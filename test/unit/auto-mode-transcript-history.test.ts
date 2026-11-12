@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifierHistory } from "../../extensions/auto-mode/history.ts";
-import { renderTranscript, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
+import { classifierHistory } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import { renderTranscript, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 

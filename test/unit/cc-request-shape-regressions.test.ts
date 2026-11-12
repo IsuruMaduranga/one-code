@@ -1,15 +1,25 @@
 /** Regressions for the request-shaping steps: the cache mark, call ids after a model switch, and fallbacks. */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
-import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { subagentHandbackExtension, SUBAGENT_HANDBACK_LOAD_FIRST } from "../../extensions/lib/subagent-handback.ts";
-import { TOOLS_AVAILABLE, withToolAdditions } from "../../extensions/lib/tool-additions.ts";
-import { withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
+import { afterEach, describe, expect, it, vi, onTestFinished } from "vitest";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
+import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { subagentHandbackExtension } from "../../extensions/lib/agents/subagent-handback.ts";
+import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
+import { withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
+import { withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
+import { handbackResultText } from "../../extensions/lib/agents/handback-text.ts";
 
-const BUDGET = "<total_tokens>15000000 tokens left</total_tokens>";
+const TOOLS_AVAILABLE = toolSearchResultText.toolsAvailable;
+/** The budget line for `left` tokens, in the profile's words. */
+const budget = (left: number) => totalTokensBlock(left);
+
+
+const BUDGET = budget(15_000_000);
 const mark = { type: "ephemeral", ttl: "1h" };
 /** The first exchange: the first prompt carries the context stack, never a marker. */
 const opening = [
@@ -49,7 +59,7 @@ describe("call ids pi rewrote after a model switch", () => {
 		const id = "call_x|fc_y";
 		const wire = { messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "call_x_fc_y", content: "ok" }] }] };
 		const out = withTurnBudgetMessages(wire, { shape: "anthropic", systemRole: true, role: "system", left: new Map([[id, 7]]) }) as { messages: unknown[] };
-		expect(out.messages[1]).toEqual({ role: "system", content: [{ type: "text", text: "<total_tokens>7 tokens left</total_tokens>" }] });
+		expect(out.messages[1]).toEqual({ role: "system", content: [{ type: "text", text: budget(7) }] });
 		const added = withToolAdditions(wire, new Map([[id, ["late"]]]))!;
 		expect((added.payload.messages as Array<{ content: Array<{ text?: string }> }>)[1].content[0].text).toBe(`${TOOLS_AVAILABLE}\nlate`);
 	});
@@ -68,7 +78,7 @@ describe("system-reminder resolves stored countdowns on every request", () => {
 		const model = { id: "claude-opus-5-5", api: "anthropic-messages", provider: "anthropic", compat: { supportsMidConvoSystemMessages: true } };
 		const messages = [
 			{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
-			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "ok" }, { type: "text", text: "<total_tokens>9 tokens left</total_tokens>" }], timestamp: 2 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "ok" }, { type: "text", text: budget(9) }], timestamp: 2 },
 		];
 		const shaped = await fake.fireOne<{ messages: Array<{ content: unknown[] }> }>("context", { messages }, createFakeCtx({ model }));
 		expect(shaped?.messages[1].content).toEqual([{ type: "text", text: "ok" }]);
@@ -98,13 +108,15 @@ describe("text that only looks like a marker stays the user's or the tool's", ()
 	});
 
 	it("leaves a tool result that is exactly the line whole when the budget is off", async () => {
-		vi.stubEnv("CC_TOTAL_TOKENS", "0");
+		// The context-budget feature is the budget's one switch.
+		useProfile({ features: { "context-budget": false } });
+		onTestFinished(() => setActiveProfileForTest(undefined));
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		const model = { id: "claude-opus-5-5", api: "anthropic-messages", provider: "anthropic", compat: { supportsMidConvoSystemMessages: true } };
 		const messages = [
 			{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
-			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "<total_tokens>9 tokens left</total_tokens>" }], timestamp: 2 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: budget(9) }], timestamp: 2 },
 		];
 		expect(await fake.fireOne("context", { messages }, createFakeCtx({ model }))).toBeUndefined();
 	});
@@ -117,7 +129,7 @@ describe("a fork's hand-back reminder", () => {
 		fake.events.on(REMINDER_CHANNEL, (data) => texts.push((data as { text: string }).text));
 		subagentHandbackExtension({ recordHandback: () => true }, { deferred: true })(fake.pi as never);
 		await fake.fireOne("session_start", {}, createFakeCtx());
-		expect(texts[0].startsWith(`${SUBAGENT_HANDBACK_LOAD_FIRST}\n`)).toBe(true);
+		expect(texts[0]).toBe(`${handbackResultText.loadFirst}\n${handbackResultText.reminder}`);
 	});
 });
 

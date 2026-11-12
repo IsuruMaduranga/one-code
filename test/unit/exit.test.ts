@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import exitExtension from "../../extensions/exit/index.ts";
-import initExtension from "../../extensions/init/index.ts";
-import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import exitExtension from "../../extensions/commands/exit/index.ts";
+import runStatusExtension from "../../extensions/request/run-status/index.ts";
+import initExtension from "../../extensions/commands/init/index.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let originalExitCode: typeof process.exitCode;
@@ -17,7 +18,7 @@ afterEach(() => {
 function harness(mode = "print") {
 	const fake = createFakePi();
 	const ctx = createFakeCtx({ mode });
-	exitExtension(fake.pi as never);
+	runStatusExtension(fake.pi as never);
 	return {
 		fake,
 		ctx,
@@ -261,7 +262,8 @@ describe("one-shot exit status", () => {
 });
 
 it("still registers /exit as graceful shutdown", async () => {
-	const { fake } = harness();
+	const fake = createFakePi();
+	exitExtension(fake.pi as never);
 	const shutdown = vi.fn();
 	await fake.commands.get("exit")!.handler("", createFakeCtx({ shutdown }));
 	expect(shutdown).toHaveBeenCalledOnce();

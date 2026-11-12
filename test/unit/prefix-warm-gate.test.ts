@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../../extensions/lib/prefix-warm-gate.ts";
+import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../../extensions/lib/side-calls/prefix-warm-gate.ts";
 
 /** Drain the microtask queue (no timers — those are faked), so pending `admit()`s can settle. */
 const flush = async () => {

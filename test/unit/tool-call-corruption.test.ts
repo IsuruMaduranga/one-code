@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { scanToolCallMarkup, toolCallCorruptionReason } from "../../extensions/lib/tool-call-corruption.ts";
+import { scanToolCallMarkup, toolCallCorruptionReason } from "../../extensions/request/tool-call-corruption/tool-call-corruption.ts";
+import type { ArgumentDamage } from "../../extensions/request/tool-call-corruption/text.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
+
+/** The damage as the profile words it: the reason the base passes on. */
+const damage = (d: ArgumentDamage) => toolCallCorruptionText.damage(d);
+const NOT_ONE_JSON = (): string => damage({ kind: "notOneJson" });
+const UNBALANCED_QUOTE = (): string => damage({ kind: "unbalancedQuote" });
 
 describe("toolCallCorruptionReason", () => {
 	it("rejects multiple JSON objects concatenated in one streamed call", () => {
-		expect(toolCallCorruptionReason("bash", '{"command":"pwd"}{"command":"ls"}')).toMatchObject({ kind: "corrupt", reason: expect.stringMatching(/JSON/) });
+		expect(toolCallCorruptionReason("bash", '{"command":"pwd"}{"command":"ls"}')).toMatchObject({ kind: "corrupt", reason: NOT_ONE_JSON() });
 	});
 
 	it("rejects trailing data and incomplete JSON", () => {
 		for (const raw of ['{} trailing', '{}\n{}', '{"command":']) {
-			expect(toolCallCorruptionReason("Agent", raw)?.reason).toMatch(/JSON/);
+			expect(toolCallCorruptionReason("Agent", raw)?.reason).toBe(NOT_ONE_JSON());
 		}
 	});
 
@@ -20,7 +27,7 @@ describe("toolCallCorruptionReason", () => {
 	it.each(["bash", "powershell", "monitor"])("rejects the escaped-quote truncation on %s", (tool) => {
 		const raw = '{"command":"grep -rn \\\"","run_in_background":false}';
 		expect(JSON.parse(raw).command).toBe('grep -rn "');
-		expect(toolCallCorruptionReason(tool, raw)).toMatchObject({ kind: "corrupt", reason: expect.stringMatching(/double quote/) });
+		expect(toolCallCorruptionReason(tool, raw)).toMatchObject({ kind: "corrupt", reason: UNBALANCED_QUOTE() });
 	});
 
 	it.each([
@@ -37,8 +44,8 @@ describe("toolCallCorruptionReason", () => {
 	});
 
 	it("counts escaped backslashes and ignores apostrophes inside double quotes", () => {
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: String.raw`echo \\"` }))?.reason).toMatch(/double quote/);
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: `echo 'a " inside' "` }))?.reason).toMatch(/double quote/);
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: String.raw`echo \\"` }))?.reason).toBe(UNBALANCED_QUOTE());
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: `echo 'a " inside' "` }))?.reason).toBe(UNBALANCED_QUOTE());
 	});
 
 	it("respects PowerShell's backtick escape", () => {
@@ -61,10 +68,10 @@ describe("toolCallCorruptionReason", () => {
 	});
 
 	it("suspects a command cut off before an escaped quote (Morph's spaced shape)", () => {
-		expect(toolCallCorruptionReason("bash", '{ "command": "grep -rn "\t, "timeout": 120000 }')).toMatchObject({ kind: "suspect", reason: expect.stringContaining('"-rn"') });
+		expect(toolCallCorruptionReason("bash", '{ "command": "grep -rn "\t, "timeout": 120000 }')).toMatchObject({ kind: "suspect", reason: damage({ kind: "cutAfterOption", option: "-rn" }) });
 		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "python3 -c " }))?.kind).toBe("suspect");
 		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "git commit -m " }))?.kind).toBe("suspect");
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "grep -rn x src --include=" }))).toMatchObject({ kind: "suspect", reason: expect.stringContaining('"--include="') });
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "grep -rn x src --include=" }))).toMatchObject({ kind: "suspect", reason: damage({ kind: "cutAfterOption", option: "--include=" }) });
 		expect(toolCallCorruptionReason("monitor", JSON.stringify({ command: "tail -f\t" }))?.kind).toBe("suspect");
 	});
 

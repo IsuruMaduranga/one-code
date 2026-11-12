@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shellName } from "../../extensions/system-prompt/environment.ts";
+import { shellName } from "../../extensions/request/system-prompt/environment.ts";
 
 describe("shellName", () => {
 	it("is the basename of SHELL, else COMSPEC, with .exe stripped (Claude Code's Shell: line)", () => {

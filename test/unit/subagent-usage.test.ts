@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { addUsage, emptyUsage, formatTokenCount, formatUsage } from "../../extensions/subagents/usage.ts";
+import { addUsage, emptyUsage, formatStats, formatTokenCount } from "../../extensions/lib/agents/usage.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 describe("addUsage", () => {
 	it("sums usage across assistant messages", () => {
@@ -33,14 +34,16 @@ describe("formatTokenCount", () => {
 	});
 });
 
-describe("formatUsage", () => {
-	it("renders tokens and cost, omitting a zero cost", () => {
+describe("formatStats", () => {
+	const stats = (p: { toolCalls: number; tokens?: string; cost?: number }) => subagentResultText().stats(p);
+
+	it("hands the profile the tool count, the token count in k and the cost", () => {
 		const totals = { ...emptyUsage(), total: 2300, cost: 0.0421 };
-		expect(formatUsage(totals)).toBe("2.3k tokens · $0.0421");
-		expect(formatUsage({ ...emptyUsage(), total: 500 })).toBe("500 tokens");
+		expect(formatStats(3, totals)).toBe(stats({ toolCalls: 3, tokens: "2.3k", cost: 0.0421 }));
+		expect(formatStats(0, { ...emptyUsage(), total: 500 })).toBe(stats({ toolCalls: 0, tokens: "500", cost: 0 }));
 	});
 
-	it("is empty when nothing was recorded", () => {
-		expect(formatUsage(emptyUsage())).toBe("");
+	it("hands it only the tools when no usage was recorded", () => {
+		expect(formatStats(2, emptyUsage())).toBe(stats({ toolCalls: 2 }));
 	});
 });

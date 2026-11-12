@@ -10,12 +10,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { LiveReminders, REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { CYCLE_KEY } from "../../extensions/permissions/modes.ts";
-import planModeExtension from "../../extensions/plan-mode/index.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { LiveReminders, REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { CYCLE_KEY } from "../../extensions/lib/rules/modes.ts";
+import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { brandedId, envName } from "../../extensions/lib/profile/brand.mjs";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
+import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
+
+const permissionWords = permissionText();
+const planMode = requireText("planMode");
 
 describe("permission mode cycle with plan-mode mounted", () => {
 	let fake: FakePi;
@@ -23,6 +30,8 @@ describe("permission mode cycle with plan-mode mounted", () => {
 	let live: LiveReminders;
 	/** One-shots in emission order, as system-reminder persists them. */
 	let pending: ReminderPayload[];
+	/** The plan file plan-mode announced last (permissions keeps it for the announcement). */
+	let planFile: string | undefined;
 	const traffic: Array<Record<string, unknown>> = [];
 	/** The one-shots bound to `toolCallId`'s result. */
 	const boundTo = (toolCallId: string) => pending.filter((payload) => payload.toolCallId === toolCallId);
@@ -31,12 +40,14 @@ describe("permission mode cycle with plan-mode mounted", () => {
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "mode-cycle-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		fake.flags.set("dangerously-skip-permissions", true);
 		traffic.length = 0;
 		live = new LiveReminders();
 		pending = [];
+		planFile = undefined;
+		fake.events.on(PLAN_FILE_CHANNEL, (data) => (planFile = (data as { path: string }).path));
 		// Mirror what the system-reminder extension does with the traffic.
 		fake.events.on(REMINDER_CHANNEL, (data) => {
 			const payload = data as ReminderPayload;
@@ -81,7 +92,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		await fake.tools.get("exit_plan_mode")!.execute("approve-plan", {}, undefined, undefined, ctx);
 		expect(traffic.find((entry) => entry.key === "permission-mode" && entry.text)).toMatchObject({ toolCallId: "approve-plan" });
 		expect(traffic.find((entry) => entry.key === "permission-mode-change")).toMatchObject({ toolCallId: "approve-plan" });
-		expect(traffic.find((entry) => typeof entry.text === "string" && entry.text.includes("You have exited plan mode."))).toMatchObject({ toolCallId: "approve-plan" });
+		expect(traffic.find((entry) => entry.text === planModeResultText().exited(entered.details.planFilePath))).toMatchObject({ toolCallId: "approve-plan" });
 		expect(boundTo("read-before")).toEqual([]);
 		expect(boundTo("approve-plan")).toHaveLength(2);
 	});
@@ -98,7 +109,7 @@ describe("permission mode cycle with plan-mode mounted", () => {
 		const shortcut = vi.mocked(fake.pi.registerShortcut as (key: string, options: { handler: (ctx: unknown) => void }) => void)
 			.mock.calls.find(([key]) => key === CYCLE_KEY)!;
 		shortcut[1].handler(ctx);
-		expect(pending.map((entry) => entry.text)).toEqual([`The user's permission mode is now "${to}".`]);
+		expect(pending.map((entry) => entry.text)).toEqual([permissionWords.modeChanged({ mode: to, planFile })]);
 	});
 
 	it("a redundant enter_plan_mode call preserves the standing plan block and its anchor", async () => {
@@ -131,17 +142,17 @@ describe("permission mode cycle with plan-mode mounted", () => {
 
 		const announce = traffic.filter((t) => t.key === "permission-mode-change").map((t) => t.text as string);
 		expect(announce).toHaveLength(4);
-		expect(announce[3]).toContain('now "plan"');
-		expect(announce[3]).toContain(join(stateDir, "plans"));
+		expect(planFile?.startsWith(join(stateDir, "plans"))).toBe(true);
+		const planAnnounce = permissionWords.modeChanged({ mode: "plan", planFile });
+		expect(announce[3]).toBe(planAnnounce);
 
 		// What the next request would carry: the plan block (sticky) and the last announce only.
 		const sticky = live.stickyEntries();
 		expect(sticky).toHaveLength(1);
-		expect(sticky[0].text).toContain(join(stateDir, "plans"));
-		expect(sticky[0].text).not.toContain("Auto mode is active");
+		expect(sticky[0].text).toBe(planMode.reminder({ planFile: planFile!, planExists: false }));
 		const oneShots = outbox().filter((entry) => entry.key === "permission-mode-change");
 		expect(oneShots).toHaveLength(1);
-		expect(oneShots[0].text).toContain('now "plan"');
+		expect(oneShots[0].text).toBe(planAnnounce);
 	});
 });
 
@@ -152,13 +163,17 @@ describe("plan mode follows the branch across /tree (permissions' session_tree r
 	let branch: Entry[];
 	const reminders: ReminderPayload[] = [];
 	const modeRequests: Array<{ mode?: string }> = [];
+	/** Every plan file plan-mode announced, in order. */
+	const planFiles: string[] = [];
 
 	beforeEach(() => {
 		stateDir = mkdtempSync(join(tmpdir(), "plan-tree-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		fake = createFakePi();
 		branch = [];
 		reminders.length = 0;
+		planFiles.length = 0;
+		fake.events.on(PLAN_FILE_CHANNEL, (data) => planFiles.push((data as { path: string }).path));
 		// A session tree: appends extend the current branch, a /tree swaps it.
 		let next = 0;
 		fake.pi.appendEntry = (customType: string, data?: unknown) => {
@@ -193,15 +208,16 @@ describe("plan mode follows the branch across /tree (permissions' session_tree r
 
 		// Branch B: plan mode entered from acceptEdits, the plan not written yet.
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
-		const planB = /at (\S+\.md)/.exec(standing())![1];
-		expect(standing()).toContain("No plan file exists yet");
+		const planB = planFiles.at(-1)!;
+		expect(standing()).toBe(planMode.reminder({ planFile: planB, planExists: false }));
 		const leafB = branch;
 
 		// Branch A: back before B, plan mode from default (a plan file of its own), then out to default.
 		await tree(root);
 		fake.events.emit(MODE_CHANNEL, { mode: "default" });
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
-		const planA = /at (\S+\.md)/.exec(standing())![1];
+		const planA = planFiles.at(-1)!;
+		expect(standing()).toBe(planMode.reminder({ planFile: planA, planExists: false }));
 		expect(planA).not.toBe(planB);
 		fake.events.emit(MODE_CHANNEL, { mode: "default" });
 
@@ -210,10 +226,9 @@ describe("plan mode follows the branch across /tree (permissions' session_tree r
 		writeFileSync(planB, "# Plan B\n1. Do it.\n");
 		await tree(leafB);
 
-		expect(standing()).toContain(planB);
 		// The run on B began with no plan file: its block keeps that wording.
-		expect(standing()).toContain("No plan file exists yet");
-		const entryStates = branch.filter((e) => e.customType === "one-code:state" && (e.data as { key?: string }).key === "plan-mode:entry");
+		expect(standing()).toBe(planMode.reminder({ planFile: planB, planExists: false }));
+		const entryStates = branch.filter((e) => e.customType === brandedId("state") && (e.data as { key?: string }).key === "plan-mode:entry");
 		expect(JSON.stringify(entryStates)).not.toContain(planA);
 
 		// The approval offers B's mode before planning, acceptEdits, first.
@@ -233,7 +248,8 @@ describe("plan mode follows the branch across /tree (permissions' session_tree r
 		await fake.fire("session_start", {}, ctx);
 		fake.events.emit(MODE_CHANNEL, { mode: "acceptEdits" });
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
-		const plan = /at (\S+\.md)/.exec(reminders.filter((r) => r.key === "permission-mode" && r.text).at(-1)!.text!)![1];
+		const plan = planFiles.at(-1)!;
+		expect(reminders.filter((r) => r.key === "permission-mode" && r.text).at(-1)!.text).toBe(planMode.reminder({ planFile: plan, planExists: false }));
 		mkdirSync(join(stateDir, "plans"), { recursive: true });
 		writeFileSync(plan, "# Plan\n1. Do it.\n");
 

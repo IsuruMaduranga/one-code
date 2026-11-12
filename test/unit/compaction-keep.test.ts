@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDoctorReport } from "../../extensions/doctor/build.ts";
-import { renderDoctorText } from "../../extensions/doctor/report.ts";
-import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/compaction-keep.mjs";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { buildDoctorReport } from "../../extensions/commands/doctor/build.ts";
+import { renderDoctorText } from "../../extensions/commands/doctor/report.ts";
+import { compactionKeepView, keepWindowFix, withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
 
 describe("withCompactionKeepBackfilled", () => {
 	it("sets 0 when the user has not set a keep window, keeping their other keys", () => {
@@ -43,13 +44,12 @@ describe("/doctor's keep-window line", () => {
 						cwd: home,
 						home,
 						agentDir: join(home, ".pi", "agent"),
-						stateDir: join(home, ".onecode"),
-						configMode: "claude-compatible",
+						stateDir: join(home, brand.stateDir),
 						env: { PATH: join(home, "empty-bin"), HOME: home },
 						platform: "darwin",
 						arch: "arm64",
 						nodeVersion: "26.3.1",
-						oneCodeVersion: "0.5.0",
+						productVersion: "0.5.0",
 						install: "pi-package",
 						piVersion: "0.99.2",
 						compactionKeep: { ...compactionKeep, paths: { user: join(home, ".pi", "agent", "settings.json"), project: join(home, ".pi", "settings.json") } },

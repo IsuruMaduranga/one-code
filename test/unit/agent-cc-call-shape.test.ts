@@ -2,11 +2,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateToolArguments } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
-import { decide, extractSubject, parseRules } from "../../extensions/permissions/matcher.ts";
-import { prepareAgentArguments } from "../../extensions/subagents/agent-args.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { decide, extractSubject, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { prepareAgentArguments } from "../../extensions/agents/subagents/agent-args.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 /**
  * Claude Code's Agent tool takes `prompt` (the task) and `description` (a short
@@ -35,11 +37,15 @@ const text = (result: unknown) => {
 	return content.map((c) => c.text ?? "").join("");
 };
 
+const refused = (refusal: Parameters<ReturnType<typeof subagentResultText>["refused"]>[0]) => subagentResultText().refused(refusal);
+
 describe("Agent tool, Claude Code call shape (H1)", () => {
+	afterEach(() => vi.restoreAllMocks());
+
 	it("fails loud when a run names an agent but has no task", async () => {
 		const result = (await run({ subagent_type: "general-purpose" })) as { isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(text(result)).toMatch(/`task` is required/);
+		expect(text(result)).toBe(refused({ kind: "taskRequired", aliasNote: requireText("subagents").taskAliasNote }));
 	});
 
 	// Battery round 7: DeepSeek V3.2 repeated a run without `subagent_type` up to
@@ -52,7 +58,7 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 		const tool = agentTool() as unknown as { prepareArguments: (a: unknown) => unknown; execute: (...a: unknown[]) => Promise<unknown> };
 		const result = await tool.execute("call-1", tool.prepareArguments({ task: "Read the git history.", isolation: "worktree" }), undefined, undefined, createFakeCtx({ cwd }));
 		rmSync(cwd, { recursive: true, force: true });
-		expect(text(result)).toBe('isolation: "worktree" needs a git repository; this directory is not one.');
+		expect(text(result)).toBe(refused({ kind: "worktreeNeedsGit" }));
 	});
 
 	// The default is set before the gate, so a deny rule naming the agent stops
@@ -74,20 +80,22 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 	it("rejects a blank task rather than spawning an empty child", async () => {
 		const result = (await run({ subagent_type: "general-purpose", prompt: "   " })) as { isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(text(result)).toMatch(/required/);
+		expect(text(result)).toBe(refused({ kind: "taskRequired", aliasNote: requireText("subagents").taskAliasNote }));
 	});
 
 	it("accepts `prompt` as the task (CC's name), reaching agent validation", async () => {
 		// A CC-shaped call whose agent name is unknown must fail at agent lookup,
 		// NOT at the empty-task guard — proving `prompt` was read as the task.
+		const refusedSpy = vi.spyOn(subagentResultText(), "refused");
 		const result = (await run({
 			subagent_type: "does-not-exist",
 			description: "Audit auth",
 			prompt: "Audit the authentication flow for bypasses.",
 		})) as { isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(text(result)).toMatch(/Unknown agent/);
-		expect(text(result)).not.toMatch(/`task` is required/);
+		expect(refusedSpy).toHaveBeenCalledTimes(1);
+		expect(refusedSpy).toHaveBeenCalledWith(expect.objectContaining({ kind: "unknownAgents", names: ["does-not-exist"] }));
+		expect(text(result)).toBe(refusedSpy.mock.results[0].value);
 	});
 });
 

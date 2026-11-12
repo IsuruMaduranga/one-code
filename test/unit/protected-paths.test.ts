@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { decide, isBroadExecutionRule, parseRule, parseRules } from "../../extensions/permissions/matcher.ts";
-import { isProtectedPath, isWritingTool } from "../../extensions/permissions/protected-paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { decide, isBroadExecutionRule, parseRule, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { isProtectedPath, isWritingTool } from "../../extensions/lib/rules/protected-paths.ts";
 
 describe("isProtectedPath", () => {
 	it("protects tooling and agent configuration directories", () => {
@@ -48,11 +49,11 @@ describe("isProtectedPath", () => {
 		}
 	});
 
-	it("exempts .onecode/worktrees, independent mode's worktree folder, and nothing else under .onecode", () => {
-		expect(isProtectedPath(".onecode/worktrees/feature/src/a.ts")).toBe(false);
-		expect(isProtectedPath(".onecode/worktrees/fix/.git")).toBe(true);
-		expect(isProtectedPath(".onecode/agents/reviewer.md")).toBe(true);
-		expect(isProtectedPath(".onecode/settings.json")).toBe(true);
+	it("exempts <state dir>/worktrees, independent mode's worktree folder, and nothing else under the state dir", () => {
+		expect(isProtectedPath(`${brand.stateDir}/worktrees/feature/src/a.ts`)).toBe(false);
+		expect(isProtectedPath(`${brand.stateDir}/worktrees/fix/.git`)).toBe(true);
+		expect(isProtectedPath(`${brand.stateDir}/agents/reviewer.md`)).toBe(true);
+		expect(isProtectedPath(`${brand.stateDir}/settings.json`)).toBe(true);
 	});
 
 	it("exempts .claude/worktrees, which is the agent's own working space", () => {
@@ -60,9 +61,9 @@ describe("isProtectedPath", () => {
 		expect(isProtectedPath(".claude/settings.local.json")).toBe(true);
 	});
 
-	it("protects .onecode like .claude, excepting only plan documents", () => {
-		expect(isProtectedPath("/home/u/.onecode/settings.json")).toBe(true);
-		expect(isProtectedPath("/home/u/.onecode/plans/brisk-otter-map.md")).toBe(false);
+	it("protects the product's state dir like .claude, excepting only plan documents", () => {
+		expect(isProtectedPath(`/home/u/${brand.stateDir}/settings.json`)).toBe(true);
+		expect(isProtectedPath(`/home/u/${brand.stateDir}/plans/brisk-otter-map.md`)).toBe(false);
 	});
 
 	it("treats the directory itself as not-yet-a-write-target", () => {

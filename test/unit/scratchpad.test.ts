@@ -2,26 +2,27 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlin
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { comparablePath } from "../../extensions/lib/paths.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { comparablePath } from "../../extensions/lib/profile/paths.ts";
 import {
 	ensurePrivateScratchpad,
 	isPrivateScratchpad,
 	ownerDirProblem,
 	scratchpadDir,
 	sessionScratchpadDir,
-} from "../../extensions/lib/scratchpad.ts";
-import { isInsideDir } from "../../extensions/permissions/matcher.ts";
+} from "../../extensions/lib/core/scratchpad.ts";
+import { isInsideDir } from "../../extensions/lib/rules/matcher.ts";
 
 describe("scratchpadDir", () => {
-	it("builds Claude Code's path shape under a One Code-named owner dir", () => {
+	it("builds Claude Code's path shape under an owner dir named for the product", () => {
 		expect(scratchpadDir("/private/tmp", 501, "/Users/u/ml/proj", "abc-123")).toBe(
-			join("/private/tmp", "onecode-501", "-Users-u-ml-proj", "abc-123", "scratchpad"),
+			join("/private/tmp", `${brand.bin}-501`, "-Users-u-ml-proj", "abc-123", "scratchpad"),
 		);
 	});
 
 	it("drops the uid suffix where the platform has none", () => {
-		expect(scratchpadDir("/tmp", undefined, "/home/u/proj", "s1")).toBe(join("/tmp", "onecode", "-home-u-proj", "s1", "scratchpad"));
+		expect(scratchpadDir("/tmp", undefined, "/home/u/proj", "s1")).toBe(join("/tmp", brand.bin, "-home-u-proj", "s1", "scratchpad"));
 	});
 });
 

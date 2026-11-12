@@ -1,22 +1,25 @@
 /**
- * permissions/index.ts wiring for the PERMISSIONS-REVIEW-2026-09-05 medium/low
+ * safety/permissions/index.ts wiring for the PERMISSIONS-REVIEW-2026-09-05 medium/low
  * fixes that live in the gate's session state rather than in `decide()`:
  * scoped "don't ask again" grants (M2), the runtime-protected agent dir (M7),
  * a fresh gate per session (L1), and worktree originals through the prompt
  * and the plan-mode pre-gate (L3).
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/original-command.ts";
-import { PANEL_FOCUS_CHANNEL } from "../../extensions/lib/panel-focus.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/shell/original-command.ts";
+import { PANEL_FOCUS_CHANNEL } from "../../extensions/lib/ui/panel-focus.ts";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 type Prompt = { title: string; options: string[] };
 type GateResult = { block?: boolean; reason?: string; terminate?: boolean } | undefined;
@@ -53,7 +56,7 @@ describe("permissions session state", () => {
 		stateDir = mkdtempSync(join(tmpdir(), "perm-state-"));
 		cwd = join(stateDir, "project");
 		agentDir = join(stateDir, "agent");
-		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(stateDir, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 		fake = createFakePi();
 		prompts.length = 0;
@@ -96,7 +99,7 @@ describe("permissions session state", () => {
 			rejectWith("esc");
 			const result = await rejected("esc-1");
 			expect(result?.block).toBe(true);
-			expect(result?.reason).toContain("STOP what you are doing");
+			expect(result?.reason).toBe(userDenialText());
 			expect(ui().input).not.toHaveBeenCalled();
 			expect(ctx.abort).toHaveBeenCalledTimes(1);
 			// pi ends the loop after the batch instead of sending one more request
@@ -332,9 +335,10 @@ describe("permissions session state", () => {
 		});
 
 		it("matches rules against trusted original commands without retaining the old resolved root", async () => {
-			const config = join(stateDir, "empty-config");
-			mkdirSync(config);
-			writeFileSync(join(config, "settings.json"), JSON.stringify({ permissions: {
+			// The product's own user settings: every profile reads them.
+			const settings = productSettingsPath(homedir());
+			mkdirSync(dirname(settings), { recursive: true });
+			writeFileSync(settings, JSON.stringify({ permissions: {
 				allow: ["Bash(npm test)", "Bash(echo:*)"],
 				deny: ["Bash(npm run publish:*)"],
 			} }));

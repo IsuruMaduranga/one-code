@@ -12,9 +12,9 @@
 
 import { createEventBus, type EventBus } from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
-import { toldOf } from "../../../extensions/lib/ledger/fold.ts";
-import type { ToldFact } from "../../../extensions/lib/ledger/records.ts";
-import { RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/reminders.ts";
+import { toldOf } from "../../../extensions/lib/request/ledger/fold.ts";
+import type { ToldFact } from "../../../extensions/lib/request/ledger/records.ts";
+import { RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/request/reminders.ts";
 
 export type FakeHandler = (event: unknown, ctx: unknown) => unknown;
 
@@ -249,7 +249,7 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 }
 
 /**
- * Close the open batch of lifecycle notices (lib/notices.ts): the owner shows
+ * Close the open batch of lifecycle notices (lib/notify/notices.ts): the owner shows
  * it on the next macrotask, so step a fake clock or yield to a real one.
  */
 export async function flushNotices(): Promise<void> {

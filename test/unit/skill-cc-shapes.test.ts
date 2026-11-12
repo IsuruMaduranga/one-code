@@ -1,28 +1,40 @@
 /**
- * skill/index.ts against Claude Code's shapes: the listing's order (project
+ * tools/skill/index.ts against Claude Code's shapes: the listing's order (project
  * skills, plugin commands, plugin skills, then the bundled catalog) with
  * `when_to_use`; a typed `/<plugin>:<skill>` expanded in the harness; a model
- * call answered "Launching skill" with the text beside it; and code-review's
+ * call answered with the profile's launch line and the text beside it; and code-review's
  * body chosen by tier and effort.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import skillExtension from "../../extensions/skill/index.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { codeReviewCell, readCellTable, type ReviewEffort } from "../../extensions/tools/skill/code-review.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
+import type { PromptTier } from "../../extensions/lib/models/model-tier.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { skillResultText } from "../../extensions/tools/skill/text.ts";
+import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 const root = mkdtempSync(join(tmpdir(), "skill-cc-shapes-"));
 const cwd = join(root, "project");
 const demoDir = join(cwd, ".claude", "skills", "demo");
-const pluginDir = join(root, ".claude", "plugins", "cache", "market", "kit", "1.0.0");
+// The harness's own plugin root (`<agentDir>/plugins`), which every profile reads.
+const pluginsRoot = join(root, "agent", "plugins");
+const pluginDir = join(pluginsRoot, "cache", "market", "kit", "1.0.0");
 const codeReviewFile = join(BUNDLED_SKILLS_DIR, "code-review", "SKILL.md");
 // A Windows checkout may carry CRLF; the selector reads the cells with LF, as Claude Code's text is.
 const cell = (name: string) => readFileSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${name}.md`), "utf-8").replace(/\r\n/g, "\n").trimEnd();
+const table = readCellTable(join(BUNDLED_SKILLS_DIR, "code-review", "cells"));
+/** The body the profile's table gives a tier and effort: the cell, then the table's closing section. */
+const body = (tier: PromptTier, effort: ReviewEffort) => {
+	const picked = cell(codeReviewCell(table, tier, effort));
+	return table.after ? `${picked}\n\n${cell(table.after)}` : picked;
+};
 
 const write = (path: string, text: string) => {
 	mkdirSync(join(path, ".."), { recursive: true });
@@ -36,7 +48,7 @@ beforeAll(() => {
 	write(join(pluginDir, "commands", "go.md"), "---\ndescription: Go command\n---\n\nRun go for $ARGUMENTS.\n");
 	write(join(pluginDir, "commands", "silent.md"), "Run silently.\n");
 	write(
-		join(root, ".claude", "plugins", "installed_plugins.json"),
+		join(pluginsRoot, "installed_plugins.json"),
 		JSON.stringify({ version: 2, plugins: { "kit@market": [{ scope: "user", installPath: pluginDir }] } }),
 	);
 	mkdirSync(join(root, "agent"), { recursive: true });
@@ -101,7 +113,7 @@ describe("typed skills expand in the harness", () => {
 		expect(outcome.action).toBe("transform");
 		expect(outcome.text).toBe(
 			"<command-message>kit:tip</command-message>\n<command-name>/kit:tip</command-name>\n<command-args>do it</command-args>\n\n" +
-				`Base directory for this skill: ${join(pluginDir, "skills", "tip")}\n\nTip body.\n\nARGUMENTS: do it\n`,
+				`${withBaseDir({ dir: join(pluginDir, "skills", "tip"), text: "Tip body.\n\nARGUMENTS: do it" })}\n`,
 		);
 		expect(fake.sentUserMessages).toHaveLength(0);
 	});
@@ -122,25 +134,25 @@ describe("skill tool: Claude Code's result", () => {
 		const { turn, call } = await mount();
 		await turn();
 		const result = await call({ skill: "kit:go", args: "prod" });
-		expect(result.content.map((block) => block.text)).toEqual(["Launching skill: kit:go", "Run go for prod."]);
+		expect(result.content.map((block) => block.text)).toEqual([skillResultText.launching("kit:go"), "Run go for prod."]);
 	});
 
 	it("gives a frontier session at medium effort the minimal prompt, with no folder named", async () => {
 		const { turn, call } = await mount(frontier, "medium");
 		await turn();
 		const result = await call({ skill: "code-review", args: "123" });
-		expect(result.content[0].text).toBe("Launching skill: code-review");
-		expect(result.content[1].text).toBe(`${cell("minimal-prompt")}\n\n${cell("arguments-and-flags")}\n\nARGUMENTS: 123`);
+		expect(result.content[0].text).toBe(skillResultText.launching("code-review"));
+		expect(result.content[1].text).toBe(`${body("frontier", "medium")}\n\nARGUMENTS: 123`);
 	});
 
-	it("gives a workhorse session Claude Code's Sonnet 5 cells, and a typed level wins over the session's", async () => {
+	it("gives a session its tier's cell, and a typed level wins over the session's", async () => {
 		const high = await mount(workhorse, "high");
 		await high.turn();
-		expect((await high.call({ skill: "code-review", args: "main" })).content[1].text.startsWith(cell("high-3x5-recall-verify"))).toBe(true);
+		expect((await high.call({ skill: "code-review", args: "main" })).content[1].text.startsWith(body("workhorse", "high"))).toBe(true);
 		const typed = await mount(frontier, "high");
 		await typed.turn();
 		const text = (await typed.call({ skill: "code-review", args: "low 123 --fix" })).content[1].text;
-		expect(text.startsWith(cell("low-1-pass-max4"))).toBe(true);
+		expect(text.startsWith(body("frontier", "low"))).toBe(true);
 		expect(text.endsWith("\n\nARGUMENTS: 123 --fix")).toBe(true);
 	});
 
@@ -150,6 +162,6 @@ describe("skill tool: Claude Code's result", () => {
 		await fake.commands.get("code-review")!.handler("", ctx);
 		const content = fake.sentMessages[0].message.content as Array<{ text: string }>;
 		expect(content[0].text).toBe("<command-message>code-review</command-message>\n<command-name>/code-review</command-name>\n");
-		expect(content[1].text).toBe(`${cell("xhigh-5x5-verify-sweep")}\n\n${cell("arguments-and-flags")}\n`);
+		expect(content[1].text).toBe(`${body("workhorse", "xhigh")}\n`);
 	});
 });

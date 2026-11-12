@@ -2,14 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import memoryExtension from "../../extensions/memory/index.ts";
-import effortExtension from "../../extensions/effort/index.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import pluginsExtension from "../../extensions/plugins/index.ts";
-import skillExtension from "../../extensions/skill/index.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import memoryExtension from "../../extensions/context/memory/index.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import pluginsExtension from "../../extensions/tools/plugins/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -21,7 +21,6 @@ beforeEach(() => {
 	mkdirSync(cwd);
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	invalidatePluginsCache();
 });
 afterEach(() => {
@@ -75,7 +74,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		mkdirSync(external);
 		(ctx.ui as { select: ReturnType<typeof vi.fn> }).select.mockResolvedValue("yes");
 		await fake.commands.get("add-dir")!.handler(external, ctx);
-		expect(existsSync(oneCodeProjectSettingsPath(cwd, home))).toBe(false);
+		expect(existsSync(productProjectSettingsPath(cwd, home))).toBe(false);
 		expect(notices()).not.toContain("Added directory");
 	});
 
@@ -86,7 +85,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		(ctx.ui as { select: ReturnType<typeof vi.fn> }).select.mockResolvedValue(choice);
 		await fake.commands.get("add-dir")!.handler(external, ctx);
 		expect(notices()).toContain("Added directory");
-		const settings = oneCodeProjectSettingsPath(cwd, home);
+		const settings = productProjectSettingsPath(cwd, home);
 		if (choice === "Yes, for this session") expect(existsSync(settings)).toBe(false);
 		else expect(JSON.parse(readFileSync(settings, "utf8")).permissions.additionalDirectories).toHaveLength(1);
 	});
@@ -108,7 +107,8 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 	});
 
 	it("/skills lists skill states and explains that management needs the TUI", async () => {
-		const path = join(cwd, ".claude", "skills", "demo");
+		// The base's own project skill folder, which every profile reads.
+		const path = join(cwd, ".agents", "skills", "demo");
 		mkdirSync(path, { recursive: true });
 		writeFileSync(join(path, "SKILL.md"), "---\nname: demo\ndescription: Demonstration\n---\nDemo body.\n");
 		const { fake, ctx, custom, notices } = mount(skillExtension);

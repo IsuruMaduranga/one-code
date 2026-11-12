@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { canShowCustomUi, notifyRpcReadOnly } from "../../extensions/lib/headless-output.ts";
+import { canShowCustomUi, notifyRpcReadOnly } from "../../extensions/lib/notify/headless-output.ts";
 
 describe("canShowCustomUi", () => {
 	it("is true only for a TUI session: RPC has UI but no custom components, one-shot modes have no UI", () => {

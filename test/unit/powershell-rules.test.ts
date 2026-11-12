@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
@@ -11,7 +11,7 @@ import {
 	powershellReadOnly,
 	powershellStatements,
 	statementCommand,
-} from "../../extensions/permissions/powershell-rules.ts";
+} from "../../extensions/lib/shell/powershell-rules.ts";
 import { HAVE_POWERSHELL, psReadOnly, WINDOWS_ONLY_ALIAS, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 describe("canonicalCommandName", () => {

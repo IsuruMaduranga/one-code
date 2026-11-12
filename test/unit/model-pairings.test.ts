@@ -1,8 +1,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
-import { currentCatalog } from "../../extensions/lib/model-catalog.ts";
-import { PAIRING_TABLE, PAIRINGS_AS_OF, pairedModel } from "../../extensions/lib/model-pairings.ts";
+import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
+import { currentCatalog } from "../../extensions/lib/models/model-catalog.ts";
+import { PAIRING_TABLE, PAIRINGS_AS_OF, pairedModel } from "../../extensions/lib/models/model-pairings.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input: number, extra: Partial<Model<Api>> = {}) =>

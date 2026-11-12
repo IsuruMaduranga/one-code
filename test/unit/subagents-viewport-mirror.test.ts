@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asScrollableViewport, ViewportMirror } from "../../extensions/subagents/viewport-mirror.ts";
+import { asScrollableViewport, ViewportMirror } from "../../extensions/agents/subagents/viewport-mirror.ts";
 
 /** pi-tui's primary scroll view, reduced to what the mirror touches. */
 class FakeViewport {

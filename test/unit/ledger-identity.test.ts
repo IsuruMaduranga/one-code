@@ -7,10 +7,10 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { requestIdentity } from "../../extensions/lib/anthropic-auth.ts";
-import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import { makeRecord, RECORD, type RequestIdentity } from "../../extensions/lib/ledger/records.ts";
-import { mergeDeclarations } from "../../extensions/lib/ledger/wire.ts";
+import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
+import { foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
+import { makeRecord, RECORD, type RequestIdentity } from "../../extensions/lib/request/ledger/records.ts";
+import { mergeDeclarations } from "../../extensions/lib/request/ledger/wire.ts";
 import { LedgerSim } from "./helpers/ledger-sim.ts";
 
 const sonnet = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5-5", reasoning: true, compat: { supportsMidConvoEffort: true } };

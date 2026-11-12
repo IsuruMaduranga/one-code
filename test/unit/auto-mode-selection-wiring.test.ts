@@ -1,12 +1,14 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/lib/rules/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 
 const model = (id: string, contextWindow: number, price: number) => ({ provider: "openai-codex", id, name: id, contextWindow, maxTokens: 8192, cost: { input: price, output: price * 4 } });
 // All frontier on OpenAI's own API, released together so none supersedes another; ids the
@@ -23,7 +25,7 @@ describe("automatic classifier selection wiring", () => {
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "classifier-selection-"));
 		mkdirSync(join(home, "project"));
-		mkdirSync(join(home, ".onecode"));
+		mkdirSync(join(home, brand.stateDir));
 		stubHome(home);
 		pinCatalog([
 			{ id: "openai/gpt-7-astra", released: "2026-09-22", price: [5, 40] },
@@ -31,7 +33,6 @@ describe("automatic classifier selection wiring", () => {
 			{ id: "openai/gpt-7-sol", released: "2026-09-22", price: [1, 13] },
 			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [2.5, 30] },
 		]);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		fake = createFakePi();
 		statuses = [];
@@ -86,7 +87,7 @@ describe("automatic classifier selection wiring", () => {
 	});
 
 	it("/auto-mode model saves a stamped choice, warns about a smaller window, and clears back to automatic", async () => {
-		const settings = join(home, ".onecode", "settings.json");
+		const settings = productSettingsPath(home);
 		(ctx.modelRegistry as { getApiKeyAndHeaders?: unknown }).getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "key" });
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		const command = fake.commands.get("auto-mode")!;

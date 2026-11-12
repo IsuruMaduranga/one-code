@@ -1,6 +1,6 @@
 /**
  * Claude Code's SubagentHandback for every child session
- * (lib/subagent-handback.ts): the tool, its closing reminder, the turn
+ * (lib/agents/subagent-handback.ts): the tool, its closing reminder, the turn
  * tracker that reports a handed-back report (and falls back to the child's
  * final text), and the two runners that wire it in. Real pi SDK sessions on a
  * temp agent dir with no model: `prompt` is spied, and the spy calls the
@@ -11,42 +11,40 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import {
-	HANDBACK_ALREADY_DELIVERED,
-	HANDBACK_DELIVERED,
-	HANDBACK_EMPTY,
-	oneTurnHandbackSlot,
-	SUBAGENT_HANDBACK_DESCRIPTION,
-	SUBAGENT_HANDBACK_REMINDER,
-	subagentHandbackExtension,
-	subagentHandbackTool,
-} from "../../extensions/lib/subagent-handback.ts";
-import { childToolAllowlist } from "../../extensions/subagents/agents.ts";
-import { forkTaskMessage } from "../../extensions/subagents/outcome.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { oneTurnHandbackSlot, subagentHandbackExtension, subagentHandbackTool } from "../../extensions/lib/agents/subagent-handback.ts";
+import { childToolAllowlist } from "../../extensions/lib/agents/agent-catalog.ts";
+import { forkTaskMessage } from "../../extensions/agents/subagents/outcome.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
+import { handbackResultText } from "../../extensions/lib/agents/handback-text.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 type ToolResult = { content: Array<{ text: string }>; isError?: boolean; terminate?: boolean };
 
+const handback = requireText("handback");
+
 describe("the SubagentHandback tool", () => {
-	it("carries Claude Code's description, reminder and schema", () => {
+	it("carries the profile's description and parameter text, and a strict one-field schema", () => {
 		const tool = subagentHandbackTool(oneTurnHandbackSlot());
 		expect(tool.name).toBe("SubagentHandback");
-		expect(tool.description).toBe(
-			"Deliver your final report to the agent that spawned you (your caller). Use it once, for that hand-off only: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so do everything else first and put everything your caller needs in that one report. It is not a messaging channel: do not use it for progress updates or questions.\n\nOnly a report delivered through SubagentHandback reaches your caller; plain text you write at the end of your run is NOT delivered. There is no recipient parameter: the report can only go to your caller.",
-		);
-		expect(tool.description).toBe(SUBAGENT_HANDBACK_DESCRIPTION);
-		expect(SUBAGENT_HANDBACK_REMINDER).toBe(
-			"Your final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your last step. Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered.",
-		);
+		expect(tool.description).toBe(handback.description);
 		const schema = tool.parameters as unknown as { type: string; properties: Record<string, { type: string; description: string }>; required: string[]; additionalProperties: boolean };
-		expect(schema.properties).toEqual({ message: expect.objectContaining({ type: "string", description: "Your full report for your caller" }) });
+		expect(schema.properties).toEqual({ message: expect.objectContaining({ type: "string", description: handback.messageParam }) });
 		expect(schema.required).toEqual(["message"]);
 		expect(schema.additionalProperties).toBe(false);
+	});
+
+	it("points a subagent, which can still message its caller, at SendMessage after a second report", async () => {
+		const slot = oneTurnHandbackSlot();
+		const tool = subagentHandbackTool(slot, true);
+		await tool.execute("c1", { message: "Report." }, undefined, undefined, undefined as never);
+		const again = (await tool.execute("c2", { message: "More." }, undefined, undefined, undefined as never)) as { content: { text: string }[] };
+		expect(again.content[0].text).toBe(handbackResultText.alreadyDelivered({ sendMessage: true }));
 	});
 
 	it("records the report once and ends the run", async () => {
@@ -55,15 +53,14 @@ describe("the SubagentHandback tool", () => {
 		const run = (message: unknown) => tool.execute("h", { message } as never, undefined, undefined, {} as never) as Promise<ToolResult>;
 
 		const delivered = await run("The file is app.py.");
-		expect(delivered.content[0].text).toBe(HANDBACK_DELIVERED);
-		expect(delivered.content[0].text).toBe("Report delivered to your caller.");
+		expect(delivered.content[0].text).toBe(handbackResultText.delivered);
 		expect(delivered.terminate).toBe(true);
 		expect(delivered.isError).toBeUndefined();
 		expect(slot.report).toBe("The file is app.py.");
 
 		const again = await run("a second report");
 		expect(again).toMatchObject({ isError: true });
-		expect(again.content[0].text).toBe(HANDBACK_ALREADY_DELIVERED);
+		expect(again.content[0].text).toBe(handbackResultText.alreadyDelivered({ sendMessage: false }));
 		expect(slot.report).toBe("The file is app.py.");
 	});
 
@@ -71,7 +68,7 @@ describe("the SubagentHandback tool", () => {
 		const slot = oneTurnHandbackSlot();
 		const result = (await subagentHandbackTool(slot).execute("h", { message: "  " } as never, undefined, undefined, {} as never)) as ToolResult;
 		expect(result).toMatchObject({ isError: true });
-		expect(result.content[0].text).toBe(HANDBACK_EMPTY);
+		expect(result.content[0].text).toBe(handbackResultText.empty);
 		expect(slot.report).toBeUndefined();
 	});
 });
@@ -88,7 +85,7 @@ describe("the hand-back extension a child loads", () => {
 		expect(deferred).toEqual([]);
 		expect(reminders).toEqual([]);
 		await fake.fire("session_start", { reason: "startup" });
-		expect(reminders).toEqual([{ text: SUBAGENT_HANDBACK_REMINDER, key: "subagent-handback", placement: "sticky-append" }]);
+		expect(reminders).toEqual([{ text: handbackResultText.reminder, key: "subagent-handback", placement: "sticky-append" }]);
 	});
 
 	it("defers the tool in a fork, which sends the parent's tool list", () => {
@@ -101,7 +98,7 @@ describe("the hand-back extension a child loads", () => {
 
 	it("an agent file's tools allowlist keeps it, and a fork's framing points at it", () => {
 		expect(childToolAllowlist(["Read"])).toContain("SubagentHandback");
-		expect(forkTaskMessage("do it")).toContain("the report you hand back through SubagentHandback is returned to the parent conversation verbatim");
+		expect(forkTaskMessage("do it")).toBe(requireText("subagents").forkTask({ task: "do it", isolation: undefined }));
 	});
 });
 
@@ -129,7 +126,7 @@ describe("SessionTurnTracker: the handed-back report is the turn's result", () =
 		const tracker = new SessionTurnTracker();
 		tracker.recordHandback("Partial.");
 		tracker.markAborted();
-		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: "Partial.\n\n[terminated before the turn finished]" });
+		expect(tracker.turnOutcome()).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "stopped", output: "Partial." }) });
 	});
 });
 

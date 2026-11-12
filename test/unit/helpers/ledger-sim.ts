@@ -6,11 +6,11 @@
  * message (the real one is system-reminder). `load()` again is a `/reload`:
  * new instances on the same entries.
  */
-import ledgerExtension from "../../../extensions/ledger/index.ts";
-import ledgerWireExtension from "../../../extensions/ledger/wire.ts";
-import { foldBranch } from "../../../extensions/lib/ledger/fold.ts";
-import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../../extensions/lib/ledger/plan.ts";
-import { type EntryLike, makeRecord, RECORD, readRecord } from "../../../extensions/lib/ledger/records.ts";
+import ledgerExtension from "../../../extensions/request/ledger/index.ts";
+import ledgerWireExtension from "../../../extensions/request/ledger/wire.ts";
+import { foldBranch } from "../../../extensions/lib/request/ledger/fold.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../../extensions/lib/request/ledger/plan.ts";
+import { type EntryLike, makeRecord, RECORD, readRecord } from "../../../extensions/lib/request/ledger/records.ts";
 
 export interface SimMessage {
 	role: string;

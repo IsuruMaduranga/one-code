@@ -6,10 +6,10 @@
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { defaultHookShell, hookShellSpawn, runHookCommand } from "../../extensions/hooks/executor.ts";
-import { matcherApplies, toolMatchCandidates } from "../../extensions/hooks/matcher.ts";
-import { parseHooksBlock } from "../../extensions/hooks/settings.ts";
-import { resolvePowerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
+import { defaultHookShell, hookShellSpawn, runHookCommand } from "../../extensions/safety/hooks/executor.ts";
+import { matcherApplies, toolMatchCandidates } from "../../extensions/lib/rules/hook-matcher.ts";
+import { parseHooksBlock } from "../../extensions/safety/hooks/settings.ts";
+import { resolvePowerShellSpawn } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { PORTABLE_PWSH_DIR } from "./helpers/local-pwsh.ts";
 
 describe("parseHooksBlock shell field", () => {

@@ -2,13 +2,13 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import pluginsExtension from "../../extensions/plugins/index.ts";
-import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
-import { setInstalledEnabled } from "../../extensions/plugins/install/registry.ts";
-import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import pluginsExtension from "../../extensions/tools/plugins/index.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { setInstalledEnabled } from "../../extensions/tools/plugins/install/registry.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { promptCommandText } from "../../extensions/skill/invoke.ts";
+import { promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 let home: string;
 let root: string;

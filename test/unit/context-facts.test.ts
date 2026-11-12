@@ -3,16 +3,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import claudeContextExtension from "../../extensions/claude-context/index.ts";
-import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/lib/context-facts.ts";
-import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
-import { toldOf } from "../../extensions/lib/ledger/fold.ts";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { projectMemoryDir } from "../../extensions/lib/memory.ts";
-import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../extensions/lib/reminders.ts";
+import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import { contextBlockFacts, contextFingerprints, FACT_KEYS, gitFingerprint, instructionFacts, resumeFactsNotice } from "../../extensions/context/instructions/context-facts.ts";
+import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/context/git-status.ts";
+import { toldOf } from "../../extensions/lib/request/ledger/fold.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
+import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { contextWords } from "../../extensions/lib/context/context-words.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 
+/** The profile's notice for what changed since the saved context snapshot. */
+const changedNotice = (changes: Array<"git" | "memory" | "instructions" | "product">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction, file: instructionTargets().project });
 
 describe("context fact comparisons", () => {
 	const files: Parameters<typeof contextFingerprints>[0] = { contextFiles: [{ path: "/CLAUDE.md", content: "rules", descriptor: "rules" }] as never, memoryIndex: { path: "/MEMORY.md", content: "memory" } };
@@ -21,10 +26,10 @@ describe("context fact comparisons", () => {
 
 	it("reports only changed categories and sends nothing for identical visible facts", () => {
 		expect(resumeFactsNotice(told.blocks, false, live())).toBeUndefined();
-		expect(resumeFactsNotice(told.blocks, false, live({ memoryIndex: null }))?.text).toBe("Since the saved context snapshot, the memory index changed. The earlier context block reflects the session's start, not the current workspace. Read the current files or run git status if needed.");
+		expect(resumeFactsNotice(told.blocks, false, live({ memoryIndex: null }))?.text).toBe(changedNotice(["memory"]));
 		const changed = resumeFactsNotice(told.blocks, false, live({ contextFiles: [], memoryIndex: null }, "new git"));
-		expect(changed?.text).toContain("git status changed; the memory index changed; CLAUDE.md-family instructions changed");
-		expect(resumeFactsNotice(told.blocks, true, live({}, "new git"))?.text).toContain("reflects the latest compaction");
+		expect(changed?.text).toBe(changedNotice(["git", "memory", "instructions"]));
+		expect(resumeFactsNotice(told.blocks, true, live({}, "new git"))?.text).toBe(changedNotice(["git"], true));
 	});
 
 	it("tells the live fingerprints with the notice, so it is said once", () => {
@@ -32,12 +37,26 @@ describe("context fact comparisons", () => {
 		expect(notice?.facts).toEqual([{ kind: "block", key: FACT_KEYS.git, hash: gitFingerprint("new git") }]);
 	});
 
+	it("reports a change to the product's own instruction file, and stays silent for a session that never told it", () => {
+		const product = [{ path: "/PRODUCT.md", content: "mine", descriptor: "product" }] as never;
+		const edited = live({ oneCodeFiles: product });
+		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toBe(contextWords().changedSinceSnapshot({ changes: ["product"], atCompaction: false, file: instructionTargets().project }));
+		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toContain(`${brand.productFile} instructions changed`);
+		const before = new Map([...told.blocks].filter(([key]) => key !== FACT_KEYS.product));
+		expect(resumeFactsNotice(before, false, edited)).toBeUndefined();
+	});
+
 	it("says nothing about facts the epoch never told (blocks that predate the facts)", () => {
 		expect(resumeFactsNotice(new Map(), false, live({ memoryIndex: null }, "new git"))).toBeUndefined();
 	});
 });
 
-describe("claude-context's resumed-session check", () => {
+describe("the instructions extension's resumed-session check", () => {
+	/** Any change notice, whichever changes it names. */
+	const isNotice = (text: string) =>
+		(["git", "memory", "instructions"] as const)
+			.flatMap((a, i, all) => [[a], ...all.slice(i + 1).map((b) => [a, b]), ...(i === 0 ? [[...all]] : [])])
+			.some((changes) => text === changedNotice(changes as Array<"git" | "memory" | "instructions">));
 	let home: string;
 	let cwd: string;
 	let memory: string;
@@ -49,7 +68,7 @@ describe("claude-context's resumed-session check", () => {
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		execFileSync("git", ["init", "-q", cwd]);
 		execFileSync("git", ["-C", cwd, "config", "user.email", "first@example.invalid"]);
-		writeFileSync(join(cwd, "CLAUDE.md"), "old instructions\n");
+		writeFileSync(join(cwd, "AGENTS.md"), "old instructions\n");
 		memory = join(projectMemoryDir(cwd, home), "MEMORY.md");
 		mkdirSync(join(memory, ".."), { recursive: true });
 		writeFileSync(memory, "old memory\n");
@@ -64,7 +83,7 @@ describe("claude-context's resumed-session check", () => {
 		const fake = createFakePi();
 		const facts: ToldFact[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => facts.push(...((data as { facts?: ToldFact[] }).facts ?? [])));
-		claudeContextExtension(fake.pi as never);
+		instructionsExtension(fake.pi as never);
 		fake.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 		const ctx = createFakeCtx({ cwd, sessionManager: { getSessionId: () => "s", getBranch: () => [] } });
 		await fake.fire("session_start", { reason: "startup" }, ctx);
@@ -76,33 +95,31 @@ describe("claude-context's resumed-session check", () => {
 	it("says once, on the first request of a resumed process, what changed since the epoch's message 1", async () => {
 		const first = await open();
 		const told = first.facts;
-		writeFileSync(join(cwd, "CLAUDE.md"), "new instructions\n");
+		writeFileSync(join(cwd, "AGENTS.md"), "new instructions\n");
 		writeFileSync(memory, "new memory\n");
 		const resumed = await open();
 		const blocks = renderRequest(resumed.events, { facts: told });
-		const notices = blocks.map((block) => block.text).filter((text) => text.startsWith("Since the saved context snapshot"));
-		expect(notices).toHaveLength(1);
-		expect(notices[0]).toContain("the memory index changed; CLAUDE.md-family instructions changed");
+		const notice = changedNotice(["memory", "instructions"]);
+		expect(blocks.map((block) => block.text).filter((text) => text === notice)).toHaveLength(1);
 		// The request failed (nothing new told): the retry says it again.
-		expect(resumed.render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(1);
+		expect(resumed.render(told).filter((text) => text === notice)).toHaveLength(1);
 		// Answered: its facts are told, so nothing more.
 		const delivered = [...told, ...blocks.flatMap((block) => block.facts ?? [])];
-		expect(resumed.render(delivered).filter((text) => text.startsWith("Since the saved context snapshot"))).toHaveLength(0);
+		expect(resumed.render(delivered).filter(isNotice)).toHaveLength(0);
 	});
 
-	it("tells the absence of instructions, so a CLAUDE.md added between sessions is noticed on resume", async () => {
-		rmSync(join(cwd, "CLAUDE.md"));
+	it("tells the absence of instructions, so an instructions file added between sessions is noticed on resume", async () => {
+		rmSync(join(cwd, "AGENTS.md"));
 		rmSync(memory);
 		const told = (await open()).facts;
 		expect(told.some((fact) => fact.kind === "block" && fact.key === FACT_KEYS.instructions)).toBe(true);
-		writeFileSync(join(cwd, "CLAUDE.md"), "new instructions\n");
-		const notices = (await open()).render(told).filter((text) => text.startsWith("Since the saved context snapshot"));
-		expect(notices).toHaveLength(1);
-		expect(notices[0]).toContain("CLAUDE.md-family instructions changed");
+		writeFileSync(join(cwd, "AGENTS.md"), "new instructions\n");
+		// Adding the file also shows in git status.
+		expect((await open()).render(told).filter(isNotice)).toEqual([changedNotice(["git", "instructions"])]);
 	});
 
 	it("says nothing when nothing changed", async () => {
 		const told = (await open()).facts;
-		expect((await open()).render(told).filter((text) => text.startsWith("Since the saved context snapshot"))).toEqual([]);
+		expect((await open()).render(told).filter(isNotice)).toEqual([]);
 	});
 });

@@ -1,19 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-let btwExtension: typeof import("../../extensions/btw/index.ts").default;
+let btwExtension: typeof import("../../extensions/agents/btw/index.ts").default;
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
+vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
-const { logSideCallUsage } = await import("../../extensions/lib/side-call-usage.ts");
+const { logSideCallUsage } = await import("../../extensions/lib/side-calls/side-call-usage.ts");
 const logSideCall = vi.mocked(logSideCallUsage);
 const answer = (text: string) => ({ content: [{ type: "text", text }], stopReason: "stop", usage: {} }) as Awaited<ReturnType<typeof completeSimple>>;
 beforeEach(async () => {
 	complete.mockReset();
 	logSideCall.mockReset();
-	btwExtension = (await import("../../extensions/btw/index.ts")).default;
+	btwExtension = (await import("../../extensions/agents/btw/index.ts")).default;
 });
 
 function setup(model = { api: "anthropic-messages", provider: "anthropic", id: "test" }) {

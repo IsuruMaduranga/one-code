@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { consentDialog, installConsentDialogs, startupConsentReady } from "../../extensions/lib/consent-dialogs.ts";
+import { consentDialog, installConsentDialogs, startupConsentReady } from "../../extensions/lib/consent/consent-dialogs.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 const deferred = () => {

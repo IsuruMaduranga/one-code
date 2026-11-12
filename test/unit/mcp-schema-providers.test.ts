@@ -6,7 +6,7 @@ import { stream as streamCompletions } from "@earendil-works/pi-ai/api/openai-co
 import { getJsonSchemaToolParameters, makeStrictJsonSchema, resolveJsonSchemaStrictSampling } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { convertTools as convertGoogleTools } from "@earendil-works/pi-ai/api/google-shared";
-import { jsonSchemaToTypeBox } from "../../extensions/mcp/schema.ts";
+import { jsonSchemaToTypeBox } from "../../extensions/tools/mcp/schema.ts";
 
 function convertedMcpParameters() {
 	return jsonSchemaToTypeBox({

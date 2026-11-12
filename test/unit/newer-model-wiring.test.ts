@@ -4,11 +4,12 @@ import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pinReleaseDates } from "./catalog-fixture.ts";
-import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
-import { oneCodeSettingsPath, readSuggestNewerModels } from "../../extensions/lib/one-code-settings.ts";
-import newerModelExtension from "../../extensions/newer-model/index.ts";
-import { NOTICE_CHANNEL } from "../../extensions/lib/notices.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
+import { productSettingsPath, readSuggestNewerModels } from "../../extensions/lib/profile/product-settings.ts";
+import newerModelExtension from "../../extensions/ui/newer-model/index.ts";
+import { NOTICE_CHANNEL } from "../../extensions/lib/notify/notices.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const model = (id: string) => ({ provider: "openai", id, name: id, api: "openai-responses", cost: { input: 1, output: 3 } }) as Model<Api>;
 const old = model("gpt-5.6-luna");
@@ -19,7 +20,7 @@ let dir: string;
 
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "onecode-newer-model-"));
-	vi.stubEnv("ONECODE_STATE_DIR", dir);
+	vi.stubEnv(envName("STATE_DIR"), dir);
 	pinReleaseDates({
 		"openai/gpt-5.6-luna": { releaseDate: "2026-07-09" },
 		"openai/gpt-6-luna": { releaseDate: "2026-09-01" },
@@ -39,7 +40,7 @@ function mount(mode = "tui", hasUI = true) {
 	const getAll = vi.fn(() => { throw new Error("Suggestions must use available models, not the full catalog"); });
 	const ctx = createFakeCtx({ mode, hasUI, model: old, modelRegistry: { getAvailable, getAll } });
 	newerModelExtension(fake.pi as never);
-	// The notice reaches the UI when the lifecycle notice batch closes (lib/notices.ts).
+	// The notice reaches the UI when the lifecycle notice batch closes (lib/notify/notices.ts).
 	const start = async () => { await fake.fire("session_start", { reason: "startup" }, ctx); await flushNotices(); };
 	const select = async (m: Model<Api>) => { await fake.fire("model_select", { model: m }, ctx); await flushNotices(); };
 	return { fake, ctx, start, select, emit, getAvailable, getAll };
@@ -131,13 +132,13 @@ describe("newer-model notices", () => {
 	});
 	it("registers the notice extension in the shipped package", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
-		expect(pkg.pi.extensions).toContain("extensions/newer-model/index.ts");
+		expect(pkg.pi.extensions).toContain("extensions/ui/newer-model/index.ts");
 	});
 });
 
 describe("readSuggestNewerModels", () => {
 	const home = () => join(dir, "home");
-	const path = () => oneCodeSettingsPath(home(), {});
+	const path = () => productSettingsPath(home(), {});
 	const write = (value: unknown) => {
 		mkdirSync(dirname(path()), { recursive: true });
 		writeFileSync(path(), JSON.stringify(value));
@@ -162,6 +163,6 @@ describe("readSuggestNewerModels", () => {
 		writeFileSync(path(), "{ bad json");
 		expect(readSuggestNewerModels(home(), {})).toBe(true);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ suggestNewerModels: false }));
-		expect(readSuggestNewerModels(home(), { ONECODE_STATE_DIR: dir })).toBe(false);
+		expect(readSuggestNewerModels(home(), { [envName("STATE_DIR")]: dir })).toBe(false);
 	});
 });

@@ -1,14 +1,15 @@
 /**
  * Shared harness for testing inline-extension tool_call handlers directly
  * (the child permission gate and its sibling factories from
- * extensions/lib/agent-loader.ts) without building a real resource loader.
+ * extensions/lib/agents/agent-loader.ts) without building a real resource loader.
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { permissionGateFactory } from "../../../extensions/lib/permission-gate.ts";
+import { permissionGateFactory } from "../../../extensions/lib/agents/permission-gate.ts";
+import { writeRepositorySettings, writeUserSettings } from "./settings-files.ts";
 
 export type ToolCallHandler = (event: {
 	toolName: string;
@@ -32,10 +33,10 @@ export function captureToolCallHandler(ext: InlineExtension): ToolCallHandler {
 }
 
 /**
- * A permission gate over a fresh temp cwd/home. `settings` is the USER file
- * (`<home>/.claude/settings.json` — allow rules there apply directly);
- * `projectSettings` is the repo's `<cwd>/.claude/settings.json`, whose allow
- * rules need consent.
+ * A permission gate over a fresh temp cwd/home. `settings` goes to the
+ * profile's primary user settings file (allow rules there apply directly);
+ * `projectSettings` to the repository's settings file, whose allow rules need
+ * consent (a profile without one needs `useRepositorySettings()`).
  */
 export function buildGate(
 	settings: object,
@@ -44,12 +45,8 @@ export function buildGate(
 ): { handler: ToolCallHandler; cwd: string; home: string } {
 	const cwd = mkdtempSync(join(os.tmpdir(), "gate-cwd-"));
 	const home = mkdtempSync(join(os.tmpdir(), "gate-home-"));
-	mkdirSync(join(home, ".claude"), { recursive: true });
-	writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings));
-	if (projectSettings) {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(projectSettings));
-	}
+	writeUserSettings(cwd, home, settings);
+	if (projectSettings) writeRepositorySettings(cwd, home, projectSettings);
 	return { handler: captureToolCallHandler(permissionGateFactory(cwd, home, undefined, getBridge)), cwd, home };
 }
 

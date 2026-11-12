@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
-import { replacedBuiltinsView } from "../../extensions/doctor/builtins.ts";
-import { piHasBuiltinExtensions } from "../../extensions/lib/pi-version.ts";
+import { replacedBuiltinsView } from "../../extensions/commands/doctor/builtins.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { piHasBuiltinExtensions } from "../../extensions/lib/app/pi-version.ts";
 import {
 	BUILTIN_EXTENSIONS_PI,
 	builtinEnabled,
@@ -21,7 +22,7 @@ import {
 	turnOffPrompt,
 	withBuiltinsTurnedOff,
 	withReplacedBuiltinsOff,
-} from "../../extensions/lib/replaced-builtins.mjs";
+} from "../../extensions/lib/app/replaced-builtins.mjs";
 import { piDist, piRoot } from "./helpers/pi-install.ts";
 
 /** pi's own glob matcher, the one its `!` override entries go through. */
@@ -86,14 +87,14 @@ describe("withReplacedBuiltinsOff (the app's settings edit)", () => {
 describe("the notice and the fix", () => {
 	const both = builtinsLeftOn([], []);
 
-	it("names both routes, and says to keep One Code", () => {
+	it("names both routes, and says to keep the product", () => {
 		expect(replacedBuiltinsNotice(both)).toBe(
-			"One Code provides its own tool search and MCP, so pi skips its built-in tool-search and mcp extensions and warns about them at startup. " +
-				"Keep One Code installed. To hide the warnings, run `pi config` and turn off tool-search and mcp under Built-in, or run /doctor to have it done for you.",
+			`${brand.name} provides its own tool search and MCP, so pi skips its built-in tool-search and mcp extensions and warns about them at startup. ` +
+				"Keep " + brand.name + " installed. To hide the warnings, run `pi config` and turn off tool-search and mcp under Built-in, or run /doctor to have it done for you.",
 		);
 		expect(replacedBuiltinsNotice([both[1]], "onecode config")).toBe(
-			"One Code provides its own MCP, so pi skips its built-in mcp extension and warns about it at startup. " +
-				"Keep One Code installed. To hide the warning, run `onecode config` and turn off mcp under Built-in, or run /doctor to have it done for you.",
+			`${brand.name} provides its own MCP, so pi skips its built-in mcp extension and warns about it at startup. ` +
+				"Keep " + brand.name + " installed. To hide the warning, run `onecode config` and turn off mcp under Built-in, or run /doctor to have it done for you.",
 		);
 		expect(replacedBuiltinsNotice([])).toBeUndefined();
 	});
@@ -179,8 +180,8 @@ describe("the one-time question", () => {
 	it("says why, what changes, where, and how to undo it", () => {
 		const text = turnOffPrompt(both, "/h/.pi/agent/settings.json");
 		expect(text.split("\n")[0]).toBe("Turn off pi's built-in tool-search and mcp?");
-		expect(text).toContain("warns about each at every start, telling you to remove One Code");
-		expect(text).toContain("changes nothing while One Code is installed");
+		expect(text).toContain(`warns about each at every start, telling you to remove ${brand.name}.`);
+		expect(text).toContain(`changes nothing while ${brand.name} is installed`);
 		expect(text).toContain('"-builtin:tool-search" and "-builtin:mcp" to "extensions" in /h/.pi/agent/settings.json');
 		expect(text).toContain("turn them back on with `pi config`");
 	});

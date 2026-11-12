@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { actionsFor, type McpEntry, statusText } from "../../extensions/mcp/panel/model.ts";
-import { applyMcpKey, initialMcpState, type McpPanelState } from "../../extensions/mcp/panel/state.ts";
-import { decodeMcpKey } from "../../extensions/mcp/panel/keys.ts";
+import { actionsFor, type McpEntry, statusText } from "../../extensions/tools/mcp/panel/model.ts";
+import { applyMcpKey, initialMcpState, type McpPanelState } from "../../extensions/tools/mcp/panel/state.ts";
+import { decodeMcpKey } from "../../extensions/tools/mcp/panel/keys.ts";
 
 function entry(overrides: Partial<McpEntry>): McpEntry {
 	return {

@@ -13,9 +13,9 @@ import {
 	renderViewer,
 	viewerHeight,
 	type ViewerRunSnapshot,
-} from "../../extensions/workflow/viewer.ts";
-import { formatDuration, wrapPlainText } from "../../extensions/lib/tui-render.ts";
-import type { AgentRecord } from "../../extensions/workflow/types.ts";
+} from "../../extensions/agents/workflow/viewer.ts";
+import { formatDuration, wrapPlainText } from "../../extensions/lib/ui/tui-render.ts";
+import type { AgentRecord } from "../../extensions/agents/workflow/types.ts";
 
 /** Paint that tags styled text so tests can strip/inspect it. */
 const paint = {

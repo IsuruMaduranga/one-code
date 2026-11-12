@@ -7,7 +7,7 @@ import {
 	clearThinkingEnabled,
 	looksLikeAnthropicRequest,
 	withClearThinking,
-} from "../../extensions/context-management/index.ts";
+} from "../../extensions/request/context-management/index.ts";
 
 describe("clearThinkingEnabled", () => {
 	const firstParty = { api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com" };
@@ -26,11 +26,11 @@ describe("clearThinkingEnabled", () => {
 		expect(clearThinkingEnabled("1", undefined)).toBe(false);
 	});
 
-	it("CC_CLEAR_THINKING=1 forces on for a confirmed proxy", () => {
+	it("*_CLEAR_THINKING=1 forces on for a confirmed proxy", () => {
 		expect(clearThinkingEnabled("1", proxy)).toBe(true);
 	});
 
-	it("CC_CLEAR_THINKING=0 forces off everywhere", () => {
+	it("*_CLEAR_THINKING=0 forces off everywhere", () => {
 		expect(clearThinkingEnabled("0", firstParty)).toBe(false);
 	});
 });

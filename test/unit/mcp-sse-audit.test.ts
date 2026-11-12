@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { beginInteractiveAuth, callTool, close, connect, finishInteractiveAuth, isUnauthorized, type Connection } from "../../extensions/mcp/client.ts";
-import { parseServer, type HttpServer } from "../../extensions/mcp/config.ts";
-import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
-import { silentProvider } from "../../extensions/mcp/oauth/flow.ts";
-import { hashServerConfig } from "../../extensions/mcp/trust.ts";
+import { beginInteractiveAuth, callTool, close, connect, finishInteractiveAuth, isUnauthorized, type Connection } from "../../extensions/tools/mcp/client.ts";
+import { parseServer, type HttpServer } from "../../extensions/tools/mcp/config.ts";
+import { McpOAuthProvider } from "../../extensions/tools/mcp/oauth/provider.ts";
+import { silentProvider } from "../../extensions/tools/mcp/oauth/flow.ts";
+import { hashServerConfig } from "../../extensions/tools/mcp/trust.ts";
 
 let endpoint: Server | undefined;
 let connection: Connection | undefined;

@@ -118,14 +118,14 @@ user turn. The ninth block ends the turn with a notice. Hooks still receive
 
 ## Debugging hooks
 
-Set `CC_HOOKS_DEBUG=1` before launching to print each hook dispatch and its
+Set `ONECODE_HOOKS_DEBUG=1` before launching to print each hook dispatch and its
 outcome to stderr. Decisions are also appended to
 `~/.onecode/hooks/hooks-decisions.jsonl` while the variable is set.
 
 ## Which shell runs a hook
 
 Hooks run in bash, as in Claude Code: `/bin/bash` on macOS and Linux, Git
-Bash on Windows (`CLAUDE_CODE_GIT_BASH_PATH` points at a different bash;
+Bash on Windows (`ONECODE_GIT_BASH_PATH` points at a different bash;
 a value that isn't a bash or sh binary is ignored with a warning). A hook
 can ask for PowerShell instead with Claude Code's `shell` field:
 

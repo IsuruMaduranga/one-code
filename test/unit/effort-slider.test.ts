@@ -16,7 +16,7 @@ import {
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
-} from "../../extensions/effort/slider.ts";
+} from "../../extensions/lib/ui/effort-slider.ts";
 
 // Identity paint keeps layout assertions free of colour codes.
 const plain = (_color: string, text: string) => text;

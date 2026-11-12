@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { alignRight, formatDuration } from "../../extensions/lib/tui-render.ts";
-import { composeWorkingMessage, estimateTokens, messageChars, spinnerFrames } from "../../extensions/spinner/line.ts";
-import { pickVerb, SPINNER_VERBS } from "../../extensions/spinner/verbs.ts";
+import { alignRight, formatDuration } from "../../extensions/lib/ui/tui-render.ts";
+import { composeWorkingMessage, estimateTokens, messageChars, spinnerFrames } from "../../extensions/ui/spinner/line.ts";
+import { ALL_VERBS, pickVerb, SPINNER_VERBS } from "../../extensions/ui/spinner/verbs.ts";
 
 describe("spinnerFrames", () => {
 	it("mirrors the frame cycle forward then back", () => {
@@ -16,12 +16,17 @@ describe("spinnerFrames", () => {
 });
 
 describe("pickVerb", () => {
-	it("picks from Claude Code's verb list, clamped at the edges", () => {
-		expect(pickVerb(() => 0)).toBe(SPINNER_VERBS[0]);
-		expect(pickVerb(() => 0.999999)).toBe(SPINNER_VERBS[SPINNER_VERBS.length - 1]);
+	it("picks from the verb list, clamped at the edges", () => {
+		expect(pickVerb(() => 0)).toBe(ALL_VERBS[0]);
+		expect(pickVerb(() => 0.999999)).toBe(ALL_VERBS[ALL_VERBS.length - 1]);
 		expect(SPINNER_VERBS).toContain("Hyperspacing");
 		expect(SPINNER_VERBS).toContain("Beboppin'");
-		expect(SPINNER_VERBS.length).toBe(187);
+		expect(SPINNER_VERBS.length).toBe(186);
+	});
+
+	it("adds the brand's own verbs after the base's", () => {
+		expect(ALL_VERBS.slice(0, SPINNER_VERBS.length)).toEqual(SPINNER_VERBS);
+		expect(pickVerb(() => 0.999999, [...SPINNER_VERBS, "Branding"])).toBe("Branding");
 	});
 });
 
@@ -80,7 +85,7 @@ describe("spinner wiring (retry keeps the open span)", () => {
 	it("keeps the first run's start and verb across agent_end/agent_start, stopping only at settle", async () => {
 		vi.useFakeTimers();
 		try {
-			const { default: spinnerExtension } = await import("../../extensions/spinner/index.ts");
+			const { default: spinnerExtension } = await import("../../extensions/ui/spinner/index.ts");
 			const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => void>>();
 			const pi = {
 				on(event: string, handler: (event: unknown, ctx: unknown) => void) {

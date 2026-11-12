@@ -1,12 +1,12 @@
 /**
- * lib/hook-gate.ts: the child half of the subagent hook bridge — a child's
+ * lib/agents/hook-gate.ts: the child half of the subagent hook bridge — a child's
  * tool_call/tool_result forwarded to the parent's hooks and the outcome applied
  * as the parent applies it to its own calls; fail-open without a bridge.
  */
 import { describe, expect, it } from "vitest";
-import type { ChildHookCall, ChildHookResult, HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
-import { hookGateFactory } from "../../extensions/lib/hook-gate.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import type { ChildHookCall, ChildHookResult, HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
+import { hookGateFactory } from "../../extensions/lib/agents/hook-gate.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function mount(bridge: HookBridge | undefined, agentTypeOf?: (id: string | undefined) => string | undefined) {
@@ -46,7 +46,7 @@ describe("hookGateFactory", () => {
 		const bridge: HookBridge = {
 			async preToolUse(call) {
 				calls.push(call);
-				return { block: { reason: "not in children" } };
+				return { refusal: "PreToolUse hook: not in children" };
 			},
 			async postToolUse() {
 				return {};
@@ -85,7 +85,7 @@ describe("hookGateFactory", () => {
 			},
 			async postToolUse(result) {
 				seen.push(result);
-				return { block: { reason: "lint failed" }, updatedToolResult: "replaced", additionalContext: "<system-reminder>\nctx\n</system-reminder>" };
+				return { objection: "PostToolUse hook: lint failed", updatedToolResult: "replaced", additionalContext: "<system-reminder>\nctx\n</system-reminder>" };
 			},
 		};
 		const { fake } = mount(bridge);
@@ -133,7 +133,7 @@ describe("hookGateFactory", () => {
 		const bridge: HookBridge = {
 			preToolUse: async () => {
 				called++;
-				return { block: { reason: "x" } };
+				return { refusal: "x" };
 			},
 			postToolUse: async () => ({}),
 		};

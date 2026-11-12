@@ -36,12 +36,44 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx vitest run
         env:
-          # Log taskkill's verdicts (lib/process-tree.ts) so a kill that misses shows why.
+          # Log taskkill's verdicts (lib/shell-run/process-tree.ts) so a kill that misses shows why.
           ONECODE_DEBUG_KILL: ${{ runner.os == 'Windows' && '1' || '' }}
 
+  # A product replaces profile/ with its own, so the base must typecheck and
+  # pass its tests on any profile that fills the contract. This runs them on
+  # a copy of the repository with the fixture profile (test/fixtures/profile/)
+  # in place of One Code's.
+  base-suite:
+    name: base on the fixture profile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: scripts/test-base.sh
+
+  # The bundled app loads pi as a library and finds the extension package
+  # through its own package.json, a path no unit test takes: this packs both
+  # tarballs, installs the app into a throwaway prefix and starts it. No
+  # provider key is needed (the run stops at the missing key, after the
+  # extension set has loaded).
+  app-smoke:
+    name: bundled app starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: NODE_BIN_DIR="$(dirname "$(command -v node)")" test/e2e/app-smoke.sh
 
   # The extension package rides on the user's own pi, so the oldest pi in the
-  # tested range (TESTED_PI_MIN, extensions/lib/pi-version.ts) must load the
+  # tested range (TESTED_PI_MIN, extensions/lib/app/pi-version.ts) must load the
   # whole extension set and run a turn. A local mock model answers, so no
   # provider key is needed. The pi the repo develops against runs the same
   # smoke as the control.
@@ -57,7 +89,7 @@ jobs:
       - run: npm ci
       - name: Install the oldest pi in the tested range
         run: |
-          min=$(node -e 'const s=require("fs").readFileSync("extensions/lib/pi-version.ts","utf8");process.stdout.write(s.match(/TESTED_PI_MIN = "([^"]+)"/)[1])')
+          min=$(node -e 'const s=require("fs").readFileSync("extensions/lib/app/pi-version.ts","utf8");process.stdout.write(s.match(/TESTED_PI_MIN = "([^"]+)"/)[1])')
           echo "TESTED_PI_MIN=$min"
           npm install --prefix "$RUNNER_TEMP/pi-floor" --no-save --legacy-peer-deps --no-audit --no-fund "@earendil-works/pi-coding-agent@$min"
       - run: node test/e2e/pi-floor-smoke.mjs "$RUNNER_TEMP/pi-floor/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"

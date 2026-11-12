@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextPrPollDelay, parsePrNumber, PR_IDLE_STOP_MS, PR_POLL_INTERVAL_MS } from "../../extensions/footer/pr.ts";
+import { nextPrPollDelay, parsePrNumber, PR_IDLE_STOP_MS, PR_POLL_INTERVAL_MS } from "../../extensions/ui/footer/pr.ts";
 
 describe("parsePrNumber", () => {
 	it("returns the first PR number from gh pr list --json output", () => {

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { hashAgentCall, ReplayCursor } from "../../extensions/workflow/journal.ts";
-import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/workflow/globals.ts";
-import type { AgentCallFn } from "../../extensions/workflow/types.ts";
+import { hashAgentCall, ReplayCursor } from "../../extensions/agents/workflow/journal.ts";
+import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/agents/workflow/globals.ts";
+import type { AgentCallFn } from "../../extensions/agents/workflow/types.ts";
 import { makeGlobals } from "./workflow-test-helpers.ts";
+import type { RunStop } from "../../extensions/agents/workflow/text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
+
+/** Why the runtime refused an agent() call, as the profile words it. */
+const runStop = (stop: RunStop) => workflowResultText.runStop(stop);
 
 describe("createLimiter", () => {
 	it("never exceeds the limit", async () => {
@@ -47,25 +52,25 @@ describe("agent()", () => {
 	it("throws on the agent-count cap and on an exhausted budget", async () => {
 		const capped = makeGlobals({ maxAgents: 1 });
 		await capped.globals.agent("one");
-		await expect(capped.globals.agent("two")).rejects.toThrow(/agent limit/);
+		await expect(capped.globals.agent("two")).rejects.toThrow(runStop({ kind: "agentLimit", max: 1 }));
 
 		const budgeted = makeGlobals({ budgetTotal: 40 });
 		await budgeted.globals.agent("one"); // spends 50 > 40
-		await expect(budgeted.globals.agent("two")).rejects.toThrow(/budget exhausted/);
+		await expect(budgeted.globals.agent("two")).rejects.toThrow(runStop({ kind: "budgetExhausted", total: 40 }));
 	});
 
 	it("throws once aborted", async () => {
 		const controller = new AbortController();
 		const { globals } = makeGlobals({ signal: controller.signal });
 		controller.abort();
-		await expect(globals.agent("x")).rejects.toThrow(/aborted/);
+		await expect(globals.agent("x")).rejects.toThrow(runStop({ kind: "aborted" }));
 	});
 
 	it("stops queued agents when the first completion exhausts the budget", async () => {
 		const { globals, state, events, journal } = makeGlobals({ budgetTotal: 50, concurrency: 1 });
 		const settled = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => globals.agent(`task ${i}`)));
 		expect(settled.map((result) => result.status)).toEqual(["fulfilled", ...Array<string>(9).fill("rejected")]);
-		expect((settled[1] as PromiseRejectedResult).reason.message).toMatch(/budget exhausted/);
+		expect((settled[1] as PromiseRejectedResult).reason.message).toBe(runStop({ kind: "budgetExhausted", total: 50 }));
 		expect(state.outputTokens()).toBe(50);
 		expect(events.filter((event) => event.type === "agentStart")).toHaveLength(1);
 		expect(journal).toHaveLength(1);
@@ -89,7 +94,7 @@ describe("agent()", () => {
 		const result = Promise.all(Array.from({ length: 10 }, (_, i) => globals.agent(`task ${i}`)));
 		expect(started).toBe(2);
 		release();
-		await expect(result).rejects.toThrow(/budget exhausted/);
+		await expect(result).rejects.toThrow(runStop({ kind: "budgetExhausted", total: 50 }));
 		expect(started).toBe(2);
 		expect(state.outputTokens()).toBe(100);
 	});
@@ -158,7 +163,7 @@ describe("budget + workflow()", () => {
 
 	it("workflow() throws when nesting is not available", async () => {
 		const { globals } = makeGlobals();
-		await expect(globals.workflow("child")).rejects.toThrow(/one level/);
+		await expect(globals.workflow("child")).rejects.toThrow(workflowResultText.callProblem({ kind: "nestedTooDeep" }));
 	});
 });
 
@@ -186,14 +191,14 @@ describe("nested workflow accounting (S9)", () => {
 		expect(calls).toBe(1);
 		expect(parent.state.outputTokens()).toBe(50);
 		expect(children[1].globals.budget.remaining()).toBe(0);
-		await expect(children[1].globals.agent("new call")).rejects.toThrow(/budget exhausted/);
+		await expect(children[1].globals.agent("new call")).rejects.toThrow(runStop({ kind: "budgetExhausted", total: 50 }));
 	});
 
 	it("shares the agent-count limit across sibling workflows", async () => {
 		const parent = makeGlobals({ maxAgents: 1 });
 		const child = () => makeGlobals({ admission: parent.state.admission });
 		await child().globals.agent("first");
-		await expect(child().globals.agent("second")).rejects.toThrow(/agent limit/);
+		await expect(child().globals.agent("second")).rejects.toThrow(runStop({ kind: "agentLimit", max: 1 }));
 		expect(parent.state.agentCount()).toBe(1);
 	});
 

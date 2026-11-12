@@ -111,7 +111,7 @@ unless you're changing `app/` or how the package is resolved.
 | `extensions/<name>/` | One pi extension each. `index.ts` is wiring; the logic is in the modules beside it. |
 | `extensions/lib/` | Pure modules shared across extensions. |
 | `extensions/auto-mode/` | The auto-mode classifier library, called by `permissions`. Not an extension. |
-| `agents/`, `skills/`, `themes/` | The bundled agent, skill and theme catalogs. |
+| `profile/` | The One Code profile: its model-facing text (`profile/text/`), its brand, and the bundled `agents/`, `skills/` and `themes/` catalogs. |
 | `app/` | The `onecode` app package. Plain JavaScript. |
 | `test/unit/` | Vitest over the pure modules. |
 | `test/e2e/` | Live harnesses: RPC drivers, request dumps, the cache probe, smoke tests. |

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyKey, SendNowChord } from "../../extensions/send-now/chord.ts";
+import { classifyKey, SendNowChord } from "../../extensions/ui/send-now/chord.ts";
 
 describe("classifyKey", () => {
 	it("reads the legacy control bytes", () => {

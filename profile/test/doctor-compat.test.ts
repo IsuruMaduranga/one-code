@@ -1,0 +1,286 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/commands/doctor/compat.ts";
+import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/commands/doctor/dependencies.ts";
+import { whichOnPath } from "../../extensions/lib/shell-run/which.ts";
+import { invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
+import { tempHome } from "../../test/unit/helpers/temp-home.ts";
+
+let home: string;
+let cwd: string;
+const write = (path: string, data: unknown) => {
+	mkdirSync(join(path, ".."), { recursive: true });
+	writeFileSync(path, typeof data === "string" ? data : JSON.stringify(data));
+};
+
+beforeEach(() => {
+	({ home, cwd } = tempHome("onecode-doctor-compat-"));
+	invalidatePluginsCache();
+	resetHookSettingsCache();
+});
+
+const input = () => ({ cwd, home, agentDir: join(home, ".onecode", "agent"), env: { HOME: home, PATH: "" } as NodeJS.ProcessEnv });
+
+describe("collectCompat: hooks", () => {
+	it("does not count plugin hooks that user settings turned off", () => {
+		const claudeDir = join(home, ".claude");
+		const installPath = join(claudeDir, "plugins", "cache", "market", "fixture", "1.0.0");
+		write(join(installPath, ".claude-plugin", "plugin.json"), { name: "fixture" });
+		write(join(installPath, "hooks", "hooks.json"), { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "plugin-guard" }] }] } });
+		write(join(claudeDir, "plugins", "installed_plugins.json"), { version: 2, plugins: { "fixture@market": [{ scope: "user", installPath, version: "1.0.0" }] } });
+		write(join(claudeDir, "settings.json"), { enabledPlugins: { "fixture@market": true } });
+		expect(collectCompat(input()).hooks.commands).toBe(1);
+		write(join(claudeDir, "settings.json"), { disableAllHooks: true, enabledPlugins: { "fixture@market": true } });
+		resetHookSettingsCache();
+		invalidatePluginsCache();
+		const hooks = collectCompat(input()).hooks;
+		expect(hooks.commands).toBe(0);
+		expect(hooks.sources).toEqual([]);
+	});
+});
+
+describe("collectCompat: settings files", () => {
+	it("reports the subagent-model spelling the loader uses, and the other with the ignored variables", () => {
+		write(join(home, ".claude", "settings.json"), { env: { ONECODE_SUBAGENT_MODEL: "", CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } });
+		const user = collectCompat(input()).files.find((f) => f.scope === "borrowed-user")!;
+		expect(user.used).toEqual(['env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"']);
+		expect(user.ignored).toEqual(["env (1 variable — One Code does not export settings env blocks)"]);
+	});
+
+	it("reports what each Claude Code file contributes and which keys One Code leaves alone", () => {
+		write(join(home, ".claude", "settings.json"), {
+			permissions: { allow: ["Bash(git status)"], deny: ["Read(.env)"], defaultMode: "plan" },
+			hooks: { PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "npx prettier" }] }] },
+			env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet", FOO: "1" },
+			enabledPlugins: { "a@b": true },
+			model: "opus",
+			statusLine: { type: "command", command: "echo" },
+		});
+		write(join(cwd, ".claude", "settings.json"), { permissions: { allow: ["Bash(npm test)"], defaultMode: "auto" }, autoMode: { allow: ["x"] } });
+		const compat = collectCompat(input());
+		const user = compat.files.find((f) => f.scope === "borrowed-user")!;
+		expect(user.used).toEqual([
+			"permissions: 1 allow, 1 deny, 0 ask; defaultMode plan",
+			"hooks: PostToolUse ×1",
+			"enabledPlugins: 1",
+			'env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"',
+		]);
+		expect(user.ignored).toEqual(["env (1 variable — One Code does not export settings env blocks)", "model", "statusLine"]);
+		const project = compat.files.find((f) => f.scope === "borrowed-project")!;
+		expect(project.used).toEqual(["permissions: 1 allow, 0 deny, 0 ask; allow rules apply after a once-per-config consent"]);
+		expect(project.refused).toEqual([
+			'permissions.defaultMode "auto" — a repository\'s files may not select it',
+			"autoMode (allow) — never read from a repository's files",
+		]);
+		const texts = compat.findings.map((f) => f.text);
+		expect(texts.some((t) => t.includes('sets permissions.defaultMode "auto"'))).toBe(true);
+		expect(texts.some((t) => t.includes("has an autoMode block"))).toBe(true);
+		const section = importedConfigSection(compat, home);
+		expect(section.lines.some((l) => l.text.startsWith("Claude Code user settings ~/.claude/settings.json: permissions"))).toBe(true);
+		expect(section.lines.some((l) => l.text === "not used by One Code: env (1 variable — One Code does not export settings env blocks), model, statusLine")).toBe(true);
+	});
+
+	it("flags invalid JSON as an error and One Code keys left in the Claude Code user file", () => {
+		write(join(home, ".claude", "settings.json"), '{ "permissions": { "allow": [ ] }, }');
+		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "plan" }, subagentModel: "inherit", webSearch: { apiKeys: { brave: "k" } } });
+		const compat = collectCompat(input());
+		expect(compat.files.find((f) => f.scope === "borrowed-user")).toMatchObject({ exists: true, valid: false });
+		expect(compat.findings.find((f) => f.level === "error")?.text).toContain("is not valid JSON");
+		const onecode = compat.files.find((f) => f.scope === "product-user")!;
+		expect(onecode.refused[0]).toContain('permissions.defaultMode "plan" — never read from One Code\'s own files');
+		expect(onecode.used).toEqual(['subagentModel "inherit"', "webSearch (keys/order for the search fallback)"]);
+	});
+
+	it("counts One Code's own keys, the /memory rows among them, as used rather than ignored", () => {
+		write(join(home, ".onecode", "settings.json"), {
+			configMode: "independent",
+			autoMemoryEnabled: false,
+			modelTiers: { "x/y": "cheap" },
+			suggestNewerModels: false,
+			workflowSizeGuideline: "small",
+			compactionKeepDeclined: true,
+		});
+		const onecode = collectCompat(input()).files.find((f) => f.scope === "product-user")!;
+		expect(onecode.ignored).toEqual([]);
+		expect(onecode.used).toEqual(expect.arrayContaining(['configMode "independent" (/memory config sources)', "autoMemoryEnabled: false"]));
+	});
+
+	it("refuses a classifier model in Claude Code's settings: One Code reads it from ~/.onecode only", () => {
+		write(join(home, ".claude", "settings.json"), { subagentModel: "sonnet", autoMode: { classifierModel: "anthropic/claude-haiku-4-5", environment: ["x"] } });
+		const compat = collectCompat(input());
+		const user = compat.files.find((f) => f.scope === "borrowed-user")!;
+		expect(user.refused).toEqual(expect.arrayContaining([
+			"subagentModel — One Code's own key, read from ~/.onecode/settings.json only",
+			"autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only",
+		]));
+		expect(user.used).toEqual(["autoMode: environment"]);
+		expect(compat.findings.some((f) => f.text.includes("autoMode.classifierModel") && f.fix?.includes("/auto-mode model"))).toBe(true);
+	});
+});
+
+describe("collectCompat: content", () => {
+	it("opens no Claude Code settings file in independent mode", () => {
+		write(join(home, ".claude", "settings.json"), "{not json");
+		resetConfigModeForTest("independent");
+		const compat = collectCompat(input());
+		expect(compat.files.map((f) => f.scope)).toEqual(["product-user", "product-local"]);
+		expect(compat.findings.some((f) => f.text.includes(".claude"))).toBe(false);
+	});
+
+	it("reads the primary file's keys from One Code's own user file in independent mode", () => {
+		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "plan" }, hooks: { Stop: [{ hooks: [{ type: "command", command: "true" }] }] } });
+		resetConfigModeForTest("independent");
+		const onecode = collectCompat(input()).files.find((f) => f.scope === "product-user")!;
+		expect(onecode.refused).toEqual([]);
+		expect(onecode.ignored).toEqual([]);
+		expect(onecode.used).toEqual(["permissions: defaultMode plan", "hooks: Stop ×1"]);
+	});
+
+	it("sizes the instruction files and warns over the 40k soft limit", () => {
+		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
+		write(join(cwd, "sub", "CLAUDE.local.md"), "local");
+		const compat = collectCompat({ ...input(), cwd: join(cwd, "sub") });
+		expect(compat.contextFiles.map((f) => [basename(f.path), f.overLimit])).toEqual([
+			["CLAUDE.md", true],
+			["CLAUDE.local.md", false],
+		]);
+		expect(compat.findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);
+	});
+
+	it("names a file over half the model's window as not loaded, in place of the 40k warning", () => {
+		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
+		const compat = collectCompat({ ...input(), contextWindow: 10_000 });
+		const texts = compat.findings.map((f) => f.text);
+		expect(texts.some((t) => t.includes("CLAUDE.md (~") && t.includes("is not loaded: instruction files may take at most half of this model's 10k-token context window"))).toBe(true);
+		expect(texts.some((t) => t.includes("over the 40.0k-char limit"))).toBe(false);
+		// A window it fits keeps the 40k warning.
+		expect(collectCompat({ ...input(), contextWindow: 1_000_000 }).findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);
+	});
+
+	it("counts agents, skills and command templates, and flags a skill without a description", () => {
+		write(join(home, ".claude", "agents", "reviewer.md"), "---\nname: reviewer\ndescription: reviews\n---\nBody");
+		write(join(cwd, ".claude", "agents", "empty.md"), "---\nname: empty\n---\n");
+		write(join(cwd, ".claude", "skills", "deploy", "SKILL.md"), "---\nname: deploy\n---\nHow to deploy");
+		write(join(cwd, ".claude", "skills", "ok", "SKILL.md"), "---\nname: ok\ndescription: fine\n---\nBody");
+		write(join(cwd, ".claude", "commands", "ship.md"), "ship it");
+		const compat = collectCompat(input());
+		expect(compat.agents).toMatchObject({ user: 1, project: 0, plugin: 0 });
+		expect(compat.agents.failed).toHaveLength(1);
+		expect(compat.skills).toMatchObject({ project: 2, user: 0, plugin: 0 });
+		expect(compat.skills.bundled).toBeGreaterThan(0);
+		expect(compat.skills.noDescription[0]).toContain("deploy");
+		expect(compat.commands).toBe(1);
+		expect(compat.findings.some((f) => f.text.includes("has no description in its frontmatter"))).toBe(true);
+		expect(compat.findings.some((f) => f.text.includes("has no body and is skipped"))).toBe(true);
+	});
+
+	it("loads MCP servers from .mcp.json and reports missing env vars and config errors", () => {
+		write(join(cwd, ".mcp.json"), { mcpServers: { docs: { type: "http", url: "https://x/${DOCS_TOKEN}" }, local: { command: "my-mcp", args: [] } } });
+		write(join(home, ".claude.json"), "not json");
+		const compat = collectCompat(input());
+		expect(compat.mcp.servers.map((s) => s.name)).toEqual(["docs", "local"]);
+		expect(compat.findings.some((f) => f.text.includes("unset environment variable DOCS_TOKEN"))).toBe(true);
+		expect(compat.mcp.configErrors[0]).toContain("~/.claude.json");
+		const section = mcpSection(compat, undefined, home);
+		expect(section.lines.some((l) => l.text.startsWith("docs — http: https://x/") && l.text.includes("missing DOCS_TOKEN"))).toBe(true);
+		const liveSection = mcpSection(compat, { modelSource: "none", mcp: { settled: true, servers: [{ name: "local", status: "connected", toolCount: 4 }] } }, home);
+		expect(liveSection.lines.some((l) => l.text.includes("local — stdio: my-mcp · connected · 4 tools"))).toBe(true);
+	});
+
+	it("loads what the session loads: registered servers, and pi's project mcp.json under its config dir name", () => {
+		write(join(cwd, ".rebranded", "mcp.json"), { mcpServers: { piproject: { command: "pi-mcp" } } });
+		write(join(cwd, ".pi", "mcp.json"), { mcpServers: { ignored: { command: "x" } } });
+		const registered = [{ name: "jira", config: { url: "https://mcp.example.com/${JIRA_TOKEN}" }, extensionPath: "/ext/jira.ts" }];
+		const compat = collectCompat({ ...input(), piConfigDirName: ".rebranded", registeredMcpServers: registered });
+		expect(compat.mcp.servers.map((s) => s.name)).toEqual(["jira", "piproject"]);
+		expect(compat.findings.some((f) => f.text.includes("unset environment variable JIRA_TOKEN (from /ext/jira.ts)"))).toBe(true);
+	});
+});
+
+describe("dependencies", () => {
+	it("finds executables on PATH and detects the project's languages by root markers", () => {
+		const bin = join(home, "bin");
+		mkdirSync(bin);
+		writeFileSync(join(bin, "gopls"), "#!/bin/sh\n", { mode: 0o755 });
+		writeFileSync(join(bin, "notexec"), "");
+		expect(whichOnPath("gopls", { PATH: bin }, "darwin")).toBe(join(bin, "gopls"));
+		// Windows has no execute bit: a plain file is "executable" there, so the check is POSIX-only.
+		if (process.platform !== "win32") expect(whichOnPath("notexec", { PATH: bin }, "darwin")).toBeUndefined();
+		expect(whichOnPath("git", { PATH: bin }, "darwin")).toBeUndefined();
+		writeFileSync(join(cwd, "go.mod"), "module x");
+		writeFileSync(join(cwd, "pyproject.toml"), "");
+		expect(projectLanguages(cwd).sort()).toEqual(["go", "python"]);
+
+		const report = checkDependencies({ cwd, env: { PATH: bin }, platform: "darwin", mcpServers: [{ kind: "stdio", name: "srv", command: "my-mcp", args: [], source: "x" }], webSearchSettings: {} });
+		const gopls = report.checks.find((c) => c.name === "gopls")!;
+		expect(gopls).toMatchObject({ found: true, need: "project" });
+		const pyright = report.checks.find((c) => c.name === "pyright-langserver")!;
+		expect(pyright).toMatchObject({ found: false, need: "project" });
+		expect(report.findings.some((f) => f.text.includes("pyright-langserver is not installed") && f.fix?.includes("npm install -g pyright"))).toBe(true);
+		expect(report.findings.some((f) => f.text.includes('MCP server "srv" runs "my-mcp"'))).toBe(true);
+		expect(report.findings.some((f) => f.text.startsWith("git is not on PATH"))).toBe(true);
+		expect(report.checks.find((c) => c.name === "typescript-language-server")).toMatchObject({ need: "unused" });
+	});
+
+	it("finds a project's languages by its source files when it has no root marker", () => {
+		write(join(cwd, "scripts", "tool.py"), "print(1)\n");
+		write(join(cwd, "web", "src", "app.ts"), "export {};\n");
+		write(join(cwd, "node_modules", "dep", "main.go"), "package dep\n");
+		write(join(cwd, ".cache", "x.rs"), "fn main() {}\n");
+		expect(projectLanguages(cwd).sort()).toEqual(["python", "typescript"]);
+		const report = checkDependencies({ cwd, env: { PATH: "" }, platform: "darwin", mcpServers: [], webSearchSettings: {} });
+		expect(report.checks.find((c) => c.name === "pyright-langserver")).toMatchObject({ need: "project" });
+		expect(report.checks.find((c) => c.name === "typescript-language-server")).toMatchObject({ need: "project" });
+		expect(report.checks.find((c) => c.name === "gopls")).toMatchObject({ need: "unused" });
+	});
+
+	it("names the web-search route", () => {
+		const anthropic = { provider: "anthropic", id: "claude-sonnet-5", api: "anthropic-messages" } as any;
+		expect(providerHasNativeSearch(anthropic)).toBe(true);
+		expect(webSearchRoute({ env: {}, sessionModel: anthropic, webSearchSettings: {} }).route).toBe("provider-native");
+		const groq = { provider: "groq", id: "llama", api: "openai-completions" } as any;
+		expect(webSearchRoute({ env: {}, sessionModel: groq, webSearchSettings: {} }).route).toBe("exa-free");
+		expect(webSearchRoute({ env: { TAVILY_API_KEY: "t" }, sessionModel: groq, webSearchSettings: {} }).route).toBe("tavily");
+		expect(webSearchRoute({ env: {}, sessionModel: groq, webSearchSettings: { apiKeys: { brave: "b" } } }).detail).toContain("key in ~/.onecode/settings.json");
+	});
+});
+
+describe("checkDependencies: the shell tools (Shells entry, 2026-09-19)", () => {
+	const base = { cwd: process.cwd(), env: { PATH: "" }, mcpServers: [], webSearchSettings: { apiKeys: {} } as any };
+	it("Windows with PowerShell only: bash optional and missing with the Git hint, PowerShell primary", () => {
+		const r = checkDependencies({ ...base, platform: "win32", shells: { powershell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe", powershellWanted: true, bashExpected: false, primary: "powershell", notices: [] } });
+		const bash = r.checks.find((c) => c.name === "bash")!;
+		const ps = r.checks.find((c) => c.name === "powershell")!;
+		expect(bash.found).toBe(false);
+		expect(bash.need).toBe("optional");
+		expect(bash.hint).toContain("git-scm.com");
+		expect(ps.found).toBe(true);
+		expect(ps.reason).toBe("the primary shell tool");
+		expect(r.findings.some((f) => /bash|shell/i.test(f.text))).toBe(false);
+	});
+	it("Windows with neither shell: the no-shell notice is an error finding", () => {
+		const r = checkDependencies({ ...base, platform: "win32", shells: { powershellWanted: true, bashExpected: false, primary: "none", notices: ["No shell available: install Git for Windows …"] } });
+		expect(r.findings.some((f) => f.level === "error" && f.text.startsWith("No shell available"))).toBe(true);
+	});
+	it("macOS: bash required and primary, PowerShell unused unless switched on; an ignored override is a warning", () => {
+		const r = checkDependencies({ ...base, platform: "darwin", shells: { bash: "/bin/bash", bashWarning: 'CLAUDE_CODE_GIT_BASH_PATH ignored: "/x" does not exist.', powershellWanted: false, bashExpected: true, primary: "bash", notices: [] } });
+		expect(r.checks.find((c) => c.name === "bash")!.need).toBe("required");
+		expect(r.checks.find((c) => c.name === "powershell")!.need).toBe("unused");
+		expect(r.findings.some((f) => f.level === "warn" && f.text.includes("CLAUDE_CODE_GIT_BASH_PATH ignored"))).toBe(true);
+	});
+	it("a set switch with no pwsh gets the switch-specific fix on every platform; the jdtls hint follows the injected platform", () => {
+		const notice = "CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off.";
+		const r = checkDependencies({ ...base, platform: "win32", shells: { bash: "C:\\Program Files\\Git\\bin\\bash.exe", powershellWanted: true, bashExpected: false, primary: "bash", notices: [notice], switchVar: "CLAUDE_CODE_USE_POWERSHELL_TOOL" } });
+		expect(r.findings.find((f) => f.text === notice)!.fix).toContain("unset CLAUDE_CODE_USE_POWERSHELL_TOOL");
+		const jdtls = r.checks.find((c) => c.name === "jdtls");
+		if (jdtls) expect(jdtls.hint).not.toMatch(/brew/);
+	});
+
+	it("without a shells input the report is unchanged", () => {
+		const r = checkDependencies({ ...base, platform: "darwin" });
+		expect(r.checks.some((c) => c.name === "bash" || c.name === "powershell")).toBe(false);
+	});
+});

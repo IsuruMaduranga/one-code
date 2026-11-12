@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory, panelUi } from "../../extensions/lib/panel-focus.ts";
+import { PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory, panelUi } from "../../extensions/lib/ui/panel-focus.ts";
 
 /** A bus that feeds one PanelFocus, as the permissions extension listens. */
 function bus() {

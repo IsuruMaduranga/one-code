@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ASSISTANT_MARKER, markAssistantMarkdown } from "../../extensions/branding/assistant-marker.ts";
+import { ASSISTANT_MARKER, markAssistantMarkdown } from "../../extensions/ui/branding/assistant-marker.ts";
 
 describe("markAssistantMarkdown", () => {
 	it("prefixes plain prose with the bullet", () => {

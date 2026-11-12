@@ -1,0 +1,53 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { sources } from "../claude-code/sources.ts";
+import { readInstructionFiles } from "../claude-code/settings.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
+
+/** A temp home whose ~/.claude/settings.json holds `settings` (CLAUDE_CONFIG_DIR unset in tests). */
+function homeWith(settings: Record<string, unknown> | undefined): string {
+	const home = mkdtempSync(join(tmpdir(), "instruction-files-"));
+	if (settings) {
+		mkdirSync(join(home, ".claude"), { recursive: true });
+		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(settings));
+	}
+	return home;
+}
+
+describe("readInstructionFiles (findings §57)", () => {
+	it("defaults to claude-md-or-agents-md", () => {
+		expect(readInstructionFiles(homeWith(undefined))).toBe("claude-md-or-agents-md");
+	});
+
+	it("reads the AGENTS.md plugin's option from pluginConfigs", () => {
+		const home = homeWith({ pluginConfigs: { "cc-plugin-agents-md@builtin": { options: { instructionFiles: "claude-md-and-agents-md" } } } });
+		expect(readInstructionFiles(home)).toBe("claude-md-and-agents-md");
+	});
+
+	it("maps the legacy projectInstructions, which yields to instructionFiles", () => {
+		expect(readInstructionFiles(homeWith({ projectInstructions: "none" }))).toBe("managed-only");
+		expect(readInstructionFiles(homeWith({ projectInstructions: "both" }))).toBe("claude-md-and-agents-md");
+		expect(readInstructionFiles(homeWith({ projectInstructions: "whatever" }))).toBe("claude-md");
+		const both = homeWith({ projectInstructions: "none", pluginConfigs: { "cc-plugin-agents-md": { options: { instructionFiles: "claude-md" } } } });
+		expect(readInstructionFiles(both)).toBe("claude-md");
+	});
+
+	it("ignores an unknown instructionFiles value", () => {
+		const home = homeWith({ pluginConfigs: { "cc-plugin-agents-md@builtin": { options: { instructionFiles: "everything" } } } });
+		expect(readInstructionFiles(home)).toBe("claude-md-or-agents-md");
+	});
+});
+
+describe("One Code's source provider", () => {
+	it("opens no instruction view in independent mode, whatever Claude Code's settings say", () => {
+		const home = homeWith({ projectInstructions: "claude" });
+		expect(sources.open({ home }).instructions).toBeDefined();
+		resetConfigModeForTest("independent");
+		const off = sources.open({ home });
+		expect(off.instructions).toBeUndefined();
+		expect(off.allowPath?.(join(home, ".claude", "CLAUDE.md"))).toBe(false);
+		expect(off.allowPath?.(join(home, "AGENTS.md"))).toBe(true);
+	});
+});

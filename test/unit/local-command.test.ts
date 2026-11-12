@@ -3,19 +3,23 @@ import {
 	announceLocalCommand,
 	commandInputBlock,
 	commandStdoutBlock,
-	escapeXml,
-	LOCAL_COMMAND_CAVEAT,
+	localCommandCaveat,
 	localCommandBlocks,
 	registerLocalCommand,
-} from "../../extensions/lib/local-command.ts";
-import { modelSwitchStdout } from "../../extensions/model-default/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
+} from "../../extensions/lib/ui/local-command.ts";
+import { escapeXml } from "../../extensions/lib/core/xml.ts";
+import { modelSwitchStdout } from "../../extensions/ui/model-default/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+
+/** The caveat block as the base wraps the profile's caveat (One Code's: profile/test/local-command-wording.test.ts). */
+const caveatBlock = () => `<local-command-caveat>${notificationWords().localCommandCaveat}</local-command-caveat>\n`;
 
 describe("local-command breadcrumbs (Claude Code's three blocks)", () => {
 	it("reproduces the /model trio byte for byte", () => {
 		expect(localCommandBlocks({ name: "model", stdout: "Set model to `Sonnet 5` and saved as your default for new sessions" })).toEqual([
-			"<local-command-caveat>The command below was run directly in One Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>\n",
+			caveatBlock(),
 			"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>\n",
 			"<local-command-stdout>Set model to `Sonnet 5` and saved as your default for new sessions</local-command-stdout>\n",
 		]);
@@ -23,7 +27,7 @@ describe("local-command breadcrumbs (Claude Code's three blocks)", () => {
 
 	it("/clear carries an empty stdout block", () => {
 		expect(localCommandBlocks({ name: "clear" })[2]).toBe("<local-command-stdout></local-command-stdout>\n");
-		expect(LOCAL_COMMAND_CAVEAT.startsWith("<local-command-caveat>The command below was run directly in One Code")).toBe(true);
+		expect(localCommandCaveat()).toBe(caveatBlock());
 	});
 
 	it("carries trimmed args and XML-escapes stdout like CC's escapeXml (& < > only)", () => {

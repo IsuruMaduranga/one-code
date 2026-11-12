@@ -3,16 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
-import { type CatalogSources, catalogCacheDir, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
-import { resolveModelTier } from "../../extensions/lib/model-tier.ts";
-import { requestSystemPrompt } from "../../extensions/lib/prompt-options.ts";
-import { registerFormTool } from "../../extensions/lib/tool-variants.ts";
-import { sessionModelTier } from "../../extensions/lib/session-model-tier.ts";
-import searchToolsExtension from "../../extensions/search-tools/index.ts";
-import systemPromptExtension from "../../extensions/system-prompt/index.ts";
+import { writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
+import { type CatalogSources, catalogCacheDir, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
+import { resolveModelTier } from "../../extensions/lib/models/model-tier.ts";
+import { requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
+import { registerFormTool } from "../../extensions/lib/profile/tool-variants.ts";
+import { sessionModelTier } from "../../extensions/lib/models/session-model-tier.ts";
+import searchToolsExtension from "../../extensions/tools/search-tools/index.ts";
+import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";
 import { catalogSources } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { cwdLine } from "../../extensions/request/system-prompt/text.ts";
 
 const model = { provider: "openai", id: "gpt-5", cost: { input: 2 } } as Model<Api>;
 const otherModel = { ...model, id: "gpt-5.1" };
@@ -74,7 +76,7 @@ function setup(betweenConsumers?: () => void) {
 }
 
 beforeEach(() => {
-	vi.stubEnv("CC_PROMPT_TIER", "auto");
+	vi.stubEnv(envName("PROMPT_TIER"), "auto");
 });
 afterEach(() => {
 	vi.unstubAllEnvs();
@@ -113,11 +115,11 @@ describe("sessionModelTier ownership", () => {
 	});
 
 	it("applies a changed environment override only at a lifecycle boundary", async () => {
-		vi.stubEnv("CC_PROMPT_TIER", "frontier");
+		vi.stubEnv(envName("PROMPT_TIER"), "frontier");
 		const fake = createFakePi();
 		const tier = sessionModelTier(fake.pi as never);
 		await fake.fire("session_start", {}, createFakeCtx({ model }));
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		expect(tier()).toBe("frontier");
 		await fake.fire("model_select", { model: otherModel });
 		expect(tier()).toBe("tiny");
@@ -135,7 +137,8 @@ describe("the session's request-surface tier", () => {
 		const t = setup();
 		await t.fake.fire("session_start", { reason: "startup" }, t.ctx);
 		const before = await t.request();
-		expect(before.prompt).toContain("You are One Code");
+		// The profile's prompt, built by the system-prompt extension (not pi's default).
+		expect(before.prompt).toContain(cwdLine((t.ctx.cwd as string).replace(/\\/g, "/")));
 		expect(before.description).toBe(form);
 		expect(before.tools).toEqual(beforeTier === "tiny" ? [...baseTools, ...searchTools] : baseTools);
 
@@ -183,7 +186,7 @@ describe("the session's request-surface tier", () => {
 
 	it("sees another extension's disk refresh on the next model change within the stat throttle", async () => {
 		const stateDir = mkdtempSync(join(tmpdir(), "session-tier-"));
-		vi.stubEnv("ONECODE_STATE_DIR", stateDir);
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
 		vi.spyOn(Date, "now").mockReturnValue(10_000);
 		const initial = catalog("workhorse");
 		const refreshed = catalog("tiny");

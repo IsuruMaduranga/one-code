@@ -8,12 +8,12 @@
  * token start is a comment.
  */
 import { describe, expect, it } from "vitest";
-import { decide, findBashAllowRule, parseRules, ruleMatches } from "../../extensions/permissions/matcher.ts";
+import { decide, findBashAllowRule, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import {
 	powershellInjectionSyntax,
 	powershellMatchForms,
 	powershellStatements,
-} from "../../extensions/permissions/powershell-rules.ts";
+} from "../../extensions/lib/shell/powershell-rules.ts";
 import { HAVE_POWERSHELL, psParse, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const cwd = "/proj";

@@ -1,7 +1,7 @@
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { jsonSchemaToTypeBox } from "../../extensions/mcp/schema.ts";
+import { jsonSchemaToTypeBox } from "../../extensions/tools/mcp/schema.ts";
 import {
 	githubCustomPropertyAllowedValues,
 	githubCustomPropertyDescription,

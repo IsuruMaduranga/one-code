@@ -1,27 +1,27 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
+vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
-const { logSideCallUsage } = await import("../../extensions/lib/side-call-usage.ts");
+const { logSideCallUsage } = await import("../../extensions/lib/side-calls/side-call-usage.ts");
 const logSideCall = vi.mocked(logSideCallUsage);
 const answer = (text: string) => ({ content: [{ type: "text", text }], stopReason: "stop", usage: {} }) as Awaited<ReturnType<typeof completeSimple>>;
-let recapExtension: typeof import("../../extensions/recap/index.ts").default;
+let recapExtension: typeof import("../../extensions/agents/recap/index.ts").default;
 
 beforeEach(async () => {
 	vi.useFakeTimers();
-	process.env.CC_RECAP_IDLE_MS = "1000";
-	delete process.env.CC_RECAP;
+	process.env[envName("RECAP_IDLE_MS")] = "1000";
 	complete.mockReset();
 	logSideCall.mockReset();
-	recapExtension = (await import("../../extensions/recap/index.ts")).default;
+	recapExtension = (await import("../../extensions/agents/recap/index.ts")).default;
 });
 
 afterEach(() => {
-	delete process.env.CC_RECAP_IDLE_MS;
+	delete process.env[envName("RECAP_IDLE_MS")];
 	vi.useRealTimers();
 });
 

@@ -1,0 +1,46 @@
+/**
+ * One Code's side-question wording: the reminder that frames the answerer
+ * and the final user message around the question.
+ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { btw, SIDE_QUESTION_REMINDER } from "../text/btw/index.ts";
+
+/** The side question's final user message in One Code's words (the extension trims the question). */
+const sideQuestionMessage = (question: string) => btw.question(question.trim());
+
+const capturePath = fileURLToPath(new URL("../../captures/btw.json", import.meta.url));
+
+describe("btw side-question reminder", () => {
+	it("matches Claude Code's captured reminder byte for byte when the capture is present", () => {
+		let capture: { messages: Array<{ content: string }> } | undefined;
+		try {
+			capture = JSON.parse(readFileSync(capturePath, "utf8"));
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				return; // the capture is an internal file; SIDE_QUESTION_REMINDER below is the locked copy
+			}
+			throw error;
+		}
+		// The last message is the side question CC sent: the reminder, a blank
+		// line, then the user's question verbatim.
+		const sent: string = capture!.messages.at(-1)!.content;
+		expect(sideQuestionMessage("is this a good project")).toBe(sent);
+		expect(sent.startsWith(SIDE_QUESTION_REMINDER)).toBe(true);
+	});
+
+	it("frames the answerer as a tool-less, one-off instance", () => {
+		expect(SIDE_QUESTION_REMINDER).toContain("This is a side question from the user");
+		expect(SIDE_QUESTION_REMINDER).toContain("You have NO tools available");
+		expect(SIDE_QUESTION_REMINDER).toContain("This is a one-off response");
+	});
+});
+
+describe("sideQuestionMessage", () => {
+	it("trims the question but leaves the reminder intact", () => {
+		const message = sideQuestionMessage("  what is this?  ");
+		expect(message.endsWith("\n\nwhat is this?")).toBe(true);
+		expect(message.startsWith(SIDE_QUESTION_REMINDER)).toBe(true);
+	});
+});

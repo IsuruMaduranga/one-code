@@ -2,7 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
+import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/agents/subagents/runs.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 describe("nextRunName", () => {
 	it("allocates the lowest free <agent>-<n>", () => {
@@ -133,6 +134,6 @@ describe("resolveRunName", () => {
 		registry.add(record("explore-1", "def67890"));
 		const resolved = resolveRunName(registry, "explore", "reviewer");
 		expect(resolved.name).toBe("explore-2");
-		expect(resolved.note).toBe('Note: the name "reviewer" is already used by task abc12345 in this session; this run is named "explore-2".');
+		expect(resolved.note).toBe(subagentResultText().renamed({ wanted: "reviewer", takenBy: "abc12345", name: "explore-2" }));
 	});
 });

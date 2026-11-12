@@ -504,8 +504,9 @@ A pause after 20 blocks in total waits for your approval. So that an
 unattended session isn't held indefinitely, the first of these prompts after three blocks in a row denies
 the action if nobody answers within two minutes, as Claude Code does, and
 shows a countdown. A later prompt in the same run of blocks waits for you.
-To change the wait, set `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`, Claude
-Code's variable for it, to a number of milliseconds.
+To change the wait, set `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` (or Claude
+Code's `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`) to a number of
+milliseconds.
 
 ### Approve a call auto mode denied
 
@@ -611,7 +612,7 @@ It never reads `autoMode` from a project's `.claude/settings.json` or
 `.claude/settings.local.json`, because a checked-in file must not be able
 to loosen the classifier for whoever clones it.
 
-To see the classifier's verdicts while you work, set `CC_AUTO_MODE_DEBUG=1`
+To see the classifier's verdicts while you work, set `ONECODE_AUTO_MODE_DEBUG=1`
 before launching; each decision is printed to stderr with its stage,
 severity, and rule.
 

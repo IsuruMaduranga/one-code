@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/hooks/matcher.ts";
-import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
-import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
-import { hookSettingsPaths, loadHookSettings, parseHooksBlock, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/lib/rules/hook-matcher.ts";
+import { loadPluginHooks } from "../../extensions/safety/hooks/plugin-hooks.ts";
+import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/lib/rules/hook-protocol.ts";
+import { hookSettingsPaths, loadHookSettings, parseHooksBlock, resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
 
 const ok = (stdout: string): FinishedRun => ({ exitCode: 0, timedOut: false, stdout, stderr: "" });
 
@@ -43,7 +44,7 @@ describe("protocol: interpretHookResult", () => {
 			stdout: "",
 			stderr: "not on my watch\n",
 		});
-		expect(outcome.block).toEqual({ reason: "not on my watch" });
+		expect(outcome.block).toEqual({ kind: "stated", reason: "not on my watch" });
 	});
 
 	it("other non-zero exits fail open", () => {
@@ -78,18 +79,20 @@ describe("protocol: interpretHookResult", () => {
 
 	it("permissionDecision deny and ask both block; allow does nothing", () => {
 		const deny = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "deny", permissionDecisionReason: "no" } }));
-		expect(interpretHookResult("PreToolUse", deny).block).toEqual({ reason: "no" });
+		expect(interpretHookResult("PreToolUse", deny).block).toEqual({ kind: "stated", reason: "no" });
 		const ask = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "ask" } }));
-		expect(interpretHookResult("PreToolUse", ask).block?.reason).toContain("confirmation");
+		expect(interpretHookResult("PreToolUse", ask).block).toEqual({ kind: "askRequested" });
 		const allow = ok(JSON.stringify({ hookSpecificOutput: { permissionDecision: "allow" } }));
 		expect(interpretHookResult("PreToolUse", allow)).toEqual({});
 	});
 
 	it("supports the legacy decision field and continue:false", () => {
 		expect(interpretHookResult("Stop", ok(JSON.stringify({ decision: "block", reason: "keep going" }))).block).toEqual({
+			kind: "stated",
 			reason: "keep going",
 		});
 		expect(interpretHookResult("Stop", ok(JSON.stringify({ continue: false, stopReason: "halt" }))).block).toEqual({
+			kind: "stated",
 			reason: "halt",
 		});
 	});
@@ -121,7 +124,7 @@ describe("protocol: interpretHookResult", () => {
 		});
 		expect(interpretHookResult("PreCompact", { ...ok("do not use this failed output"), exitCode: 1 })).toEqual({});
 		expect(interpretHookResult("PreCompact", { ...ok("do not use this blocked output"), exitCode: 2, stderr: "wait for the backup" })).toEqual({
-			block: { reason: "wait for the backup" },
+			block: { kind: "stated", reason: "wait for the backup" },
 		});
 	});
 
@@ -174,26 +177,29 @@ describe("settings", () => {
 		cwd = join(root, "project");
 		mkdirSync(claudeDir, { recursive: true });
 		mkdirSync(join(cwd, ".claude"), { recursive: true });
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 	});
-	afterEach(() => rmSync(root, { recursive: true, force: true }));
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	/** The settings files hooks are read from for the profile in force, managed policy aside, in collection order. */
+	const writable = () => hookSettingsPaths(cwd, join(claudeDir, "..")).filter((path) => path.scope !== "managed").map((path) => path.path);
+	const write = (path: string, text: string) => {
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, text);
+	};
 
 	const hooksJson = (command: string) => ({
 		hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command }] }] },
 	});
 
-	it("loads user, project, and local scopes in order", () => {
-		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify(hooksJson("user-hook")));
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(hooksJson("project-hook")));
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), JSON.stringify(hooksJson("local-hook")));
-		const loaded = loadHookSettings(claudeDir, cwd);
-		expect(loaded.sources.map((s) => s.scope)).toEqual(["user", "project", "local"]);
-		expect(loaded.diagnostics).toEqual([]);
-	});
-
 	it("skips malformed files and unsupported hook types with diagnostics", () => {
-		writeFileSync(join(claudeDir, "settings.json"), "{ broken");
-		writeFileSync(
-			join(cwd, ".claude", "settings.json"),
+		const [first, second] = writable();
+		write(first, "{ broken");
+		write(
+			second,
 			JSON.stringify({
 				hooks: {
 					PreToolUse: [{ matcher: "*", hooks: [{ type: "prompt", prompt: "judge this" }] }],
@@ -201,7 +207,7 @@ describe("settings", () => {
 				},
 			}),
 		);
-		const loaded = loadHookSettings(claudeDir, cwd);
+		const loaded = loadHookSettings(cwd, join(claudeDir, ".."));
 		expect(loaded.sources).toEqual([]);
 		expect(loaded.diagnostics.join("\n")).toContain("unreadable");
 		expect(loaded.diagnostics.join("\n")).toContain('type "prompt"');
@@ -209,13 +215,13 @@ describe("settings", () => {
 	});
 
 	it("re-reads a file only when its mtime changes", () => {
-		const path = join(claudeDir, "settings.json");
-		writeFileSync(path, JSON.stringify(hooksJson("v1")));
+		const [path] = writable();
+		write(path, JSON.stringify(hooksJson("v1")));
 		utimesSync(path, new Date(1000000), new Date(1000000));
-		expect(loadHookSettings(claudeDir, cwd).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v1");
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v1");
 		writeFileSync(path, JSON.stringify(hooksJson("v2")));
 		utimesSync(path, new Date(2000000), new Date(2000000));
-		expect(loadHookSettings(claudeDir, cwd).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v2");
+		expect(loadHookSettings(cwd, join(claudeDir, "..")).sources[0]?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("v2");
 	});
 
 	it("parseHooksBlock keeps timeout only when positive", () => {
@@ -228,10 +234,6 @@ describe("settings", () => {
 		expect(config.PreToolUse?.[0]?.hooks[0]?.timeout).toBeUndefined();
 	});
 
-	it("names all four candidate paths", () => {
-		const paths = hookSettingsPaths("/h/.claude", "/p");
-		expect(paths.map((p) => p.scope)).toEqual(["user", "managed", "project", "local"]);
-	});
 });
 
 describe("plugin hooks", () => {

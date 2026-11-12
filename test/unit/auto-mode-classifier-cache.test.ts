@@ -4,13 +4,12 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { classify, createClassifierState } from "../../extensions/auto-mode/classifier.ts";
-import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
-import { buildPayload, type ClassifyRequest, stage1User, stage2User, reviewUser } from "../../extensions/auto-mode/prompt.ts";
-import { cacheClassifierHistory } from "../../extensions/auto-mode/cache.ts";
-import { claudeMdFraming } from "../../extensions/auto-mode/classifier-prompt.ts";
-import { transcriptBlocks, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
-import { RESOLVED_PATHS_NOTE } from "../../extensions/auto-mode/resolved-paths-meta.ts";
+import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
+import { buildPayload, type ClassifyRequest, stage1User, stage2User, reviewUser } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { classifierText, instructionsFraming } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { transcriptBlocks, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 const request: ClassifyRequest = {
@@ -193,7 +192,7 @@ const mixedText = '<transcript>\n' + [
 	'{"Bash":"echo historical action"}',
 	'{"denied_by_permission_rule":{"tool":"Bash","attempted":"rm file","rule":"Bash(rm:*)"}}',
 	'{"meta":{"gitStatus":{"modified":1,"staged":0,"untracked":0}}}',
-	JSON.stringify({ meta: { resolvedPaths, note: RESOLVED_PATHS_NOTE } }),
+	JSON.stringify({ meta: { resolvedPaths, note: classifierText().resolvedPathsNote } }),
 	'{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}',
 ].join("\n") + '\n</transcript>';
 
@@ -209,7 +208,7 @@ describe("classifier request options", () => {
 describe("classifier text preservation", () => {
 	it.each([undefined, "", "# CLAUDE.md\nKeep exact whitespace.\n\n"])("matches the original text with framing %j in every stage", (claudeMd) => {
 		const built = buildPayload({ ...request, claudeMd, transcript: mixed });
-		const prefix = [claudeMdFraming(claudeMd), mixedText].filter(Boolean).join("\n\n");
+		const prefix = [instructionsFraming(claudeMd), mixedText].filter(Boolean).join("\n\n");
 		expect(built.userPrefix).toBe(prefix);
 		for (const render of [stage1User, (value: string) => stage2User(value), (value: string) => stage2User(value, true), reviewUser]) {
 			const expected = render(prefix);

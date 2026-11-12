@@ -4,7 +4,7 @@
  * another directory, and keeps it everywhere else (findings §8), so a
  * module-level value is lost on some lifecycle paths and kept on others.
  * State belongs to one of three kinds: branch state (a `one-code:state`
- * entry or a fold of the branch), process state (lib/process-state.ts) or a
+ * entry or a fold of the branch), process state (lib/profile/process-state.ts) or a
  * resource that ends in `session_shutdown`. A module-scope `let`, or a
  * module-scope `const` that starts an empty `Map`, `Set`, array or object
  * (state filled in later), is allowed only for a cache of pure inputs or a
@@ -17,37 +17,38 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const ALLOWED: Record<string, string> = {
-	"extensions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
-	"extensions/hooks/plugin-hooks.ts cache": "mtime cache of plugin hooks.json files",
-	"extensions/hooks/settings.ts cache": "mtime cache of the hook settings files",
-	"extensions/hooks/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent dispatches; the decisions are process state",
-	"extensions/lib/anthropic-auth.ts authCache": "auth.json read, keyed by its mtime",
-	"extensions/lib/atomic-write.ts sequence": "temp-file name counter, unique within the process",
-	"extensions/lib/claude-rules.ts touched": "stat cache of rule files",
-	"extensions/lib/claude-rules.ts matchers": "compiled glob matchers, a memo of pure inputs",
-	"extensions/lib/claude-rules.ts walks": "rule-directory walks, reused while their stats match",
-	"extensions/lib/model-catalog-data.ts bundled": "the bundled catalog, loaded once",
-	"extensions/lib/model-catalog-data.ts memo": "memo of the catalog sources",
-	"extensions/lib/model-catalog-data.ts pinned": "test pin of the catalog sources",
-	"extensions/lib/model-catalog-data.ts inflight": "catalog refreshes in flight, shared by concurrent callers",
-	"extensions/lib/model-tier.ts overrideMemo": "memo of the tier overrides file",
-	"extensions/lib/model-tier.ts overridesPinned": "test pin of the tier overrides",
-	"extensions/lib/process-tree.ts groupReaper": "process resource: the reaper timer for remembered groups",
-	"extensions/lib/process-tree.ts exitHookInstalled": "process resource: one exit listener per module instance, each killing its own children",
-	"extensions/lib/process-tree.ts rememberedGroups": "process resource: the groups the reaper and the signal listeners kill",
-	"extensions/lib/process-tree.ts groupSignalHandlers": "process resource: one termination-signal listener per signal",
-	"extensions/lib/process-tree.ts pendingKills": "process resource: trees sent SIGTERM whose SIGKILL is still due",
-	"extensions/lib/shell-spawn.ts cachedBash": "the resolved bash binary",
-	"extensions/lib/shell-spawn.ts cachedPowerShell": "the resolved PowerShell binary",
-	"extensions/lib/worktree-isolation.ts active": "live isolation worktrees, registered and read inside one extension's import graph (file header)",
-	"extensions/mcp/client.ts sdkPromise": "the MCP SDK, imported once",
-	"extensions/mcp/client.ts unauthorizedClass": "a class from the SDK, resolved once",
-	"extensions/mcp/client.ts httpErrorClass": "a class from the SDK, resolved once",
-	"extensions/mcp/client.ts sseErrorClass": "a class from the SDK, resolved once",
-	"extensions/mcp/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent callers; the decisions are process state",
-	"extensions/permissions/powershell-rules.ts lastSplit": "memo of the last parsed line",
-	"extensions/subagents/prose.ts ctorPromise": "a renderer class, imported once",
-	"extensions/web-fetch/extract.ts libsPromise": "the reader libraries, imported once",
+	"extensions/safety/permissions/auto-mode/history.ts provenanceMemo": "memo of a pure function of the transcript",
+	"extensions/safety/hooks/plugin-hooks.ts cache": "mtime cache of plugin hooks.json files",
+	"extensions/safety/hooks/settings.ts cache": "mtime cache of the hook settings files",
+	"extensions/safety/hooks/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent dispatches; the decisions are process state",
+	"extensions/lib/request/anthropic-auth.ts authCache": "auth.json read, keyed by its mtime",
+	"extensions/lib/core/atomic-write.ts sequence": "temp-file name counter, unique within the process",
+	"extensions/lib/context/claude-rules.ts touched": "stat cache of rule files",
+	"extensions/lib/context/claude-rules.ts matchers": "compiled glob matchers, a memo of pure inputs",
+	"extensions/lib/context/claude-rules.ts walks": "rule-directory walks, reused while their stats match",
+	"extensions/lib/models/model-catalog-data.ts bundled": "the bundled catalog, loaded once",
+	"extensions/lib/models/model-catalog-data.ts memo": "memo of the catalog sources",
+	"extensions/lib/models/model-catalog-data.ts pinned": "test pin of the catalog sources",
+	"extensions/lib/models/model-catalog-data.ts inflight": "catalog refreshes in flight, shared by concurrent callers",
+	"extensions/lib/models/model-tier.ts overrideMemo": "memo of the tier overrides file",
+	"extensions/lib/models/model-tier.ts overridesPinned": "test pin of the tier overrides",
+	"extensions/lib/profile/profile.ts active": "memo of the shipped profile resolved against the process environment, both constant for the process",
+	"extensions/lib/shell-run/process-tree.ts groupReaper": "process resource: the reaper timer for remembered groups",
+	"extensions/lib/shell-run/process-tree.ts exitHookInstalled": "process resource: one exit listener per module instance, each killing its own children",
+	"extensions/lib/shell-run/process-tree.ts rememberedGroups": "process resource: the groups the reaper and the signal listeners kill",
+	"extensions/lib/shell-run/process-tree.ts groupSignalHandlers": "process resource: one termination-signal listener per signal",
+	"extensions/lib/shell-run/process-tree.ts pendingKills": "process resource: trees sent SIGTERM whose SIGKILL is still due",
+	"extensions/lib/shell-run/shell-spawn.ts cachedBash": "the resolved bash binary",
+	"extensions/lib/shell-run/shell-spawn.ts cachedPowerShell": "the resolved PowerShell binary",
+	"extensions/lib/agents/worktree-isolation.ts active": "live isolation worktrees, registered and read inside one extension's import graph (file header)",
+	"extensions/tools/mcp/client.ts sdkPromise": "the MCP SDK, imported once",
+	"extensions/tools/mcp/client.ts unauthorizedClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/client.ts httpErrorClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/client.ts sseErrorClass": "a class from the SDK, resolved once",
+	"extensions/tools/mcp/trust.ts pendingPrompts": "trust prompts in flight, shared by concurrent callers; the decisions are process state",
+	"extensions/lib/shell/powershell-rules.ts lastSplit": "memo of the last parsed line",
+	"extensions/lib/ui/prose.ts ctorPromise": "a renderer class, imported once",
+	"extensions/tools/web-fetch/extract.ts libsPromise": "the reader libraries, imported once",
 };
 
 function sources(dir: string, out: string[] = []): string[] {

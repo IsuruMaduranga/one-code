@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { upEditsQueue } from "../../extensions/branding/queued-edit.ts";
+import { upEditsQueue } from "../../extensions/ui/branding/queued-edit.ts";
 
 const editor = (line: number, autocomplete = false, first = "draft") => ({
 	getCursor: () => ({ line, col: 0 }),

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sanitizePathSegment } from "../../extensions/lib/plugin-root.ts";
+import { sanitizePathSegment } from "../../extensions/lib/plugins/plugin-root.ts";
 import {
 	collectRawServers,
 	pluginDataDir,
@@ -14,7 +14,7 @@ import {
 	resolveServerConfig,
 	resolveWithinPlugin,
 	substitute,
-} from "../../extensions/lsp/plugin-servers.ts";
+} from "../../extensions/tools/lsp/plugin-servers.ts";
 
 const PLUGIN = { name: "demo", path: "/plugins/demo", dataRoot: "/data-root" };
 

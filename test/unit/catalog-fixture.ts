@@ -1,9 +1,9 @@
 /**
  * Builds model-catalog sources for tests: a few vendor models, the pi rows
  * that serve them, and their sizes, in the shape the real payloads have
- * (`extensions/lib/model-catalog-data.ts`).
+ * (`extensions/lib/models/model-catalog-data.ts`).
  */
-import { type CatalogSources, emptyCatalogSources, setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
+import { type CatalogSources, emptyCatalogSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 
 export interface FixtureModel {
 	/** The vendor's own `vendor/id`, which is also the pi row on a provider of that name. */

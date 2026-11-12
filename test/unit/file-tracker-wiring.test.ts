@@ -1,23 +1,26 @@
 /**
- * file-tracker/index.ts wiring (T15a): handler sequencing across tool_call /
+ * safety/file-tracker/index.ts wiring (T15a): handler sequencing across tool_call /
  * tool_result / agent_start, plus the session_start / session_tree
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
- * already covered by file-tracker.test.ts.
+ * already covered by file-tracker.test.ts. Runs on any profile: the words are
+ * the active profile's. The cases that need Claude Code's instruction files,
+ * and One Code's wording, are in profile/test/file-tracker-wiring.test.ts.
  */
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
-import { discoverContextFiles } from "../../extensions/lib/claude-context.ts";
-import { persistExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
-import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
+import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/agents/child-writes.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
+
+const words = fileTrackerText;
 
 describe("file-tracker wiring", () => {
 	let dir: string;
@@ -28,7 +31,10 @@ describe("file-tracker wiring", () => {
 		fake = createFakePi();
 		fileTrackerExtension(fake.pi as never);
 	});
-	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+	afterEach(() => {
+		vi.restoreAllMocks();
+		rmSync(dir, { recursive: true, force: true });
+	});
 
 	const path = (name: string) => join(dir, name);
 	const ctx = () => createFakeCtx({ cwd: dir });
@@ -47,7 +53,7 @@ describe("file-tracker wiring", () => {
 			ctx(),
 		);
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("has not been read");
+		expect(result?.reason).toBe(words.unread({ path: file, tool: "edit" }));
 	});
 
 	it("guards every spelling pi's tools resolve (`~/`, `@`, `file://`), both for the unread and the stale case (A6-M1)", async () => {
@@ -62,7 +68,7 @@ describe("file-tracker wiring", () => {
 				for (const toolName of ["write", "edit"]) {
 					const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: spelling } }, ctx());
 					expect(result?.block, `${toolName} ${spelling}`).toBe(true);
-					expect(result?.reason).toContain(file);
+					expect(result?.reason, `${toolName} ${spelling}`).toBe(words.unread({ path: file, tool: toolName }));
 				}
 			}
 			// A read spelled one way counts for the others, and a later change makes each spelling stale.
@@ -71,7 +77,7 @@ describe("file-tracker wiring", () => {
 			writeFileSync(file, "changed by the user");
 			for (const spelling of spellings) {
 				const stale = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: spelling } }, ctx());
-				expect(stale?.reason, spelling).toContain("has changed on disk");
+				expect(stale?.reason, spelling).toBe(words.stale({ path: file }));
 			}
 		} finally {
 			vi.unstubAllEnvs();
@@ -84,15 +90,18 @@ describe("file-tracker wiring", () => {
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 		const reminders: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		const changed = vi.spyOn(words, "changedOnDisk");
 		writeFileSync(file, "the user's notes\n");
 		// The change scan runs at the next turn start and reports the new content…
 		await fake.fire("agent_start", {}, ctx());
-		expect(reminders.join("\n")).toContain(`${file} changed on disk since you last read it`);
-		expect(reminders.join("\n")).toContain("the user's notes");
+		expect(changed).toHaveBeenCalledOnce();
+		expect(changed.mock.calls[0][0].path).toBe(file);
+		expect(changed.mock.calls[0][0].excerpt.numbered).toContain("the user's notes");
+		expect(reminders.join("\n")).toContain(changed.mock.results[0].value);
 		// …without marking it read: the write that would discard it is refused.
 		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: file } }, ctx());
 		expect(result?.block).toBe(true);
-		expect(result?.reason).toContain("has changed on disk");
+		expect(result?.reason).toBe(words.stale({ path: file }));
 	});
 
 	it("allows the edit once the file has been read, then observes the write", async () => {
@@ -134,7 +143,7 @@ describe("file-tracker wiring", () => {
 			ctx(),
 		);
 		expect(blocked?.block).toBe(true);
-		expect(blocked?.reason).toContain("changed on disk");
+		expect(blocked?.reason).toBe(words.stale({ path: file }));
 	});
 
 	it("allows creating a brand-new file with no prior read", async () => {
@@ -155,11 +164,13 @@ describe("file-tracker wiring", () => {
 		writeFileSync(file, "after");
 		const emitted: unknown[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data));
+		const changed = vi.spyOn(words, "changedOnDisk");
 
 		await fake.fireOne("agent_start", {}, ctx());
 		expect(emitted).toHaveLength(1);
-		expect((emitted[0] as { text: string }).text).toContain(file);
-		expect((emitted[0] as { text: string }).text).toContain("after");
+		expect(changed.mock.calls[0][0].path).toBe(file);
+		expect(changed.mock.calls[0][0].excerpt.numbered).toContain("after");
+		expect((emitted[0] as { text: string }).text).toContain(changed.mock.results[0].value);
 
 		// The stale-edit guard must still fire: agent_start's notice does
 		// NOT count as a re-read, or the model could clobber the external change.
@@ -183,23 +194,30 @@ describe("file-tracker wiring", () => {
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 		const emitted: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+		const byAgent = vi.spyOn(words, "changedByAgent");
+		const onDisk = vi.spyOn(words, "changedOnDisk");
 
 		writeFileSync(file, "child edit");
 		fake.events.emit(CHILD_WROTE_CHANNEL, { path: file, agent: "fix the parser" });
 		await fake.fireOne("tool_execution_end", { toolName: "Agent", toolCallId: "a1", isError: false }, ctx());
 		expect(emitted).toHaveLength(1);
-		expect(emitted[0]).toContain(`Note: ${file} was changed by the agent "fix the parser" you started in this session since you last read it.`);
-		expect(emitted[0]).not.toContain("usually deliberate");
+		expect(byAgent).toHaveBeenCalledOnce();
+		expect(byAgent.mock.calls[0][0]).toMatchObject({ path: file, agent: "fix the parser" });
+		expect(emitted[0]).toContain(byAgent.mock.results[0].value);
+		expect(onDisk).not.toHaveBeenCalled();
 		// Still stale: the parent must re-read before editing.
 		const stale = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
-		expect(stale?.reason).toContain("has changed on disk");
+		expect(stale?.reason).toBe(words.stale({ path: file }));
 
 		// The parent reads it; a later outside change gets the ordinary notice.
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 		writeFileSync(file, "child edit\nformatted");
 		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
 		expect(emitted).toHaveLength(2);
-		expect(emitted[1]).toContain(`Note: ${file} changed on disk since you last read it. That's usually deliberate`);
+		expect(byAgent).toHaveBeenCalledOnce();
+		expect(onDisk).toHaveBeenCalledOnce();
+		expect(onDisk.mock.calls[0][0].path).toBe(file);
+		expect(emitted[1]).toContain(onDisk.mock.results[0].value);
 	});
 
 	it("never credits a later outside change to a subagent whose write was already accounted for", async () => {
@@ -220,20 +238,21 @@ describe("file-tracker wiring", () => {
 		utimesSync(same, new Date(), new Date(Date.now() + 5_000));
 		fake.events.emit(CHILD_WROTE_CHANNEL, { path: same, agent: "sweep" });
 		await fake.fireOne("tool_execution_end", { toolName: "Agent", toolCallId: "a1", isError: false }, ctx());
-		expect(emitted.at(-1)).toContain(`1 more file(s) you read earlier changed on disk since: ${files[5]}`);
+		expect(emitted.at(-1)).toBe(words.moreChanged({ paths: [files[5]] }));
 
 		emitted.length = 0;
+		const byAgent = vi.spyOn(words, "changedByAgent");
+		const onDisk = vi.spyOn(words, "changedOnDisk");
 		writeFileSync(files[5], "child edit\nformatted");
 		writeFileSync(same, "before\nformatted");
 		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
 		expect(emitted).toHaveLength(2);
-		for (const text of emitted) {
-			expect(text).toContain("changed on disk since you last read it. That's usually deliberate");
-			expect(text).not.toContain("sweep");
-		}
+		expect(byAgent).not.toHaveBeenCalled();
+		expect(onDisk.mock.calls.map(([p]) => p.path).sort()).toEqual([files[5], same].sort());
+		expect([...emitted].sort()).toEqual(onDisk.mock.results.map((r) => r.value).sort());
 	});
 
-	it("reports a change made during the turn at the end of the next tool execution, with Claude Code's steer, and does not report our own writes", async () => {
+	it("reports a change made during the turn at the end of the next tool execution, and does not report our own writes", async () => {
 		const file = path("f.ts");
 		writeFileSync(file, "before");
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
@@ -250,15 +269,15 @@ describe("file-tracker wiring", () => {
 		// A formatter rewrites the file while a later tool (say bash) runs: the
 		// change is reported when that tool's execution ends — mid-turn, before the
 		// model's next edit — as a one-shot (default placement, pinned to that result).
+		const changed = vi.spyOn(words, "changedOnDisk");
 		writeFileSync(file, "our edit\nformatted");
 		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b1", isError: false }, ctx());
 		expect(emitted).toHaveLength(1);
 		expect(emitted[0].placement).toBeUndefined();
-		const text = emitted[0].text;
-		expect(text).toContain(
-			`Note: ${file} changed on disk since you last read it. That's usually deliberate, so take it as the current state rather than reverting it; if the change looks wrong, say so rather than undoing it yourself — otherwise no need to call it out. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n`,
-		);
-		expect(text).toContain("formatted");
+		expect(changed).toHaveBeenCalledOnce();
+		expect(changed.mock.calls[0][0].path).toBe(file);
+		expect(changed.mock.calls[0][0].excerpt.numbered).toContain("formatted");
+		expect(emitted[0].text).toBe(changed.mock.results[0].value);
 
 		// Still stale for the edit guard, and not reported twice.
 		const blocked = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
@@ -304,7 +323,7 @@ describe("file-tracker wiring", () => {
 		resumed.events.on(REMINDER_CHANNEL, (data) => notices.push(String((data as { text?: string }).text)));
 		fileTrackerExtension(resumed.pi as never);
 		await resumed.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s1", getBranch: () => branch } }));
-		expect(notices.filter((text) => text.includes(file))).toHaveLength(1);
+		expect(notices).toEqual([words.changedWhileAway({ paths: [file] })]);
 		const blocked = await resumed.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
 		expect(blocked?.block).toBe(true);
 	});
@@ -339,7 +358,7 @@ describe("file-tracker wiring", () => {
 		expect(result?.block).toBe(true);
 	});
 
-	it("after a compaction restores a small file, notes a large one, and clears what was read, as Claude Code does", async () => {
+	it("after a compaction restores a small file, notes a large one, and clears what was read", async () => {
 		const small = path("small.txt");
 		const big = path("big.txt");
 		const other = path("other.txt");
@@ -359,17 +378,17 @@ describe("file-tracker wiring", () => {
 
 		expect(emitted.every((r) => r.placement === "user-prepend")).toBe(true);
 		const texts = emitted.map((r) => r.text);
-		expect(texts.find((t) => t.startsWith(`Note: ${big} was read before`))).toBeDefined();
-		expect(texts).toContain(`Called the read tool with the following input: ${JSON.stringify({ path: small })}`);
-		expect(texts.find((t) => t.startsWith("Result of calling the read tool:\none\ntwo"))).toBeDefined();
+		expect(texts).toContain(words.tooLargeToRestore({ path: big }));
+		expect(texts).toContain(words.restoredCall({ path: small }));
+		expect(texts).toContain(words.restoredResult({ text: "one\ntwo\n" }));
 
 		const edit = (file: string) => fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
 		expect(await edit(small)).toBeUndefined();
 		expect((await edit(big))?.block).toBe(true);
 	});
 
-	it("clears discarded reads when pi compacts with One Code's summarizer disabled", async () => {
-		vi.stubEnv("CC_COMPACTION", "0");
+	it("clears discarded reads when pi compacts with the harness's summarizer disabled", async () => {
+		useProfile({ features: { compaction: false } });
 		try {
 			const file = path("discarded.ts");
 			const kept = path("retained.ts");
@@ -388,10 +407,11 @@ describe("file-tracker wiring", () => {
 				createFakeCtx({ cwd: dir, sessionManager: { getBranch: () => branch } }));
 			const blocked = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: file } }, ctx());
 			expect(blocked?.block).toBe(true);
-			expect(blocked?.reason).toContain("has not been read");
+			expect(blocked?.reason).toBe(words.unread({ path: file, tool: "write" }));
 			expect(await fake.fireOne("tool_call", { toolName: "write", input: { path: kept } }, ctx())).toBeUndefined();
 			expect(emitted).toEqual([]);
 		} finally {
+			setActiveProfileForTest(undefined);
 			vi.unstubAllEnvs();
 		}
 	});
@@ -438,69 +458,22 @@ describe("file-tracker wiring", () => {
 			for (const file of [outside, inside]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 			const emitted: string[] = [];
 			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+			const restoredCall = vi.spyOn(words, "restoredCall");
+			const restoredResult = vi.spyOn(words, "restoredResult");
+			const tooLarge = vi.spyOn(words, "tooLargeToRestore");
 			const branch = [{ type: "compaction", id: "c1", firstKeptEntryId: "c1" }];
 			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
-			// The read call block carries the path JSON-encoded (escaped backslashes on Windows).
-			expect(emitted.some((t) => t.includes(JSON.stringify({ path: inside })))).toBe(true);
-			expect(emitted.some((t) => t.includes("inside text"))).toBe(true);
-			expect(emitted.some((t) => t.includes(JSON.stringify({ path: outside })) || t.includes(outside) || t.includes("outside text"))).toBe(false);
+			// Only the file inside the project comes back, as a read call and its result.
+			expect(restoredCall.mock.calls.map(([p]) => p.path)).toEqual([inside]);
+			expect(restoredResult.mock.calls.map(([p]) => p.text)).toEqual([expect.stringContaining("inside text")]);
+			expect(tooLarge).not.toHaveBeenCalled();
+			expect(emitted).toEqual([restoredCall.mock.results[0].value, restoredResult.mock.results[0].value]);
+			expect(emitted.some((t) => t.includes(outside) || t.includes("outside text"))).toBe(false);
 		} finally {
 			rmSync(outsideDir, { recursive: true, force: true });
 		}
 	});
 
-	it.each([false, true])("retains an external instruction import's read state only when its contents are in context (approved: %s)", async (approved) => {
-		const home = path("home");
-		const project = path("project");
-		mkdirSync(project);
-		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
-		resetConfigModeForTest("claude-compatible");
-		try {
-			const imported = path("external.md");
-			writeFileSync(imported, "EXTERNAL IMPORT CONTENT\n");
-			writeFileSync(join(project, "CLAUDE.md"), "@../external.md\n");
-			persistExternalIncludesApproval(project, home, approved);
-			const shown = discoverContextFiles({ cwd: project, home, homeClaudeDir: join(home, ".claude"), rule: "claude-md", includeExternal: approved });
-			expect(shown.some((file) => file.content.includes("EXTERNAL IMPORT CONTENT"))).toBe(approved);
-			const branch = [{ type: "compaction", id: "c", firstKeptEntryId: "c" }];
-			const context = createFakeCtx({ cwd: project, sessionManager: { getBranch: () => branch } });
-			await fake.fireOne("tool_result", { toolName: "read", input: { path: imported }, isError: false }, context);
-			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, context);
-			const result = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "write", input: { path: imported } }, context);
-			expect(result?.block === true).toBe(!approved);
-		} finally {
-			vi.unstubAllEnvs();
-			resetConfigModeForTest();
-		}
-	});
-
-	it("does not count a CLAUDE.md over half the window as in context after a compaction", async () => {
-		const home = path("home");
-		const project = path("project-big");
-		mkdirSync(project);
-		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
-		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-		resetConfigModeForTest("claude-compatible");
-		try {
-			const big = join(project, "CLAUDE.md");
-			writeFileSync(big, `BIG-RULES ${"x".repeat(24_000)}\n`);
-			const emitted: string[] = [];
-			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
-			const branch = [{ type: "compaction", id: "c", firstKeptEntryId: "c" }];
-			// A 1,000-token window: message 1 carries only a note for this file.
-			const context = createFakeCtx({ cwd: project, model: { provider: "t", id: "small", api: "t", contextWindow: 1_000 }, sessionManager: { getSessionId: () => "s", getBranch: () => branch } });
-			await fake.fireOne("tool_result", { toolName: "read", input: { path: big }, isError: false }, context);
-			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, context);
-			const result = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "write", input: { path: big } }, context);
-			// Either the restore brought its contents back, or the read state is gone: never read but unseen.
-			expect(result?.block === true || emitted.some((text) => text.includes("BIG-RULES"))).toBe(true);
-		} finally {
-			vi.unstubAllEnvs();
-			resetConfigModeForTest();
-		}
-	});
 
 	it("keeps a kept file stale when it changed on disk, so the edit guard still holds", async () => {
 		const kept = path("kept-stale.ts");
@@ -516,7 +489,7 @@ describe("file-tracker wiring", () => {
 		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
 		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: kept } }, ctx());
 		expect(result?.block).toBe(true);
-		expect(result?.reason).not.toContain("has not been read");
+		expect(result?.reason).toBe(words.stale({ path: kept }));
 	});
 
 	it("keeps a kept turn's file eligible for the next compaction's restore", async () => {
@@ -536,8 +509,7 @@ describe("file-tracker wiring", () => {
 		// A second compaction summarizes that turn away: the file comes back without another read.
 		const second = [...first, { type: "message", id: "a2", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }, { type: "compaction", id: "c2", firstKeptEntryId: "a2", timestamp: new Date().toISOString() }];
 		await fake.fire("session_compact", { compactionEntry: second[4], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => second } }));
-		expect(emitted).toContain(`Called the read tool with the following input: ${JSON.stringify({ path: kept })}`);
+		expect(emitted).toContain(words.restoredCall({ path: kept }));
 		expect(await fake.fireOne("tool_call", { toolName: "edit", input: { path: kept } }, ctx())).toBeUndefined();
 	});
 });
-

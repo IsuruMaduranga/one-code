@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { changedSince, FORMATTER_NOTICE, fileToolTarget, snapshotFile } from "../../extensions/hooks/formatter-notice.ts";
+import { changedSince, fileToolTarget, snapshotFile } from "../../extensions/safety/hooks/formatter-notice.ts";
 
 const dir = () => mkdtempSync(join(tmpdir(), "formatter-notice-"));
 
@@ -53,14 +53,5 @@ describe("changedSince", () => {
 		const path = join(dir(), "grew.py");
 		writeFileSync(path, "x = 1\n"); // small: snapshotFile returns content
 		expect(changedSince(path, { kind: "stamp", value: "123:9999999" })).toBe(true);
-	});
-});
-
-describe("FORMATTER_NOTICE", () => {
-	it("names the file, forbids a revert, and asks for a read before reporting", () => {
-		const text = FORMATTER_NOTICE("/repo/src/a.py");
-		expect(text).toContain("/repo/src/a.py");
-		expect(text).toMatch(/do not revert/i);
-		expect(text).toMatch(/read the file first/i);
 	});
 });

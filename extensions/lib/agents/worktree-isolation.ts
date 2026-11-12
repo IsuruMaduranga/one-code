@@ -1,0 +1,209 @@
+/**
+ * Worktree isolation for in-process agent runs (`isolation: "worktree"` on the
+ * Agent tool and workflow `agent()` calls): a registry of the live isolation
+ * worktrees, and the inline-extension guard that applies the same git-isolation
+ * bash guard an `enter_worktree` session gets (extensions/lib/rules/worktree-guards.ts).
+ *
+ * The registry exists because the association can only resolve at call time:
+ * these worktrees live in tmpdirs (not statically recognizable paths), and the
+ * guard judges each call's `ctx.cwd`, not the cwd its child's loader was built
+ * with (one loader per child session, lib/agents/agent-loader.ts openChildSession).
+ * createWorktree/cleanupWorktree (lib/agents/agent-worktree.ts) register and release
+ * entries; reconstructed run records re-register kept worktrees after a
+ * process restart (agents/subagents/index.ts); the worktree the main session entered
+ * with `enter_worktree` is registered too (`followEnteredWorktree`), so a child
+ * spawned there is guarded like an isolated one; the guard resolves each bash
+ * call's cwd against them.
+ *
+ * Module state is deliberate and safe despite jiti isolation: registration
+ * (worktree creation) and lookup (the guard factory) always happen inside the
+ * SAME extension's import graph — the subagents extension, or the workflow
+ * extension via its own module copy — so the state never needs to cross
+ * extensions.
+ */
+
+import { homedir } from "node:os";
+import { isAbsolute, join, relative } from "node:path";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { findProjectRoot, repositoryWorktrees } from "../context/git.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
+import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../shell/paths.ts";
+import { analyzeShellCommand } from "../shell/shell-analysis.ts";
+import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../rules/worktree-guards.ts";
+import type { WorktreeGuardRefusal } from "../rules/worktree-guard-text.ts";
+import { worktreeGuardText } from "../rules/worktree-guard-text.ts";
+
+export interface WorktreeIsolation {
+	/** The isolated worktree the run works in. */
+	worktreePath: string;
+	/** Root of the shared checkout the worktree belongs to. */
+	sharedRoot: string;
+	/**
+	 * Both roots in resolved form (macOS /var → /private/var, symlinked
+	 * checkouts), computed once at registration so the per-call write guard
+	 * resolves only the write's own target, not two static roots per tool call.
+	 */
+	resolvedWorktreePath: string;
+	resolvedSharedRoot: string;
+}
+
+/** Build the registry entry for a worktree, resolving both roots once. Exported for tests. */
+export function describeIsolation(worktreePath: string, sharedRoot: string): WorktreeIsolation {
+	return {
+		worktreePath,
+		sharedRoot,
+		resolvedWorktreePath: resolveForContainment(worktreePath) ?? worktreePath,
+		resolvedSharedRoot: resolveForContainment(sharedRoot) ?? sharedRoot,
+	};
+}
+
+/** worktreePath → its isolation record, for every live isolation worktree. */
+const active = new Map<string, WorktreeIsolation>();
+
+export function registerWorktreeIsolation(worktreePath: string, sharedRoot: string): void {
+	active.set(worktreePath, describeIsolation(worktreePath, sharedRoot));
+}
+
+export function releaseWorktreeIsolation(worktreePath: string): void {
+	active.delete(worktreePath);
+}
+
+/**
+ * Follow the main session's `enter_worktree` state over `WORKTREE_CHANNEL`
+ * and return a getter for it. The entered worktree is registered in this
+ * extension's registry, so a child spawned there gets the git-isolation and
+ * write guards. The entry stays after the session exits the worktree: a child
+ * started there may still be running, and a registration for a directory no
+ * later child runs in is inert.
+ */
+export function followEnteredWorktree(events: { on(channel: string, handler: (data: unknown) => void): unknown }): () => WorktreeLocation | undefined {
+	let entered: WorktreeLocation | undefined;
+	events.on(WORKTREE_CHANNEL, (data) => {
+		const location = data as WorktreeLocation | null | undefined;
+		entered = location?.path ? location : undefined;
+		if (entered) registerWorktreeIsolation(entered.path, entered.sharedRoot ?? findProjectRoot(entered.path) ?? entered.path);
+	});
+	return () => entered;
+}
+
+/** The registered isolation worktree `cwd` lives in, if any. */
+export function worktreeIsolationFor(cwd: string): WorktreeIsolation | undefined {
+	for (const isolation of active.values()) {
+		if (isWithin(isolation.worktreePath, cwd)) return isolation;
+	}
+	if (active.size === 0) return undefined;
+	const resolved = resolveForContainment(cwd);
+	if (resolved === undefined) return undefined;
+	for (const isolation of active.values()) {
+		if (isWithin(isolation.resolvedWorktreePath, resolved)) return isolation;
+	}
+	return undefined;
+}
+
+/**
+ * Where a write from an isolated run must not land: inside the shared checkout,
+ * outside the worktree. Returns the corresponding worktree path when `target`
+ * is such a path, else undefined (inside the worktree, or outside the
+ * repository altogether — the permission gate still judges those). Shared by
+ * the file-tool guard and the bash write-target guard below. Pure.
+ */
+export function sharedCheckoutWriteTarget(target: string, cwd: string, isolation: WorktreeIsolation, home = homedir()): string | undefined {
+	const { worktreePath, sharedRoot, resolvedWorktreePath, resolvedSharedRoot } = isolation;
+	const absolute = toAbsolute(cwd, target, home);
+	// Resolve even paths spelled under the worktree: a symlink there can point
+	// back into the shared checkout.
+	const resolved = resolveForContainment(absolute) ?? absolute;
+	if (isWithin(resolvedWorktreePath, resolved) || !isWithin(resolvedSharedRoot, resolved)) return undefined;
+	// The tail keeps the model's spelling when the path was written under the
+	// shared root as given; the resolved forms are case-folded on darwin, which
+	// would send the model to `a.ts` for a file named `A.ts` on a case-sensitive volume.
+	const spelled = relative(sharedRoot, absolute);
+	const tail = spelled && !spelled.startsWith("..") && !isAbsolute(spelled) ? spelled : relative(resolvedSharedRoot, resolved);
+	return join(worktreePath, tail);
+}
+
+const refusal = (isolation: WorktreeIsolation, target: string, inCommand: boolean, mapped: string): WorktreeGuardRefusal => ({
+	kind: "sharedCheckoutWrite",
+	worktreePath: isolation.worktreePath,
+	sharedRoot: isolation.sharedRoot,
+	target,
+	inCommand,
+	mapped,
+});
+
+/**
+ * Refuse a file-tool write (`edit`/`write`/`notebook_edit`) from an isolated
+ * run that lands in the shared checkout: the model was told to work in the
+ * worktree, but a fork inherits a transcript whose every path points at the
+ * main tree, and a named agent's task may quote such paths too. Pure; exported
+ * for tests.
+ */
+export function worktreeWriteGuardReason(input: {
+	toolName: string;
+	target: string | undefined;
+	cwd: string;
+	isolation: WorktreeIsolation;
+	home?: string;
+}): WorktreeGuardRefusal | undefined {
+	if (!isWritingTool(input.toolName) || !input.target) return undefined;
+	const mapped = sharedCheckoutWriteTarget(input.target, input.cwd, input.isolation, input.home);
+	return mapped ? refusal(input.isolation, input.target, false, mapped) : undefined;
+}
+
+/**
+ * The same rule for a shell command: every path the command may write
+ * (redirections, `sed -i`/`cp`/`mv`/`tee` positionals, output flags — the
+ * write-target model auto-mode's shell analysis already maintains) is checked
+ * like a file-tool target. Reads of the shared checkout stay allowed: the fork
+ * may need to look at what it inherited. Interpreters (`sed -i`, `perl`,
+ * `python`) are not modelled as writers there, so a write hidden in one reaches
+ * the permission gate and, in auto mode, the classifier instead — steering, not
+ * a sandbox (same contract as extensions/lib/rules/worktree-guards.ts). Pure; exported for tests.
+ */
+export function worktreeBashWriteGuardReason(input: { command: string; cwd: string; isolation: WorktreeIsolation; home?: string }): WorktreeGuardRefusal | undefined {
+	const home = input.home ?? homedir();
+	const evidence = analyzeShellCommand({ command: input.command, cwd: input.cwd, home });
+	for (const write of evidence.writes) {
+		// The target as the shell reaches it (Git Bash spellings converted), judged like a file-tool path.
+		const mapped = sharedCheckoutWriteTarget(write.absolute, input.cwd, input.isolation, home);
+		if (mapped) return refusal(input.isolation, write.token, true, mapped);
+	}
+	return undefined;
+}
+
+/**
+ * The git-isolation guard for worktree-isolated child sessions, as its own
+ * inline extension so it loads AHEAD of the permission gate — the same
+ * guard-before-permissions layering the main session gets from extension load
+ * order (worktree before permissions, findings §3). buildAgentLoader places it
+ * first in `extensionFactories`; keep it there. Three checks: bash git operations
+ * must target the worktree (extensions/lib/rules/worktree-guards.ts), and writes — by file
+ * tool or by shell command — must land in it.
+ */
+export function worktreeGuardFactory(cwd: string): InlineExtension {
+	return {
+		name: "agent-worktree-guard",
+		hidden: true,
+		factory: (pi) => {
+			// Read when a refusal is worded: every child loads this guard, and only an isolated one refuses.
+			const block = (refusal: WorktreeGuardRefusal | undefined) => (refusal ? { block: true, reason: worktreeGuardText.refusal(refusal) } : undefined);
+			pi.on("tool_call", async (event, ctx) => {
+				const runCwd = ctx?.cwd ?? cwd;
+				const isolation = worktreeIsolationFor(runCwd);
+				if (!isolation) return undefined;
+				const input = (event.input ?? {}) as Record<string, unknown>;
+				if (event.toolName === "bash") {
+					if (typeof input.command !== "string") return undefined;
+					// Every worktree of the repository, as the main session's guard checks: a linked one may live outside the shared root.
+					const others = namesGit(input.command) ? await repositoryWorktrees(isolation.worktreePath) : [];
+					if (others === undefined) return block(unlistedWorktreesReason(isolation.worktreePath));
+					return block(
+						worktreeBashGuardReason({ command: input.command, worktreePath: isolation.worktreePath, sharedRoot: isolation.sharedRoot, otherWorktrees: others }) ??
+							worktreeBashWriteGuardReason({ command: input.command, cwd: runCwd, isolation }),
+					);
+				}
+				return block(worktreeWriteGuardReason({ toolName: event.toolName, target: pathArgument(input), cwd: runCwd, isolation }));
+			});
+		},
+	};
+}

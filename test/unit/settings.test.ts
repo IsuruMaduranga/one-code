@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { projectSlug } from "../../extensions/lib/memory.ts";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { beforeEach, describe, expect, it } from "vitest";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import {
 	loadPermissionSettings,
 	markOutsideReadPromptSeen,
@@ -10,144 +9,126 @@ import {
 	persistAllowRule,
 	persistBlockOutsideReads,
 	resolveStartupMode,
-} from "../../extensions/permissions/settings.ts";
+} from "../../extensions/lib/rules/settings.ts";
+import { userSettingsPath, useRepositorySettings, writeRepositorySettings, writeUserSettings } from "./helpers/settings-files.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 
-let dir: string;
 let home: string;
 let cwd: string;
 
 beforeEach(() => {
-	dir = mkdtempSync(join(tmpdir(), "cc-settings-"));
-	home = join(dir, "home");
-	cwd = join(dir, "project");
-	mkdirSync(join(home, ".claude"), { recursive: true });
+	({ home, cwd } = tempHome("cc-settings-"));
 	mkdirSync(join(cwd, ".claude"), { recursive: true });
-});
-
-afterEach(() => {
-	rmSync(dir, { recursive: true, force: true });
 });
 
 const write = (path: string, data: unknown) => writeFileSync(path, JSON.stringify(data));
 
 describe("loadPermissionSettings", () => {
-	it("merges user, project, and local files with local defaultMode winning", () => {
-		write(join(home, ".claude", "settings.json"), {
-			permissions: { allow: ["Bash(ls:*)"], defaultMode: "default" },
-		});
-		write(join(cwd, ".claude", "settings.json"), {
-			permissions: { allow: ["Read"], deny: ["Bash(rm -rf:*)"], defaultMode: "acceptEdits" },
-		});
-		write(join(cwd, ".claude", "settings.local.json"), {
-			permissions: { ask: ["Bash(git push:*)"] },
-		});
+	// The files are found by role, so these hold for any profile: the primary
+	// user file is Claude Code's with a provider that reads it, the product's
+	// own without one. The repository's file is in the next block.
+	const writeFile = (path: string, data: unknown) => {
+		mkdirSync(dirname(path), { recursive: true });
+		write(path, data);
+	};
 
-		const s = loadPermissionSettings(cwd, home);
-		// The repo's own allow rules are held apart for consent (review P10); its
-		// deny/ask rules load freely.
-		expect(s.allow).toEqual(["Bash(ls:*)"]);
-		expect(s.projectAllow).toEqual(["Read"]);
-		expect(s.deny).toEqual(["Bash(rm -rf:*)"]);
-		expect(s.ask).toEqual(["Bash(git push:*)"]);
-		expect(s.defaultMode).toBe("acceptEdits");
-	});
-
-	it("accepts Claude Code's manual alias and dontAsk for defaultMode", () => {
-		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "manual" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("default");
-		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "dontAsk" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("dontAsk");
-	});
-
-	it("accepts auto as a defaultMode from user settings", () => {
-		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "auto" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("auto");
-	});
-
-	it("ignores defaultMode auto from project and local settings", () => {
-		// Both files live in the repo, so honouring `auto` there would let a
-		// checked-in file put the session into the mode whose classifier contains it.
-		for (const file of ["settings.json", "settings.local.json"]) {
-			write(join(cwd, ".claude", file), { permissions: { defaultMode: "auto" } });
-			expect(loadPermissionSettings(cwd, home).defaultMode, file).toBeUndefined();
-			rmSync(join(cwd, ".claude", file));
-		}
-	});
-
-	it("ignores defaultMode bypassPermissions from project and local settings (2026-09-05 H3)", () => {
-		// A cloned repo must not start the session with every check off; only the
-		// user's own or a managed file may pick bypass.
-		for (const file of ["settings.json", "settings.local.json"]) {
-			write(join(cwd, ".claude", file), { permissions: { defaultMode: "bypassPermissions" } });
-			expect(loadPermissionSettings(cwd, home).defaultMode, file).toBeUndefined();
-			rmSync(join(cwd, ".claude", file));
-		}
-		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "bypassPermissions" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("bypassPermissions");
-		// A project file cannot override the user's choice with a refused mode either.
-		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "bypassPermissions" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("bypassPermissions");
-	});
-
-	it("still honours dontAsk and acceptEdits from project settings (they cannot approve more than default)", () => {
-		for (const mode of ["dontAsk", "acceptEdits"]) {
-			write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: mode } });
+	it("takes defaultMode from the primary user file, auto and bypassPermissions included", () => {
+		for (const mode of ["auto", "bypassPermissions", "acceptEdits", "plan"]) {
+			writeUserSettings(cwd, home, { permissions: { defaultMode: mode } });
 			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
 		}
 	});
 
-	it("reads disableBypassPermissionsMode from any source, as a restriction", () => {
-		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBeUndefined();
-		write(join(cwd, ".claude", "settings.json"), { permissions: { disableBypassPermissionsMode: "disable" } });
-		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
-		write(join(cwd, ".claude", "settings.json"), { permissions: { disableBypassPermissionsMode: "enable" } });
-		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBeUndefined();
-	});
-
-	it("still honours other modes from project settings", () => {
-		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "plan" } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("plan");
-	});
-
-	it("does not let a project file downgrade user-set auto to nothing", () => {
-		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "auto" } });
-		write(join(cwd, ".claude", "settings.json"), { permissions: { allow: ["Read"] } });
-		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("auto");
+	it("accepts Claude Code's manual alias and dontAsk for defaultMode", () => {
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "manual" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("default");
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "dontAsk" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("dontAsk");
 	});
 
 	it("ignores unknown defaultMode values", () => {
-		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "turbo" } });
+		writeUserSettings(cwd, home, { permissions: { defaultMode: "turbo" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBeUndefined();
 	});
 
 	it("tolerates missing and malformed files", () => {
-		writeFileSync(join(cwd, ".claude", "settings.json"), "{not json");
-		const s = loadPermissionSettings(cwd, home);
-		expect(s).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
+		expect(loadPermissionSettings(cwd, home)).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
+		const file = userSettingsPath(cwd, home);
+		mkdirSync(dirname(file), { recursive: true });
+		writeFileSync(file, "{not json");
+		expect(loadPermissionSettings(cwd, home)).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
 	});
 
-	it("merges One Code's own global and per-repo allow files alongside .claude", () => {
-		// /allow persists to ~/.onecode (global) and a per-repo file under it — those
-		// rules are read back here, never from a write into Claude Code's files.
-		write(join(home, ".claude", "settings.json"), { permissions: { allow: ["Bash(ls:*)"] } });
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-		write(join(home, ".onecode", "settings.json"), { permissions: { allow: ["Read"] } });
-		// The per-repo slug is taken from the natively resolved root (macOS TMPDIR sits behind a
-		// symlink; Windows TEMP can be an 8.3 short name).
-		const projectDir = join(home, ".onecode", "projects", projectSlug(realpathSync.native(cwd)));
-		mkdirSync(projectDir, { recursive: true });
-		write(join(projectDir, "settings.json"), { permissions: { allow: ["Bash(npm test:*)"] } });
-
+	it("merges the product's own global and per-repo allow files", () => {
+		// /allow persists to the product's user file and a per-repo file in its state dir.
+		writeFile(productSettingsPath(home), { permissions: { allow: ["Read"], deny: ["Bash(sudo:*)"], ask: ["Bash(git push:*)"] } });
+		writeFile(productProjectSettingsPath(cwd, home), { permissions: { allow: ["Bash(npm test:*)"] } });
 		const s = loadPermissionSettings(cwd, home);
-		expect(s.allow).toEqual(expect.arrayContaining(["Bash(ls:*)", "Read", "Bash(npm test:*)"]));
+		expect(s.allow).toEqual(expect.arrayContaining(["Read", "Bash(npm test:*)"]));
+		expect(s.allow).toHaveLength(2);
+		expect(s.projectAllow).toEqual([]);
+		expect(s.deny).toEqual(["Bash(sudo:*)"]);
+		expect(s.ask).toEqual(["Bash(git push:*)"]);
 	});
 
-	it("never takes defaultMode from a One Code file", () => {
-		// One Code writes only rules to its files; a hand-edited defaultMode there
-		// (auto included) must not flip the session — that stays a .claude decision.
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "auto" } });
+	it("never takes defaultMode from the product's per-repo file", () => {
+		// The product writes only rules there; a hand-edited defaultMode (auto
+		// included) must not flip the session.
+		writeFile(productProjectSettingsPath(cwd, home), { permissions: { defaultMode: "auto" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBeUndefined();
+	});
+
+	it("reads disableBypassPermissionsMode and blockReadsOutsideWorkingDirectories from the product's per-repo file, as restrictions", () => {
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBeUndefined();
+		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBeUndefined();
+		writeFile(productProjectSettingsPath(cwd, home), { permissions: { disableBypassPermissionsMode: "disable", blockReadsOutsideWorkingDirectories: true } });
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
+		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBe(true);
+	});
+});
+
+describe("loadPermissionSettings with a repository settings file", () => {
+	// A repository's file is the one a cloned repo controls: its allow rules
+	// wait for consent, and it may not pick a mode that approves more than
+	// default. Only a source provider lists one; the helper lists one on any
+	// profile.
+	useRepositorySettings();
+
+	it("holds the repository's allow rules apart for consent, and loads its deny and ask rules", () => {
+		writeUserSettings(cwd, home, { permissions: { allow: ["Bash(ls:*)"] } });
+		writeRepositorySettings(cwd, home, { permissions: { allow: ["Read"], deny: ["Bash(rm -rf:*)"], ask: ["Bash(git push:*)"] } });
+		const s = loadPermissionSettings(cwd, home);
+		expect(s.allow).toEqual(["Bash(ls:*)"]);
+		expect(s.projectAllow).toEqual(["Read"]);
+		expect(s.deny).toEqual(["Bash(rm -rf:*)"]);
+		expect(s.ask).toEqual(["Bash(git push:*)"]);
+	});
+
+	it("ignores defaultMode auto and bypassPermissions from the repository's file", () => {
+		for (const mode of ["auto", "bypassPermissions"]) {
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: mode } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBeUndefined();
+		}
+	});
+
+	it("keeps the user's own bypassPermissions or auto when the repository's file names a mode it may not pick", () => {
+		for (const mode of ["auto", "bypassPermissions"]) {
+			writeUserSettings(cwd, home, { permissions: { defaultMode: mode } });
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: "bypassPermissions" } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
+		}
+	});
+
+	it("still honours dontAsk, acceptEdits and plan from the repository's file (none approves more than default)", () => {
+		for (const mode of ["dontAsk", "acceptEdits", "plan"]) {
+			writeRepositorySettings(cwd, home, { permissions: { defaultMode: mode } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
+		}
+	});
+
+	it("reads disableBypassPermissionsMode from the repository's file, as a restriction", () => {
+		writeRepositorySettings(cwd, home, { permissions: { disableBypassPermissionsMode: "disable" } });
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
 	});
 });
 
@@ -195,29 +176,23 @@ describe("resolveStartupMode", () => {
 });
 
 describe("blockReadsOutsideWorkingDirectories and the first outside-read prompt", () => {
-	it("reads the block setting from any source, the repository's included (it only tightens)", () => {
-		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBeUndefined();
-		write(join(cwd, ".claude", "settings.json"), { permissions: { blockReadsOutsideWorkingDirectories: true } });
-		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBe(true);
-	});
-
-	it("persists Block into the given One Code file, keeping its other keys", () => {
-		const file = join(home, ".onecode", "settings.json");
-		mkdirSync(join(home, ".onecode"), { recursive: true });
+	it("persists Block into the given product file, keeping its other keys", () => {
+		const file = productSettingsPath(home);
+		mkdirSync(dirname(file), { recursive: true });
 		write(file, { permissions: { allow: ["Read"] }, theme: "x" });
 		persistBlockOutsideReads(file);
 		const saved = JSON.parse(readFileSync(file, "utf-8"));
 		expect(saved).toEqual({ permissions: { allow: ["Read"], blockReadsOutsideWorkingDirectories: true }, theme: "x" });
 	});
 
-	it("counts the prompt as answered from One Code's flag or Claude Code's ~/.claude.json", () => {
-		const oneCode = join(home, ".onecode", "settings.json");
+	it("counts the prompt as answered from the product's flag or Claude Code's ~/.claude.json", () => {
+		const oneCode = productSettingsPath(home);
 		const claudeJson = join(home, ".claude.json");
-		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(false);
+		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(false);
 		write(claudeJson, { hasSeenAutoModeOutsideReadPrompt: true });
-		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(true);
+		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(true);
 		rmSync(claudeJson);
 		markOutsideReadPromptSeen(oneCode);
-		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(true);
+		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(true);
 	});
 });

@@ -2,17 +2,20 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import doctorExtension from "../../extensions/doctor/index.ts";
+import doctorExtension from "../../extensions/commands/doctor/index.ts";
 import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
-import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/models/model-unusable.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/rules/settings-channels.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { captureUserTurns } from "./helpers/user-turn.ts";
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
-import { commandDisplayLine, promptCommandText } from "../../extensions/skill/invoke.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
+import { commandDisplayLine, promptCommandText } from "../../extensions/lib/plugins/skill-invoke.ts";
+import { brand, envName, productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -51,14 +54,14 @@ function ctxFor(current: any | undefined, mode: "tui" | "rpc" | "print" | "json"
 }
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-home-"));
-	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-cwd-"));
+	home = mkdtempSync(join(tmpdir(), "doctor-wiring-home-"));
+	cwd = mkdtempSync(join(tmpdir(), "doctor-wiring-cwd-"));
 	stubHome(home);
-	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, ".onecode", "agent"));
-	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
-	vi.stubEnv("CC_VERSION", "");
+	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, brand.stateDir, "agent"));
+	vi.stubEnv(envName("NO_UPDATE_CHECK"), "1");
+	vi.stubEnv(envName("VERSION"), "");
 	// A clean environment for the checks that read it.
-	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
+	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", envName("PROMPT_TIER"), "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
 	sessionStarted = false;
 	fake = createFakePi();
 	startTurn = captureUserTurns(fake);
@@ -140,7 +143,7 @@ describe("/doctor wiring", () => {
 		const { ctx } = ctxFor(anthropic[1], "tui");
 		const panel = vi.fn(async (factory) => {
 			expect(blocks).toHaveLength(3);
-			expect(blocks[2]).toContain("<local-command-stdout>One Code doctor");
+			expect(blocks[2]).toContain(`<local-command-stdout>${brand.name} doctor`);
 			const component = factory({ terminal: { rows: 40 }, requestRender: () => {} }, {}, {}, () => {});
 			component.handleInput("f");
 			return null;
@@ -169,9 +172,9 @@ describe("/doctor wiring", () => {
 		const { ctx, notified } = ctxFor(undefined, mode);
 		await run("report", ctx);
 		expect(notified).toHaveLength(1);
-		expect(notified[0]).toContain("One Code doctor");
+		expect(notified[0]).toContain(`${brand.name} doctor`);
 		expect(notified[0]).toContain("Not ready: no model provider has credentials");
-		expect(notified[0]).toContain("Updates: check skipped (ONECODE_NO_UPDATE_CHECK=1)");
+		expect(notified[0]).toContain(`Updates: check skipped (${envName("NO_UPDATE_CHECK")}=1)`);
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
@@ -199,7 +202,7 @@ describe("/doctor wiring", () => {
 		await run("", ctx);
 		expect(fake.sentUserMessages).toHaveLength(0);
 		expect(notified[0]).toContain("No model is available, so the checkup cannot run");
-		expect(notified[1]).toContain("One Code doctor");
+		expect(notified[1]).toContain(`${brand.name} doctor`);
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
@@ -212,11 +215,12 @@ describe("/doctor wiring", () => {
 	});
 
 	it("reports the session tier until model_select re-resolves it", async () => {
-		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
+		vi.stubEnv(envName("PROMPT_TIER"), "workhorse");
 		const { ctx, notified } = ctxFor(anthropic[0]);
 		await run("report", ctx);
 		expect(notified[0]).toContain("Prompt register: workhorse");
-		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		expect(notified[0]).toContain(`forced by ${envName("PROMPT_TIER")}`);
+		vi.stubEnv(envName("PROMPT_TIER"), "tiny");
 		await run("report", ctx);
 		expect(notified[1]).toContain("Prompt register: workhorse");
 		ctx.model = anthropic[1];
@@ -240,8 +244,8 @@ describe("/doctor wiring", () => {
 	});
 
 	it("applies a preset and returns the classifier to the automatic choice", async () => {
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { classifierModel: "anthropic/claude-opus-5", environment: ["x"] }, other: 1 }));
+		mkdirSync(productStateDir(), { recursive: true });
+		writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { classifierModel: "anthropic/claude-opus-5", environment: ["x"] }, other: 1 }));
 		const heard: string[] = [];
 		fake.events.on(SUBAGENT_DEFAULT_CHANGED_CHANNEL, () => heard.push("subagent"));
 		fake.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => heard.push("classifier"));
@@ -249,7 +253,7 @@ describe("/doctor wiring", () => {
 		await run("preset quality", ctx);
 		expect(setModel).toHaveBeenCalledTimes(1);
 		expect(setModel.mock.calls[0][0].id).toBe("claude-opus-5");
-		const saved = JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf8"));
+		const saved = JSON.parse(readFileSync(productSettingsPath(home), "utf8"));
 		expect(saved.subagentModel).toBe("inherit");
 		expect(saved.autoMode).toEqual({ environment: ["x"] });
 		expect(saved.other).toBe(1);
@@ -263,7 +267,7 @@ describe("/doctor wiring", () => {
 		const { ctx, notified } = ctxFor(anthropic[1]);
 		await run("preset economical", ctx);
 		expect(notified[0]).toContain("nothing was changed");
-		expect(() => readFileSync(join(home, ".onecode", "settings.json"))).toThrow();
+		expect(() => readFileSync(productSettingsPath(home))).toThrow();
 	});
 
 	it("rejects an unknown preset and a bare `preset`", async () => {
@@ -308,14 +312,16 @@ describe("/doctor wiring", () => {
 
 	it("bare /doctor with a model sends the report inside the checkup prompt as a user turn", async () => {
 		const withModel = ctxFor(anthropic[1], "rpc");
+		const fixPrompt = vi.spyOn(requireText("doctor"), "fixPrompt");
 		await run("", withModel.ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
 		const content = fake.sentUserMessages[0].content as string;
 		// Led by the command breadcrumb, so the transcript shows `/doctor`, not the prompt.
 		expect(commandDisplayLine(content)).toBe("/doctor");
-		expect(content.startsWith(promptCommandText("doctor", "", "# One Code Doctor").slice(0, -1))).toBe(true);
-		expect(content).toContain("Main: anthropic/claude-sonnet-5");
-		expect(content).toContain("One Code never writes Claude Code's files");
+		expect(fixPrompt).toHaveBeenCalledTimes(1);
+		expect(content).toBe(promptCommandText("doctor", "", fixPrompt.mock.results[0].value as string));
+		expect(fixPrompt.mock.calls[0][0].reportText).toContain("Main: anthropic/claude-sonnet-5");
+		fixPrompt.mockRestore();
 		expect(fake.sentUserMessages[0].options).toEqual({ deliverAs: "followUp" });
 
 		await run("fix", withModel.ctx);

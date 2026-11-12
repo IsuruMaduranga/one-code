@@ -2,10 +2,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { bashMatchForms } from "../../extensions/permissions/matcher.ts";
-import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
+import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { bashMatchForms } from "../../extensions/lib/rules/matcher.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 
 let cwd: string;
 let home: string;
@@ -223,7 +224,7 @@ describe("analyzeShellCommand fast path", () => {
 		it("the harness's own credential stores are on the sensitive list", () => {
 			for (const command of [
 				"cat ~/.pi/agent/auth.json",
-				"cat ~/.onecode/agent/auth.json",
+				`cat ~/${brand.stateDir}/agent/auth.json`,
 				"cat ~/.claude/.credentials.json",
 				"cat ~/.cargo/credentials.toml",
 				"cat ~/Library/Keychains/login.keychain-db",
@@ -477,7 +478,7 @@ describe("containment signal: Claude Code's acceptEdits file commands on the wor
 			"echo x > .claude/commands/deploy.md",
 			"cp a.json .claude/settings.json",
 			"rm .claude/settings.local.json",
-			"echo x > .onecode/settings.json",
+			`echo x > ${brand.stateDir}/settings.json`,
 		]) {
 			const ev = analyze(cmd);
 			expect(ev.verdict, cmd).toBe("escalate");
@@ -492,7 +493,7 @@ describe("containment signal: Claude Code's acceptEdits file commands on the wor
 		expect(ev.protectedPaths).toEqual([]);
 		expect(ev.verdict).toBe("safe");
 		// Independent mode's worktree folder (lib/config-mode.ts) is the same space.
-		expect(analyze("echo x > .onecode/worktrees/fix/notes.txt").protectedPaths).toEqual([]);
+		expect(analyze(`echo x > ${brand.stateDir}/worktrees/fix/notes.txt`).protectedPaths).toEqual([]);
 	});
 
 	// A delete target the classifier's fast path cannot enumerate must never be

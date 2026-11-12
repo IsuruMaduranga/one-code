@@ -2,16 +2,20 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import toolStyleExtension from "../../extensions/tool-style/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import { SessionTurnTracker } from "../../extensions/subagents/session-turns.ts";
-import { applyPostToolUseOutcome } from "../../extensions/hooks/protocol.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
+import fileTrackerExtension from "../../extensions/safety/file-tracker/index.ts";
+import toolStyleExtension from "../../extensions/tools/tool-style/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
+import { applyPostToolUseOutcome } from "../../extensions/lib/rules/hook-protocol.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { fileTrackerText } from "../../extensions/safety/file-tracker/text.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const text = (value: string) => ({ type: "text", text: value });
-const marker = (name: string) => `(${name} completed with no output)`;
+/** The profile's text for a tool that returned nothing (One Code's: profile/test/profile-tool-results-text.test.ts). */
+const marker = (name: string) => toolResultsText.empty({ tool: name });
 
 // Apply returned changes in registration order, as pi's emitToolResult does.
 async function resultFor(content: unknown, name = "mcp__demo__silent", reminders = false, structuredContent?: unknown) {
@@ -29,7 +33,7 @@ async function resultFor(content: unknown, name = "mcp__demo__silent", reminders
 	return event;
 }
 
-describe("Claude Code's empty tool-result marker", () => {
+describe("the empty tool-result marker", () => {
 	it.each([undefined, null, "", " \t\n", [], [text("")], [text("\n"), text(" \t")]].map((content) => ({ content })))("replaces empty content $content", async ({ content }) => {
 		expect((await resultFor(content)).content).toEqual([text(marker("mcp__demo__silent"))]);
 	});
@@ -52,7 +56,7 @@ describe("Claude Code's empty tool-result marker", () => {
 	it("adds the marker, preserves structured content, and leaves a pending reminder out of the stored result", async () => {
 		const structuredContent = { exit_code: 0, output: "" };
 		const result = await resultFor([], "bash", true, structuredContent);
-		// The reminder rides the next request's tail instead (lib/reminders.ts).
+		// The reminder rides the next request's tail instead (lib/request/reminders.ts).
 		expect(result.content).toEqual([text(marker("Bash"))]);
 		expect(result.structuredContent).toBe(structuredContent);
 		expect(result.isError).toBe(false);
@@ -60,12 +64,12 @@ describe("Claude Code's empty tool-result marker", () => {
 });
 
 describe("completed subagents without a reply", () => {
-	it("returns Claude Code's completed-empty text without declaring a task failure", () => {
+	it("returns the profile's completed-empty text without declaring a task failure", () => {
 		const tracker = new SessionTurnTracker();
 		tracker.beginTurn();
 		tracker.process({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } });
 		tracker.process({ type: "agent_settled" });
-		expect(tracker.turnOutcome().output).toBe("(Subagent completed but returned no output.)");
+		expect(tracker.turnOutcome().output).toBe(subagentResultText().noOutput);
 		expect(tracker.turnOutcome().failed).toBeUndefined();
 	});
 });
@@ -90,7 +94,7 @@ describe("built-in empty results", () => {
 			const change = await handler(event, ctx);
 			if (change) event = { ...event, ...change };
 		}
-		expect(event.content[0].text).toBe("<system-reminder>Warning: the file exists but the contents are empty.</system-reminder>");
+		expect(event.content[0].text).toBe(fileTrackerText.toolResult({ kind: "empty" }));
 		expect(event.content).toHaveLength(1);
 	});
 
@@ -116,12 +120,12 @@ describe("built-in empty results", () => {
 		expect(event.content).toEqual([text(expected)]);
 	});
 
-	it("uses Claude Code's Glob no-files text for pi find", async () => {
+	it("uses the profile's no-files text for pi find", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "empty-result-find-"));
 		dirs.push(dir);
 		const fake = createFakePi();
 		toolStyleExtension(fake.pi as never);
 		const result = await fake.tools.get("find")!.execute("f1", { pattern: "*.absent" }, undefined, undefined, createFakeCtx({ cwd: dir })) as any;
-		expect((await resultFor(result.content, "find")).content).toEqual([text("No files found")]);
+		expect((await resultFor(result.content, "find")).content).toEqual([text(toolResultsText.noFilesFound)]);
 	});
 });

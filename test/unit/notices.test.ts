@@ -3,12 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NOTICE_CHANNEL, queueNotice } from "../../extensions/lib/notices.ts";
-import newerModelExtension from "../../extensions/newer-model/index.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import { NOTICE_CHANNEL, queueNotice } from "../../extensions/lib/notify/notices.ts";
+import newerModelExtension from "../../extensions/ui/newer-model/index.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
 
 const uiCtx = (hasUI = true) => {
 	const notify = vi.fn();
@@ -89,9 +90,8 @@ describe("lifecycle notices across extensions", () => {
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "onecode-notices-"));
 		mkdirSync(join(home, "project"));
-		mkdirSync(join(home, ".onecode"));
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
+		mkdirSync(productStateDir());
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		pinCatalog([
 			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },

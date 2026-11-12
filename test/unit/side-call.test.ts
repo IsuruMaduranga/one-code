@@ -6,7 +6,7 @@ import {
 	toolStubs,
 	trimToTurnBoundary,
 	withoutSystemMessages,
-} from "../../extensions/lib/side-call.ts";
+} from "../../extensions/lib/side-calls/side-call.ts";
 
 describe("toolStubs", () => {
 	it("builds a name-only, empty-schema stub per tool with the given reason", () => {
@@ -22,9 +22,9 @@ describe("toolStubs", () => {
 		}
 	});
 
-	it("uses a generic default reason", () => {
-		const [stub] = toolStubs(["Read"]) as unknown as { description: string }[];
-		expect(stub.description).toBe("Unavailable for this call; answer in text.");
+	it("describes each stub with the caller's reason", () => {
+		const [stub] = toolStubs(["Read"], "Not here.") as unknown as { description: string }[];
+		expect(stub.description).toBe("Not here.");
 	});
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter, trackDockRows } from "../../extensions/lib/dock-rows.ts";
+import { DOCK_ROWS_CHANNEL, DockRows, dockRowsReporter, trackDockRows } from "../../extensions/lib/ui/dock-rows.ts";
 
 describe("dock rows", () => {
 	it("reports a strip's rows only on a change, and sums the other strips", () => {

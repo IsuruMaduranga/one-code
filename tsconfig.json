@@ -10,6 +10,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "types": [
       "node"
     ],
@@ -21,7 +22,11 @@
   },
   "include": [
     "extensions/**/*.ts",
+    "profile/**/*.ts",
     "test/**/*.ts",
     "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "test/fixtures/profile/**"
   ]
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LEDGER_VERSION, makeRecord, readRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
+import { LEDGER_VERSION, makeRecord, readRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
 
 const custom = (customType: string, data: unknown, id = "e1") => ({ type: "custom", id, parentId: null, customType, data });
 

@@ -1,0 +1,45 @@
+/**
+ * One Code's `/doctor fix` prompt (profile/text/doctor/): the golden snapshot does
+ * not run /doctor (its report names the machine's tool versions), so the
+ * prompt's moving parts, and which files it lets the model write, are checked
+ * here. How the base sends the prompt: test/unit/doctor-wiring.test.ts.
+ */
+import { describe, expect, it } from "vitest";
+import { doctorText } from "../text/doctor/index.ts";
+import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
+
+const doctor = doctorText(ALL_LIVE);
+
+const input: FixPromptInput = {
+	reportText: "REPORT BODY",
+	install: "app",
+	productVersion: "9.9.9",
+	sessionsDir: "/agent/sessions",
+	sessionDir: "/agent/sessions/--proj--",
+	productSettingsPath: "/home/u/.onecode/settings.json",
+	productProjectSettingsPath: "/home/u/.onecode/projects/x/settings.json",
+	decisionLogEnabled: false,
+	modeCycleKey: "shift+tab",
+	upgradeCommands: { npm: "npm i -g pkg", brew: "brew upgrade pkg", "pi-package": "pi update" },
+};
+
+describe("One Code's /doctor fix prompt", () => {
+	it("attaches the report and names the install's upgrade commands and the mode key", () => {
+		const text = doctor.fixPrompt(input);
+		expect(text.startsWith("# One Code Doctor")).toBe(true);
+		expect(text).toContain("REPORT BODY");
+		expect(text).toContain("`npm i -g pkg` (or `brew upgrade pkg` for a Homebrew install)");
+		expect(text).toContain("change the mode with shift+tab");
+		expect(doctor.fixPrompt({ ...input, install: "pi-package" })).toContain("`pi update`");
+	});
+
+	it("says One Code never writes Claude Code's files", () => {
+		expect(doctor.fixPrompt(input)).toContain("One Code never writes Claude Code's files");
+	});
+
+	it("maps Claude Code's paths to One Code's own only in independent mode", () => {
+		expect(doctor.fixPrompt(input)).not.toContain("This session runs in independent mode");
+		expect(doctor.fixPrompt({ ...input, sourcesOff: true })).toContain("This session runs in independent mode");
+	});
+});

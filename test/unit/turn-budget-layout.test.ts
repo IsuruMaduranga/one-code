@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { wrapReminder } from "../../extensions/lib/reminders.ts";
-import { CLEAR_AT_NUDGE, resolveCountdowns, withTurnBudgetMessages } from "../../extensions/lib/turn-budget-layout.ts";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { resolveCountdowns, withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
+import { CLEAR_AT_NUDGE, totalTokensBlock } from "../../extensions/lib/context/budget.ts";
 
-const BUDGET = "<total_tokens>15000000 tokens left</total_tokens>";
-const left = (n: number) => `<total_tokens>${n} tokens left</total_tokens>`;
+/** The budget line for `n` tokens as context-budget writes it, in the profile's words. */
+const left = (n: number) => totalTokensBlock(n);
+const BUDGET = left(15_000_000);
 const mark = { type: "ephemeral" };
 
 describe("resolveCountdowns", () => {

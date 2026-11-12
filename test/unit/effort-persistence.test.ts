@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import effortExtension from "../../extensions/effort/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 let home: string;
 let agentDir: string;
@@ -16,11 +17,10 @@ const key = `${model.provider}/${model.id}`;
 
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "effort-persistence-"));
-	agentDir = join(home, ".onecode", "agent");
+	agentDir = join(home, brand.stateDir, "agent");
 	settingsPath = join(agentDir, "settings.json");
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 });
 afterEach(() => {
 	vi.unstubAllEnvs();

@@ -10,8 +10,9 @@ import { createAssistantMessageEventStream, type AssistantMessage } from "@earen
 import { type AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/agents/child-extensions.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-corruption-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -78,7 +79,7 @@ describe("OpenRouter corruption guard in a child session", () => {
 		expect(entry).toMatch(/tool-call-corruption[\\/]child\.ts$/);
 		expect(existsSync(entry!)).toBe(true);
 		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).at(-2));
-		expect(names.indexOf("tool-call-corruption")).toBe(names.indexOf("claude-context") + 1);
+		expect(names.indexOf("tool-call-corruption")).toBe(names.indexOf("instructions") + 1);
 	});
 
 	it("blocks the damaged call and stops only the child, without writing to the parent's terminal", async () => {
@@ -94,7 +95,9 @@ describe("OpenRouter corruption guard in a child session", () => {
 			expect(execute).not.toHaveBeenCalled();
 			expect(requests).toHaveBeenCalledTimes(1);
 			const result = session.messages.find((message) => message.role === "toolResult");
-			expect(JSON.stringify(result)).toContain("OpenRouter tool-call corruption");
+			const words = toolCallCorruptionText;
+			const text = (result as { content: Array<{ text?: string }> }).content.map((part) => part.text ?? "").join("");
+			expect(text).toBe(words.corruptBlock({ reason: words.damage({ kind: "unbalancedQuote" }), repeat: false }));
 			// Stopped after the blocked result: no second request, nothing after it.
 			expect(session.messages.at(-1)).toBe(result);
 			// No notice and no provider lookup: a child has no terminal of its own.

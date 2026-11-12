@@ -1,5 +1,5 @@
 /**
- * lsp/index.ts wiring (T15c): the mid-session crash/respawn path in
+ * tools/lsp/index.ts wiring (T15c): the mid-session crash/respawn path in
  * `clientFor` (up to MAX_RESPAWNS, then give up and report once), and
  * `forceDeltaScan` — why an edit's diagnostics resurface even when the
  * server's publish tally didn't move.
@@ -13,11 +13,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
-import { pathToUri } from "../../extensions/lsp/client.ts";
-import lspExtension from "../../extensions/lsp/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import type { LspDiagnostic } from "../../extensions/tools/lsp/format.ts";
+import { pathToUri } from "../../extensions/tools/lsp/client.ts";
+import lspExtension from "../../extensions/tools/lsp/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
 const state = vi.hoisted(() => ({
 	instances: [] as FakeLspClientInstance[],
@@ -48,8 +49,8 @@ interface FakeLspClientInstance {
 	error: string | undefined;
 }
 
-vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
+vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/tools/lsp/client.ts")>();
 	class FakeLspClient implements FakeLspClientInstance {
 		isRunningValue = true;
 		publishCountValue = 0;
@@ -136,7 +137,7 @@ describe("lsp wiring", () => {
 		await fake.fireOne("tool_result", editEvent(file), ctx);
 		expect(state.instances).toHaveLength(3);
 		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify.mock.calls[0][0]).toContain("gave up after 2 restarts");
+		expect(notify.mock.calls[0][0]).toContain(lspResultText.failure({ kind: "gaveUp", restarts: 2 }));
 
 		// A further edit must not spam the warning a second time (warned-once).
 		await fake.fireOne("tool_result", editEvent(file), ctx);
@@ -162,10 +163,11 @@ describe("lsp wiring", () => {
 		// is the initial publish reaching the model.
 		await fake.fireOne("tool_result", { toolName: "read" as const, input: {}, isError: false, content: [], toolCallId: "c2" }, ctx);
 		expect(delivered).toHaveLength(1);
-		expect(delivered[0].text).toContain("unresolved name x");
-		// Claude Code's shape: a bare <new-diagnostics> block inside the tool
+		// Claude Code's shape: the bare new-diagnostics block inside the tool
 		// result, no <system-reminder> frame, never a message of its own.
-		expect(delivered[0].text?.startsWith("<new-diagnostics>")).toBe(true);
+		const words = lspResultText.newDiagnostics;
+		const block = words.block(words.section({ path: "b.py", entries: [words.entry({ line: 1, column: 1, severity: "error", message: "unresolved name x" })] }));
+		expect(delivered[0].text).toBe(block);
 		expect(delivered[0]).toMatchObject({ placement: "last-append", raw: true });
 		expect(fake.sentMessages).toHaveLength(0);
 
@@ -180,7 +182,7 @@ describe("lsp wiring", () => {
 		// server's publish tally never moved from 1.
 		await fake.fireOne("tool_result", editEvent(file), ctx);
 		expect(delivered).toHaveLength(1);
-		expect(delivered[0].text).toContain("unresolved name x");
+		expect(delivered[0].text).toBe(block);
 	});
 
 	it("delivers diagnostics that arrived while idle on the next run's start, whoever opened it", async () => {

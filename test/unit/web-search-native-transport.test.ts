@@ -2,9 +2,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import webExtension from "../../extensions/web/index.ts";
-import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/web/native-call.ts";
+import webExtension from "../../extensions/tools/web/index.ts";
+import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/tools/web/native-call.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { fellBack } from "./helpers/web-search-fallback.ts";
 
 let dir: string;
 const model = { provider: "google", api: "google-generative-ai", id: "gemini-test", baseUrl: "https://google.example.test/v1", maxTokens: 8192 };
@@ -32,6 +33,8 @@ async function execute(selectedModel = model): Promise<Result> {
 	})) as Result;
 }
 
+/** Brave's one result, as `braveReply` serves it. */
+const braveResults = [{ title: "Brave result", url: "https://example.com/source", snippet: "Fresh result" }];
 const braveReply = () => new Response(JSON.stringify({ web: { results: [{ title: "Brave result", url: "https://example.com/source", description: "Fresh result" }] } }), { headers: { "content-type": "application/json" } });
 
 describe("web_search through the real pi-web-search transport", () => {
@@ -98,7 +101,7 @@ describe("web_search through the real pi-web-search transport", () => {
 		vi.stubGlobal("fetch", fetch);
 		const result = await execute();
 		expect(result.details.backend).toBe("brave");
-		expect(result.content[0].text).toContain("without performing a web search");
+		expect(result.content[0].text).toBe(fellBack({ kind: "noSearch" }, braveResults));
 		expect(result.content[0].text).not.toContain("No answer available.");
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
@@ -189,7 +192,7 @@ describe("web_search through the real pi-web-search transport", () => {
 		expect(nativeSignal?.aborted).toBe(true);
 		const result = await pending;
 		expect(result.details.backend).toBe("brave");
-		expect(result.content[0].text).toContain("within 120 seconds");
+		expect(result.content[0].text).toBe(fellBack({ kind: "timedOut", seconds: 120 }, braveResults));
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
 });

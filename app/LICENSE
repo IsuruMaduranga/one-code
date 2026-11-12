@@ -44,9 +44,9 @@ it runs.
 
 This package bundles or adapts work from other MIT-licensed projects:
 
-- The language-server command table in `extensions/lsp/servers.ts` follows the
+- The language-server command table in `extensions/tools/lsp/servers.ts` follows the
   one in `pi-lsp-extension` (MIT).
-- The subagent spawn approach in `extensions/subagents/` is modeled on the
+- The subagent spawn approach in `extensions/agents/subagents/` is modeled on the
   official subagent example in the pi repository (MIT).
 - `web_search` is provided by the `pi-web-search` package (MIT), a runtime
   dependency rather than vendored code.

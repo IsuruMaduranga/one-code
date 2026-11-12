@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contentHash, encodeRequest, listKey, payloadHead, recordedRequest } from "../../extensions/lib/ledger/wire.ts";
+import { contentHash, encodeRequest, listKey, payloadHead, recordedRequest } from "../../extensions/lib/request/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "api-key" };
 const user = (text: string, marked = false) => ({ role: "user", content: [{ type: "text", text, ...(marked ? { cache_control: { type: "ephemeral" } } : {}) }] });

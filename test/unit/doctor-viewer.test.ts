@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, VIEWER_CHROME_ROWS, visibleBodyRows } from "../../extensions/doctor/viewer.ts";
+import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, VIEWER_CHROME_ROWS, visibleBodyRows } from "../../extensions/commands/doctor/viewer.ts";
 
 const paint = (_c: string, t: string) => t;
 const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);

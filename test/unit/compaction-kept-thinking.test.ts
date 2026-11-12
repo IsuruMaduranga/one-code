@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withoutKeptThinking, withoutThinking } from "../../extensions/compaction/kept-thinking.ts";
+import { withoutKeptThinking, withoutThinking } from "../../extensions/lib/request/kept-thinking.ts";
 
 const thinking = { type: "thinking", thinking: "plan", thinkingSignature: "sig" };
 const redacted = { type: "thinking", thinking: "", thinkingSignature: "opaque", redacted: true };
@@ -11,7 +11,7 @@ const kept = { role: "assistant", content: [thinking, text("done"), call], times
 const keptResult = { role: "toolResult", content: [text("file")], timestamp: 950 };
 const later = { role: "assistant", content: [thinking, text("next")], timestamp: 1_200 };
 const conversation = [summary, kept, keptResult, { role: "user", content: "go on", timestamp: 1_100 }, later];
-/** The compaction entry's time, as `lib/compaction-boundary.ts` reads it off the branch. */
+/** The compaction entry's time, as `lib/request/compaction-boundary.ts` reads it off the branch. */
 const COMPACTED = 1_000;
 
 describe("withoutKeptThinking", () => {
@@ -54,7 +54,7 @@ describe("kept-thinking's place in the manifest", () => {
 	it("runs its context hook before every extension that captures the request's messages", async () => {
 		const { readFileSync } = await import("node:fs");
 		const manifest: string[] = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).pi.extensions;
-		const at = (name: string) => manifest.indexOf(`extensions/${name}/index.ts`);
+		const at = (name: string) => manifest.findIndex((entry) => entry.endsWith(`/${name}/index.ts`));
 		expect(at("kept-thinking")).toBeGreaterThanOrEqual(0);
 		for (const later of ["skill", "background", "subagents", "recap", "btw", "compaction"]) {
 			expect(at("kept-thinking"), later).toBeLessThan(at(later));
@@ -64,7 +64,7 @@ describe("kept-thinking's place in the manifest", () => {
 
 describe("latestCompaction", () => {
 	it("finds the newest compaction, where its kept tail starts, and its time", async () => {
-		const { inContextEntries, latestCompaction } = await import("../../extensions/lib/compaction-boundary.ts");
+		const { inContextEntries, latestCompaction } = await import("../../extensions/lib/request/compaction-boundary.ts");
 		const branch = [
 			{ id: "a", type: "message" },
 			{ id: "c0", type: "compaction", firstKeptEntryId: "a", timestamp: "2026-10-01T00:00:00.000Z" },

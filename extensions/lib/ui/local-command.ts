@@ -1,0 +1,162 @@
+/**
+ * Local-command breadcrumbs — what Claude Code shows the model when the user
+ * runs a slash command that the harness handles locally (`/clear`, `/model`, a
+ * panel command). Captured from CC 2.1.278 (`captures/sonnet.json`, and this
+ * repo's own sessions after a `/clear`; findings §14, 2026-09-19): three
+ * synthetic user messages that reach the model as consecutive bare text blocks
+ * of the next user message, after the reminder stack and before the user's own
+ * text —
+ *
+ *   <local-command-caveat>The command below was run directly in …</local-command-caveat>\n
+ *   <command-name>/model</command-name>\n
+ *               <command-message>model</command-message>\n
+ *               <command-args></command-args>\n
+ *   <local-command-stdout>Set model to `Sonnet 5` …</local-command-stdout>\n
+ *
+ * (twelve-space indent on the second and third command lines, verbatim from
+ * CC's `formatCommandInputTags`; stdout XML-escaped like CC's `escapeXml`, `&
+ * < >` only). `/clear` carries an EMPTY stdout block and opens the new
+ * conversation. The caveat tells the model the command was the user's, not a
+ * request to it, kept as context.
+ *
+ * One Code emits these through the reminder queue's `user-prepend` placement
+ * (`lib/request/reminders.ts`): pi dispatches an extension command BEFORE its `input`
+ * event fires and handles its own built-ins (`/model`, `/name`, …) before
+ * either, so there is no single interception point — every One Code local
+ * command is registered through `registerLocalCommand`, which announces before
+ * the handler runs (or, with `reportsResult`, after it, carrying the handler's
+ * returned text as the stdout, as CC's `onDone(result)` does), and `/model` is
+ * announced from the `model_select` event by the extension that persists the
+ * choice. pi built-ins we cannot see
+ * (`/compact`, `/settings`, …) stay silent. The blocks are persisted when
+ * announced, as pending entries the next prompt's request carries and records
+ * (lib/request/reminders.ts `user-prepend`), so a `/reload` or a resume before that
+ * prompt keeps them, as CC's transcript does.
+ */
+
+import { announceArgumentHint, type HintEmitter, withoutExactMatch } from "./argument-hints.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../request/reminders.ts";
+import { notificationWords } from "../notify/notification-words.ts";
+import { escapeXml } from "../core/xml.ts";
+
+/** The slice of pi's ExtensionAPI the announcer needs (its event bus). */
+export interface ReminderEmitter {
+	events: { emit(channel: string, data: unknown): unknown };
+}
+
+/**
+ * How each breadcrumb block begins — what a first message that is NOT the
+ * user's topic starts with (the session-title extension skips these, as CC's
+ * REPL does before naming a session).
+ */
+export const LOCAL_COMMAND_TAG_PREFIXES = ["<local-command-caveat>", "<command-name>", "<command-message>", "<local-command-stdout>"] as const;
+
+/** Claude Code's caveat frame around the profile's words. */
+export function localCommandCaveat(): string {
+	return `<local-command-caveat>${notificationWords().localCommandCaveat}</local-command-caveat>\n`;
+}
+
+export interface LocalCommand {
+	/** Command name without the slash (`clear`, `model`). */
+	name: string;
+	/** The argument text the user typed after the name; "" when none. */
+	args?: string;
+	/** The command's printed result; "" (the default) is what `/clear` shows. */
+	stdout?: string;
+	/**
+	 * Keys the breadcrumb's pending entries (`<key>:caveat`, `<key>:command`,
+	 * `<key>:stdout`), so a later announcement under the same key replaces an
+	 * undelivered one instead of joining it.
+	 */
+	key?: string;
+}
+
+/** CC's `formatCommandInputTags` — the command breadcrumb, indentation included. */
+export function commandInputBlock(name: string, args = ""): string {
+	return `<command-name>/${name}</command-name>\n            <command-message>${name}</command-message>\n            <command-args>${args}</command-args>\n`;
+}
+
+/** CC's `<local-command-stdout>` message; the content is XML-escaped. */
+export function commandStdoutBlock(stdout = ""): string {
+	return `<local-command-stdout>${escapeXml(stdout)}</local-command-stdout>\n`;
+}
+
+/** The pending-entry key suffix of each block, in `localCommandBlocks` order. */
+const BLOCK_KEYS = ["caveat", "command", "stdout"] as const;
+
+/** The three bare text blocks a local command leaves for the model, in CC's order. */
+export function localCommandBlocks(command: LocalCommand): string[] {
+	return [localCommandCaveat(), commandInputBlock(command.name, (command.args ?? "").trim()), commandStdoutBlock(command.stdout ?? "")];
+}
+
+/**
+ * Tell the model a local command ran. Call it from the command's handler; a
+ * command that replaces the session (`/clear`) announces from the new
+ * session's `session_start` instead, so the breadcrumb opens the new
+ * conversation exactly as in CC.
+ */
+export function announceLocalCommand(pi: ReminderEmitter, command: LocalCommand): void {
+	localCommandBlocks(command).forEach((text, index) => {
+		// The caveat heads a RUN of commands: a second command before the next
+		// prompt joins the first caveat instead of repeating it.
+		const payload: ReminderPayload = {
+			text,
+			placement: "user-prepend",
+			raw: true,
+			...(index === 0 ? { once: true } : {}),
+			...(command.key ? { key: `${command.key}:${BLOCK_KEYS[index]}` } : {}),
+		};
+		pi.events.emit(REMINDER_CHANNEL, payload);
+	});
+}
+
+type CommandOptions = { handler: (args: string, ctx: any) => Promise<void> | void } & Record<string, unknown>;
+
+/**
+ * What a local command passes: pi's options, plus `reportsResult` when its
+ * handler returns the stdout (a returned string is never silently dropped).
+ */
+type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & { argumentHint?: string } & (
+		| { reportsResult: true; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<string | void> | string | void }
+		| { reportsResult?: false; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<void> | void }
+	);
+
+/**
+ * `pi.registerCommand` for a One Code local command: the breadcrumb is
+ * announced before the handler runs, so no command can forget it. With
+ * `reportsResult`, it is announced once the handler settles instead, its
+ * stdout the string the handler returned (CC's `onDone(result)`; "" for none
+ * or a throw). Only a command that never starts a turn of its own may opt in:
+ * a breadcrumb queued after `sendUserMessage` would miss that message. `/clear`
+ * is the one exception — it announces from the NEW session's `session_start`
+ * (see commands/clear/index.ts) and registers plainly. `argumentHint` is the prompt's
+ * dim placeholder for the command's argument (lib/ui/argument-hints.ts). Its
+ * completions leave out an exact match, so a fully typed argument runs on the
+ * first Enter (`withoutExactMatch`).
+ */
+export function registerLocalCommand<O extends CommandOptions>(
+	pi: ReminderEmitter & HintEmitter & { registerCommand(name: string, options: O): void },
+	name: string,
+	options: LocalCommandOptions<O>,
+): void {
+	const { argumentHint, reportsResult, ...rest } = options;
+	if (argumentHint) announceArgumentHint(pi, name, argumentHint);
+	const complete = (rest as { getArgumentCompletions?: Parameters<typeof withoutExactMatch>[0] }).getArgumentCompletions;
+	pi.registerCommand(name, {
+		...(rest as unknown as O),
+		...(complete ? { getArgumentCompletions: withoutExactMatch(complete) } : {}),
+		handler: async (args: string, ctx: Parameters<O["handler"]>[1]) => {
+			if (!reportsResult) {
+				announceLocalCommand(pi, { name, args });
+				await options.handler(args, ctx);
+				return;
+			}
+			let stdout = "";
+			try {
+				stdout = (await options.handler(args, ctx)) ?? "";
+			} finally {
+				announceLocalCommand(pi, { name, args, stdout });
+			}
+		},
+	});
+}

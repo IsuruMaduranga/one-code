@@ -1,12 +1,13 @@
 /**
- * Types for the plain-JS update-check module (extensions/lib/update-check.mjs),
+ * Types for the plain-JS update-check module (extensions/lib/app/update-check.mjs),
  * shared by the bundled app and the doctor; tsc has no allowJs, so the
  * extension code and the unit tests see it through this declaration.
  */
-declare module "*/lib/update-check.mjs" {
+declare module "*/update-check.mjs" {
 	export const APP_PACKAGE: string;
 	export const EXTENSION_PACKAGE: string;
-	export const HOMEBREW_FORMULA: string;
+	export const HOMEBREW_FORMULA: string | undefined;
+	export const NO_UPDATE_CHECK_VAR: string;
 	export const UPGRADE_COMMANDS: { npm: string; brew: string; "pi-package": string };
 	export function upgradeCommandFor(install: "app" | "pi-package", env?: Record<string, string | undefined>): string;
 	export function registryPackumentUrl(name: string): string;
@@ -28,10 +29,12 @@ declare module "*/lib/update-check.mjs" {
 	}): (pi: unknown) => void;
 }
 
-/** Types for the plain-JS launcher-environment module (extensions/lib/app-launch.mjs). */
+/** Types for the plain-JS launcher-environment module (extensions/lib/app/app-launch.mjs). */
 declare module "*/app-launch.mjs" {
 	export const APP_AGENT_DIR_VAR: string;
 	export const LAUNCHER_ENV_VAR: string;
+	export const INSTALL_METHOD_VAR: string;
+	export const VERSION_VAR: string;
 	export const LAUNCHER_VARS: readonly string[];
 	export function appAgentDir(env?: Record<string, string | undefined>, home?: string): string;
 	export function installMethodFor(binRealPath: string | undefined): "brew" | "npm";
@@ -42,7 +45,7 @@ declare module "*/app-launch.mjs" {
 	export function childProcessEnv(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): NodeJS.ProcessEnv;
 }
 
-/** Types for the plain-JS replaced-built-ins module (extensions/lib/replaced-builtins.mjs). */
+/** Types for the plain-JS replaced-built-ins module (extensions/lib/app/replaced-builtins.mjs). */
 declare module "*/replaced-builtins.mjs" {
 	export interface ReplacedBuiltin {
 		name: string;
@@ -68,7 +71,7 @@ declare module "*/replaced-builtins.mjs" {
 	export function turnOffPrompt(left: readonly BuiltinLeftOn[], settingsPath: string, configCommand?: string): string;
 }
 
-/** Types for the plain-JS compaction keep-window module (extensions/lib/compaction-keep.mjs). */
+/** Types for the plain-JS compaction keep-window module (extensions/lib/app/compaction-keep.mjs). */
 declare module "*/compaction-keep.mjs" {
 	export interface CompactionKeepView {
 		value: number;
@@ -83,4 +86,74 @@ declare module "*/compaction-keep.mjs" {
 	export const KEEP_NO: string;
 	export function keepWindowPrompt(settingsPath: string): string;
 	export function keepWindowFix(settingsPath: string, model?: string): string;
+}
+
+/** Types for the plain-JS brand module (extensions/lib/profile/brand.mjs); `profile/brand.json` must satisfy `Brand` (brand.test.ts). */
+declare module "*/brand.mjs" {
+	export interface Brand {
+		/** Display name, in UI text: "One Code". */
+		readonly name: string;
+		/** Prefix of internal event and session-entry ids (`<idPrefix>:<name>`); fixed once, old sessions record it. */
+		readonly idPrefix: string;
+		/** The CLI command, settings labels and the app's own names: "onecode". */
+		readonly bin: string;
+		/** Prefix of the product's environment variables (`<envPrefix>_<suffix>`). */
+		readonly envPrefix: string;
+		/** The state directory's name under the home directory, and the project config folder's name: ".onecode". One lower-case folder name: path checks compare case-folded paths against it. */
+		readonly stateDir: string;
+		/** The product's own instruction file: "ONECODE.md". */
+		readonly productFile: string;
+		/** The theme seeded on first run. */
+		readonly theme: string;
+		/** The product's repository web URL (`https://github.com/<owner>/<repo>`): user agents, doc links under `/blob/master/`, and package.json's repository, homepage and bugs fields. */
+		readonly homepage: string;
+		/** The product's user guide, a folder inside the package, when it is not `profile/guide`: "docs/guide". Listed in package.json `files` (scripts/apply-brand.mjs). */
+		readonly guideDir?: string;
+		/** Spinner verbs the product adds to the base's list. */
+		readonly spinnerVerbs?: readonly string[];
+		/** The banner's tagline. */
+		readonly subtitle: string;
+		/** The banner's wordmark rows. */
+		readonly wordmark: readonly string[];
+		readonly packages: {
+			/** The bundled app's npm package. */
+			readonly app: string;
+			/** The extension package the app depends on. */
+			readonly extension: string;
+			/** The Homebrew formula, when the product ships one. */
+			readonly homebrewFormula?: string;
+		};
+		/** Each package's npm listing, stamped into its package.json (scripts/apply-brand.mjs). */
+		readonly packageInfo: {
+			readonly app: PackageInfo;
+			readonly extension: PackageInfo;
+		};
+	}
+	export interface PackageInfo {
+		readonly description: string;
+		readonly keywords: readonly string[];
+	}
+	export function checkBrand(value: unknown): Brand;
+	export const brand: Brand;
+	/** The product's user guide, relative to the package root: the brand's `guideDir`, else `profile/guide`. */
+	export const guideDir: string;
+	export function brandedId(name: string): string;
+	export function envName(suffix: string): string;
+	export function productStateDir(env?: Record<string, string | undefined>, home?: string): string;
+	export const stateDirPattern: string;
+}
+
+/** Types for the brand stamp (scripts/apply-brand.mjs). */
+declare module "*/apply-brand.mjs" {
+	/** The npm listing fields the stamp writes into both packages. */
+	export interface Listing {
+		name: string;
+		description: string;
+		keywords: string[];
+		repository: { type: "git"; url: string; directory?: string };
+		homepage: string;
+		bugs: { url: string };
+	}
+	export function stampExtension<T extends Record<string, unknown>>(pkg: T): Omit<T, keyof Listing> & Listing;
+	export function stampApp(pkg: Record<string, unknown>): Record<string, unknown> & Listing;
 }

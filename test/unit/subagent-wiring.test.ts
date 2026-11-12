@@ -1,25 +1,29 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
-import backgroundExtension from "../../extensions/background/index.ts";
-import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
-import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agent-view.ts";
-import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
-import * as defaults from "../../extensions/subagents/default-model.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
-import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import type { AgentRunRecord } from "../../extensions/subagents/runs.ts";
-import * as worktrees from "../../extensions/subagents/worktree.ts";
-import type { Worktree } from "../../extensions/subagents/worktree.ts";
-import { emptyUsage } from "../../extensions/subagents/usage.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
+import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
+import { DEFAULT_COALESCE_MS, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
+import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
+import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import * as defaults from "../../extensions/lib/models/subagent-default.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
+import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import type { AgentRunRecord } from "../../extensions/agents/subagents/runs.ts";
+import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
+import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
+import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -87,8 +91,18 @@ describe("subagent model command", () => {
 		const h = await mount();
 		await h.fake.commands.get("subagent")!.handler("openai/gpt-5-flash-text", h.ctx);
 		expect(defaults.persistSubagentModel).not.toHaveBeenCalled();
-		expect(h.notices()).toContain("is text-only");
-		expect(h.notices()).toContain("openai/gpt-5-main ($2/M in) — the default");
+		const words = subagentModelWordsInForce();
+		expect(h.notices()).toContain(words.notice({ kind: "textOnlyCall", model: "openai/gpt-5-flash-text" }));
+		// The menu offers the image-capable models only.
+		expect(h.notices()).toContain(
+			words.menu({
+				lines: [
+					words.menuLine({ model: "openai/gpt-5-main", price: 2, label: "sessionDefault" }),
+					words.menuLine({ model: "openai/gpt-5-flash-vision", price: 0.7, label: "cheaper" }),
+				],
+				notes: [],
+			}),
+		);
 		expect(h.notices()).not.toContain("- openai/gpt-5-flash-text");
 	});
 
@@ -231,7 +245,7 @@ describe("the main-session call that started a run's turn", () => {
 		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async (call: { toolName: string; parentToolCallId?: string }) => { asked.push(call); return undefined; } });
 		await h.fake.tools.get("Agent")!.execute("agent-call", { subagent_type: "general-purpose", task: "Delegate" }, undefined, undefined, h.ctx);
 		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
-		await nested!.execute("nested-call", { subagent_type: "explore", task: "Look" }, undefined, undefined, h.ctx as never);
+		await nested!.execute("nested-call", { subagent_type: "general-purpose", task: "Look" }, undefined, undefined, h.ctx as never);
 		expect(asked.at(-1)).toMatchObject({ toolName: "Agent", parentToolCallId: "agent-call" });
 		expect(runtime.runner.run.mock.calls.at(-1)?.[0].mainToolCallId?.()).toBe("agent-call");
 	});
@@ -364,8 +378,10 @@ describe("subagent runtime build failure", () => {
 		const h = await mount([record]);
 		const first = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(first.isError).toBe(true);
-		expect(first.content[0].text).toContain("could not start the subagent runtime: models.json: Unexpected token");
-		expect(await statusOf(h, "worker")).toBe("finished (resume with SendMessage)");
+		expect(first.content[0].text).toBe(
+			subagentResultText().refused({ kind: "couldNotResume", name: "worker", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }),
+		);
+		expect(await statusOf(h, "worker")).toBe("finished");
 		const second = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { isError?: boolean };
 		expect(second.isError).toBeUndefined();
 		expect(run).toHaveBeenCalledOnce();
@@ -376,7 +392,7 @@ describe("subagent runtime build failure", () => {
 		const h = await mount();
 		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("could not start the subagent runtime");
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "couldNotStart", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
 });
@@ -411,9 +427,10 @@ describe("subagent pending-claim backstop", () => {
 		const h = await mount([], cheap);
 		const reminders = pendingReminders(h);
 		await h.fake.fire("agent_start", {}, h.ctx);
-		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { details: { agentRuns: AgentRunRecord[] } };
 		await h.fake.fire("agent_end", {}, h.ctx);
-		expect(reminders.join("")).toContain("still running");
+		const pending = subagentResultText().pendingClaim({ runs: [{ name: "general-purpose-1", taskId: spawned.details.agentRuns[0].taskId }] });
+		expect(reminders).toEqual([pending]);
 
 		reminders.length = 0;
 		await h.fake.fire("agent_start", {}, h.ctx);
@@ -421,7 +438,7 @@ describe("subagent pending-claim backstop", () => {
 		// Finished, but nobody answers the review yet, so the report has not gone out.
 		runtime.finish([{ toolName: "bash", subject: "ls" }]);
 		await h.fake.fire("agent_end", {}, h.ctx);
-		expect(reminders.join("")).toContain("still running");
+		expect(reminders).toEqual([pending]);
 	});
 });
 
@@ -471,7 +488,9 @@ describe("subagent resumed turns", () => {
 		expect(h.messages()).not.toContain("Agent output"); // held until the verdict
 		reviews[0].onReview!({ kind: "blocked", reason: "sent .env off the machine" });
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
-		expect(h.messages()).toContain("SECURITY WARNING: auto mode blocked this subagent's report. Reason: sent .env off the machine");
+		// messages() holds each message's content as JSON, so the warning is matched in that spelling.
+		const warning = notificationWords().handBackWarning({ kind: "blocked", reason: "sent .env off the machine", clipped: false });
+		expect(h.messages()).toContain(JSON.stringify(warning).slice(1, -1));
 	});
 
 	it("blocks in a one-shot session and returns the reply inline, reviewed at the tool result (M3)", async () => {
@@ -488,7 +507,7 @@ describe("subagent resumed turns", () => {
 		expect(settled).toBe(false); // waits for the turn, never detaches it
 		finish({ ...outcome(), output: "The follow-up answer", actions: risky });
 		const result = await pending;
-		expect(result.content[0].text).toContain("This is a one-shot session, so the agent's turn ran to completion instead of in the background.");
+		expect(result.content[0].text).toContain(subagentResultText().inlineReply({ name: "worker", note: oneShotNote("agentTurn") }));
 		expect(result.content[0].text).toContain("The follow-up answer");
 		expect(result.content[0].text).not.toContain("task notification");
 		expect(result.isError).toBe(false);
@@ -534,7 +553,7 @@ describe("fork runs in a one-shot session", () => {
 
 	// A fork's first request extends the parent's recorded one, tools block
 	// included; the ledger keeps a recorded declaration only while the live
-	// schema matches (lib/ledger/wire.ts mergeDeclarations), so a fork's spawn
+	// schema matches (lib/request/ledger/wire.ts mergeDeclarations), so a fork's spawn
 	// tool with its own schema replaced the parent's Agent mid-array and the fork
 	// missed the parent's cache from there on.
 	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
@@ -551,16 +570,15 @@ describe("fork runs in a one-shot session", () => {
 		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
 		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
-		const call = (params: Record<string, unknown>) => nested.execute("nested-call", { subagent_type: "explore", task: "Look", ...params }, undefined, undefined, h.ctx);
+		const call = (params: Record<string, unknown>) => nested.execute("nested-call", { subagent_type: "general-purpose", task: "Look", ...params }, undefined, undefined, h.ctx);
 		for (const option of [{ model: "gpt-5-flash-text" }, { thinking: "high" }, { isolation: "worktree" }]) {
 			const refused = await call(option);
 			expect(refused.isError).toBe(true);
-			expect(refused.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
-			expect(refused.content[0].text).toContain("Call again without it");
+			expect(refused.content[0].text).toBe(subagentResultText().refused({ kind: "nestedOptions", options: Object.keys(option) }));
 		}
 		const forked = await call({ subagent_type: "fork" });
 		expect(forked.isError).toBe(true);
-		expect(forked.content[0].text).toContain("pick a named agent");
+		expect(forked.content[0].text).toBe(subagentResultText().refused({ kind: "nestedFork" }));
 		expect(run).toHaveBeenCalledTimes(1);
 		const plain = await call({});
 		expect(plain.isError).toBe(false);
@@ -607,7 +625,7 @@ describe("fork runs in a one-shot session", () => {
 		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; execute: (...args: unknown[]) => Promise<Result> }> }).extraTools!.find((tool) => tool.name === "Agent")!;
 		const result = await nested.execute("nested", { subagent_type: "general-purpose", task: "Look", ...option }, undefined, undefined, h.ctx);
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain(`\`${Object.keys(option)[0]}\``);
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "nestedOptions", options: Object.keys(option) }));
 	});
 });
 
@@ -616,9 +634,14 @@ describe("fork runs in a one-shot session", () => {
 describe("subagent reports past the cap", () => {
 	const longReport = `${"row\n".repeat(17_500)}Verdict: the migration is safe.`;
 	const longOutcome = (): ChildOutcome => ({ ...outcome(), output: longReport });
-	/** The persisted file a <persisted-output> block names, read back. */
+	/** A saved output's size as the persisted block gives it. */
+	const shownSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / (1024 * 1024)).toFixed(1)}MB`);
+	/** The persisted file a <persisted-output> block names (by the profile's line for it), read back. */
 	const persistedText = (text: string) => {
-		const path = /Full output saved to: (\S+\.txt)/.exec(text)?.[1];
+		const words = toolResultsText;
+		const path = (readdirSync(dir, { recursive: true }) as string[])
+			.map((name) => join(dir, name))
+			.find((file) => statSync(file).isFile() && text.includes(words.persisted({ size: shownSize(statSync(file).size), file })));
 		expect(path).toBeDefined();
 		return readFileSync(path!, "utf-8");
 	};
@@ -655,7 +678,7 @@ describe("subagent reports past the cap", () => {
 		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
 		await h.call("Agent", { subagent_type: "general-purpose", task: "Delegate the table" });
 		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
-		const result = (await nested!.execute("nested-call", { subagent_type: "explore", task: "Tabulate" }, undefined, undefined, h.ctx as never)) as {
+		const result = (await nested!.execute("nested-call", { subagent_type: "general-purpose", task: "Tabulate" }, undefined, undefined, h.ctx as never)) as {
 			content: Array<{ text: string }>;
 		};
 		expect(result.content[0].text).toContain("<persisted-output>");
@@ -703,28 +726,29 @@ describe("hand-back shape by permission mode", () => {
 		writeFileSync(sessionFile, "");
 		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
 		h.fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode, paused: false });
-		await h.call("Agent", { subagent_type: agent, task: "Tabulate" });
+		const spawned = (await h.call("Agent", { subagent_type: agent, task: "Tabulate" })) as { details: { agentRuns: AgentRunRecord[] } };
 		runtime.finish([], "The table is done.");
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
-		return sent(h);
+		return { out: sent(h), taskId: spawned.details.agentRuns[0].taskId };
 	};
+	const words = () => notificationWords();
 
 	it("sends the report inline in one notification outside auto mode", async () => {
-		const out = await run("default", "general-purpose");
+		const { out } = await run("default", "general-purpose");
 		expect(out).toMatch(/<result>The table is done\.<\/result>/);
-		expect(out).not.toContain("[Subagent hand-back]");
+		expect(out).not.toContain(words().agentMessage.handBackPreamble);
 	});
 
 	it("keeps the two-message hand-back for a non-fork agent in auto mode", async () => {
-		const out = await run("auto", "general-purpose");
-		expect(out).toContain("[Subagent hand-back]");
-		expect(out).toContain("This agent's report was delivered to you as a message from");
+		const { out, taskId } = await run("auto", "general-purpose");
+		expect(out).toContain(`<agent-message from="${taskId}">\n${words().agentMessage.handBackPreamble}\n  The table is done.\n</agent-message>`);
+		expect(out).toContain(words().handBackPointer({ from: taskId, flagged: false }));
 	});
 
 	it("sends a fork's report inline even in auto mode", async () => {
-		const out = await run("auto", "fork");
+		const { out } = await run("auto", "fork");
 		expect(out).toMatch(/<result>The table is done\.<\/result>/);
-		expect(out).not.toContain("[Subagent hand-back]");
+		expect(out).not.toContain(words().agentMessage.handBackPreamble);
 	});
 });
 

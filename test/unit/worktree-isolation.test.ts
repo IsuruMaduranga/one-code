@@ -11,8 +11,21 @@ import {
 	worktreeGuardFactory,
 	worktreeIsolationFor,
 	worktreeWriteGuardReason,
-} from "../../extensions/lib/worktree-isolation.ts";
+} from "../../extensions/lib/agents/worktree-isolation.ts";
+import type { WorktreeGuardRefusal } from "../../extensions/lib/rules/worktree-guard-text.ts";
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
+import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
+
+/**
+ * Worktree isolation for subagents and workflow agents
+ * (lib/agents/worktree-isolation.ts): the registry, the guard factory's wiring, and
+ * the write guards' decisions as the refusal data the profile words. One
+ * Code's wording of the write refusals is tested in
+ * profile/test/worktree-isolation-wording.test.ts.
+ */
+
+/** A guard's refusal as the factory hands it to the model, in the profile's words. */
+const worded = (refusal: WorktreeGuardRefusal) => worktreeGuardText.refusal(refusal);
 
 describe("worktree isolation registry", () => {
 	afterEach(() => releaseWorktreeIsolation("/tmp/cc-wt-x/tree"));
@@ -32,10 +45,10 @@ describe("worktree isolation registry", () => {
 	});
 });
 
-// The exact refusal wording is owned by worktree-guards.test.ts — these tests
+// The refusal decisions are owned by worktree-guards.test.ts — these tests
 // only pin the wiring: the guard factory fires for registered worktrees. Its
 // placement BEFORE the permission gate is set by extensionFactories order in
-// lib/agent-loader.ts (load-bearing, commented there).
+// lib/agents/agent-loader.ts (load-bearing, commented there).
 describe("worktreeGuardFactory", () => {
 	function guardedCwd(): { handler: ReturnType<typeof captureToolCallHandler>; cwd: string } {
 		const cwd = mkdtempSync(join(os.tmpdir(), "wt-guard-cwd-"));
@@ -51,7 +64,8 @@ describe("worktreeGuardFactory", () => {
 				input: { command: "git merge-base master feature | xargs git log --oneline -1" },
 			});
 			expect(result?.block).toBe(true);
-			expect(result?.reason).toContain(`isolated in the worktree ${cwd}`);
+			// Not a repository, so the worktrees cannot be listed: refused before any other check.
+			expect(result?.reason).toBe(worded({ kind: "gitTarget", worktreePath: cwd, problem: { kind: "unlisted" } }));
 		} finally {
 			releaseWorktreeIsolation(cwd);
 		}
@@ -63,7 +77,7 @@ describe("worktreeGuardFactory", () => {
 		try {
 			const result = await handler({ toolName: "bash", input: { command: "git status" } });
 			expect(result?.block).toBe(true);
-			expect(result?.reason).toContain("worktrees could not be listed");
+			expect(result?.reason).toBe(worded({ kind: "gitTarget", worktreePath: cwd, problem: { kind: "unlisted" } }));
 		} finally {
 			releaseWorktreeIsolation(cwd);
 		}
@@ -94,12 +108,21 @@ describe("worktreeGuardFactory", () => {
 describe("worktreeWriteGuardReason", () => {
 	const base = { cwd: "/tmp/cc-wt-x/tree", isolation: describeIsolation("/tmp/cc-wt-x/tree", "/repo"), home: "/home/u" };
 
+	/** The refusal of a write into the shared checkout, naming the worktree path to use. */
+	const sharedWrite = (target: string, mapped: string, inCommand = false) => ({
+		kind: "sharedCheckoutWrite",
+		worktreePath: "/tmp/cc-wt-x/tree",
+		sharedRoot: "/repo",
+		target,
+		inCommand,
+		mapped,
+	});
+
 	it("refuses an edit/write/notebook_edit into the shared checkout and names the worktree path to use", () => {
 		for (const toolName of ["edit", "write", "notebook_edit"]) {
-			const reason = worktreeWriteGuardReason({ ...base, toolName, target: "/repo/src/a.ts" });
-			expect(reason).toContain("isolated in the worktree /tmp/cc-wt-x/tree");
-			expect(reason).toContain("/repo/src/a.ts is in the shared checkout /repo");
-			expect(reason).toContain(`Write the corresponding path there instead: ${join("/tmp/cc-wt-x/tree", "src", "a.ts")}`);
+			expect(worktreeWriteGuardReason({ ...base, toolName, target: "/repo/src/a.ts" }), toolName).toEqual(
+				sharedWrite("/repo/src/a.ts", join("/tmp/cc-wt-x/tree", "src", "a.ts")),
+			);
 		}
 	});
 
@@ -111,16 +134,16 @@ describe("worktreeWriteGuardReason", () => {
 	});
 
 	it("keeps the model's spelling in the suggested path (case-folded resolution must not rename A.ts)", () => {
-		const reason = worktreeWriteGuardReason({ ...base, toolName: "edit", target: "/repo/src/A.ts" });
-		expect(reason).toContain(`there instead: ${join("/tmp/cc-wt-x/tree", "src", "A.ts")}`);
+		expect(worktreeWriteGuardReason({ ...base, toolName: "edit", target: "/repo/src/A.ts" })).toEqual(
+			sharedWrite("/repo/src/A.ts", join("/tmp/cc-wt-x/tree", "src", "A.ts")),
+		);
 	});
 
 	it("refuses shell commands that write into the shared checkout, and lets reads through", () => {
 		const bash = (command: string) => worktreeBashWriteGuardReason({ command, cwd: base.cwd, isolation: base.isolation, home: base.home });
-		expect(bash("echo hi > /repo/notes.txt")).toContain("this command writes to /repo/notes.txt");
-		expect(bash("echo hi > /repo/notes.txt")).toContain(`there instead: ${join("/tmp/cc-wt-x/tree", "notes.txt")}`);
-		expect(bash("cp fixed.ts /repo/src/a.ts")).toContain("shared checkout /repo");
-		expect(bash("tee /repo/out.log < in.txt")).toContain("/repo/out.log");
+		expect(bash("echo hi > /repo/notes.txt")).toEqual(sharedWrite("/repo/notes.txt", join("/tmp/cc-wt-x/tree", "notes.txt"), true));
+		expect(bash("cp fixed.ts /repo/src/a.ts")).toEqual(sharedWrite("/repo/src/a.ts", join("/tmp/cc-wt-x/tree", "src", "a.ts"), true));
+		expect(bash("tee /repo/out.log < in.txt")).toEqual(sharedWrite("/repo/out.log", join("/tmp/cc-wt-x/tree", "out.log"), true));
 		expect(bash("cat /repo/README.md")).toBeUndefined();
 		expect(bash("echo hi > notes.txt")).toBeUndefined();
 		expect(bash("cp fixed.ts /tmp/cc-wt-x/tree/src/a.ts")).toBeUndefined();
@@ -173,24 +196,37 @@ describe("worktree isolation through symlinks", () => {
 
 	it("refuses a file write through a worktree symlink into the shared checkout", () => {
 		symlinkSync(shared, join(worktree, "shared-link"), "junction");
-		const reason = worktreeWriteGuardReason({
+		const refusal = worktreeWriteGuardReason({
 			toolName: "write",
 			target: "shared-link/new.txt",
 			cwd: worktree,
 			isolation: describeIsolation(worktree, shared),
 		});
-		expect(reason).toContain("Refusing the write");
-		expect(reason).toContain(`there instead: ${join(worktree, "new.txt")}`);
+		expect(refusal).toEqual({
+			kind: "sharedCheckoutWrite",
+			worktreePath: worktree,
+			sharedRoot: shared,
+			target: "shared-link/new.txt",
+			inCommand: false,
+			mapped: join(worktree, "new.txt"),
+		});
 	});
 
 	it("refuses a shell write through a worktree symlink into the shared checkout", () => {
 		symlinkSync(shared, join(worktree, "shared-link"), "junction");
-		const reason = worktreeBashWriteGuardReason({
+		const refusal = worktreeBashWriteGuardReason({
 			command: "echo work > shared-link/new.txt",
 			cwd: worktree,
 			isolation: describeIsolation(worktree, shared),
 		});
-		expect(reason).toContain("Refusing the write");
+		expect(refusal).toEqual({
+			kind: "sharedCheckoutWrite",
+			worktreePath: worktree,
+			sharedRoot: shared,
+			target: "shared-link/new.txt",
+			inCommand: true,
+			mapped: join(worktree, "new.txt"),
+		});
 	});
 
 	it("finds an isolation registered through a symlink when the child cwd is canonical", () => {
@@ -230,9 +266,7 @@ describe.skipIf(process.platform !== "win32")("worktree write guard: Git Bash pa
 	const bash = (command: string) => worktreeBashWriteGuardReason({ command, cwd: "/tmp/cc-wt-y/tree", isolation, home: "/home/u" });
 
 	it("refuses a shell write into the shared checkout spelled /<drive>/repo", () => {
-		const reason = bash(`echo x > /${drive}/repo/src/a.ts`);
-		expect(reason).toContain("shared checkout");
-		expect(reason).toContain(join("/tmp/cc-wt-y/tree", "src", "a.ts"));
+		expect(bash(`echo x > /${drive}/repo/src/a.ts`)).toMatchObject({ kind: "sharedCheckoutWrite", inCommand: true, mapped: join("/tmp/cc-wt-y/tree", "src", "a.ts") });
 	});
 
 	it("lets a shell write into the worktree spelled /<drive>/tmp/… through", () => {

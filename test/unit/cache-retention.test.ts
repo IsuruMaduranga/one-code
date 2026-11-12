@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CACHE_RETENTION_ENV, mainSessionCacheRetention, withShortCacheRetention } from "../../extensions/lib/cache-retention.ts";
+import { CACHE_RETENTION_ENV, mainSessionCacheRetention, withShortCacheRetention } from "../../extensions/lib/request/cache-retention.ts";
 
 describe("mainSessionCacheRetention", () => {
 	it("chooses the long TTL for the interactive modes when the user set nothing", () => {

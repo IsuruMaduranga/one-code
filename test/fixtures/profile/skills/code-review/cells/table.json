@@ -1,0 +1,5 @@
+{
+	"tables": {
+		"default": { "low": "review", "medium": "review", "high": "review", "xhigh": "review", "max": "review" }
+	}
+}

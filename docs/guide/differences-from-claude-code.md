@@ -96,8 +96,8 @@ action but never pre-approve one. See [Hooks](hooks.md).
 
 ## Settings keys that are ignored
 
-The `env` block is read only for `CLAUDE_CODE_SUBAGENT_MODEL`, and only
-from user and managed scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
+The `env` block is read only for `CLAUDE_CODE_SUBAGENT_MODEL` (or One Code's
+`ONECODE_SUBAGENT_MODEL`), and only from user and managed scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
 `cleanupPeriodDays`, and `spinnerTipsEnabled` aren't read. Run
 `/doctor report` to see, per file, which keys were used, ignored, or
 refused.

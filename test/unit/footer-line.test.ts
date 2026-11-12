@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
+import { brandedId } from "../../extensions/lib/profile/brand.mjs";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import {
 	buildFooterLines,
 	computeMainUsage,
@@ -8,7 +9,7 @@ import {
 	formatTokens,
 	type FooterData,
 	type Paint,
-} from "../../extensions/footer/footer-line.ts";
+} from "../../extensions/ui/footer/footer-line.ts";
 
 /** Identity paint so assertions see the plain line. */
 const plain: Paint = (_color, text) => text;
@@ -155,9 +156,9 @@ describe("computeMainUsage", () => {
 	it("adds persisted out-of-band usage entries to the total", () => {
 		const entries = [
 			{ type: "message", message: { role: "assistant", usage: { input: 100, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } } },
-			{ type: "custom", customType: "one-code:usage", data: { source: "classifier", cost: 0.01 } },
-			{ type: "custom", customType: "one-code:usage", data: { source: "subagent", cost: 0.4 } },
-			{ type: "custom", customType: "one-code:turn-duration", data: { ms: 1000 } },
+			{ type: "custom", customType: brandedId("usage"), data: { source: "classifier", cost: 0.01 } },
+			{ type: "custom", customType: brandedId("usage"), data: { source: "subagent", cost: 0.4 } },
+			{ type: "custom", customType: brandedId("turn-duration"), data: { ms: 1000 } },
 		];
 		expect(computeMainUsage(entries).cost).toBeCloseTo(0.51, 5);
 	});

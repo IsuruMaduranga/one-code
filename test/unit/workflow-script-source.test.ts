@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import vm from "node:vm";
-import { parseWorkflowScript, wrapScriptBody } from "../../extensions/workflow/script-source.ts";
+import { parseWorkflowScript, wrapScriptBody } from "../../extensions/agents/workflow/script-source.ts";
+import type { ScriptProblem } from "../../extensions/agents/workflow/text.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
+
+/** A script problem as the profile words it: what the parser throws. */
+const problem = (p: ScriptProblem) => workflowResultText.scriptProblem(p);
 
 const VALID = `export const meta = {
   name: 'audit',
@@ -29,44 +34,46 @@ describe("parseWorkflowScript", () => {
 	});
 
 	it("rejects a script that does not start with the meta export", () => {
-		expect(() => parseWorkflowScript("const a = 1\nexport const meta = { name: 'x', description: 'y' }")).toThrow(
-			/must begin with/,
-		);
+		expect(() => parseWorkflowScript("const a = 1\nexport const meta = { name: 'x', description: 'y' }")).toThrow(problem({ kind: "noMeta" }));
 	});
 
 	it("rejects non-literal meta", () => {
-		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: someVar }")).toThrow(/pure literal/);
+		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: someVar }")).toThrow(
+			problem({ kind: "notLiteral", path: "meta.description", detail: "other" }),
+		);
 		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', extra: fn() }")).toThrow(
-			/pure literal/,
+			problem({ kind: "notLiteral", path: "meta.extra", detail: "other" }),
 		);
 	});
 
 	it("rejects spread, computed keys, and __proto__", () => {
-		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', ...rest }")).toThrow();
+		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', ...rest }")).toThrow(
+			problem({ kind: "notLiteral", path: "meta", detail: "spreadOrMethod" }),
+		);
 		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', [key]: 1 }")).toThrow(
-			/computed/,
+			problem({ kind: "notLiteral", path: "meta", detail: "computedKey" }),
 		);
 		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', __proto__: {} }")).toThrow(
-			/__proto__/,
+			problem({ kind: "forbiddenKey", path: "meta", key: "__proto__" }),
 		);
 	});
 
 	it("rejects missing name/description and bad phases", () => {
-		expect(() => parseWorkflowScript("export const meta = { name: 'x' }")).toThrow(/description/);
+		expect(() => parseWorkflowScript("export const meta = { name: 'x' }")).toThrow(problem({ kind: "metaField", field: "description" }));
 		expect(() => parseWorkflowScript("export const meta = { name: 'x', description: 'y', phases: [{}] }")).toThrow(
-			/title/,
+			problem({ kind: "metaField", field: "phaseTitle" }),
 		);
 	});
 
 	it("rejects further imports/exports in the body", () => {
 		expect(() =>
 			parseWorkflowScript("export const meta = { name: 'x', description: 'y' }\nimport fs from 'node:fs'"),
-		).toThrow(/import\/export/);
+		).toThrow(problem({ kind: "importExport" }));
 	});
 
 	it("rejects template interpolation in meta", () => {
 		expect(() => parseWorkflowScript("export const meta = { name: `a${'b'}`, description: 'y' }")).toThrow(
-			/interpolation/,
+			problem({ kind: "notLiteral", path: "meta.name", detail: "interpolation" }),
 		);
 	});
 });

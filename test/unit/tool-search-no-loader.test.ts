@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import { DEFER_CHANNEL, deferralEnabled, loaderUnavailableReminderText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 /**
  * A `--tools` list that leaves out tool_search unregisters it, while pi 1.0.4+
@@ -95,14 +96,12 @@ describe("tool_search when pi declines to activate a tool", () => {
 		};
 
 		const refusedOnly = await fake.runTool("tool_search", { query: "select:mcp__fixture__lookup_ticket" });
-		expect(refusedOnly.content[0].text).toBe(
-			"Could not load mcp__fixture__lookup_ticket: this session's tool list (pi's --tools) leaves them out, so they cannot be called.",
-		);
+		expect(refusedOnly.content[0].text).toBe(toolSearchResultText.result({ added: [], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
 		expect((refusedOnly as { isError?: boolean }).isError).toBe(true);
 		expect(refusedOnly.details).toMatchObject({ added: [], refused: ["mcp__fixture__lookup_ticket"] });
 
 		const mixed = await fake.runTool("tool_search", { query: "select:web_fetch,mcp__fixture__lookup_ticket" });
-		expect(mixed.content[0].text).toMatch(/^Loaded web_fetch\. These tools are now callable\. Could not load mcp__fixture__lookup_ticket:/);
+		expect(mixed.content[0].text).toBe(toolSearchResultText.result({ added: ["web_fetch"], already: [], refused: ["mcp__fixture__lookup_ticket"], missing: [], withdrawn: [] }));
 		expect((mixed as { isError?: boolean }).isError).toBe(false);
 		expect(fake.activeTools()).toContain("web_fetch");
 	});

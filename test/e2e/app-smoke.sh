@@ -70,8 +70,8 @@ const piRequire = createRequire(import.meta.resolve('@earendil-works/pi-coding-a
 const { createJiti } = await import(pathToFileURL(piRequire.resolve('jiti')));
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 const extensionRoot = dirname(require.resolve('one-code-extension/package.json'));
-const { createRunAdmission, createScriptGlobals } = await jiti.import(join(extensionRoot, 'extensions/workflow/globals.ts'));
-const { runWorkflowScript } = await jiti.import(join(extensionRoot, 'extensions/workflow/vm-runtime.ts'));
+const { createRunAdmission, createScriptGlobals } = await jiti.import(join(extensionRoot, 'extensions/agents/workflow/globals.ts'));
+const { runWorkflowScript } = await jiti.import(join(extensionRoot, 'extensions/agents/workflow/vm-runtime.ts'));
 const { globals } = createScriptGlobals({
   agentCall: async () => ({ value: 42, tokens: { input: 0, output: 1, total: 1 }, cost: 0 }),
   args: null, admission: createRunAdmission({ budgetTotal: 10, concurrency: 1 }),
@@ -105,7 +105,7 @@ echo "PASS: onecode doctor ran under the bundled app."
 
 # Scratch git project as cwd, and a throwaway HOME so nothing touches real state.
 mkdir -p "$S/proj"
-(cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git commit -qm init)
+(cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git -c user.name=smoke -c user.email=smoke@example.invalid commit -qm init)
 
 echo "smoke: launching onecode -p (no credentials expected)"
 OUT="$S/out.txt"

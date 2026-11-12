@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { Model } from "@earendil-works/pi-ai";
 import { stream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { readerMessages } from "../../extensions/web-fetch/summarize.ts";
+import { readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+
+const webFetch = requireText("webFetch");
 
 const model: Model<"anthropic-messages"> = {
 	id: "claude-sonnet-5", name: "Offline reader", api: "anthropic-messages", provider: "anthropic",
@@ -13,7 +16,7 @@ type Block = { type: string; text: string; cache_control?: { type: string; ttl?:
 type Payload = { system: Block[]; messages: { role: string; content: Block[] }[] };
 
 async function capture(url: string, apiKey: string, cacheRetention: "short" | "long" | "none") {
-	const text = readerMessages({ prompt: "What is the release?", markdown: "Release 3.2.\nExact Unicode: 😀 café.", url });
+	const text = readerMessages(webFetch, { prompt: "What is the release?", markdown: "Release 3.2.\nExact Unicode: 😀 café.", url });
 	let payload: Payload | undefined;
 	const fetch = vi.fn(async () => { throw new Error("No network in this test"); });
 	const result = await stream(model, normalizeContext({

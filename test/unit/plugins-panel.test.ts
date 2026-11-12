@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { decodePanelKey } from "../../extensions/plugins/panel/keys.ts";
-import { renderPanel, type PanelPaint } from "../../extensions/plugins/panel/render.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { decodePanelKey } from "../../extensions/tools/plugins/panel/keys.ts";
+import { renderPanel, type PanelPaint } from "../../extensions/tools/plugins/panel/render.ts";
 import {
 	buildDiscoverRows,
 	buildInstalledRows,
 	type DiscoverRow,
 	type InstalledRow,
-} from "../../extensions/plugins/panel/rows.ts";
+} from "../../extensions/tools/plugins/panel/rows.ts";
 import {
 	applyPanelKey,
 	initialPanelState,
 	type PanelState,
 	type PanelView,
-} from "../../extensions/plugins/panel/state.ts";
-import type { MarketplaceSnapshot } from "../../extensions/plugins/marketplace/sync.ts";
-import type { Plugin } from "../../extensions/lib/plugins.ts";
+} from "../../extensions/tools/plugins/panel/state.ts";
+import type { MarketplaceSnapshot } from "../../extensions/tools/plugins/marketplace/sync.ts";
+import type { Plugin } from "../../extensions/lib/plugins/plugins.ts";
 
 const paint: PanelPaint = {
 	fg: (_color, text) => text,
@@ -32,7 +33,7 @@ const snapshot = (name: string, plugins: Array<{ name: string; description?: str
 
 const plugin = (overrides: Partial<Plugin> & { id: string; name: string }): Plugin => ({
 	path: "/x",
-	originRoot: "one-code",
+	originRoot: "product",
 	enabled: true,
 	dataRoot: "/data",
 	...overrides,
@@ -385,7 +386,7 @@ describe("renderPanel", () => {
 		});
 		const lines = renderPanel(renderInput(state, view), paint).map(strip);
 		expect(lines.some((l) => l.includes("installed by Claude Code"))).toBe(true);
-		expect(lines.some((l) => l.includes("One Code override"))).toBe(true);
+		expect(lines.some((l) => l.includes(`${brand.name} override`))).toBe(true);
 		expect(lines.some((l) => l.includes("Make sure you trust a plugin"))).toBe(true);
 		expect(lines.some((l) => l.includes("Enter/Space/e/d to toggle"))).toBe(true);
 	});

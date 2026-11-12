@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findGitRoot, findProjectRoot, linkedWorktreeMainRoot } from "../../extensions/lib/git.ts";
+import { findGitRoot, findProjectRoot, linkedWorktreeMainRoot } from "../../extensions/lib/context/git.ts";
 
 /**
  * Laid out by hand rather than with `git worktree add`: what matters is the

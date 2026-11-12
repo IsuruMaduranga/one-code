@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePlanRun } from "../../extensions/plan-mode/run-state.ts";
+import { parsePlanRun } from "../../extensions/safety/plan-mode/run-state.ts";
 
 describe("a plan-mode run as the branch records it", () => {
 	const path = "/plans/a.md";

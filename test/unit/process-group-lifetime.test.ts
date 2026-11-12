@@ -3,8 +3,8 @@ import { once } from "node:events";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { detachedSpawnOptions, rememberProcessGroup, waitForChildExit } from "../../extensions/lib/process-tree.ts";
-import { bashSpawnOrThrow, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
+import { detachedSpawnOptions, rememberProcessGroup, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { bashSpawnOrThrow, spawnShellCommand } from "../../extensions/lib/shell-run/shell-spawn.ts";
 
 const alive = (pid: number) => {
 	try { process.kill(pid, 0); return true; } catch { return false; }
@@ -16,11 +16,11 @@ const until = async (condition: () => boolean) => {
 
 describe.skipIf(process.platform === "win32")("remembered process groups", () => {
 	it.each(["quit", "natural", "SIGINT", "SIGTERM", "SIGHUP"] as const)("a completed shell's child survives until its owner exits (%s)", async (how) => {
-		const moduleUrl = pathToFileURL(resolve("extensions/bash/background.ts")).href;
+		const moduleUrl = pathToFileURL(resolve("extensions/lib/shell-run/bash-background.ts")).href;
 		const script = [
 			`import { runBackgroundBashBlocking } from ${JSON.stringify(moduleUrl)};`,
 			`const keepAlive = setInterval(() => {}, 1000);`,
-			`const result = await runBackgroundBashBlocking({ id: 'owner-test', command: 'sleep 60 & printf "%s %s\\n" "$$" "$!"', description: 'daemon', cwd: process.cwd() });`,
+			`const result = await runBackgroundBashBlocking({ text: { earlierTruncated: '', spoolLost: () => '', emptyOutput: '' }, id: 'owner-test', command: 'sleep 60 & printf "%s %s\\n" "$$" "$!"', description: 'daemon', cwd: process.cwd() });`,
 			`process.stdout.write(result.output);`,
 			`process.stdin.once('data', () => { ${how === "natural" ? "clearInterval(keepAlive); process.stdin.destroy();" : "process.exit(0);"} });`,
 		].join("\n");

@@ -1,22 +1,23 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, oneCodeStateDir, absoluteFrom } from "../../extensions/lib/paths.ts";
+import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, productStateDir, absoluteFrom } from "../../extensions/lib/profile/paths.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 describe("paths", () => {
-	it("defaults to ~/.claude and ~/.onecode", () => {
+	it("defaults to ~/.claude and the brand's state dir in the home folder", () => {
 		expect(claudeConfigDir({})).toBe(join(homedir(), ".claude"));
-		expect(oneCodeStateDir({})).toBe(join(homedir(), ".onecode"));
+		expect(productStateDir({})).toBe(join(homedir(), brand.stateDir));
 	});
 
 	it("honours the env overrides", () => {
 		expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "/custom/claude" })).toBe("/custom/claude");
-		expect(oneCodeStateDir({ ONECODE_STATE_DIR: "/custom/one-code" })).toBe("/custom/one-code");
+		expect(productStateDir({ [envName("STATE_DIR")]: "/custom/one-code" })).toBe("/custom/one-code");
 	});
 
 	it("ignores empty overrides", () => {
 		expect(claudeConfigDir({ CLAUDE_CONFIG_DIR: "" })).toBe(join(homedir(), ".claude"));
-		expect(oneCodeStateDir({ ONECODE_STATE_DIR: "" })).toBe(join(homedir(), ".onecode"));
+		expect(productStateDir({ [envName("STATE_DIR")]: "" })).toBe(join(homedir(), brand.stateDir));
 	});
 });
 

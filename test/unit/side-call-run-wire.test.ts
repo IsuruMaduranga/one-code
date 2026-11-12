@@ -7,20 +7,21 @@
  * below as the reference) through pi-ai's real provider adapter, and compares
  * the bytes each would send.
  */
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as completionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import btwExtension from "../../extensions/btw/index.ts";
-import recapExtension from "../../extensions/recap/index.ts";
-import webFetchExtension from "../../extensions/web-fetch/index.ts";
-import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../../extensions/lib/side-call-cache.ts";
+import btwExtension from "../../extensions/agents/btw/index.ts";
+import recapExtension from "../../extensions/agents/recap/index.ts";
+import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
+import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../../extensions/lib/side-calls/side-call-cache.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-vi.mock("../../extensions/lib/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
+vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
 const answer = { content: [{ type: "text", text: "An answer." }], stopReason: "stop", usage: {} } as Awaited<ReturnType<typeof completeSimple>>;
@@ -98,7 +99,7 @@ async function drive(kind: "btw" | "recap" | "reader", model: Model<Api>): Promi
 		await fake.commands.get("btw")!.handler("What did we decide?", ctx);
 	} else if (kind === "recap") {
 		vi.useFakeTimers();
-		process.env.CC_RECAP_IDLE_MS = "1000";
+		process.env[envName("RECAP_IDLE_MS")] = "1000";
 		recapExtension(fake.pi as never);
 		await fake.fire("session_start", {}, ctx);
 		await fake.fire("context", { messages: history }, ctx);
@@ -115,10 +116,9 @@ async function drive(kind: "btw" | "recap" | "reader", model: Model<Api>): Promi
 
 beforeEach(() => {
 	complete.mockReset().mockResolvedValue(answer);
-	delete process.env.CC_RECAP;
 });
 afterEach(() => {
-	delete process.env.CC_RECAP_IDLE_MS;
+	delete process.env[envName("RECAP_IDLE_MS")];
 	vi.useRealTimers();
 	vi.unstubAllGlobals();
 });

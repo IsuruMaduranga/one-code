@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BackgroundTask } from "../../extensions/background/registry.ts";
-import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
-import { trackShellTasks } from "../../extensions/lib/shell-tasks.ts";
-import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
-import { STRIP_LINGER_MS } from "../../extensions/subagents/panel-render.ts";
-import { reduceShellKey, renderShellChip, shellRows } from "../../extensions/subagents/shell-panel.ts";
-import { OUTPUT_BOX_ROWS, renderShellDetail, settleTasksView, shellDetailKey } from "../../extensions/subagents/tasks-dialog.ts";
+import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
+import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
+import { trackShellTasks } from "../../extensions/lib/shell-run/shell-tasks.ts";
+import { decodeStripKey } from "../../extensions/agents/subagents/panel-keys.ts";
+import { STRIP_LINGER_MS } from "../../extensions/agents/subagents/panel-render.ts";
+import { reduceShellKey, renderShellChip, shellRows } from "../../extensions/agents/subagents/shell-panel.ts";
+import { OUTPUT_BOX_ROWS, renderShellDetail, settleTasksView, shellDetailKey } from "../../extensions/agents/subagents/tasks-dialog.ts";
 
 /** Paint that tags styled text so tests can strip/inspect it. */
 const paint = {

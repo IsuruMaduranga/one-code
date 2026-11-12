@@ -3,11 +3,12 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resetAutoMemoryForTest } from "../../extensions/lib/auto-memory.ts";
-import { projectMemoryDir } from "../../extensions/lib/memory.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import { resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
+import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 describe("auto-memory off", () => {
 	let root: string;
@@ -18,11 +19,10 @@ describe("auto-memory off", () => {
 		root = realpathSync.native(mkdtempSync(join(tmpdir(), "auto-memory-off-")));
 		home = join(root, "home");
 		cwd = join(root, "project");
-		mkdirSync(join(home, ".onecode"), { recursive: true });
+		mkdirSync(join(home, brand.stateDir), { recursive: true });
 		mkdirSync(cwd);
 		stubHome(home);
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		mkdirSync(projectMemoryDir(cwd, home), { recursive: true });
 	});
 	afterEach(() => {

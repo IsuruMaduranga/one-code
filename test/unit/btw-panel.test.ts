@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyBtwKey, type BtwPanelInput, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel, SHOWN_HISTORY } from "../../extensions/btw/panel.ts";
-import { visibleWidth } from "../../extensions/lib/tui-render.ts";
+import { applyBtwKey, type BtwPanelInput, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel, SHOWN_HISTORY } from "../../extensions/agents/btw/panel.ts";
+import { visibleWidth } from "../../extensions/lib/ui/tui-render.ts";
 
 describe("decodeBtwKey", () => {
 	it("maps arrows, paging, home/end, copy, fork, clear and close", () => {

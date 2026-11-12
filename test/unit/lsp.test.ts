@@ -5,14 +5,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	filterDiagnostics,
-	formatDiagnostic,
 	formatDiagnostics,
 	type LspDiagnostic,
 	severityName,
-} from "../../extensions/lsp/format.ts";
-import { describeStartFailure, INSTALL_HINTS } from "../../extensions/lsp/install-hints.ts";
-import { withKeepAlive } from "../../extensions/lsp/keep-alive.ts";
-import { createReaderState, encodeMessage, readMessages } from "../../extensions/lsp/protocol.ts";
+	shownDiagnostic,
+} from "../../extensions/tools/lsp/format.ts";
+import { describeStartFailure, INSTALL_HINTS } from "../../extensions/tools/lsp/install-hints.ts";
+import { withKeepAlive } from "../../extensions/lib/core/keep-alive.ts";
+import { createReaderState, encodeMessage, readMessages } from "../../extensions/tools/lsp/protocol.ts";
 import {
 	findProjectRoot,
 	languageIdForPath,
@@ -20,13 +20,9 @@ import {
 	SERVERS,
 	typescriptPreflight,
 	findTypescript,
-} from "../../extensions/lsp/servers.ts";
-
-const diag = (message: string, severity = 1, line = 0, character = 0): LspDiagnostic => ({
-	range: { start: { line, character } },
-	severity,
-	message,
-});
+} from "../../extensions/tools/lsp/servers.ts";
+import { diag } from "./helpers/lsp-diagnostics.ts";
+import { lspResultText } from "../../extensions/tools/lsp/text.ts";
 
 describe("protocol framing", () => {
 	it("round-trips a message", () => {
@@ -111,7 +107,7 @@ describe("project root and preflight", () => {
 
 	it("flags a local TypeScript without tsserver.js", () => {
 		mkdirSync(join(dir, "node_modules", "typescript", "lib"), { recursive: true });
-		expect(typescriptPreflight(dir)).toMatch(/tsserver\.js/);
+		expect(typescriptPreflight(dir)).toEqual({ kind: "noTsserver", install: "npm install -D typescript@5" });
 	});
 
 	it("passes when tsserver.js is present", () => {
@@ -121,9 +117,7 @@ describe("project root and preflight", () => {
 	});
 
 	it("flags a project with no TypeScript reachable at all (a global install does not count)", () => {
-		const problem = typescriptPreflight(dir);
-		expect(problem).toMatch(/No TypeScript installation is reachable/);
-		expect(problem).toMatch(/npm install -D typescript@5/);
+		expect(typescriptPreflight(dir)).toEqual({ kind: "noTypescript", install: "npm install -D typescript@5" });
 		expect(findTypescript(dir)).toBeUndefined();
 	});
 
@@ -137,32 +131,32 @@ describe("project root and preflight", () => {
 });
 
 describe("start-failure install hints", () => {
-	const enoent = (command: string) => `Could not start ${command}: spawn ${command} ENOENT`;
+	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });
 
 	it("rewrites a missing built-in server into its install command", () => {
-		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver")).toBe(
-			"pyright-langserver is not installed. Install it with: npm install -g pyright",
-		);
+		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver")).toEqual({
+			kind: "notInstalled",
+			command: "pyright-langserver",
+			installHint: "npm install -g pyright",
+		});
 	});
 
 	it("names the plugin when a plugin configured a known command", () => {
-		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toBe(
-			"pyright-langserver is not installed (configured by the pyright plugin). Install it with: npm install -g pyright",
-		);
+		expect(describeStartFailure(enoent("pyright-langserver"), "pyright-langserver", "pyright")).toEqual({
+			kind: "notInstalled",
+			command: "pyright-langserver",
+			plugin: "pyright",
+			installHint: "npm install -g pyright",
+		});
 	});
 
-	it("gives PATH guidance for a plugin command it has no hint for", () => {
-		const message = describeStartFailure(enoent("mi-lemminx"), "mi-lemminx", "mi-ls");
-		expect(message).toContain("configured by the mi-ls plugin");
-		expect(message).toContain("on your PATH");
-		expect(message).toContain("plugin's documentation");
+	it("gives no install hint for a plugin command it has no hint for", () => {
+		expect(describeStartFailure(enoent("mi-lemminx"), "mi-lemminx", "mi-ls")).toEqual({ kind: "notInstalled", command: "mi-lemminx", plugin: "mi-ls" });
 	});
 
 	it("reports a vendored absolute path as missing, not uninstalled", () => {
 		const command = "/plugins/mi-ls/bin/server";
-		expect(describeStartFailure(enoent(command), command, "mi-ls")).toBe(
-			"/plugins/mi-ls/bin/server does not exist (configured by the mi-ls plugin). Check the plugin's installation.",
-		);
+		expect(describeStartFailure(enoent(command), command, "mi-ls")).toEqual({ kind: "missingPath", command, plugin: "mi-ls" });
 	});
 
 	it("covers every built-in table server with a hint", () => {
@@ -171,15 +165,15 @@ describe("start-failure install hints", () => {
 		expect(commands.size).toBeGreaterThan(0);
 		for (const command of commands) {
 			expect(INSTALL_HINTS[command], command).toBeTruthy();
-			expect(describeStartFailure(enoent(command), command)).toContain(INSTALL_HINTS[command]);
+			expect(describeStartFailure(enoent(command), command)).toMatchObject({ kind: "notInstalled", installHint: INSTALL_HINTS[command] });
 		}
 	});
 
 	it("passes non-ENOENT failures through unchanged", () => {
-		const crash = "language server stopped unexpectedly";
+		const crash = { kind: "exitedQuietly" as const };
 		expect(describeStartFailure(crash, "pyright-langserver")).toBe(crash);
-		const protocolError = "Could not start jdtls: initialize timed out after 10000ms";
-		expect(describeStartFailure(protocolError, "jdtls", "java-tools")).toBe(protocolError);
+		const timeout = { kind: "timedOut" as const, method: "initialize", ms: 10000 };
+		expect(describeStartFailure(timeout, "jdtls", "java-tools")).toBe(timeout);
 	});
 });
 
@@ -205,27 +199,32 @@ describe("diagnostic formatting", () => {
 			source: "typescript",
 			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
 		};
-		expect(formatDiagnostic("src/index.ts", d)).toBe(
-			"src/index.ts:5:30 error: Argument of type 'number' is not assignable to parameter of type 'string'. (2345) [typescript]",
-		);
+		expect(shownDiagnostic(d)).toEqual({
+			line: 5,
+			column: 30,
+			severity: "error",
+			code: 2345,
+			source: "typescript",
+			message: "Argument of type 'number' is not assignable to parameter of type 'string'.",
+		});
 	});
 
 	it("summarises counts and truncates long lists", () => {
 		const many = Array.from({ length: 25 }, (_, i) => diag(`e${i}`, 1, i));
-		const out = formatDiagnostics("a.ts", many, 10);
-		expect(out).toContain("25 errors");
-		expect(out).toContain("… 15 more");
-		expect(out.split("\n").filter((l) => l.startsWith("a.ts:"))).toHaveLength(10);
+		const words = lspResultText.diagnostics;
+		const lines = many.slice(0, 10).map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
+		expect(formatDiagnostics("a.ts", many, 10)).toBe(`${words.summary({ errors: 25, warnings: 0, total: 25 })}\n\n${[...lines, words.more(15)].join("\n")}`);
 	});
 
 	it("reports a clean file", () => {
-		expect(formatDiagnostics("a.ts", [])).toBe("No diagnostics.");
+		expect(formatDiagnostics("a.ts", [])).toBe(lspResultText.diagnostics.none);
 	});
 
 	it("counts errors and warnings separately", () => {
-		expect(formatDiagnostics("a.ts", [diag("e", 1), diag("w", 2), diag("w2", 2)])).toContain(
-			"1 error, 2 warnings",
-		);
+		const list = [diag("e", 1), diag("w", 2), diag("w2", 2)];
+		const words = lspResultText.diagnostics;
+		const lines = list.map((d) => words.line({ path: "a.ts", diagnostic: shownDiagnostic(d) }));
+		expect(formatDiagnostics("a.ts", list)).toBe(`${words.summary({ errors: 1, warnings: 2, total: 3 })}\n\n${lines.join("\n")}`);
 	});
 });
 
@@ -235,7 +234,7 @@ describe("withKeepAlive", () => {
 	// nothing but an unref'd timer — the shape of every LspClient await
 	// (unref'd child process, pipes, timeout timers).
 	// working-docs/one-shot-lsp-event-loop-drain.md.
-	const keepAliveUrl = new URL("../../extensions/lsp/keep-alive.ts", import.meta.url).href;
+	const keepAliveUrl = new URL("../../extensions/lib/core/keep-alive.ts", import.meta.url).href;
 	const unrefdWork = `
 		const work = () => new Promise((resolve) => {
 			const timer = setTimeout(() => resolve("settled"), 200);

@@ -9,10 +9,14 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import systemPromptExtension from "../../extensions/system-prompt/index.ts";
-import { optionsForIdleTurn, withSystemHead } from "../../extensions/system-prompt/idle-turn.ts";
-import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/prompt-options.ts";
+import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";
+import { optionsForIdleTurn, withSystemHead } from "../../extensions/request/system-prompt/idle-turn.ts";
+import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { cwdLine } from "../../extensions/request/system-prompt/text.ts";
+
+/** A line only the profile's prompt carries (pi's default has none): its working-directory line. */
+const profilePromptMark = (cwd: string) => cwdLine(cwd.replace(/\\/g, "/"));
 
 const PI_DEFAULT = "You are an expert coding assistant operating inside pi, a coding agent harness.";
 
@@ -76,7 +80,7 @@ describe("system-prompt on a turn opened from idle", () => {
 		Object.assign(options, { forceSystemPrompt: typed?.systemPrompt, selectedTools: ["bash", "read", "bash"] });
 
 		const result = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
-		expect(typed?.systemPrompt).toContain("You are One Code");
+		expect(typed?.systemPrompt).toContain(profilePromptMark(ctx.cwd as string));
 		expect(result?.messages[0]).toEqual({ role: "system", content: typed?.systemPrompt, toolsAdded: [{ name: "read" }], timestamp: 1 });
 		expect(result?.messages.slice(1)).toEqual(idleContext().messages.slice(1));
 	});
@@ -95,7 +99,7 @@ describe("system-prompt on a turn opened from idle", () => {
 		await fake.fire("session_start", { type: "session_start" }, ctx);
 		await fake.fire("before_agent_start", { type: "before_agent_start", systemPromptOptions: { cwd: ctx.cwd } }, ctx);
 		const result = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
-		expect(String(result?.messages[0].content)).toContain("You are One Code");
+		expect(String(result?.messages[0].content)).toContain(profilePromptMark(ctx.cwd as string));
 		await fake.fire("session_start", { type: "session_start" }, ctx);
 		expect(await fake.fireOne("context_with_system", idleContext(), ctx)).toBeUndefined();
 	});
@@ -128,7 +132,7 @@ describe("system-prompt on a turn opened from idle", () => {
 		const options = { cwd: ctx.cwd, selectedTools: ["read"] };
 		announcePromptOptions(fake.events, { cwd: ctx.cwd, getSystemPromptOptions: () => options });
 		const forked = requestSystemPrompt(fake.events, ctx);
-		expect(forked).toContain("You are One Code");
+		expect(forked).toContain(profilePromptMark(ctx.cwd as string));
 		expect(forked).not.toContain(PI_DEFAULT);
 		const idle = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
 		expect(idle?.messages[0].content).toBe(forked);

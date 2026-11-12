@@ -94,7 +94,7 @@ child.stderr.on("data", (d) => (stderr += d.toString()));
 let timedOut = false;
 const timer = setTimeout(() => {
 	timedOut = true;
-	// Plain JS cannot import lib/process-tree.ts; this mirrors its Windows kill (taskkill /T /F from System32, then the leader).
+	// Plain JS cannot import lib/shell-run/process-tree.ts; this mirrors its Windows kill (taskkill /T /F from System32, then the leader).
 	if (process.platform === "win32" && child.pid) {
 		try {
 			execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });

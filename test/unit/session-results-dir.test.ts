@@ -7,7 +7,9 @@ import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const inMemory = (id: string, cwd = "/some/project") => ({ cwd, sessionManager: { getSessionDir: () => "", getSessionId: () => id } });
 
@@ -20,7 +22,7 @@ describe("sessionResultsDir without a session dir", () => {
 		expect(a).not.toBe(join(tmpdir(), "one-code"));
 		if (typeof process.getuid === "function") {
 			const owner = dirname(dirname(a));
-			expect(basename(owner)).toBe(`onecode-${process.getuid()}`);
+			expect(basename(owner)).toBe(`${brand.bin}-${process.getuid()}`);
 			expect(statSync(owner).mode & 0o777).toBe(0o700);
 			expect(statSync(a).mode & 0o777).toBe(0o700);
 		}
@@ -37,6 +39,8 @@ describe("sessionResultsDir without a session dir", () => {
 	it("is where persistIfLarge writes", () => {
 		const dir = sessionResultsDir(inMemory("persist-check"));
 		const text = persistIfLarge("x".repeat(60 * 1024), { dir, id: "t1" });
-		expect(text).toContain(`Full output saved to: ${join(dir, "tool-results", "t1.txt")}`);
+		const file = join(dir, "tool-results", "t1.txt");
+		expect(text).toContain(toolResultsText.persisted({ size: "60.0KB", file }));
+		expect(statSync(file).size).toBe(60 * 1024);
 	});
 });

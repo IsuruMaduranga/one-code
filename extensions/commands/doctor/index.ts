@@ -1,0 +1,360 @@
+import { feature } from "../../lib/profile/feature.ts";
+import type { Api, Model } from "@earendil-works/pi-ai";
+/**
+ * doctor extension — `/doctor`, One Code's setup checkup.
+ *
+ * Claude Code has two: `claude doctor` (a read-only terminal diagnostics
+ * screen) and the in-session `/doctor` (a model-driven checkup skill that reads
+ * the same diagnostics and fixes what it finds). One Code mirrors both: bare
+ * `/doctor` is the checkup, as in Claude Code, with the harness's measured
+ * report attached to the prompt; `/doctor report` shows that report alone, and
+ * bare `/doctor` falls back to it when no model can run — the first-session
+ * state ("no provider is ready") this command exists for. working-docs/decisions/doctor.md.
+ *
+ *   /doctor                  the checkup: the report goes to the model inside Claude Code's
+ *                            doctor prompt, adapted (falls back to the report when no model can run)
+ *   /doctor report           the measured report alone (a scrollable panel in the TUI, plain text elsewhere)
+ *   /doctor presets          the three model presets for this provider
+ *   /doctor preset <name>    apply one: main model and subagent default
+ *
+ * `onecode doctor` (the app's CLI subcommand) prints the same report without a
+ * session — see cli.ts. Thin wiring: every check lives in the pure modules.
+ */
+
+import * as os from "node:os";
+import { join } from "node:path";
+import {
+	CONFIG_DIR_NAME,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	type ExtensionContext,
+	getAgentDir,
+	SettingsManager,
+	VERSION as PI_VERSION,
+} from "@earendil-works/pi-coding-agent";
+import { loadAutoModeConfig, persistClassifierModel } from "../../lib/rules/auto-mode-config.ts";
+import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../../lib/models/model-catalog-data.ts";
+import { BUILTIN_PROVIDER_POLICIES } from "../../lib/models/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../../lib/models/model-unusable.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../lib/plugins/mcp-status.ts";
+import { canShowCustomUi, notifyOrPrint } from "../../lib/notify/headless-output.ts";
+import { createUserMessageSender, sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
+import { modelSpec } from "../../lib/models/model-policy.ts";
+import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
+import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
+import { productStateDir } from "../../lib/profile/paths.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-channels.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
+import { persistSubagentModel } from "../../lib/models/subagent-default.ts";
+import { buildDoctorReport, productVersion } from "./build.ts";
+import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
+import { requireText } from "../../lib/profile/profile.ts";
+import { modeCycleKey } from "../../lib/ui/keys.ts";
+import { UPGRADE_COMMANDS } from "../../lib/app/update-check.mjs";
+import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
+import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
+import { lookupLatestVersion } from "./update-lookup.ts";
+import { applyDoctorKey, decodeDoctorKey, type DoctorViewerState, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
+import { announceArgumentHint, extendingCompletions } from "../../lib/ui/argument-hints.ts";
+import { announceLocalCommand } from "../../lib/ui/local-command.ts";
+import { registeredMcpServers } from "../../tools/mcp/config.ts";
+import { sourceSwitchStatus, sourcesOff } from "../../lib/profile/sources.ts";
+import { promptCommandText } from "../../lib/plugins/skill-invoke.ts";
+import { panelUi } from "../../lib/ui/panel-focus.ts";
+
+/** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
+export const DOCTOR_PANEL_MAX_HEIGHT = 40;
+
+function doctorExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
+	const sendUserMessage = createUserMessageSender(pi);
+	// Models the account refused this session (lib/models/model-unusable.ts): the report
+	// and presets must not recommend a model the session has just learned to avoid.
+	const unusableModels = new Set<string>();
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		unusableModels.add((data as ModelUnusableEvent).model);
+	});
+	const usableModels = (ctx: { modelRegistry: { getAvailable(): Model<Api>[] } }) => withoutUnusable(ctx.modelRegistry.getAvailable(), unusableModels);
+	let permission: PermissionStatus | undefined;
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		permission = data as PermissionStatus;
+	});
+
+	/** The mcp extension answers the request synchronously on the bus (lib/plugins/mcp-status.ts). */
+	const mcpSnapshot = (): McpStatusEvent | undefined => {
+		let snapshot: McpStatusEvent | undefined;
+		const unsubscribe = pi.events.on(MCP_STATUS_CHANNEL, (data) => {
+			snapshot = data as McpStatusEvent;
+		});
+		try {
+			pi.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
+		} finally {
+			unsubscribe();
+		}
+		return snapshot;
+	};
+
+	// The public model catalogs behind the tiers (lib/models/model-catalog-data.ts):
+	// refreshed at most daily, only from a session that outlives the turn, never
+	// awaited in session_start (findings §15, §19), inert once the session is
+	// shutting down (session_shutdown cancels a fetch in flight), off with
+	// `refreshModelCatalog: false`. A failure is logged once, the copy on disk
+	// (or the bundled one) keeps serving, and the next try waits a day. The
+	// start-up check reads only the files' stamps; this extension never parses
+	// the catalogs unless it refreshes or reports. Request surfaces keep their
+	// frozen tier until session_start/model_select; automatic model selection
+	// uses the refreshed catalog immediately.
+	let shuttingDown = false;
+	let refreshWarned = false;
+	let refreshAbort = new AbortController();
+	const refreshCatalog = async (ctx: ExtensionContext, home: string): Promise<void> => {
+		if (!readCatalogRefreshEnabled(productSettingsPath(home))) return;
+		const outcome = await refreshModelCatalog({
+			stateDir: productStateDir(process.env, home),
+			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
+			signal: refreshAbort.signal,
+		});
+		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
+			refreshWarned = true;
+			try {
+				notifyOrPrint(ctx, `Model catalogs not refreshed: ${outcome.error}. Model tiers keep using the copy on disk.`, "warning");
+			} catch {
+				// A UI hiccup must not fail the report that awaits this refresh.
+			}
+		}
+	};
+	pi.on("session_start", (_event, ctx) => {
+		if (refreshAbort.signal.aborted) refreshAbort = new AbortController();
+		const home = os.homedir();
+		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(productSettingsPath(home))) return;
+		if (!catalogRefreshDue(productStateDir(process.env, home))) return;
+		void refreshCatalog(ctx, home).catch(() => {});
+	});
+	pi.on("session_shutdown", () => {
+		shuttingDown = true;
+		refreshAbort.abort(new Error("the session ended"));
+	});
+
+	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
+		const home = os.homedir();
+		const version = productVersion();
+		// Unrelated endpoints (npm registry, the model catalogs): overlap them.
+		// The catalog refresh is a no-op when fresh or turned off, bounded by its fetch timeout.
+		const [latest] = options.network
+			? await Promise.all([lookupLatestVersion({ install: installKind(), current: version, env: process.env }), refreshCatalog(ctx, home)])
+			: [undefined];
+		// One read of pi's settings serves both views; made inside their own
+		// try, since a malformed settings file throws.
+		const piPaths = { agentDir: getAgentDir(), cwd: ctx.cwd };
+		let manager: SettingsManager | undefined;
+		const piSettings = () => (manager ??= SettingsManager.create(ctx.cwd, piPaths.agentDir));
+		return buildDoctorReport({
+			env: {
+				cwd: ctx.cwd,
+				home,
+				agentDir: getAgentDir(),
+				stateDir: productStateDir(process.env, home),
+				sources: sourceSwitchStatus(home),
+				env: process.env,
+				platform: process.platform,
+				arch: process.arch,
+				nodeVersion: process.versions.node,
+				productVersion: version,
+				install: installKind(),
+				piVersion: PI_VERSION,
+				replacedBuiltins: replacedBuiltinsView(PI_VERSION, piSettings, piPaths),
+				compactionKeep: keepView(piSettings, piPaths, ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined),
+				piConfigDirName: CONFIG_DIR_NAME,
+				registeredMcpServers: registeredMcpServers(pi),
+				latest,
+			},
+			registry: {
+				all: ctx.modelRegistry.getAll(),
+				available: usableModels(ctx),
+				authStatus: (provider) => ctx.modelRegistry.getProviderAuthStatus(provider),
+				displayName: (provider) => ctx.modelRegistry.getProviderDisplayName(provider),
+			},
+			session: {
+				model: ctx.model,
+				promptTier: requestTier(),
+				modelSource: ctx.model ? "session" : "none",
+				thinkingLevel: ctx.thinkingLevel,
+				permission: permission
+					? { mode: permission.mode, classifier: permission.classifier, pinned: permission.pinned, source: permission.mode === "auto" ? undefined : "set for this session" }
+					: undefined,
+				mcp: mcpSnapshot(),
+			},
+		});
+	};
+
+	const sendFix = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<boolean> => {
+		if (!ctx.model) {
+			notifyOrPrint(ctx, "No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix.", "warning");
+			return false;
+		}
+		const home = os.homedir();
+		const prompt = requireText("doctor").fixPrompt({
+			reportText: renderDoctorText(report, 100),
+			install: installKind(),
+			productVersion: productVersion(),
+			sessionsDir: join(getAgentDir(), "sessions"),
+			sessionDir: ctx.sessionManager.getSessionDir(),
+			productSettingsPath: productSettingsPath(home),
+			productProjectSettingsPath: productProjectSettingsPath(ctx.cwd, home),
+			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
+			sourcesOff: sourcesOff(),
+			modeCycleKey: modeCycleKey(),
+			upgradeCommands: UPGRADE_COMMANDS,
+		});
+		await sendUserMessage(ctx, promptCommandText("doctor", "", prompt));
+		return true;
+	};
+
+	const showPanel = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<void> => {
+		let wantFix = false;
+		await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
+			const paint = safeThemePaint(theme);
+			const bold = safeThemeBold(theme);
+			const state: DoctorViewerState = { offset: 0 };
+			let cache: { width: number; lines: string[] } | undefined;
+			const body = (width: number) => {
+				if (cache?.width === width) return cache;
+				cache = { width, lines: renderDoctorReport(report, { width: width - 2, paint, bold }).map((line) => ` ${line}`) };
+				return cache;
+			};
+			return {
+				render: (width: number) => {
+					const termRows = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? DOCTOR_PANEL_MAX_HEIGHT;
+					const height = boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT);
+					const { lines } = body(width);
+					return renderDoctorViewer({ lines, state, width, height, canFix: ctx.model !== undefined }, paint).map((line) => truncateLine(line, width));
+				},
+				handleInput: (data: string) => {
+					const key = decodeDoctorKey(data);
+					if (!key) return;
+					const termRows = (tui as { terminal?: { rows?: number } }).terminal?.rows ?? DOCTOR_PANEL_MAX_HEIGHT;
+					const visible = state.visibleRows ?? visibleBodyRows(boundedDockHeight(termRows, DOCTOR_PANEL_MAX_HEIGHT));
+					const effect = applyDoctorKey(state, key, cache?.lines.length ?? 0, visible);
+					if (effect?.kind === "fix") {
+						wantFix = true;
+						done(null);
+						return;
+					}
+					if (effect?.kind === "close") {
+						done(null);
+						return;
+					}
+					tui.requestRender();
+				},
+				invalidate: () => {
+					cache = undefined;
+				},
+			};
+		});
+		if (wantFix) await sendFix(ctx, report);
+	};
+
+	const notifyLocalResult = (args: string, ctx: ExtensionCommandContext, stdout: string, type: "info" | "warning" | "error"): void => {
+		announceLocalCommand(pi, { name: "doctor", args, stdout });
+		notifyOrPrint(ctx, stdout, type);
+	};
+
+	/** The preset's result, for the caller to notify and report as the command's stdout. */
+	const applyPreset = async (name: string, ctx: ExtensionCommandContext): Promise<{ text: string; type: "info" | "warning" | "error" }> => {
+		const available = usableModels(ctx);
+		const { presets, unavailable } = computePresets(available, ctx.model);
+		if (unavailable === "no-model") {
+			return { text: "No model is available — connect a provider with /login first.", type: "warning" };
+		}
+		if (unavailable === "no-priced-models") {
+			return { text: "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model or /subagent.", type: "warning" };
+		}
+		const preset = findPreset(presets, name);
+		if (!preset) {
+			return { text: `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, type: "error" };
+		}
+		const home = os.homedir();
+		const mainSwitched = !ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main);
+		if (mainSwitched && !(await pi.setModel(preset.main))) {
+			return { text: `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, type: "error" };
+		}
+		try {
+			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
+			// Every preset returns the classifier to the automatic choice.
+			persistClassifierModel(undefined, home);
+		} catch (error) {
+			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
+			return { text: `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, type: "error" };
+		}
+		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
+		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
+		return {
+			text: [
+				`Applied the ${preset.label} preset:`,
+				...describePresetChanges(preset, mainSwitched).map((line) => `  ${line}`),
+				`Saved to ${SETTINGS_DISPLAY}; the main model is remembered as pi's default.`,
+			].join("\n"),
+			type: "info",
+		};
+	};
+
+	/** The subcommands, with the one-line explanation the completion menu shows next to each. */
+	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
+		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported Claude Code config, MCP servers, dependencies" },
+		{ value: "presets", description: "List the economical / balanced / maximum-quality model presets for this provider, with the models each would pick" },
+		{ value: "preset economical", description: "Apply: one cheap model for the main session and subagents; automatic classifier" },
+		{ value: "preset balanced", description: "Apply: a capable main model with automatic subagents and classifier" },
+		{ value: "preset quality", description: "Apply: the strongest model for the main session and its subagents" },
+	];
+
+	announceArgumentHint(pi, "doctor", "[report|presets|preset <name>]");
+	pi.registerCommand("doctor", {
+		description:
+			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
+		getArgumentCompletions: (prefix) =>
+			extendingCompletions(prefix, SUBCOMMANDS.map((option) => ({ value: option.value, label: option.value, description: option.description }))),
+		handler: async (args, ctx) => {
+			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+			if (verb === "preset") {
+				if (rest.length === 0) {
+					notifyLocalResult(args, ctx, `Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
+					return;
+				}
+				const result = await applyPreset(rest.join(" "), ctx);
+				notifyLocalResult(args, ctx, result.text, result.type);
+				return;
+			}
+			if (verb === "presets") {
+				const section = presetsSection(computePresets(usableModels(ctx), ctx.model), ctx.model);
+				notifyLocalResult(args, ctx, renderSection(section, { width: 100 }).join("\n"), "info");
+				return;
+			}
+			if (verb && verb !== "report") {
+				notifyLocalResult(args, ctx, `Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
+				return;
+			}
+			// Bare `/doctor` is the checkup (Claude Code parity). Without a model it
+			// cannot run, so the report — which is what explains the missing model —
+			// shows instead.
+			const checkup = verb === undefined;
+			const report = await gather(ctx, { network: !checkup });
+			if (checkup && ctx.model) {
+				await sendFix(ctx, report);
+				return;
+			}
+			const warning = checkup ? "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor." : "";
+			const stdout = renderDoctorText(report, 100);
+			// The panel can submit the checkup prompt; queue its local result first.
+			announceLocalCommand(pi, { name: "doctor", args, stdout: warning ? `${warning}\n${stdout}` : stdout });
+			if (warning) notifyOrPrint(ctx, warning, "warning");
+			if (canShowCustomUi(ctx)) {
+				await showPanel(ctx, report);
+				return;
+			}
+			notifyOrPrint(ctx, stdout, report.ready ? "info" : "warning");
+		},
+	});
+}
+
+export default feature("doctor", doctorExtension);

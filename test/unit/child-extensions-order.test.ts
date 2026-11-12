@@ -5,20 +5,20 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CHILD_EXTENSIONS } from "../../extensions/lib/child-extensions.ts";
+import { CHILD_EXTENSIONS } from "../../extensions/lib/agents/child-extensions.ts";
 
 const packageOrder = (JSON.parse(readFileSync("package.json", "utf8")) as { pi: { extensions: string[] } }).pi.extensions.map((path) =>
-	path.replace(/^extensions\//, "").replace(/\/index\.ts$/, "").replace(/\.ts$/, ""),
+	path.replace(/^extensions\//, ""),
 );
 
 describe("the child extension list", () => {
 	it("loads compaction and context-management, as the main session does", () => {
-		expect(CHILD_EXTENSIONS).toContain("compaction");
-		expect(CHILD_EXTENSIONS).toContain("context-management");
+		expect(CHILD_EXTENSIONS).toContain("context/compaction/index.ts");
+		expect(CHILD_EXTENSIONS).toContain("request/context-management/index.ts");
 	});
 
 	it("keeps the main session's relative order for the request path's core", () => {
-		const core = ["kept-thinking", "ledger", "system-reminder", "tool-search", "context-management", "compaction", "ledger/wire", "cache-marks"];
+		const core = ["request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts"];
 		const ascending = (positions: number[]) => positions.every((position, i) => position !== -1 && (i === 0 || position > positions[i - 1]));
 		expect(ascending(core.map((name) => CHILD_EXTENSIONS.indexOf(name)))).toBe(true);
 		expect(ascending(core.map((name) => packageOrder.indexOf(name)))).toBe(true);

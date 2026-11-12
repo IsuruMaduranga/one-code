@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
-import { expandTilde } from "../../extensions/lib/paths.ts";
+import { parseFrontmatterLoosely } from "../../extensions/lib/core/frontmatter.ts";
+import { expandTilde } from "../../extensions/lib/profile/paths.ts";
 
 describe("parseFrontmatterLoosely (A8)", () => {
 	it("parses valid frontmatter through pi's parser", () => {

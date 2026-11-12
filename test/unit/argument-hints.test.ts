@@ -6,7 +6,7 @@ import {
 	frontmatterCommandHint,
 	hintForInput,
 	PI_BUILTIN_HINTS,
-} from "../../extensions/lib/argument-hints.ts";
+} from "../../extensions/lib/ui/argument-hints.ts";
 
 describe("hintForInput (Claude Code's typeahead rule, findings §34)", () => {
 	const hints = new Map([

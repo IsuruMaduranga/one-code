@@ -1,5 +1,5 @@
 /**
- * lib/process-tree.ts against real shells (the repo never mocks child_process).
+ * lib/shell-run/process-tree.ts against real shells (the repo never mocks child_process).
  * With zsh as $SHELL, `cmd; echo` and pipelines run the command outside the
  * `$SHELL -c` leader; signalling the leader alone left them as orphans holding
  * the stdout pipe (LIFECYCLE-REVIEW-2026-09-06 M2). Detached spawn + group kill
@@ -14,8 +14,8 @@
 import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
-import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
 
 const win32 = process.platform === "win32";
 
@@ -88,11 +88,81 @@ describe("killProcessTree", () => {
 		expect(elapsed).toBeLessThan(EXIT_STDIO_MAX_MS + 1500);
 		killProcessTree(child, "SIGKILL"); // the loop is not the leader's group on Windows; best effort
 	});
+
+	it.skipIf(win32)("freezes the group before signalling it, and resumes it unless the signal was SIGKILL", async () => {
+		const sent: string[] = [];
+		const kill = vi.spyOn(process, "kill");
+		try {
+			const term = spawnShell("sleep 30");
+			const killed = spawnShell("sleep 30");
+			await new Promise((r) => setTimeout(r, 100));
+			const settled = Promise.all([settledWithin(term, 3000), settledWithin(killed, 3000)]);
+			killProcessTree(term);
+			killProcessTree(killed, "SIGKILL");
+			for (const [pid, signal] of kill.mock.calls) sent.push(`${pid === -term.pid! ? "term" : pid === -killed.pid! ? "killed" : "other"}:${signal}`);
+			await settled;
+		} finally {
+			kill.mockRestore();
+		}
+		expect(sent).toEqual(["term:SIGSTOP", "term:SIGTERM", "term:SIGCONT", "killed:SIGSTOP", "killed:SIGKILL"]);
+	});
+
+	it.skipIf(win32)("resumes a group it froze when the signal itself could not be sent, SIGKILL included", async () => {
+		const child = spawnShell("sleep 30");
+		await new Promise((r) => setTimeout(r, 100));
+		const real = process.kill.bind(process);
+		const sent: string[] = [];
+		const kill = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+			if (pid === -child.pid!) sent.push(String(signal));
+			if (pid === -child.pid! && signal === "SIGKILL") throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+			return real(pid, signal as NodeJS.Signals);
+		});
+		try {
+			const settled = settledWithin(child, 3000);
+			killProcessTree(child, "SIGKILL");
+			expect(sent).toEqual(["SIGSTOP", "SIGKILL", "SIGCONT"]);
+			await settled; // the leader was still killed directly
+		} finally {
+			kill.mockRestore();
+			killProcessTree(child, "SIGKILL");
+		}
+	});
+
+	it.skipIf(win32)("a shell whose command the kill ended never runs its next command or reports the job", async () => {
+		// Unfrozen, the command can die before its shell is signalled; the shell
+		// then reaps it, prints the job report and runs on (see killProcessTree).
+		const runs = await Promise.all(
+			Array.from({ length: 24 }, async () => {
+				const child = spawn(bash.shell, ["-c", "echo ready; sleep 30; echo ran-on"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
+				let out = "";
+				let err = "";
+				child.stdout?.on("data", (chunk) => (out += chunk));
+				child.stderr?.on("data", (chunk) => (err += chunk));
+				while (!out.includes("ready")) await new Promise((r) => setTimeout(r, 5));
+				const exited = waitForChildExit(child);
+				killProcessTree(child, "SIGKILL");
+				await exited;
+				return { out: out.trim(), err };
+			}),
+		);
+		expect(runs).toEqual(runs.map(() => ({ out: "ready", err: "" })));
+	});
+
+	it.skipIf(win32)("a frozen group still runs its TERM handler", async () => {
+		const child = spawn(bash.shell, ["-c", "trap 'echo handled; exit 0' TERM; echo ready; sleep 30 & wait"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
+		let out = "";
+		child.stdout?.on("data", (chunk) => (out += chunk));
+		while (!out.includes("ready")) await new Promise((r) => setTimeout(r, 5));
+		const exited = waitForChildExit(child);
+		killProcessTree(child);
+		expect((await exited).code).toBe(0);
+		expect(out).toContain("handled");
+	});
 });
 
 describe("stopProcessTree", () => {
 	// Windows has no SIGTERM to ignore: taskkill /F is the first and only signal,
-	// so the grace period does not exist there (lib/process-tree.ts).
+	// so the grace period does not exist there (lib/shell-run/process-tree.ts).
 	it.skipIf(win32)("SIGKILLs after the grace period when the tree ignores SIGTERM", async () => {
 		// The shell ignores TERM and the disposition is inherited by sleep.
 		const child = spawnShell("trap '' TERM; sleep 30");
@@ -155,7 +225,7 @@ describe("stopProcessTree", () => {
 	it.skipIf(win32)("force-kills a stopped tree at process exit, before its grace timer could fire (A3-M1, the quit path)", async () => {
 		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
 		// later, as pi's quit does (dispose, then process.exit).
-		const moduleUrl = new URL(`file://${resolve("extensions/lib/process-tree.ts")}`).href;
+		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
 		const script = [
 			`import { spawn } from "node:child_process";`,
 			`import { detachedSpawnOptions, stopProcessTree } from ${JSON.stringify(moduleUrl)};`,

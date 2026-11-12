@@ -2,18 +2,19 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
-import { approvalStorePath, resetTrustSessionState } from "../../extensions/hooks/trust.ts";
-import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
-import lspExtension from "../../extensions/lsp/index.ts";
-import { lspTrustStorePath } from "../../extensions/lsp/trust.ts";
+import hooksExtension from "../../extensions/safety/hooks/index.ts";
+import { approvalStorePath, resetTrustSessionState } from "../../extensions/safety/hooks/trust.ts";
+import { resetHookSettingsCache } from "../../extensions/safety/hooks/settings.ts";
+import lspExtension from "../../extensions/tools/lsp/index.ts";
+import { lspTrustStorePath } from "../../extensions/tools/lsp/trust.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
 
 const state = vi.hoisted(() => ({ runHook: vi.fn(), startServer: vi.fn() }));
-vi.mock("../../extensions/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
-vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/lsp/client.ts")>();
+vi.mock("../../extensions/safety/hooks/executor.ts", () => ({ runHookCommand: state.runHook }));
+vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/tools/lsp/client.ts")>();
 	return { ...actual, LspClient: class {
 		isRunning = true;
 		publishCount = 0;
@@ -23,22 +24,23 @@ vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
 	} };
 });
 
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper lists one on any profile.
+useRepositorySettings();
+
 let root: string;
 let cwd: string;
 beforeEach(() => {
 	root = mkdtempSync(join(tmpdir(), "rpc-trust-"));
 	cwd = join(root, "project");
-	mkdirSync(join(cwd, ".claude"), { recursive: true });
+	mkdirSync(cwd, { recursive: true });
 	stubHome(root);
-	vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
-	vi.stubEnv("ONECODE_CONFIG_MODE", "claude-compatible");
-	vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	resetTrustSessionState();
 	resetHookSettingsCache();
 	state.startServer.mockReset();
 	state.runHook.mockReset().mockResolvedValue({ stdout: "", stderr: "", exitCode: 0, durationMs: 1 });
-	writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo trusted" }] }] } }));
+	writeRepositorySettings(cwd, root, { hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo trusted" }] }] } });
 	writeFileSync(join(cwd, "Cargo.toml"), "[package]\nname = 'demo'\nversion = '0.1.0'\n");
 	writeFileSync(join(cwd, "main.rs"), "fn main() {}\n");
 });

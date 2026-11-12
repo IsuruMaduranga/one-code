@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { powershellQuote } from "../../extensions/lib/shell-quote.ts";
-import { rewriteToolInput } from "../../extensions/worktree/rewrite.ts";
+import { powershellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import { rewriteToolInput } from "../../extensions/safety/worktree/rewrite.ts";
 
 describe("rewriteToolInput for powershell", () => {
 	it("prefixes a Set-Location into the worktree and returns the original command", () => {

@@ -5,8 +5,8 @@ import {
 	matchRank,
 	renderModelPicker,
 	windowStart,
-} from "../../extensions/lib/model-picker.ts";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
+} from "../../extensions/lib/models/model-picker.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 
 const header = { title: "Select the default subagent model", subtitle: "Sets which model subagent runs use." };
 

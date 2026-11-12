@@ -111,9 +111,10 @@ The choice is saved to `~/.onecode/settings.json`. A saved choice is tied
 to the provider it was made on; after switching providers, run
 `/subagent status` and pick again if it no longer applies.
 
-On a Claude session, Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` variable is
-honored, from the environment or from the `env` block of your user or
-managed settings. One Code's own setting wins when both are set.
+`ONECODE_SUBAGENT_MODEL` sets the default from the environment or from the
+`env` block of your user or managed settings. Claude Code's
+`CLAUDE_CODE_SUBAGENT_MODEL` works the same way, but only on a Claude
+session. The `/subagent` setting wins over either variable.
 
 An agent definition's own `model` field overrides the default for that
 agent.

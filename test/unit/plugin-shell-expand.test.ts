@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { expandTemplate, runPlaceholderCommand } from "../../extensions/plugins/shell-expand.ts";
+import { expandTemplate, runPlaceholderCommand } from "../../extensions/tools/plugins/shell-expand.ts";
 
 const cwd = mkdtempSync(join(tmpdir(), "plugin-expand-"));
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
@@ -52,6 +52,7 @@ describe("runPlaceholderCommand", () => {
 	it("returns the error text for a failing command and stops at the timeout", async () => {
 		if (process.platform === "win32") return;
 		expect(await runPlaceholderCommand("echo oops >&2; exit 3", cwd)).toBe("oops");
-		expect(await runPlaceholderCommand("sleep 5", cwd, { timeoutMs: 200 })).toContain("timed out");
+		// Nothing printed before the timeout: the result is the timeout notice alone.
+		expect(await runPlaceholderCommand("sleep 5", cwd, { timeoutMs: 200 })).toBe("command timed out after 0 seconds");
 	});
 });

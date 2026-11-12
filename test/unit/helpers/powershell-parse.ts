@@ -5,9 +5,9 @@
  * has pwsh on every runner.
  */
 import { homedir } from "node:os";
-import { type PowerShellParse, PowerShellParser } from "../../../extensions/lib/powershell-parser.ts";
-import { spawnShellCommand, type ShellSpawn } from "../../../extensions/lib/shell-spawn.ts";
-import { powershellReadOnly, type PowerShellReadOnlyOptions } from "../../../extensions/permissions/powershell-rules.ts";
+import { type PowerShellParse, PowerShellParser } from "../../../extensions/lib/shell/powershell-parser.ts";
+import { spawnShellCommand, type ShellSpawn } from "../../../extensions/lib/shell-run/shell-spawn.ts";
+import { powershellReadOnly, type PowerShellReadOnlyOptions } from "../../../extensions/lib/shell/powershell-rules.ts";
 import { localPwsh } from "./local-pwsh.ts";
 
 export const LOCAL_POWERSHELL = localPwsh();

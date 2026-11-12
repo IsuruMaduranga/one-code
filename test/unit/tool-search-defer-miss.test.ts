@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 /**
- * Integration test for the deferred-miss steering wired in tool-search/index.ts:
+ * Integration test for the deferred-miss steering wired in request/tool-search/index.ts:
  * when the model calls a deferred tool directly, pi's core dispatcher fails it
  * with a bare "Tool <name> not found" tool_execution_end. We drive the real
  * extension against a fake pi and assert the one-shot correction is emitted.
@@ -42,8 +43,7 @@ describe("tool-search deferred-miss steering", () => {
 		const correction = correctionFor(fake.reminders, "web_fetch");
 		expect(correction).toBeDefined();
 		expect(correction?.placement).toBeUndefined();
-		expect(correction?.text).toContain("tool_search");
-		expect(correction?.text).toContain("select:web_fetch");
+		expect(correction?.text).toBe(toolSearchResultText.missReminder({ name: "web_fetch" }));
 	});
 
 	it("ignores a not-found error for a tool that is not deferred", () => {

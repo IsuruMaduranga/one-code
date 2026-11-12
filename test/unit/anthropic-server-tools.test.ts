@@ -5,10 +5,10 @@
  * (working-docs/findings/43-anthropic-server-web-tools.md).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/anthropic-server-call.ts";
+import { runServerCall, serverCallUsage, tryNativeWeb } from "../../extensions/lib/request/anthropic-server-call.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 import {
 	createServerCallAccumulator,
-	FETCH_ERROR_REASONS,
 	fetchOutcome,
 	isFirstPartyAnthropic,
 	isPrivateOrLocalUrl,
@@ -26,7 +26,9 @@ import {
 	thinkingRetry,
 	WEB_FETCH_TOOL_TYPE,
 	WEB_SEARCH_TOOL_TYPE,
-} from "../../extensions/lib/anthropic-server-tools.ts";
+} from "../../extensions/lib/request/anthropic-server-tools.ts";
+
+const nativeWeb = requireText("nativeWeb");
 
 const claude = (id: string, input: number, extra: Record<string, unknown> = {}) =>
 	({
@@ -156,19 +158,19 @@ describe("thinking off", () => {
 
 describe("request bodies", () => {
 	it("puts the URL and the question in the user message, where web_fetch may fetch from", () => {
-		const body = nativeFetchBody({ model: "claude-sonnet-5", url: "https://a.example/x", prompt: "What version?" });
-		expect(body.messages).toEqual([{ role: "user", content: "Page: https://a.example/x\n\nQuestion: What version?" }]);
+		const body = nativeFetchBody(nativeWeb.fetch, { model: "claude-sonnet-5", url: "https://a.example/x", prompt: "What version?" });
+		expect(body.messages).toEqual([{ role: "user", content: nativeWeb.fetch.user({ url: "https://a.example/x", prompt: "What version?" }) }]);
 		// Held to the URL's host: the permission gate judged that one URL.
 		expect(body.tools).toEqual([{ type: WEB_FETCH_TOOL_TYPE, name: "web_fetch", max_uses: 3, allowed_domains: ["a.example"] }]);
-		expect(body.system).toContain("untrusted data");
+		expect(body.system).toBe(nativeWeb.fetch.system);
 		expect(body).toMatchObject({ stream: true });
 		expect(body.thinking).toBeUndefined();
 	});
 
 	it("passes one domain list to the search tool", () => {
-		const body = nativeSearchBody({ model: "m", query: "q", allowedDomains: ["nodejs.org"] });
+		const body = nativeSearchBody(nativeWeb.searchSystem, { model: "m", query: "q", allowedDomains: ["nodejs.org"] });
 		expect(body.tools).toEqual([{ type: WEB_SEARCH_TOOL_TYPE, name: "web_search", max_uses: 5, allowed_domains: ["nodejs.org"] }]);
-		const blocked = nativeSearchBody({ model: "m", query: "q", blockedDomains: ["spam.example"] });
+		const blocked = nativeSearchBody(nativeWeb.searchSystem, { model: "m", query: "q", blockedDomains: ["spam.example"] });
 		expect((blocked.tools as any[])[0]).toMatchObject({ blocked_domains: ["spam.example"] });
 		expect((blocked.tools as any[])[0].allowed_domains).toBeUndefined();
 	});
@@ -263,15 +265,9 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 		expect(fetchOutcome(fold(fetchStream({ type: "web_fetch_result", url: "u" })))).toEqual({ ok: true, text: "v24.21.0", cutOff: false });
 	});
 
-	it.each(Object.keys(FETCH_ERROR_REASONS))("falls back on %s, naming the code", (code) => {
+	it.each(["url_not_accessible", "url_not_allowed", "url_not_in_prior_context", "brand_new_code"])("falls back on %s, keeping the code", (code) => {
 		const outcome = fetchOutcome(fold(fetchStream({ type: "web_fetch_tool_result_error", error_code: code }, "I couldn't fetch it.")));
-		expect(outcome.ok).toBe(false);
-		if (!outcome.ok) expect(outcome.reason).toContain(code);
-	});
-
-	it("falls back on an unknown error code too", () => {
-		const outcome = fetchOutcome(fold(fetchStream({ type: "web_fetch_tool_result_error", error_code: "brand_new_code" })));
-		expect(outcome).toEqual({ ok: false, reason: "Anthropic's fetcher returned brand_new_code (brand_new_code)" });
+		expect(outcome).toEqual({ ok: false, fallback: { kind: "fetchError", code } });
 	});
 
 	it("answers when one fetch failed but another succeeded", () => {
@@ -285,7 +281,7 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 	it("falls back when the model answered without fetching", () => {
 		expect(fetchOutcome(fold([{ type: "content_block_start", index: 0, content_block: { type: "text", text: "From memory: 22." } }, { type: "message_delta", delta: { stop_reason: "end_turn" } }]))).toEqual({
 			ok: false,
-			reason: "the model answered without fetching the page",
+			fallback: { kind: "noFetch" },
 		});
 	});
 
@@ -301,9 +297,9 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 
 	it("falls back when the call stops early, returns no text, or errors", () => {
 		const paused = fetchStream({ type: "web_fetch_result", url: "u" }).map((event: any) => (event.type === "message_delta" ? { ...event, delta: { stop_reason: "pause_turn" } } : event));
-		expect(fetchOutcome(fold(paused))).toEqual({ ok: false, reason: "the call stopped early (pause_turn)" });
-		expect(fetchOutcome(fold(fetchStream({ type: "web_fetch_result", url: "u" }, "")))).toEqual({ ok: false, reason: "the model returned no answer" });
-		expect(fetchOutcome(fold([{ type: "error", error: { message: "Overloaded" } }]))).toEqual({ ok: false, reason: "the call failed: Overloaded" });
+		expect(fetchOutcome(fold(paused))).toEqual({ ok: false, fallback: { kind: "stoppedEarly", stopReason: "pause_turn" } });
+		expect(fetchOutcome(fold(fetchStream({ type: "web_fetch_result", url: "u" }, "")))).toEqual({ ok: false, fallback: { kind: "noAnswer" } });
+		expect(fetchOutcome(fold([{ type: "error", error: { message: "Overloaded" } }]))).toEqual({ ok: false, fallback: { kind: "callFailed", osMessage: "Overloaded" } });
 	});
 
 	it("keeps a long answer cut off at the output limit, marked, but not narration or an empty one", () => {
@@ -313,9 +309,9 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 		expect(fetchOutcome(fold(cut(long)))).toEqual({ ok: true, text: long.trim(), cutOff: true });
 		expect(fetchOutcome(fold(cut("The first page lacks it; trying the linked page.")))).toEqual({
 			ok: false,
-			reason: "the call reached the output limit before it answered",
+			fallback: { kind: "cutOffEarly" },
 		});
-		expect(fetchOutcome(fold(cut("")))).toEqual({ ok: false, reason: "the model returned no answer" });
+		expect(fetchOutcome(fold(cut("")))).toEqual({ ok: false, fallback: { kind: "noAnswer" } });
 	});
 });
 
@@ -343,8 +339,8 @@ describe("searchOutcome / searchSources", () => {
 	});
 
 	it("falls back on an error or empty results", () => {
-		expect(searchOutcome(search({ type: "web_search_tool_result_error", error_code: "too_many_requests" }))).toEqual({ ok: false, reason: "the search returned too_many_requests" });
-		expect(searchOutcome(search([]))).toEqual({ ok: false, reason: "the search returned no results" });
+		expect(searchOutcome(search({ type: "web_search_tool_result_error", error_code: "too_many_requests" }))).toEqual({ ok: false, fallback: { kind: "searchError", code: "too_many_requests" } });
+		expect(searchOutcome(search([]))).toEqual({ ok: false, fallback: { kind: "noResults" } });
 	});
 });
 
@@ -387,7 +383,7 @@ describe("runServerCall", () => {
 		});
 		vi.stubGlobal("fetch", fetchMock);
 		const model = claude("claude-sonnet-5-5", 3);
-		const reply = await runServerCall(model, { apiKey: "sk-ant-api03-x", headers: { "x-drop": null } }, nativeFetchBody({ model: model.id, url: "https://a.example/", prompt: "p" }), undefined);
+		const reply = await runServerCall(model, { apiKey: "sk-ant-api03-x", headers: { "x-drop": null } }, nativeFetchBody(nativeWeb.fetch, { model: model.id, url: "https://a.example/", prompt: "p" }), undefined);
 		expect(bodies.map((body) => body.thinking)).toEqual([{ type: "disabled" }, { type: "between_tools" }]);
 		expect(bodies[1].output_config).toEqual({ effort: "low" });
 		const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
@@ -439,7 +435,7 @@ describe("runServerCall", () => {
 			{ model: claude("claude-sonnet-5", 3), modelRegistry: { getAvailable: () => [claude("claude-sonnet-5", 3)], getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "sk-ant-api03-x" }) } },
 			{ body: () => ({}), outcome: fetchOutcome, onUsage, signal: undefined },
 		);
-		expect(attempt).toEqual({ kind: "fell-back", reason: "the call failed: socket hang up" });
+		expect(attempt).toEqual({ kind: "fell-back", fallback: { kind: "callFailed", osMessage: "socket hang up" } });
 		expect(onUsage).toHaveBeenCalledOnce();
 		expect(onUsage.mock.calls[0][0]).toMatchObject({ input: 900, output: 5 });
 	});
@@ -460,7 +456,7 @@ describe("tryNativeWeb", () => {
 		modelRegistry: { getAvailable: () => [session], getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey }) },
 	});
 	const request = (signal?: AbortSignal) => ({
-		body: (model: string) => nativeFetchBody({ model, url: "https://a.example/", prompt: "p" }),
+		body: (model: string) => nativeFetchBody(nativeWeb.fetch, { model, url: "https://a.example/", prompt: "p" }),
 		outcome: fetchOutcome,
 		onUsage: vi.fn(),
 		signal,
@@ -484,9 +480,9 @@ describe("tryNativeWeb", () => {
 
 	it("falls back with the outcome's reason, or the error's", async () => {
 		vi.stubGlobal("fetch", vi.fn(async () => sse(fetchStream({ type: "web_fetch_tool_result_error", error_code: "url_not_accessible" }))));
-		expect(await tryNativeWeb(ctx(session), request())).toEqual({ kind: "fell-back", reason: "Anthropic's fetcher could not reach the page (url_not_accessible)" });
+		expect(await tryNativeWeb(ctx(session), request())).toEqual({ kind: "fell-back", fallback: { kind: "fetchError", code: "url_not_accessible" } });
 		vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 529 })));
-		expect(await tryNativeWeb(ctx(session), request())).toEqual({ kind: "fell-back", reason: "the call failed: Anthropic API error (529): {}" });
+		expect(await tryNativeWeb(ctx(session), request())).toEqual({ kind: "fell-back", fallback: { kind: "callFailed", osMessage: "Anthropic API error (529): {}" } });
 	});
 
 	it("reports a cancel as cancelled, not as a fallback", async () => {

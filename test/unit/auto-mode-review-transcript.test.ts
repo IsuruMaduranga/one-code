@@ -9,18 +9,19 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
-import { classify } from "../../extensions/auto-mode/classifier.ts";
-import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/auto-mode/history.ts";
-import { buildPayload, type ClassifyRequest } from "../../extensions/auto-mode/prompt.ts";
-import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { type PermissionBridge, SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
+import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import { buildPayload, type ClassifyRequest } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import type { HandBackVerdict } from "../../extensions/lib/notify/notifications.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { type PermissionBridge, SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "allow", reason: "", tier: "allow" })),
 }));
 
@@ -43,7 +44,7 @@ describe("hand-back review transcript", () => {
 	beforeEach(async () => {
 		vi.mocked(classify).mockClear();
 		stateDir = mkdtempSync(join(tmpdir(), "review-transcript-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(stateDir, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		fake = createFakePi();
 		fake.events.on(SUBAGENT_GATE_CHANNEL, (data) => {

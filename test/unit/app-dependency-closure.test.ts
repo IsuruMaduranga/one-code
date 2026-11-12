@@ -54,7 +54,7 @@ interface ModuleNode {
 /**
  * Specifiers one module pulls in at LOAD time: `import`, `export … from` and
  * `export * from`. Parsed with acorn (already a dependency, and the tool
- * `extensions/workflow/script-source.ts` uses for the same job) rather than
+ * `extensions/agents/workflow/script-source.ts` uses for the same job) rather than
  * matched by regex, so text inside a comment or string cannot pose as an
  * import. `import()` is deliberately excluded — a dynamic import does not run
  * at load time, so it cannot break the initial import the way this bug did,

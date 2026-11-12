@@ -1,23 +1,28 @@
 /**
- * Workspace directories (permissions/workspace.ts): what one grants in each
+ * Workspace directories (safety/permissions/workspace.ts): what one grants in each
  * mode, where they come from (settings, the repository behind consent,
  * `--add-dir`, `/add-dir`), and what the system prompt is told.
  */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
-import { forwardSlashes } from "../../extensions/lib/paths.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { listWorkspaceDirectories } from "../../extensions/permissions/settings.ts";
-import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
-import { environmentBlock } from "../../extensions/lib/environment-block.ts";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { WORKSPACE_CHANNEL } from "../../extensions/lib/rules/workspace-channel.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { listWorkspaceDirectories } from "../../extensions/lib/rules/settings.ts";
+import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/safety/permissions/workspace.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
+
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper lists one on any profile.
+useRepositorySettings();
+
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -37,7 +42,6 @@ beforeEach(() => {
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });
 afterEach(() => {
@@ -122,6 +126,12 @@ describe("workspace directories in the gate", () => {
 	};
 	const read = (path: string) => fake.fireOne<GateResult>("tool_call", { toolName: "read", input: { path }, toolCallId: `r-${Math.random()}` }, ctx);
 	const prompted = () => vi.mocked((ctx.ui as { select: () => unknown }).select).mock.calls.length;
+	/** The product's own user settings file: every profile reads it. */
+	const writeUserSettings = (settings: unknown) => {
+		const path = productSettingsPath(home);
+		mkdirSync(dirname(path), { recursive: true });
+		writeFileSync(path, JSON.stringify(settings));
+	};
 
 	beforeEach(() => {
 		announced.length = 0;
@@ -130,8 +140,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("applies permissions.additionalDirectories from the user's settings and announces them", async () => {
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["../shared"] } }));
+		writeUserSettings({ permissions: { additionalDirectories: ["../shared"] } });
 		await start();
 		expect(listWorkspaceDirectories(cwd, home).map((d) => d.path)).toEqual([shared]);
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();
@@ -148,8 +157,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("ignores the filesystem root and the home directory in settings, and says so", async () => {
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["/", "~", "../shared"] } }));
+		writeUserSettings({ permissions: { additionalDirectories: ["/", "~", "../shared"] } });
 		await start();
 		expect(announced).toEqual([[shared]]);
 		expect((await read(join(home, "notes.md")))?.block).toBe(true);
@@ -159,8 +167,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("asks to trust the repository's directories before applying them", async () => {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
+		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
 		confirmAnswer = false;
 		await start();
 		expect(announced).toEqual([[]]);
@@ -178,8 +185,7 @@ describe("workspace directories in the gate", () => {
 	});
 
 	it("asks to trust the repository's directories for a plan-mode shell read there", async () => {
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
+		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
 		await start();
 		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
 		const command = `cat ${forwardSlashes(join(shared, "notes.md"))}`;
@@ -196,7 +202,7 @@ describe("workspace directories in the gate", () => {
 		expect((ctx._notified as Array<{ message: string }>).some((n) => n.message.startsWith(`--add-dir ${join(root, "missing")}:`))).toBe(true);
 	});
 
-	it("adds a directory with /add-dir, for the session or remembered in One Code's project settings", async () => {
+	it("adds a directory with /add-dir, for the session or remembered in the product's project settings", async () => {
 		await start();
 		selectAnswer = "Yes, for this session";
 		await fake.commands.get("add-dir")!.handler(shared, ctx);
@@ -206,18 +212,9 @@ describe("workspace directories in the gate", () => {
 
 		selectAnswer = "Yes, and remember this directory";
 		await fake.commands.get("add-dir")!.handler(shared, ctx);
-		const saved = JSON.parse(readFileSync(oneCodeProjectSettingsPath(cwd, home), "utf-8"));
+		const saved = JSON.parse(readFileSync(productProjectSettingsPath(cwd, home), "utf-8"));
 		expect(saved.permissions.additionalDirectories).toEqual([shared]);
 		await fake.fire("session_start", { reason: "new" }, ctx);
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();
-	});
-});
-
-describe("the environment block", () => {
-	const env = { cwd: "/p", isGitRepo: true, platform: "darwin", osVersion: "x", shell: "zsh" };
-	it("lists workspace directories the way Claude Code's environment block does, and nothing when there are none", () => {
-		const withDirs = environmentBlock({ ...env, workspaceDirs: ["/a", "/b"] });
-		expect(withDirs).toContain(" - Primary working directory: /p\n - Is a git repository: true\n - Additional working directories:\n  - /a\n  - /b\n - Platform: darwin");
-		expect(environmentBlock(env)).toContain(" - Is a git repository: true\n - Platform: darwin");
 	});
 });

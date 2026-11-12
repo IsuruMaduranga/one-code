@@ -23,11 +23,16 @@ import {
 	isTransportFailure,
 	providerErrorSummary,
 	ROTATE_AFTER_TIMEOUTS,
-} from "../../extensions/auto-mode/classifier.ts";
-import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
-import { isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
-import { MAX_ACTION_CHARS } from "../../extensions/auto-mode/transcript.ts";
+} from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
+import { isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
+import type { ClassifierBlock } from "../../extensions/safety/permissions/auto-mode/text.ts";
+import { actionLength, MAX_ACTION_CHARS } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
+
+/** The profile's words for a block the classifier could not judge. */
+const blockText = (block: ClassifierBlock) => autoModeResultText.classifierBlock(block);
 
 const completeMock = vi.mocked(completeSimple);
 
@@ -113,7 +118,7 @@ describe("classify: pinning and fallback", () => {
 	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {
 		// The Codex "not supported when using Codex with a ChatGPT account" case:
 		// mini is refused, the classifier steps on, and the refusal is published
-		// (lib/model-unusable.ts) — a timeout or a transient error is not.
+		// (lib/models/model-unusable.ts) — a timeout or a transient error is not.
 		completeMock.mockImplementation(async (m: any) =>
 			m.id === "gpt-5-mini" ? errorReply("The 'gpt-5-mini' model is not supported when using Codex with a ChatGPT account.") : allowReply(),
 		);
@@ -188,7 +193,7 @@ describe("classify: pinning and fallback", () => {
 		completeMock.mockResolvedValueOnce(errorReply("500 internal server error"));
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("block");
-		expect(verdict.reason).toContain("returned no verdict");
+		expect(verdict.reason).toBe(blockText({ kind: "providerError", summary: "500 internal server error" }));
 		// The same model is tried again next call: switching would paper over
 		// something about to clear.
 		expect(deps.state.pinned?.id).toBe("gpt-5-mini");
@@ -227,7 +232,7 @@ describe("classify: pinning and fallback", () => {
 		completeMock.mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(truncatedReply());
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("block");
-		expect(verdict.reason).toContain("output limit");
+		expect(verdict.reason).toBe(blockText({ kind: "truncated" }));
 		expect(deps.state.pinned?.id).toBe("gpt-5-mini");
 		expect(deps.state.rejected.size).toBe(0);
 	});
@@ -348,13 +353,10 @@ describe("classify: timeout handling", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("timeout");
-		expect(verdict.reason).toContain("in time");
-		// Names the tool under review and the model that timed out (CC-aligned copy),
-		// so the model knows what was blocked and that it can wait/retry.
-		expect(verdict.reason).toContain("bash");
-		expect(verdict.reason).toContain("temporarily unavailable");
-		// A timeout must never look like a substantive "returned no verdict" error.
-		expect(verdict.reason).not.toContain("returned no verdict");
+		// Names the tool under review and the model that timed out, so the model
+		// knows what was blocked and that it can wait or retry; a timeout is never
+		// worded as a provider error.
+		expect(verdict.reason).toBe(blockText({ kind: "unavailable", tool: "bash", model: "gpt-5.1-mini" }));
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
@@ -389,8 +391,7 @@ describe("classify: timeout handling", () => {
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("timeout");
 		expect(verdict.noVerdict).toBe(true);
-		expect(verdict.reason).toContain("temporarily unavailable (network error: fetch failed)");
-		expect(verdict.reason).not.toContain("returned no verdict");
+		expect(verdict.reason).toBe(blockText({ kind: "unavailable", tool: "bash", model: "gpt-5.1-mini", networkError: "fetch failed" }));
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
@@ -489,12 +490,12 @@ describe("the action under review reaches the classifier whole", () => {
 
 	it("refuses an action too large to review in full, naming its size, without a model call", async () => {
 		const { deps } = makeDeps();
-		const verdict = await classify(
-			{ ...request, transcript: [{ kind: "tool", tool: "bash", input: { command: "x".repeat(MAX_ACTION_CHARS + 1) } }] },
-			deps,
-		);
+		const transcript = [{ kind: "tool" as const, tool: "bash", input: { command: "x".repeat(MAX_ACTION_CHARS + 1) } }];
+		const verdict = await classify({ ...request, transcript }, deps);
 		expect(verdict.decision).toBe("block");
-		expect(verdict.reason).toMatch(/characters.*Split it/);
+		const chars = actionLength(transcript);
+		expect(chars).toBeGreaterThan(MAX_ACTION_CHARS);
+		expect(verdict.reason).toBe(blockText({ kind: "actionTooLong", chars, max: MAX_ACTION_CHARS }));
 		expect(completeMock).not.toHaveBeenCalled();
 	});
 });
@@ -559,9 +560,8 @@ describe("classify: a provider that refuses the classifier's prompt", () => {
 		completeMock.mockResolvedValue(refusal());
 		const verdict = await classify(request, deps);
 		expect(verdict).toMatchObject({ decision: "block", noVerdict: true });
-		expect(verdict.reason).toBe("Auto mode has no classifier: openai/gpt-5.1-mini refused the classifier's prompt as a possible usage-policy violation.");
-		// The provider's advice to rephrase never reaches the model.
-		expect(verdict.reason).not.toMatch(/try again|different prompt/i);
+		// Only the refusal reaches the model: the provider's advice to rephrase never does.
+		expect(verdict.reason).toBe(blockText({ kind: "noClassifierLeft", refused: ["openai/gpt-5.1-mini"], unusable: [] }));
 		expect(completeMock).toHaveBeenCalledTimes(2);
 		expect(notices.filter((notice) => notice.startsWith("Auto mode has no classifier left"))).toHaveLength(1);
 		expect(notices.find((notice) => notice.startsWith("Auto mode has no classifier left"))).toMatch(/manual approval .*\/auto-mode model/);
@@ -579,9 +579,13 @@ describe("classify: a provider that refuses the classifier's prompt", () => {
 		const { deps } = makeDeps();
 		const verdict = await classify(request, deps);
 		expect(verdict).toMatchObject({ decision: "block", noVerdict: true });
-		expect(verdict.reason).toMatch(/^Auto mode has no classifier: openai\/gpt-5-mini refused/);
 		// The model that failed for another cause is named with its own error.
-		expect(verdict.reason).toContain("cannot be used (");
-		expect(verdict.reason).toContain("not supported when using Codex");
+		expect(verdict.reason).toBe(
+			blockText({
+				kind: "noClassifierLeft",
+				refused: ["openai/gpt-5-mini"],
+				unusable: [{ model: "openai/gpt-5.1-mini", error: "The 'gpt-5.1-mini' model is not supported when using Codex with a ChatGPT account." }],
+			}),
+		);
 	});
 });

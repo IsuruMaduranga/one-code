@@ -1,0 +1,551 @@
+import { type Api, clampThinkingLevel, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ProductProvider, WireFeature } from "../profile/product-providers.ts";
+import { activeProfile } from "../profile/profile.ts";
+
+export { isClaudeFamilyModel } from "./model-family.ts";
+
+/**
+ * Whether a model accepts image input, from pi's catalog `input` modality
+ * (`("text" | "image")[]`). PDFs count as image input too: pi's Read tool renders
+ * PDF pages visually, so a model that cannot take images cannot read a PDF a
+ * subagent opens either. A model whose modality is unknown (undefined `input`, as
+ * on some opaque/self-hosted providers, or a minimal test stub, or no model at all) reads as
+ * text-only here — the safe direction for a gate that only ever ADDS a
+ * requirement, never relaxes one. See `working-docs/decisions/model-policy.md`.
+ */
+export function supportsImageInput(model: { input?: readonly string[] } | undefined): boolean {
+	return Array.isArray(model?.input) && model.input.includes("image");
+}
+
+export type ProviderPolicyKind = "direct" | "hosted" | "gateway" | "opaque";
+
+export interface ProviderPolicy {
+	kind: ProviderPolicyKind;
+	/** Fixed profile for direct vendors and stable hosted catalogs. */
+	profile?: string;
+	/** The provider also serves other vendors' models: a row whose id names its vendor takes that vendor's profile. */
+	profileFromId?: boolean;
+}
+
+const direct = (profile: string): ProviderPolicy => ({ kind: "direct", profile });
+const hosted = (profile?: string): ProviderPolicy => ({ kind: "hosted", profile });
+const gateway = (): ProviderPolicy => ({ kind: "gateway" });
+const opaque = (): ProviderPolicy => ({ kind: "opaque" });
+
+/**
+ * Every built-in language-model provider in pi 1.1.0 (`model-policy.test.ts`
+ * checks the list against pi's own), plus the names older pi still in the
+ * tested range uses. Unknown/custom providers
+ * get the opaque policy below, so a pi upgrade fails safe rather than widening
+ * automatic routing.
+ */
+export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>> = {
+	"amazon-bedrock": hosted(),
+	"ant-ling": direct("ant-ling"),
+	anthropic: direct("anthropic"),
+	google: direct("google"),
+	"google-vertex": direct("google"),
+	openai: direct("openai"),
+	// Also serves Foundry models from other vendors (`deepseek-v4-pro`).
+	azure: { ...direct("openai"), profileFromId: true },
+	// pi before 1.0.3 named `azure` this way.
+	"azure-openai-responses": direct("openai"),
+	"openai-codex": direct("openai"),
+	radius: opaque(),
+	nvidia: hosted("host:nvidia"),
+	deepseek: direct("deepseek"),
+	"github-copilot": hosted(),
+	xai: direct("xai"),
+	groq: hosted("host:groq"),
+	cerebras: hosted("host:cerebras"),
+	openrouter: gateway(),
+	"vercel-ai-gateway": gateway(),
+	zai: direct("zai"),
+	"zai-coding-cn": direct("zai"),
+	mistral: direct("mistral"),
+	minimax: direct("minimax"),
+	"minimax-cn": direct("minimax"),
+	moonshotai: direct("moonshot"),
+	"moonshotai-cn": direct("moonshot"),
+	huggingface: opaque(),
+	fireworks: hosted("host:fireworks"),
+	together: hosted("host:together"),
+	baseten: hosted("host:baseten"),
+	opencode: opaque(),
+	"opencode-go": opaque(),
+	"kimi-coding": direct("host:kimi-coding"),
+	"cloudflare-workers-ai": hosted("host:cloudflare-workers"),
+	"cloudflare-ai-gateway": gateway(),
+	"qwen-token-plan": hosted("host:qwen-plan"),
+	"qwen-token-plan-cn": hosted("host:qwen-plan"),
+	"qwen-token-plan-individual": hosted("host:qwen-plan"),
+	meta: direct("meta"),
+	xiaomi: direct("xiaomi"),
+	"xiaomi-token-plan-cn": direct("xiaomi"),
+	"xiaomi-token-plan-ams": direct("xiaomi"),
+	"xiaomi-token-plan-sgp": direct("xiaomi"),
+};
+
+const VENDOR_ALIASES: Readonly<Record<string, string>> = {
+	anthropic: "anthropic",
+	openai: "openai",
+	google: "google",
+	xai: "xai",
+	"x-ai": "xai",
+	mistral: "mistral",
+	mistralai: "mistral",
+	deepseek: "deepseek",
+	zai: "zai",
+	"z-ai": "zai",
+	zhipuai: "zai",
+	qwen: "host:qwen-plan",
+	alibaba: "host:qwen-plan",
+	moonshotai: "moonshot",
+	minimax: "minimax",
+	minimaxai: "minimax",
+	xiaomi: "xiaomi",
+	meta: "meta",
+	"meta-llama": "meta",
+	amazon: "amazon",
+};
+
+export interface ModelIdentity {
+	/** Models may be switched automatically only when this key stays equal. */
+	containment: string;
+	/** Role profile to apply to normalizedId, when identity is reliable. */
+	profile?: string;
+	normalizedId: string;
+	confidence: "exact" | "family" | "opaque";
+}
+
+/** The profile's entry for a provider (lib/profile/product-providers.ts), if it declares one. */
+export function productProvider(provider: string | undefined): ProductProvider | undefined {
+	return provider === undefined ? undefined : activeProfile().providers.get(provider);
+}
+
+/** Whether the base or the profile knows the provider: anything else is a custom provider whose ids can name anything. */
+export function isKnownProvider(provider: string): boolean {
+	return provider in BUILTIN_PROVIDER_POLICIES || productProvider(provider) !== undefined;
+}
+
+/**
+ * The provider name a known provider's rows are listed under in the model
+ * catalog: its own for a built-in one (`models-dev` renames aside, which the
+ * catalog applies), the vendor it serves for one the profile declares.
+ */
+export function catalogProviderOf(provider: string): string {
+	return provider in BUILTIN_PROVIDER_POLICIES ? provider : (productProvider(provider)?.serves ?? provider);
+}
+
+/**
+ * A built-in provider's policy, else the profile's: a provider the product
+ * registers and declares is its vendor's direct provider. Anything else is
+ * opaque, so a pi upgrade or a user's own provider fails safe.
+ */
+export const providerPolicy = (provider: string): ProviderPolicy => {
+	const builtin = BUILTIN_PROVIDER_POLICIES[provider];
+	if (builtin) return builtin;
+	const product = productProvider(provider);
+	return product ? direct(product.serves) : opaque();
+};
+
+function canonicalVendor(value: string): string | undefined {
+	return VENDOR_ALIASES[value.toLowerCase()];
+}
+
+/**
+ * The identity profile a catalog vendor name stands for (`z-ai`, `zhipuai` and
+ * `zai` are one vendor), else the name itself: the key `model-catalog.ts`
+ * matches a row to its vendor's model under.
+ */
+export function vendorProfile(vendor: string): string {
+	return canonicalVendor(vendor) ?? vendor.toLowerCase();
+}
+
+function prefixedIdentity(model: Model<Api>, prefix: string): ModelIdentity {
+	const raw = model.id.startsWith("~") ? model.id.slice(1) : model.id;
+	const slash = raw.indexOf("/");
+	if (slash <= 0) {
+		return { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };
+	}
+	const route = raw.slice(0, slash).toLowerCase();
+	const normalizedId = raw.slice(slash + 1);
+	return {
+		containment: `${model.provider}:${prefix}:${route}`,
+		profile: canonicalVendor(route),
+		normalizedId,
+		confidence: canonicalVendor(route) ? "family" : "opaque",
+	};
+}
+
+function bareFamily(id: string): string | undefined {
+	if (/^claude-/i.test(id)) return "anthropic";
+	if (/^(gpt-|o\d(?:-|$))/i.test(id)) return "openai";
+	if (/^(gemini-|gemma-)/i.test(id)) return "google";
+	if (/^grok-/i.test(id)) return "xai";
+	if (/^deepseek-/i.test(id)) return "deepseek";
+	if (/^kimi-/i.test(id)) return "moonshot";
+	if (/^minimax-/i.test(id)) return "minimax";
+	if (/^glm-/i.test(id)) return "zai";
+	if (/^qwen/i.test(id)) return "host:qwen-plan";
+	if (/^mimo-/i.test(id)) return "xiaomi";
+	if (/^llama-/i.test(id)) return "meta";
+	return undefined;
+}
+
+function bedrockIdentity(model: Model<Api>): ModelIdentity {
+	// A cross-region inference profile prefixes the vendor with its geography
+	// (`us.`, `jp.`, `us-gov.`, …): a first segment that is not a vendor, followed
+	// by one that is. Reading it that way needs no list of AWS region codes.
+	const [first, second] = model.id.split(".");
+	const regional = second !== undefined && !canonicalVendor(first) && canonicalVendor(second) !== undefined;
+	const geography = regional ? first.toLowerCase() : "in-region";
+	const raw = regional ? model.id.slice(first.length + 1) : model.id;
+	const dot = raw.indexOf(".");
+	if (dot <= 0 || raw.startsWith("arn:")) {
+		return { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };
+	}
+	const vendor = raw.slice(0, dot).toLowerCase();
+	const profile = canonicalVendor(vendor);
+	return {
+		containment: `${model.provider}:geography:${geography}:family:${vendor}`,
+		profile,
+		normalizedId: raw.slice(dot + 1).replaceAll("_", "-").replace(/-v\d(?::\d+)?$/i, ""),
+		confidence: profile ? "family" : "opaque",
+	};
+}
+
+function cloudflareGatewayIdentity(model: Model<Api>): ModelIdentity {
+	if (model.id.startsWith("workers-ai/")) {
+		return {
+			containment: `${model.provider}:route:workers-ai`,
+			profile: "host:cloudflare-workers",
+			normalizedId: model.id.slice("workers-ai/".length),
+			confidence: "exact",
+		};
+	}
+	const api = String(model.api);
+	const route = api === "anthropic-messages" ? "anthropic" : api.includes("openai") ? "openai" : undefined;
+	if (!route) {
+		return { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };
+	}
+	return {
+		containment: `${model.provider}:route:${route}`,
+		profile: route,
+		normalizedId: model.id,
+		confidence: "exact",
+	};
+}
+
+/** Normalize privacy containment and model-family identity for one catalog row. */
+export function modelIdentity(model: Model<Api>): ModelIdentity {
+	const policy = providerPolicy(model.provider);
+	if (policy.kind === "opaque") {
+		return { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };
+	}
+	if (model.provider === "openrouter") return prefixedIdentity(model, "author");
+	if (model.provider === "vercel-ai-gateway") return prefixedIdentity(model, "creator");
+	if (model.provider === "cloudflare-ai-gateway") return cloudflareGatewayIdentity(model);
+	if (model.provider === "amazon-bedrock") return bedrockIdentity(model);
+	if (model.provider === "github-copilot") {
+		const profile = bareFamily(model.id);
+		return profile
+			? { containment: `${model.provider}:family:${profile}`, profile, normalizedId: model.id, confidence: "family" }
+			: { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };
+	}
+	return {
+		containment: model.provider,
+		profile: (policy.profileFromId && bareFamily(model.id)) || policy.profile,
+		normalizedId: model.id,
+		confidence: "exact",
+	};
+}
+
+/**
+ * The Claude id of a row that is Anthropic's own model, as Anthropic writes
+ * it (`claude-opus-4-8`), else undefined: a row of Anthropic's provider, or of
+ * a provider the profile says serves Anthropic's models (a built-in host's id
+ * is read through its own parsing, `us.anthropic.claude-…` on Bedrock). A
+ * gateway or host the profile does not vouch for is never one: its copy
+ * cannot be verified.
+ */
+export function anthropicModelId(model: { provider?: string; id?: string } | undefined): string | undefined {
+	if (!model?.provider || !model.id) return undefined;
+	if (model.provider === "anthropic") return model.id;
+	if (productProvider(model.provider)?.serves !== "anthropic") return undefined;
+	const identity = modelIdentity(model as Model<Api>);
+	return identity.profile === "anthropic" ? identity.normalizedId : undefined;
+}
+
+/**
+ * Whether requests for this model may carry an Anthropic wire feature:
+ * always on Anthropic's own provider (each caller keeps its own model and
+ * dialect checks), and on a product's provider only when its entry lists it.
+ */
+export function acceptsAnthropicWire(model: { provider?: string } | undefined, feature: WireFeature): boolean {
+	if (!model?.provider) return false;
+	if (model.provider === "anthropic") return true;
+	return productProvider(model.provider)?.wire?.includes(feature) === true;
+}
+
+const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
+
+/**
+ * The id without OpenRouter's `~` redirect-alias marker and without a
+ * `:batch`-style endpoint variant — the spelling the model-catalog lookups key
+ * on (`~deepseek/deepseek-v4-flash-latest`
+ * → `deepseek/deepseek-v4-flash-latest`, `gpt-5-mini:batch` → `gpt-5-mini`).
+ */
+export function baseModelId(id: string): string {
+	return (id.startsWith("~") ? id.slice(1) : id).replace(/:[a-z]+$/i, "");
+}
+
+/** Whether the id carries a redirect marker or endpoint variant (`baseModelId` would change it). */
+export function isAliasOrVariantId(id: string): boolean {
+	return baseModelId(id) !== id;
+}
+
+/**
+ * Automatic selection excludes endpoint variants with the wrong execution shape,
+ * and OpenRouter's `~vendor/family-latest` redirect aliases ("always redirects to
+ * the latest model in the family"): the model behind one moves without notice,
+ * so it has no stable identity to tier, date or price — and the classifier is a
+ * permission boundary. The alias stays available by hand through `/model` or
+ * an explicit `subagentModel` setting.
+ */
+export function isSelectableVariant(model: Model<Api>): boolean {
+	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
+}
+
+/**
+ * A moving alias: an id that names whichever model its vendor points it at
+ * today (`mistral-large-latest`, `gpt-daybreak-blue-latest`, OpenRouter's
+ * `~vendor/…-latest` redirects). What answers can change without notice, so
+ * it never supersedes a dated model, is never suggested as an upgrade, and is
+ * never picked as the auto-mode classifier (a permission boundary). Other
+ * automatic picks may still use one: Mistral serves most models only so.
+ */
+export function isMovingAlias(id: string): boolean {
+	return id.startsWith("~") || /-latest(?=$|[-:@])/i.test(id);
+}
+
+/**
+ * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
+ * a research variant, never picked automatically (as a screener or the
+ * subagent default) or suggested as an upgrade. `preview` is deliberately not matched: Google ships mainline
+ * Gemini models under it (`gemini-3-flash-preview`).
+ */
+export function isExperimentalBuild(id: string): boolean {
+	return /-exp(?:$|[-:])|experimental/i.test(id);
+}
+
+/** A positive finite catalog context window, the only value safe to compare windows by. */
+export function hasCatalogContextWindow(model: { contextWindow?: number }): model is { contextWindow: number } {
+	return Number.isFinite(model.contextWindow) && (model.contextWindow as number) > 0;
+}
+
+/** One day in milliseconds, for the release-date arithmetic in model-catalog.ts. */
+export const DAY_MS = 86_400_000;
+
+/** A catalog price, or undefined: non-positive values are sentinels/unpriced, not evidence of being free. */
+function catalogPrice(value: number | undefined): number | undefined {
+	return typeof value === "number" && value > 0 ? value : undefined;
+}
+
+/** The model's list input price, or undefined when it is unpriced. */
+export function pricedInput(model: Model<Api>): number | undefined {
+	return catalogPrice(model.cost?.input);
+}
+
+/** A classifier call's measured shape: the cached ruleset and transcript, the new turn, the verdict. */
+export const CLASSIFIER_CALL_TOKENS = { cachedInput: 28_000, freshInput: 2_000, output: 700 } as const;
+
+/**
+ * One classifier call's estimated cost in dollars at `CLASSIFIER_CALL_TOKENS`,
+ * or undefined for a model with no input price. A model without a cache-read
+ * price pays its input price for the cached part, and one without an output
+ * price its input price for the verdict: both overstate, never understate.
+ */
+export function classifierCallCost(model: Model<Api>): number | undefined {
+	const input = pricedInput(model);
+	if (input === undefined) return undefined;
+	const priced = (value: number | undefined) => catalogPrice(value) ?? input;
+	const { cachedInput, freshInput, output } = CLASSIFIER_CALL_TOKENS;
+	return (priced(model.cost?.cacheRead) * cachedInput + input * freshInput + priced(model.cost?.output) * output) / 1_000_000;
+}
+
+/**
+ * How classifier candidates are priced against `base` (the session model):
+ * per classifier call, unless `base` lists no cache-read price. Then its
+ * per-call cost would be overstated (a quarter of OpenRouter's priced models
+ * list none) and a dearer model could win, so both sides compare by list
+ * input price. The selector and the cost warnings share this, so "cheaper per
+ * call" means one thing everywhere.
+ */
+export function classifierPrice(base: Model<Api>): (model: Model<Api>) => number | undefined {
+	return catalogPrice(base.cost?.cacheRead) === undefined ? pricedInput : classifierCallCost;
+}
+
+/** How many times `model`'s classifier call costs `base`'s (priced by `classifierPrice(base)`), or undefined when either price is unknown. */
+export function classifierCostRatio(model: Model<Api>, base: Model<Api>): number | undefined {
+	const price = classifierPrice(base);
+	const cost = price(model);
+	const baseCost = price(base);
+	return cost !== undefined && baseCost !== undefined && baseCost > 0 ? cost / baseCost : undefined;
+}
+
+/** A dated snapshot id (`claude-haiku-4-5-20251001`): the trailing `-YYYYMMDD` marks a pinned alias of an undated model. */
+export function isDatedModelId(id: string): boolean {
+	return /-20\d{6}$/.test(id);
+}
+
+/**
+ * The id with a trailing snapshot date removed: `-YYYYMMDD` (Anthropic, OpenAI)
+ * or `-MMDD` (DeepSeek's `deepseek-v4-flash-0731`, `deepseek-v4-pro-0813`; the
+ * four digits must be a real month and day, so a `-2411`-style version tag is
+ * left alone). The id itself when it carries no such suffix.
+ */
+export function stripSnapshotDate(id: string): string {
+	if (isDatedModelId(id)) return id.slice(0, -9);
+	const short = id.match(/-(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+	return short ? id.slice(0, -5) : id;
+}
+
+/** Whether the id ends in a snapshot date of either shape (`stripSnapshotDate` would change it). */
+export function isSnapshotDatedId(id: string): boolean {
+	return stripSnapshotDate(id) !== id;
+}
+
+/**
+ * Whether `model` is a dated snapshot whose undated alias is also present in
+ * `pool` — the row a listing collapses so the same model is not offered twice.
+ * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
+ * is never read as a snapshot of `deepseek-v4-flash`.
+ */
+export function isDatedDuplicate(model: { id: string }, pool: ReadonlyArray<{ id: string }>): boolean {
+	const alias = stripSnapshotDate(model.id);
+	return alias !== model.id && pool.some((other) => other.id === alias);
+}
+
+/** The canonical `provider/id` spec — one source of truth for the string form. */
+export function modelSpec(model: { provider: string; id: string }): string {
+	return `${model.provider}/${model.id}`;
+}
+
+/** Whether a stamped-default setting was set for a provider this session has since left. */
+export function isStaleContainmentStamp(
+	setForContainment: string | undefined,
+	sessionModel: { provider: string; id: string } | undefined,
+): boolean {
+	return setForContainment !== (sessionModel ? modelIdentity(sessionModel as Model<Api>).containment : undefined);
+}
+
+/** Whether an explicit model leaves the session's provider/route/family boundary. */
+export function crossesProvider(model: Model<Api>, sessionModel: Model<Api>): boolean {
+	if (model.provider !== sessionModel.provider) return true;
+	return modelIdentity(model).containment !== modelIdentity(sessionModel).containment;
+}
+
+/** Models that automatic selection may consider without changing containment. */
+export function modelsContainedToSession(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
+	const sessionIdentity = modelIdentity(sessionModel);
+	return available.filter(
+		(model) =>
+			model.provider === sessionModel.provider &&
+			isSelectableVariant(model) &&
+			modelIdentity(model).containment === sessionIdentity.containment,
+	);
+}
+
+/**
+ * The thinking level to send on a one-shot `completeSimple` call that would
+ * rather run with thinking OFF (classifier, setup drafting, recap, readers).
+ *
+ * `undefined` = the model supports off — omit `reasoning`, pi disables thinking
+ * explicitly, the request stays exactly as before. A level = the model cannot
+ * disable thinking (catalog `thinkingLevelMap.off: null`, e.g. Gemini 3.6+
+ * Flash); omitting `reasoning` makes the provider 400 ("Reasoning is mandatory
+ * for this endpoint and cannot be disabled"), so send the lowest level the
+ * model supports instead.
+ */
+export function forcedReasoningLevel(model: Model<Api>): ThinkingLevel | undefined {
+	const clamped = clampThinkingLevel(model, "off");
+	return clamped === "off" ? undefined : (clamped as ThinkingLevel);
+}
+
+/**
+ * Provider error saying thinking cannot be disabled — the reactive net for a
+ * model whose catalog entry LACKS the `thinkingLevelMap.off: null` marker
+ * (OpenRouter entries, hand-added models newer than the bundled catalog).
+ * A false positive only costs one retry with minimal thinking.
+ */
+export function isReasoningMandatoryError(message: string): boolean {
+	return (
+		/(reasoning|thinking)[^.]*\b(mandatory|cannot be disabled|can't be disabled|must be enabled|is required)\b/i.test(message) ||
+		// Anthropic's: Opus 5.5 ("\"thinking.type.disabled\" is not supported for this model")
+		// and Sonnet 5.5 ("To turn thinking off on this model, send … between_tools"), findings §43.
+		/thinking\.type\.disabled\W+is not supported|to turn thinking off on this model/i.test(message)
+	);
+}
+
+/** The level to retry with after isReasoningMandatoryError: the lowest real level the model supports. */
+export function reasoningRetryLevel(model: Model<Api>): ThinkingLevel {
+	const clamped = clampThinkingLevel(model, "minimal");
+	return clamped === "off" ? "minimal" : (clamped as ThinkingLevel);
+}
+
+/**
+ * Run a one-shot `completeSimple`-style call that wants thinking OFF, handling
+ * the models that can't. The proactive path ({@link forcedReasoningLevel}) sends
+ * a level up front for catalog-marked models; the reactive path catches a
+ * provider's mandatory-thinking 400 ({@link isReasoningMandatoryError}) for the
+ * metadata gaps and retries ONCE at the model's floor. `call` receives the level
+ * to send (undefined = omit `reasoning`) and is invoked at most twice.
+ *
+ * `learned` optionally memoizes the reactive result per `provider/id` across
+ * calls, so a repeatedly-called site (the web-fetch reader) pays the failed
+ * round-trip once, not every call. Omit it for one-off callers.
+ *
+ * `onUsage` receives the final reply's `usage` once per invocation — this is the
+ * single choke point for the reader-style one-shots (web-fetch, recap, setup),
+ * so instrumenting it here reports their cost to the footer without each call
+ * site having to remember to.
+ */
+export async function withReasoningFallback<R extends { stopReason: string; errorMessage?: string; usage?: unknown }>(
+	model: Model<Api>,
+	call: (reasoning: ThinkingLevel | undefined) => Promise<R>,
+	learned?: Map<string, ThinkingLevel>,
+	onUsage?: (usage: unknown) => void,
+): Promise<R> {
+	const key = `${model.provider}/${model.id}`;
+	const reasoning = learned?.get(key) ?? forcedReasoningLevel(model);
+	let result = await call(reasoning);
+	if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
+		const level = reasoningRetryLevel(model);
+		learned?.set(key, level);
+		result = await call(level);
+	}
+	onUsage?.(result.usage);
+	return result;
+}
+
+/** Resolve an explicit provider/id, bare id, or prefix. Explicit choices are not contained. */
+export function findConfigured(available: Model<Api>[], configured: string): Model<Api> | undefined {
+	const wanted = configured.trim();
+	if (!wanted) return undefined;
+	const qualified = available.find((model) => `${model.provider}/${model.id}` === wanted);
+	if (qualified) return qualified;
+	const byId = available.find((model) => model.id === wanted);
+	if (byId) return byId;
+	const slash = wanted.indexOf("/");
+	if (slash > 0) {
+		const provider = wanted.slice(0, slash);
+		const idPrefix = wanted.slice(slash + 1);
+		const inProvider = available.filter((model) => model.provider === provider);
+		const exact = inProvider.find((model) => model.id === idPrefix);
+		if (exact) return exact;
+		const prefixed = inProvider.find((model) => model.id.startsWith(idPrefix));
+		if (prefixed) return prefixed;
+	}
+	return available.find((model) => model.id.startsWith(wanted));
+}

@@ -106,8 +106,8 @@ at the top are settings, and both take effect from the next session:
 - **Auto-memory** turns memory on or off. Off, the model gets no memory
   instructions and no `MEMORY.md` index, and the memory folder isn't
   offered. It's saved as `autoMemoryEnabled` in `~/.onecode/settings.json`,
-  Claude Code's setting name, and `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`
-  overrides it.
+  Claude Code's setting name, and `ONECODE_DISABLE_AUTO_MEMORY=1` (or
+  Claude Code's `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`) overrides it.
 - **Config sources** switches between Claude-compatible and independent
   mode. It asks you to confirm with a second **Enter**.
 
@@ -127,7 +127,7 @@ the summary should focus on. Compaction that happens because the context is
 full is more expensive than a manual or threshold compaction, because it
 can't reuse the cached prefix of the conversation.
 
-Set `CC_COMPACTION=0` to use pi's own summary instead.
+Set `ONECODE_FEATURES_OFF=compaction` to use pi's own summary instead.
 
 If you step away from a big session, One Code compacts it before the prompt
 cache runs out. On Claude models the session's cache lasts an hour, and once
@@ -135,7 +135,7 @@ it expires your next message pays to write the whole conversation to the cache
 again. So after 54 idle minutes, a session holding 200,000 tokens or more is
 compacted while reading the cache is still cheap, and you'll see "Compacted
 while idle, before the prompt cache expired". It holds off while a turn is
-running or if you typed in the last minute. Set `CC_IDLE_COMPACT=0` to turn
+running or if you typed in the last minute. Set `ONECODE_FEATURES_OFF=idle-compact` to turn
 it off.
 
 ### The token budget line
@@ -144,7 +144,7 @@ Like Claude Code, One Code tells the model how many tokens it has left in
 the current turn: a `<total_tokens>` line appears in the system prompt, at
 the end of every user message, and after every tool result. The budget is
 15,000,000 tokens per turn, Claude Code's own figure. Set
-`CC_TOTAL_TOKENS_BUDGET` to change it or `CC_TOTAL_TOKENS=0` to remove it.
+`ONECODE_TOTAL_TOKENS_BUDGET` to change it or `ONECODE_FEATURES_OFF=context-budget` to remove it.
 
 ### Thinking blocks and the cache
 
@@ -152,7 +152,7 @@ On Anthropic's own API, One Code asks the provider to keep earlier thinking
 blocks in place rather than strip them, because stripping them invalidates
 the prompt cache on older models. This is on by default for
 `api.anthropic.com` and off for Bedrock, Vertex, and proxies. Set
-`CC_CLEAR_THINKING=1` to force it on elsewhere or `CC_CLEAR_THINKING=0` to
+`ONECODE_CLEAR_THINKING=1` to force it on elsewhere or `ONECODE_CLEAR_THINKING=0` to
 turn it off.
 
 ### The prompt cache
@@ -187,7 +187,7 @@ short recap of what the model was doing and what comes next, prefixed with
 Claude Code's own recap prompt, is display-only, and is never sent back to
 the model. Its cost is included in the footer's total.
 
-Set `CC_RECAP_IDLE_MS` to change the delay (in milliseconds) or `CC_RECAP=0`
+Set `ONECODE_RECAP_IDLE_MS` to change the delay (in milliseconds) or `ONECODE_FEATURES_OFF=recap`
 to turn recaps off.
 
 ## Continue, resume, and branch
@@ -251,7 +251,7 @@ Code does: a cheap model on your provider turns the message into a short
 title (Claude Code's own naming prompt), which shows in the terminal tab as
 `One Code - <title> - <folder>` and in the session picker. A name you set
 with `/name` is never overwritten. The call's cost is included in the
-footer's total. Set `CC_SESSION_TITLE=0` to turn it off.
+footer's total. Set `ONECODE_FEATURES_OFF=session-title` to turn it off.
 
 ## Turn timing
 
@@ -260,4 +260,4 @@ reports how long it took and when it finished, with a random verb, as in
 Claude Code. The time follows your locale (`LC_ALL`, `LC_TIME` or `LANG`),
 and gains the weekday, then the date, once the turn is a day or a week old.
 When background shells are still running, the line adds a count, as in
-`· 1 shell still running`. Set `CC_TURN_DURATION=0` to turn it off.
+`· 1 shell still running`. Set `ONECODE_FEATURES_OFF=turn-duration` to turn it off.

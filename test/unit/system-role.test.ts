@@ -2,9 +2,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { withBetas } from "../../extensions/lib/anthropic-payload.ts";
-import { parseClaudeId } from "../../extensions/lib/claude-id.ts";
-import { systemRoleLayout } from "../../extensions/lib/system-role.ts";
+import { withBetas } from "../../extensions/lib/request/anthropic-payload.ts";
+import { parseClaudeId } from "../../extensions/lib/profile/claude-id.ts";
+import { systemRoleLayout } from "../../extensions/lib/request/system-role.ts";
 
 async function bundledCatalog(): Promise<Model<Api>[]> {
 	// Read from the repo's node_modules, as model-tier-catalog.test.ts does.

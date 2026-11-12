@@ -4,9 +4,9 @@
  * cannot be cancelled, so the widget line warns while anything runs.
  */
 import { describe, expect, it, vi } from "vitest";
-import backgroundExtension from "../../extensions/background/index.ts";
-import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/background/registry.ts";
-import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "../../extensions/background/switch-guard.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
+import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
+import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "../../extensions/tools/background/switch-guard.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function fakeTask(id: string, description: string): BackgroundTask & { settle: () => void } {

@@ -12,8 +12,9 @@ import {
 	taskToolsEnabled,
 	tierOverride,
 	usesClaudeCodeFastPaths,
-} from "../../extensions/lib/model-tier.ts";
+} from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 /** Minimal fake — the tier code reads only id/provider/cost. */
 function model(id: string, provider: string, inputCost?: number): Model<Api> {
@@ -166,8 +167,8 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("claude-opus-5-5", "anthropic", 4), noEnv)).toBe("cheap");
 	});
 
-	it("honors the CC_PROMPT_TIER override over classification", () => {
-		const env = (v: string) => ({ CC_PROMPT_TIER: v }) as unknown as NodeJS.ProcessEnv;
+	it("honors the *_PROMPT_TIER override over classification", () => {
+		const env = (v: string) => ({ [envName("PROMPT_TIER")]: v }) as unknown as NodeJS.ProcessEnv;
 		expect(resolveModelTier(model("claude-opus-5", "anthropic"), env("cheap"))).toBe("cheap");
 		expect(resolveModelTier(undefined, env("frontier"))).toBe("frontier");
 		expect(resolveModelTier(model("gpt-5-mini", "openai", 0.25), env("workhorse"))).toBe("workhorse");
@@ -223,16 +224,16 @@ describe("economicalContainedCandidates", () => {
 		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-6-astra"]);
 	});
 
-	it("ignores CC_PROMPT_TIER — selection uses intrinsic tiers, so the floor still excludes tiny", () => {
+	it("ignores *_PROMPT_TIER — selection uses intrinsic tiers, so the floor still excludes tiny", () => {
 		const session = model("gpt-6-astra", "openai", 5);
 		const available = [session, model("gpt-6-luna", "openai", 0.1), model("gpt-5.4-nano", "openai", 0.2)];
-		const prev = process.env.CC_PROMPT_TIER;
-		process.env.CC_PROMPT_TIER = "workhorse";
+		const prev = process.env[envName("PROMPT_TIER")];
+		process.env[envName("PROMPT_TIER")] = "workhorse";
 		try {
 			expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-6-astra"]);
 		} finally {
-			if (prev === undefined) delete process.env.CC_PROMPT_TIER;
-			else process.env.CC_PROMPT_TIER = prev;
+			if (prev === undefined) delete process.env[envName("PROMPT_TIER")];
+			else process.env[envName("PROMPT_TIER")] = prev;
 		}
 	});
 
@@ -280,10 +281,10 @@ describe("pickEconomicalContainedModel", () => {
 
 describe("tierOverride", () => {
 	it("parses valid tiers case-insensitively and ignores the rest", () => {
-		expect(tierOverride({ CC_PROMPT_TIER: "TINY" } as unknown as NodeJS.ProcessEnv)).toBe("tiny");
-		expect(tierOverride({ CC_PROMPT_TIER: "workhorse" } as unknown as NodeJS.ProcessEnv)).toBe("workhorse");
-		expect(tierOverride({ CC_PROMPT_TIER: "mid" } as unknown as NodeJS.ProcessEnv)).toBeUndefined(); // retired name
-		expect(tierOverride({ CC_PROMPT_TIER: "auto" } as unknown as NodeJS.ProcessEnv)).toBeUndefined();
+		expect(tierOverride({ [envName("PROMPT_TIER")]: "TINY" } as unknown as NodeJS.ProcessEnv)).toBe("tiny");
+		expect(tierOverride({ [envName("PROMPT_TIER")]: "workhorse" } as unknown as NodeJS.ProcessEnv)).toBe("workhorse");
+		expect(tierOverride({ [envName("PROMPT_TIER")]: "mid" } as unknown as NodeJS.ProcessEnv)).toBeUndefined(); // retired name
+		expect(tierOverride({ [envName("PROMPT_TIER")]: "auto" } as unknown as NodeJS.ProcessEnv)).toBeUndefined();
 		expect(tierOverride({} as NodeJS.ProcessEnv)).toBeUndefined();
 	});
 });
@@ -297,15 +298,15 @@ describe("usesClaudeCodeFastPaths (decisions/auto-mode.md, \"Two gates by model 
 		expect(usesClaudeCodeFastPaths(undefined)).toBe(false);
 	});
 
-	it("ignores CC_PROMPT_TIER, so a forced register never loosens the gate", () => {
+	it("ignores *_PROMPT_TIER, so a forced register never loosens the gate", () => {
 		pinCatalog(ANTHROPIC);
-		const prev = process.env.CC_PROMPT_TIER;
-		process.env.CC_PROMPT_TIER = "frontier";
+		const prev = process.env[envName("PROMPT_TIER")];
+		process.env[envName("PROMPT_TIER")] = "frontier";
 		try {
 			expect(usesClaudeCodeFastPaths(model("claude-haiku-4-5", "anthropic"))).toBe(false);
 		} finally {
-			if (prev === undefined) delete process.env.CC_PROMPT_TIER;
-			else process.env.CC_PROMPT_TIER = prev;
+			if (prev === undefined) delete process.env[envName("PROMPT_TIER")];
+			else process.env[envName("PROMPT_TIER")] = prev;
 		}
 	});
 });
@@ -338,15 +339,16 @@ describe("taskToolsEnabled (Claude Code's model gate for the task tools)", () =>
 		expect(taskToolsEnabled(undefined, noEnv)).toBe(true);
 	});
 
-	it("turns them back on with CLAUDE_CODE_ENABLE_TODO_TOOLS", () => {
+	it("turns them back on with the product's ENABLE_TODO_TOOLS knob", () => {
 		const opus = model("claude-opus-5-5", "anthropic");
+		const knob = envName("ENABLE_TODO_TOOLS");
 		for (const value of ["1", "true", "YES", "on"]) {
-			expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: value } as NodeJS.ProcessEnv)).toBe(true);
+			expect(taskToolsEnabled(opus, { [knob]: value } as NodeJS.ProcessEnv)).toBe(true);
 		}
-		expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" } as NodeJS.ProcessEnv)).toBe(false);
+		expect(taskToolsEnabled(opus, { [knob]: "0" } as NodeJS.ProcessEnv)).toBe(false);
 	});
 
 	it("follows a forced tier", () => {
-		expect(taskToolsEnabled(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), { CC_PROMPT_TIER: "frontier" } as NodeJS.ProcessEnv)).toBe(false);
+		expect(taskToolsEnabled(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), { [envName("PROMPT_TIER")]: "frontier" } as NodeJS.ProcessEnv)).toBe(false);
 	});
 });

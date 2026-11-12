@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { requestIdentity } from "../../extensions/lib/anthropic-auth.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
+import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 
 /**
  * The deferred-tools listing is live state: what a request that opens an epoch
  * renders on message 1. Inside an epoch message 1 is the ledger's record, so a
  * tool that registered since rides the request's tail, computed when the
  * request goes out from what is loadable then minus what the epoch told
- * (extensions/ledger, lib/reminders.ts RENDER_CHANNEL).
+ * (extensions/request/ledger, lib/request/reminders.ts RENDER_CHANNEL).
  */
 
 const makeFakePi = () => makeToolSearchFakePi(["read", "bash"]);
@@ -122,7 +123,7 @@ describe("tool-search listing and render-time addenda", () => {
 		fake.addDeferred("mcp__s__x");
 		expect(fake.activeTools()).not.toContain("mcp__s__x");
 		const result = await fake.runTool("tool_search", { query: "select:mcp__s__x" });
-		expect(result.content[0].text).toBe("Loaded mcp__s__x. These tools are now callable.");
+		expect(result.content[0].text).toBe(toolSearchResultText.result({ added: ["mcp__s__x"], already: [], refused: [], missing: [], withdrawn: [] }));
 	});
 
 	it("keeps a deferred tool the recorded head declares eagerly callable after a /reload (R3-M2)", () => {
@@ -150,7 +151,7 @@ describe("tool-search listing and render-time addenda", () => {
 		(branch[0].data as { blobs: Record<string, unknown> }).blobs.h = { system: "s", tools: [{ name: "workflow", input_schema: { type: "object" } }] };
 		fake.pi.fire("session_start", {}, { model: additionsModel, sessionManager: { getBranch: () => branch } });
 		fake.pi.fire("tool_execution_end", { isError: true, result: { content: [{ type: "text", text: "Tool workflow not found" }] } });
-		expect(fake.reminders.find((r) => r.key === "deferred-miss-workflow")?.text).toContain("no longer available in this session");
+		expect(fake.reminders.find((r) => r.key === "deferred-miss-workflow")?.text).toBe(toolSearchResultText.unavailable({ name: "workflow" }));
 	});
 
 	it("says once per epoch that this run cannot load the deferred tools the epoch listed", () => {
@@ -158,7 +159,7 @@ describe("tool-search listing and render-time addenda", () => {
 		fake.unregister("tool_search");
 		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
 		expect(blocks).toHaveLength(1);
-		expect(blocks[0].text).toContain("tool_search is not available");
+		expect(blocks[0].text).toContain(toolSearchResultText.loaderUnavailable);
 		expect(fake.render({ told: { tools: ["web_fetch"] }, modes: { "deferred-unavailable": true } })).toEqual([]);
 	});
 

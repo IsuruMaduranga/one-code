@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { PromptTier } from "../../extensions/lib/model-tier.ts";
-import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
-import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
+import { PROMPT_TIERS, type PromptTier } from "../../extensions/lib/models/model-tier.ts";
+import type { EnvironmentInfo } from "../../extensions/request/system-prompt/environment.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
+import { cwdLine, toolList } from "../../extensions/request/system-prompt/text.ts";
+
+/**
+ * Where the base places the profile's system-prompt text: the memory section
+ * for the session's memory folder, the tool list, the cwd line and the budget
+ * line, byte-stable across calls. One Code's own registers and wording are
+ * tested in profile/test/template-wording.test.ts.
+ */
 
 const env: EnvironmentInfo = {
 	cwd: "/tmp/project",
@@ -13,68 +22,23 @@ const env: EnvironmentInfo = {
 };
 
 const baseOptions = { cwd: "/tmp/project" };
-const TIERS: PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
+const text = () => requireText("systemPrompt");
+/** The session the base builds for these options (no selected tools, task tools on). */
+const session = (tier: PromptTier) => ({ tier, taskTools: true, tools: undefined });
 
 describe("buildClaudeCodeSystemPrompt", () => {
-	it("contains the adapted identity and core sections", () => {
+	it("includes the memory section for the session's memory folder", () => {
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("You are One Code");
-		expect(prompt).not.toContain("You are Claude Code");
-		expect(prompt).toContain("# Harness");
-		expect(prompt).toContain("<system-reminder>");
-		expect(prompt).toContain("Current working directory: /tmp/project");
+		expect(prompt).toContain(`\n\n${text().memory(env.memoryDir!, session("frontier"))}\n\n`);
 	});
 
-	it("gives frontier Claude Code's short register, in its order, without Delivering work or Corrections", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		const order = [
-			"You are One Code",
-			"You are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized security testing",
-			"# Harness\n",
-			"Write code that reads like the surrounding code",
-			"# Session-specific guidance\n",
-			"# Available tools\n",
-			"# Memory\n",
-			"# Context management\n",
-		];
-		const at = order.map((s) => prompt.indexOf(s));
-		for (const [i, pos] of at.entries()) expect(pos, order[i]).toBeGreaterThanOrEqual(0);
-		expect([...at].sort((a, b) => a - b)).toEqual(at);
-		// Claude Code's opening line follows the identity line on the next line.
-		expect(prompt).toMatch(/^You are One Code[^\n]*\nYou are an agent working with the user/);
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "tiny")).toMatch(/^You are One Code[^\n]*\nYou are an agent working with the user/);
-		expect(prompt).toContain("Prefer the dedicated file/search tools over shell commands when one fits.");
-		expect(prompt).toContain("suggest they type `! <command>` in the prompt");
-		expect(prompt).toContain("When the user types `/<skill-name>`, invoke it via the skill tool.");
-		expect(prompt).toContain("give a recommendation, not an exhaustive survey");
-		expect(prompt).not.toContain("# Delivering work");
-		expect(prompt).not.toContain("# Corrections");
-		// Text for features and tools One Code lacks stays out.
-		expect(prompt).not.toContain("<pasted_content>");
-		expect(prompt).not.toContain("EndConversation");
-		expect(prompt).not.toContain("WebSearch takes a `mode`");
-	});
-
-	it("leaves the environment, model line, scratchpad and git snapshot to the first-message context", () => {
-		for (const tier of TIERS) {
-			const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
-			expect(prompt, tier).not.toContain("Primary working directory");
-			expect(prompt, tier).not.toContain("You are powered by the model");
-			expect(prompt, tier).not.toContain("# Scratchpad Directory");
-			expect(prompt, tier).not.toContain("gitStatus");
-		}
-	});
-
-	it("includes the memory section", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("/home/u/.claude/projects/-tmp-project/memory/");
-	});
-
-	it.each(TIERS)("drops the memory section while auto-memory is off (%s)", (tier) => {
+	it.each(PROMPT_TIERS)("drops the memory section while auto-memory is off (%s)", (tier) => {
+		const on = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, { ...env, memoryDir: undefined }, tier);
-		expect(prompt).not.toContain("/memory/");
-		expect(prompt).not.toMatch(/^# (auto memory|Memory)$/m);
-		expect(prompt).toContain("Current working directory: /tmp/project");
+		// Only the memory section goes; the rest stays.
+		expect(prompt).toBe(on.replace(`\n\n${text().memory(env.memoryDir!, session(tier))}`, ""));
+		expect(prompt).not.toBe(on);
+		expect(prompt).toContain(cwdLine("/tmp/project"));
 	});
 
 	it("lists tools that have snippets and appends guidelines", () => {
@@ -88,16 +52,21 @@ describe("buildClaudeCodeSystemPrompt", () => {
 			env,
 			"frontier",
 		);
-		expect(prompt).toContain("- read: Read files");
-		expect(prompt).toContain("- bash: Run commands");
-		expect(prompt).not.toContain("- secret");
-		// deduped + trimmed guidelines
-		expect(prompt.match(/Use read before edit/g)).toHaveLength(1);
+		// Only tools with a snippet, deduplicated and trimmed guidelines.
+		expect(prompt).toContain(
+			toolList(
+				[
+					{ name: "read", snippet: "Read files" },
+					{ name: "bash", snippet: "Run commands" },
+				],
+				["Use read before edit"],
+			),
+		);
 	});
 
 	it("does NOT put project context files in the system prompt", () => {
 		// Claude Code injects CLAUDE.md as the `# claudeMd` <system-reminder> on the
-		// first user message (extensions/claude-context), never in the system prompt.
+		// first user message (extensions/context/instructions), never in the system prompt.
 		const prompt = buildClaudeCodeSystemPrompt(
 			{ ...baseOptions, contextFiles: [{ path: "/tmp/project/CLAUDE.md", content: "Always use tabs." }] },
 			env,
@@ -108,125 +77,20 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).not.toContain("Always use tabs.");
 	});
 
-	it("keeps the frontier prompt lean (no long-register sections, compact memory)", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("<system-reminder>"); // core explanation stays in all tiers
-		expect(prompt).not.toContain("# Doing tasks");
-		expect(prompt).not.toContain("# Text output");
-		expect(prompt).not.toContain("# auto memory");
-		expect(prompt).not.toContain("## Types of memory");
-		expect(prompt).not.toContain("bear no direct relation"); // caveat is workhorse/cheap/tiny only
-	});
-
-	it("gives workhorse Claude Code's long register, in its order, and the long memory spec", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse");
-		const order = [
-			"You are One Code",
-			"You are an agent working with the user toward their goals, using your own judgment along the way. Use the instructions below and the tools available to you to assist the user.",
-			"defensive use cases.\nIMPORTANT: You must NEVER generate or guess URLs",
-			"# System\n",
-			"# Doing tasks\n",
-			"# Executing actions with care\n",
-			"# Using your tools\n",
-			"# Delegating to agents\n",
-			"# Tone and style\n",
-			"# Text output (does not apply to tool calls)\n",
-			"# Session-specific guidance\n",
-			"# Available tools\n",
-			"# auto memory\n",
-			"## Types of memory",
-			"## What NOT to save in memory",
-			"## Memory and other forms of persistence",
-			"# Context management\n",
-		];
-		const at = order.map((s) => prompt.indexOf(s));
-		for (const [i, pos] of at.entries()) expect(pos, order[i]).toBeGreaterThanOrEqual(0);
-		expect([...at].sort((a, b) => a - b)).toEqual(at);
-		expect(prompt).toContain("bear no direct relation"); // fuller system-reminder caveat
-		expect(prompt).toContain('Calling Agent with subagent_type: "fork" creates a fork');
-		expect(prompt).toContain("Prefer dedicated tools over bash when one fits (read, edit, write)");
-		expect(prompt).toContain("write to it directly with the write tool");
-		expect(prompt).not.toContain("the search tools"); // no dedicated search tools above tiny
-		expect(prompt).not.toContain("# Delivering work");
-		expect(prompt).not.toContain("# Corrections");
-		// Claude Code-only parts of the long register stay out.
-		expect(prompt).not.toContain("<pasted_content>");
-		expect(prompt).not.toContain("<user-prompt-submit-hook>");
-		expect(prompt).not.toContain("/help");
-		expect(prompt).not.toContain("Claude Code");
-	});
-
-	it("shares the long register between workhorse and cheap", () => {
-		const workhorse = buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse");
-		const cheap = buildClaudeCodeSystemPrompt(baseOptions, env, "cheap");
-		expect(cheap).toBe(workhorse);
-	});
-
-	it("gives tiny the bespoke weak-model scaffolding, including an explicit skill nudge", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "tiny");
-		expect(prompt).toContain("# Make changes with tools, not prose");
-		expect(prompt).toContain("# Answer or act");
-		expect(prompt).toContain("# Playbooks");
-		expect(prompt).toContain("skill tool"); // the skills nudge that motivated tiering
-		expect(prompt).toContain("the grep, find and ls tools"); // tiny keeps the grep/find/ls steer, by tool name
-		expect(prompt).toContain("to run something, call the bash tool.");
-		expect(prompt).not.toContain("a consistency audit"); // the explore agent's description rules audits out
-		// Built on the long register: its sections stay, with one "# Using your tools" (tiny's).
-		for (const section of ["# System\n", "# Doing tasks\n", "# Executing actions with care\n", "# Text output", "# auto memory\n"]) {
-			expect(prompt, section).toContain(section);
-		}
-		expect(prompt.match(/^# Using your tools$/gm)).toHaveLength(1);
-		expect(prompt).not.toContain("# Delegating to agents"); // tiny has its stricter DELEGATE_STRICT
-		expect(prompt).not.toContain("# Delivering work");
-		expect(prompt).not.toContain("# Corrections");
-	});
-
-	it("names tiny's shell tool from the session's tools", () => {
-		const call = (selectedTools: string[]) => buildClaudeCodeSystemPrompt({ ...baseOptions, selectedTools }, env, "tiny");
-		expect(call(["read", "bash", "edit", "write"])).toContain("to run something, call the bash tool.");
-		expect(call(["read", "powershell", "edit", "write"])).toContain("to run something, call the powershell tool.");
-		expect(call(["read", "bash", "powershell", "edit", "write"])).toContain("to run something, call the bash or powershell tool.");
-		expect(buildClaudeCodeSystemPrompt({ ...baseOptions, selectedTools: ["read", "powershell"] }, env, "tiny", null, false)).toContain("call the powershell tool.");
-	});
-
 	it("is byte-stable across calls with identical inputs, for each tier", () => {
-		for (const tier of TIERS) {
+		for (const tier of PROMPT_TIERS) {
 			const a = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
 			const b = buildClaudeCodeSystemPrompt({ ...baseOptions }, { ...env }, tier);
 			expect(a).toBe(b);
 		}
 	});
-
-	it("produces three distinct registers (frontier, verbose, tiny); workhorse and cheap share one", () => {
-		const outputs = TIERS.map((tier) => buildClaudeCodeSystemPrompt(baseOptions, env, tier));
-		expect(new Set(outputs).size).toBe(3);
-	});
-
-
 });
 
 describe("the per-turn budget line", () => {
 	it("closes the prompt after the cwd line, and is absent when not given", () => {
 		const line = "<total_tokens>15000000 tokens left</total_tokens>";
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", line).endsWith(`Current working directory: /tmp/project\n\n${line}`)).toBe(true);
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null).endsWith("Current working directory: /tmp/project")).toBe(true);
-	});
-
-	it("drops the task_create line when the model runs without the task tools", () => {
-		for (const tier of ["workhorse", "cheap", "tiny"] as const) {
-			const withTasks = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
-			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier, null, false);
-			expect(withTasks, tier).toContain("task_create");
-			expect(without, tier).not.toContain("task_create");
-			// Only the task bullet goes; the rest stays.
-			expect(withTasks.split("\n").length - without.split("\n").length, tier).toBe(1);
-		}
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse")).toContain(
-			"\n - Use task_create (deferred — load it with `tool_search select:task_create,task_update`) to plan and track work. Mark each task completed as soon as it's done; don't batch.\n",
-		);
-		// Frontier has no task line either way.
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, false)).toBe(
-			buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, true),
-		);
+		const lastLine = cwdLine("/tmp/project");
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", line).endsWith(`\n${lastLine}\n\n${line}`)).toBe(true);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null).endsWith(`\n${lastLine}`)).toBe(true);
 	});
 });

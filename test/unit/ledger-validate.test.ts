@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/ledger/validate.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
+import { deliveredAfterRepair, repairRequest, validateRequest } from "../../extensions/lib/request/ledger/validate.ts";
 
 const api = "anthropic-messages";
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });

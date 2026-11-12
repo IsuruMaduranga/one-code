@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const child = spawn("perl", ["-e", "alarm 180; exec @ARGV", "pi", "--mode", "rpc", "--no-session", "--no-extensions", "-e", resolve(root, "extensions/btw/index.ts"), "--model", process.argv[2] ?? "anthropic/claude-haiku-4-5"], {
+const child = spawn("perl", ["-e", "alarm 180; exec @ARGV", "pi", "--mode", "rpc", "--no-session", "--no-extensions", "-e", resolve(root, "extensions/agents/btw/index.ts"), "--model", process.argv[2] ?? "anthropic/claude-haiku-4-5"], {
 	cwd: root,
 	stdio: ["pipe", "pipe", "inherit"],
 });

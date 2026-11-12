@@ -30,7 +30,7 @@ When pi's `quietStartup` setting is on (the bundled app turns it on), the
 startup listing is compact: one line each for the instruction files in
 context, the skills found, the saved workflows, and the themes.
 
-Set `CC_NO_BANNER=1` to keep pi's own header.
+Set `ONECODE_NO_BANNER=1` to keep pi's own header.
 
 ## Prompt and transcript markers
 
@@ -39,7 +39,7 @@ bullet, as in Claude Code. Tool calls render as `● Tool(arguments)` with
 the result on an indented `⎿` line. Thinking is collapsed behind
 `✻ Thinking… (ctrl+t to expand)`.
 
-Set `CC_NO_INPUT_MARKER=1` or `CC_NO_ASSISTANT_MARKER=1` to remove either
+Set `ONECODE_NO_INPUT_MARKER=1` or `ONECODE_NO_ASSISTANT_MARKER=1` to remove either
 marker.
 
 When you type a slash command that takes an argument followed by a space, a
@@ -58,7 +58,7 @@ The clock runs from the start of the turn until it settles, through retries.
 
 After the turn, a dim `✻ Cooked for 5m 12s · done 2:33 PM` line reports the
 total time and when the turn finished.
-Set `CC_TURN_DURATION=0` to turn it off.
+Set `ONECODE_FEATURES_OFF=turn-duration` to turn it off.
 
 ## The status line
 
@@ -78,7 +78,7 @@ web-fetch reader calls, and recaps. pi's own footer counts only the main
 conversation. When the line is too narrow, the cache-hit rate goes first,
 then the pull request, then the branch.
 
-Set `CC_FOOTER=0` to keep pi's footer.
+Set `ONECODE_FEATURES_OFF=footer` to keep pi's footer.
 
 ## The panel below the editor
 

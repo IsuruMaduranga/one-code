@@ -2,23 +2,23 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fetchInstallCounts, formatInstallCount, readCachedCounts } from "../../extensions/plugins/counts.ts";
-import { installPlugin, uninstallPlugin } from "../../extensions/plugins/install/install.ts";
-import { gitClone, gitUpdate } from "../../extensions/plugins/marketplace/git.ts";
-import * as pluginGit from "../../extensions/plugins/marketplace/git.ts";
-import { addInstalledPlugin, installedEntry, removeInstalledPlugin, setInstalledEnabled } from "../../extensions/plugins/install/registry.ts";
-import { sanitizePathSegment } from "../../extensions/lib/plugin-root.ts";
-import { versionedCachePath, withinBase } from "../../extensions/plugins/install/paths.ts";
-import { ensureOfficialRegistered, isStale, OFFICIAL_MARKETPLACE_NAME } from "../../extensions/plugins/marketplace/official.ts";
-import { parseMarketplaceInput } from "../../extensions/plugins/marketplace/parse.ts";
+import { fetchInstallCounts, formatInstallCount, readCachedCounts } from "../../extensions/tools/plugins/counts.ts";
+import { installPlugin, uninstallPlugin } from "../../extensions/tools/plugins/install/install.ts";
+import { gitClone, gitUpdate } from "../../extensions/tools/plugins/marketplace/git.ts";
+import * as pluginGit from "../../extensions/tools/plugins/marketplace/git.ts";
+import { addInstalledPlugin, installedEntry, removeInstalledPlugin, setInstalledEnabled } from "../../extensions/tools/plugins/install/registry.ts";
+import { sanitizePathSegment } from "../../extensions/lib/plugins/plugin-root.ts";
+import { versionedCachePath, withinBase } from "../../extensions/tools/plugins/install/paths.ts";
+import { ensureOfficialRegistered, isStale, OFFICIAL_MARKETPLACE_NAME } from "../../extensions/tools/plugins/marketplace/official.ts";
+import { parseMarketplaceInput } from "../../extensions/tools/plugins/marketplace/parse.ts";
 import {
 	availableMarketplaceName,
 	readKnownMarketplaces,
 	removeKnownMarketplace,
 	writeKnownMarketplace,
-} from "../../extensions/plugins/marketplace/registry.ts";
-import { syncMarketplace } from "../../extensions/plugins/marketplace/sync.ts";
-import { parseMarketplaceManifest } from "../../extensions/plugins/marketplace/types.ts";
+} from "../../extensions/tools/plugins/marketplace/registry.ts";
+import { syncMarketplace } from "../../extensions/tools/plugins/marketplace/sync.ts";
+import { parseMarketplaceManifest } from "../../extensions/tools/plugins/marketplace/types.ts";
 
 let root: string;
 

@@ -1,10 +1,15 @@
+import { join } from "node:path";
 import { vi } from "vitest";
+import { brand, envName } from "../../../extensions/lib/profile/brand.mjs";
 
 /**
  * Point `os.homedir()` at `home` on every platform: it reads HOME on macOS and
- * Linux and USERPROFILE on Windows. Undone by `vi.unstubAllEnvs()`.
+ * Linux and USERPROFILE on Windows. The product's state folder follows it to
+ * `<home>/<stateDir>`, as it does without an override. Undone by
+ * `vi.unstubAllEnvs()`.
  */
 export function stubHome(home: string): void {
 	vi.stubEnv("HOME", home);
 	vi.stubEnv("USERPROFILE", home);
+	vi.stubEnv(envName("STATE_DIR"), join(home, brand.stateDir));
 }

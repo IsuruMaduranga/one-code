@@ -1,16 +1,19 @@
 /**
- * Idle compaction (extensions/idle-compact): Claude Code 2.1.289's rules for
+ * Idle compaction (extensions/context/idle-compact): Claude Code 2.1.289's rules for
  * compacting an idle session before its one-hour cache expires: the cache TTL
  * read from the request body, the fire at 90% of the hour, the refusal order,
  * and the wiring, which follows the compaction extension's capture of the last
  * request and compacts once with the notice.
  */
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { useProfile } from "./helpers/profile.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import compactionExtension from "../../extensions/compaction/index.ts";
-import idleCompactExtension from "../../extensions/idle-compact/index.ts";
+import compactionExtension from "../../extensions/context/compaction/index.ts";
+import idleCompactExtension from "../../extensions/context/idle-compact/index.ts";
 import {
 	type ArmedRequest,
 	DEFAULT_MIN_TOKENS,
@@ -20,11 +23,12 @@ import {
 	idleCompactConfig,
 	idleRefusal,
 	ONE_HOUR_MS,
-} from "../../extensions/idle-compact/policy.ts";
-import { hasOneHourCache } from "../../extensions/lib/anthropic-payload.ts";
-import { unrefTimers } from "../../extensions/lib/timer-ops.ts";
+} from "../../extensions/context/idle-compact/policy.ts";
+import { hasOneHourCache } from "../../extensions/lib/request/anthropic-payload.ts";
+import { brandedId } from "../../extensions/lib/profile/brand.mjs";
+import { unrefTimers } from "../../extensions/lib/core/timer-ops.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../../extensions/lib/ledger/plan.ts";
+import { LEDGER_SENT_CHANNEL, type LedgerSent } from "../../extensions/lib/request/ledger/plan.ts";
 
 const FIRE_MS = 54 * 60_000;
 const ephemeral = (ttl?: string) => ({ type: "ephemeral", ...(ttl ? { ttl } : {}) });
@@ -47,18 +51,17 @@ describe("hasOneHourCache", () => {
 
 describe("idleCompactConfig", () => {
 	it("is on with Claude Code's 200,000-token floor and no delay override by default", () => {
-		expect(idleCompactConfig({})).toEqual({ enabled: true, minTokens: DEFAULT_MIN_TOKENS });
+		expect(idleCompactConfig({})).toEqual({ minTokens: DEFAULT_MIN_TOKENS });
 	});
 
-	it("turns off with CC_IDLE_COMPACT=0 and takes the testing overrides", () => {
-		expect(idleCompactConfig({ CC_IDLE_COMPACT: "0" }).enabled).toBe(false);
-		expect(idleCompactConfig({ CC_IDLE_COMPACT_MIN_TOKENS: "500", CC_IDLE_COMPACT_DELAY_MS: "5000" })).toEqual({ enabled: true, minTokens: 500, delayMs: 5000 });
+	it("takes the testing overrides", () => {
+		expect(idleCompactConfig({ [envName("IDLE_COMPACT_MIN_TOKENS")]: "500", [envName("IDLE_COMPACT_DELAY_MS")]: "5000" })).toEqual({ minTokens: 500, delayMs: 5000 });
 	});
 
 	it("ignores a delay under a second or past the hour, and a nonsense threshold", () => {
-		expect(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: "10" }).delayMs).toBeUndefined();
-		expect(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: String(ONE_HOUR_MS) }).delayMs).toBeUndefined();
-		expect(idleCompactConfig({ CC_IDLE_COMPACT_MIN_TOKENS: "lots" }).minTokens).toBe(DEFAULT_MIN_TOKENS);
+		expect(idleCompactConfig({ [envName("IDLE_COMPACT_DELAY_MS")]: "10" }).delayMs).toBeUndefined();
+		expect(idleCompactConfig({ [envName("IDLE_COMPACT_DELAY_MS")]: String(ONE_HOUR_MS) }).delayMs).toBeUndefined();
+		expect(idleCompactConfig({ [envName("IDLE_COMPACT_MIN_TOKENS")]: "lots" }).minTokens).toBe(DEFAULT_MIN_TOKENS);
 	});
 });
 
@@ -67,7 +70,7 @@ describe("idleRefusal", () => {
 	const probe = (over: Partial<FireProbe> = {}): FireProbe => ({
 		now: FIRE_MS,
 		dueAt: FIRE_MS,
-		config: { enabled: true, minTokens: DEFAULT_MIN_TOKENS },
+		config: { minTokens: DEFAULT_MIN_TOKENS },
 		compactionOn: true,
 		model: armed.model,
 		thinking: armed.thinking,
@@ -85,7 +88,6 @@ describe("idleRefusal", () => {
 	});
 
 	it.each<[string, Partial<FireProbe>]>([
-		["disabled", { config: { enabled: false, minTokens: 1 } }],
 		["compaction_off", { compactionOn: false }],
 		["prefix_changed", { model: "anthropic/claude-sonnet-5-5" }],
 		["prefix_changed", { thinking: "high" }],
@@ -140,11 +142,8 @@ describe("IdleCompactTimer", () => {
 		expect(fired).toHaveLength(0);
 	});
 
-	it("arms nothing when off, and uses the delay override", () => {
-		const off = make(idleCompactConfig({ CC_IDLE_COMPACT: "0" }));
-		off.timer.arm(request(0));
-		expect(off.timer.pending).toBe(false);
-		const quick = make(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: "5000" }));
+	it("uses the delay override", () => {
+		const quick = make(idleCompactConfig({ [envName("IDLE_COMPACT_DELAY_MS")]: "5000" }));
 		quick.timer.arm(request(0));
 		vi.advanceTimersByTime(5000);
 		expect(quick.fired.map((f) => f.dueAt)).toEqual([5000]);
@@ -157,7 +156,7 @@ describe("idle-compact wiring, beside the compaction extension's capture", () =>
 		vi.useFakeTimers({ now: 1_000_000 });
 		agentDir = mkdtempSync(join(tmpdir(), "idle-compact-agent-"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		for (const name of ["CC_IDLE_COMPACT", "CC_IDLE_COMPACT_MIN_TOKENS", "CC_IDLE_COMPACT_DELAY_MS", "CC_COMPACTION"]) vi.stubEnv(name, undefined);
+		for (const name of [envName("IDLE_COMPACT_MIN_TOKENS"), envName("IDLE_COMPACT_DELAY_MS")]) vi.stubEnv(name, undefined);
 	});
 	afterEach(() => {
 		vi.useRealTimers();
@@ -199,14 +198,14 @@ describe("idle-compact wiring, beside the compaction extension's capture", () =>
 		expect(compact).toHaveBeenCalledTimes(1);
 		expect(compact.mock.calls[0][0].customInstructions).toBeUndefined();
 		compact.mock.calls[0][0].onComplete({});
-		expect(fake.appendedEntries).toEqual([{ customType: "one-code:idle-compact", data: undefined }]);
+		expect(fake.appendedEntries).toEqual([{ customType: brandedId("idle-compact"), data: undefined }]);
 		vi.advanceTimersByTime(2 * ONE_HOUR_MS);
 		expect(compact).toHaveBeenCalledTimes(1);
 	});
 
 	it("renders the notice as a dim marked line", async () => {
 		const { fake } = await mount();
-		const renderer = fake.entryRenderers.get("one-code:idle-compact") as (entry: unknown, options: unknown, theme: unknown) => { render(width: number): string[] };
+		const renderer = fake.entryRenderers.get(brandedId("idle-compact")) as (entry: unknown, options: unknown, theme: unknown) => { render(width: number): string[] };
 		expect(renderer({}, {}, {}).render(80).join("\n")).toContain(IDLE_COMPACT_NOTICE);
 	});
 
@@ -265,19 +264,19 @@ describe("idle-compact wiring, beside the compaction extension's capture", () =>
 		expect(run.compact).not.toHaveBeenCalled();
 	});
 
-	it("respects CC_IDLE_COMPACT=0, CC_COMPACTION=0 and pi's compaction.enabled", async () => {
-		vi.stubEnv("CC_IDLE_COMPACT", "0");
+	it("respects the idle-compact and compaction feature switches and pi's compaction.enabled", async () => {
+		// Each feature has one switch, the profile's (or the FEATURES_OFF variable that feeds it).
+		useProfile({ features: { "idle-compact": false } });
 		const off = await mount();
 		await off.turn();
-		vi.stubEnv("CC_IDLE_COMPACT", undefined);
-		vi.stubEnv("CC_COMPACTION", "0");
+		useProfile({ features: { compaction: false } });
 		const ours = await mount();
 		await ours.turn();
 		vi.advanceTimersByTime(FIRE_MS);
 		expect(off.compact).not.toHaveBeenCalled();
 		expect(ours.compact).not.toHaveBeenCalled();
 
-		vi.stubEnv("CC_COMPACTION", undefined);
+		setActiveProfileForTest(undefined);
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ compaction: { enabled: false } }));
 		const piOff = await mount();
 		await piOff.turn();

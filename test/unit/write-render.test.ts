@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import { EXPAND_HINT, type ThemeLike } from "../../extensions/lib/tui-render.ts";
-import { userDenialText } from "../../extensions/lib/user-denial.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { EXPAND_HINT, type ThemeLike } from "../../extensions/lib/ui/tui-render.ts";
+import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import {
 	contentPreviewLines,
 	countLines,
@@ -13,7 +13,7 @@ import {
 	WRITE_DIFF_MAX_BYTES,
 	writeDetails,
 	writeResultLines,
-} from "../../extensions/tool-style/write-render.ts";
+} from "../../extensions/tools/tool-style/write-render.ts";
 
 const tagged: ThemeLike = {
 	fg: (color, text) => `<${color}>${text}</>`,
@@ -104,7 +104,7 @@ describe("the write tool's execution", () => {
 		const { tmpdir } = await import("node:os");
 		const { join } = await import("node:path");
 		const { createFakePi } = await import("./helpers/fake-pi.ts");
-		const { default: toolStyleExtension } = await import("../../extensions/tool-style/index.ts");
+		const { default: toolStyleExtension } = await import("../../extensions/tools/tool-style/index.ts");
 		const dir = mkdtempSync(join(tmpdir(), "write-details-"));
 		try {
 			const fake = createFakePi();

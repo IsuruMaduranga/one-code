@@ -7,11 +7,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { buildRunReport, WorkflowRunManager } from "../../extensions/workflow/run-manager.ts";
-import { buildDetail } from "../../extensions/workflow/viewer.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
+import { buildRunReport, WorkflowRunManager } from "../../extensions/agents/workflow/run-manager.ts";
+import { buildDetail } from "../../extensions/agents/workflow/viewer.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
-vi.mock("../../extensions/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
+vi.mock("../../extensions/agents/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
 
 const META = "export const meta = {name: 'kept', description: 'kept worktrees'}\n";
 
@@ -48,11 +49,22 @@ describe("kept workflow worktrees", () => {
 		await handle.finished;
 		expect(handle.status).toBe("completed");
 
-		const report = buildRunReport(handle);
-		expect(report).toContain("Worktrees kept with agents' changes or commits");
-		expect(report).toContain("- a: /tmp/cc-wt-a/tree (branch cc-subagent/a)");
-		expect(report).toContain("- b: /tmp/cc-wt-b/tree (branch cc-subagent/b)");
-		expect(handle.recentEvents.some((line) => line.includes("worktree kept at /tmp/cc-wt-a/tree"))).toBe(true);
+		expect(buildRunReport(handle)).toBe(
+			workflowResultText.report({
+				name: "kept",
+				runId: handle.runId,
+				status: "completed",
+				stats: { agents: 2, outputTokens: 1, cost: 0 },
+				seconds: Math.round((handle.finishedAt! - handle.startedAt) / 1000),
+				result: "done",
+				progress: [],
+				keptWorktrees: [
+					{ label: "a", path: "/tmp/cc-wt-a/tree", branch: "cc-subagent/a" },
+					{ label: "b", path: "/tmp/cc-wt-b/tree", branch: "cc-subagent/b" },
+				],
+			}),
+		);
+		expect(handle.recentEvents.some((line) => line.includes(workflowResultText.progress.worktreeKept({ path: "/tmp/cc-wt-a/tree" })))).toBe(true);
 
 		const [a] = handle.agents.list();
 		expect(a.worktree).toEqual({ path: "/tmp/cc-wt-a/tree", branch: "cc-subagent/a" });

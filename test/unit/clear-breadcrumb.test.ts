@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import clearExtension from "../../extensions/clear/index.ts";
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import clearExtension from "../../extensions/commands/clear/index.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 function mount() {

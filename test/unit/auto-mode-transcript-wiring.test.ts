@@ -2,18 +2,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/auto-mode/history.ts";
-import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
-import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import type { TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
 let overflow = false;
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async (request: { transcript: TranscriptEntry[]; userMessages: string[] }) => {
 		seen.push(request.transcript);
 		seenUserMessages.push(request.userMessages);
@@ -35,10 +38,9 @@ describe("classifier history in the permissions gate", () => {
 		const cwd = join(home, "project");
 		mkdirSync(cwd);
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
-		mkdirSync(join(home, ".onecode"));
-		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { logDecisions: true } }));
+		mkdirSync(productStateDir());
+		writeFileSync(productSettingsPath(home), JSON.stringify({ autoMode: { logDecisions: true } }));
 		overflow = false;
 		seen.length = 0;
 		seenUserMessages.length = 0;
@@ -135,14 +137,12 @@ describe("classifier history in the permissions gate", () => {
 		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
 		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
 		const result = await call("bash", { command: "rm probe.*" }) as { block?: boolean; reason?: string };
+		const reason = permissionText().refused({ kind: "classifierOverflowHeadless" });
 		// The exit extension turns the stop into a failed one-shot run.
-		expect(order).toEqual(["failed:auto mode classifier transcript exceeded context window in headless mode", "abort"]);
+		expect(order).toEqual([`failed:${reason}`, "abort"]);
 		expect(result.block).toBe(true);
-		expect(result.reason).toContain("auto mode classifier transcript exceeded context window in headless mode");
-		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(
-			"auto mode classifier transcript exceeded context window in headless mode. Compact the session (/compact) and continue.",
-			"error",
-		);
+		expect(result.reason).toBe(reason);
+		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(`${reason}. Compact the session (/compact) and continue.`, "error");
 		expect(ctx.abort).toHaveBeenCalledOnce();
 		expect((ctx.ui as { select: unknown }).select).not.toHaveBeenCalled();
 		const decisions = readFileSync(join(home, "sessions", "auto-mode-decisions.jsonl"), "utf8");

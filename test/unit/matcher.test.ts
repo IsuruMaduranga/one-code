@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
+import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/profile/paths.ts";
 import {
 	bashSubcommands,
 	decide,
@@ -20,8 +20,9 @@ import {
 	type PermissionRule,
 	ruleMatches,
 	unescapeLiteral,
-} from "../../extensions/permissions/matcher.ts";
-import { isProtectedPath } from "../../extensions/permissions/protected-paths.ts";
+} from "../../extensions/lib/rules/matcher.ts";
+import { isProtectedPath } from "../../extensions/lib/rules/protected-paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const CWD = "/home/user/project";
@@ -350,7 +351,7 @@ describe("decide", () => {
 	});
 
 	it("plan mode allows writes to the plan file only", () => {
-		const planFilePath = "/home/user/.onecode/plans/brisk-otter-map.md";
+		const planFilePath = `/home/user/${brand.stateDir}/plans/brisk-otter-map.md`;
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
 		const allowed = decide({ ...withPlan, toolName: "write", subject: planFilePath });
 		expect(allowed.decision).toBe("allow");
@@ -358,7 +359,7 @@ describe("decide", () => {
 		expect(decide({ ...withPlan, toolName: "edit", subject: planFilePath }).decision).toBe("allow");
 		// Anything else stays denied, including a sibling in the same directory.
 		expect(decide({ ...withPlan, toolName: "write", subject: "a.ts" }).decision).toBe("deny");
-		expect(decide({ ...withPlan, toolName: "write", subject: "/home/user/.onecode/plans/other.md" }).decision).toBe(
+		expect(decide({ ...withPlan, toolName: "write", subject: `/home/user/${brand.stateDir}/plans/other.md` }).decision).toBe(
 			"deny",
 		);
 		// The carve-out is writes only — bash aimed at the plan file is not a write.
@@ -367,9 +368,9 @@ describe("decide", () => {
 
 	it("matches the plan file across ~, relative, and resolved spellings", () => {
 		const home = homedir();
-		const planFilePath = "~/.onecode/plans/brisk-otter-map.md";
+		const planFilePath = `~/${brand.stateDir}/plans/brisk-otter-map.md`;
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
-		expect(decide({ ...withPlan, toolName: "write", subject: `${home}/.onecode/plans/brisk-otter-map.md` }).decision).toBe(
+		expect(decide({ ...withPlan, toolName: "write", subject: `${home}/${brand.stateDir}/plans/brisk-otter-map.md` }).decision).toBe(
 			"allow",
 		);
 		// A symlink spelling counts when its resolution lands on the plan file.
@@ -377,7 +378,7 @@ describe("decide", () => {
 			...withPlan,
 			toolName: "write",
 			subject: "/tmp/link.md",
-			resolvedSubject: `${home}/.onecode/plans/brisk-otter-map.md`,
+			resolvedSubject: `${home}/${brand.stateDir}/plans/brisk-otter-map.md`,
 		});
 		expect(viaSymlink.decision).toBe("allow");
 	});
@@ -389,14 +390,14 @@ describe("decide", () => {
 	});
 
 	it("deny rules still beat the plan-file carve-out", () => {
-		const planFilePath = "/home/user/.onecode/plans/brisk-otter-map.md";
+		const planFilePath = `/home/user/${brand.stateDir}/plans/brisk-otter-map.md`;
 		const d = decide({
 			...base,
 			mode: "plan",
 			planFilePath,
 			toolName: "write",
 			subject: planFilePath,
-			deny: rules([`Write(${absPattern("/home/user/.onecode/**")})`]),
+			deny: rules([`Write(${absPattern(`/home/user/${brand.stateDir}/**`)})`]),
 		});
 		expect(d.decision).toBe("deny");
 	});
@@ -609,22 +610,22 @@ describe("decide", () => {
 			const dirs = {
 				memoryDirPath: "/home/user/.claude/projects/-home-user-project/memory",
 				scratchpadDirPath: "/tmp/onecode-501/scratch",
-				resultsDirPath: "/home/user/.onecode/agent/sessions/abc",
-				planFilePath: "/home/user/.onecode/plans/plan.md",
+				resultsDirPath: `/home/user/${brand.stateDir}/agent/sessions/abc`,
+				planFilePath: `/home/user/${brand.stateDir}/plans/plan.md`,
 			};
 			for (const subject of [`${dirs.memoryDirPath}/MEMORY.md`, `${dirs.scratchpadDirPath}/a.txt`, `${dirs.resultsDirPath}/tool-results/x.txt`, dirs.planFilePath]) {
 				expect(decide({ ...base, ...dirs, toolName: "read", subject }).decision, subject).toBe("allow");
 			}
 			// Writable: memory, scratchpad, plan file (the results dir is the
-			// harness's, under protected ~/.onecode — a write there still asks).
+			// harness's, under the protected state dir — a write there still asks).
 			for (const subject of [`${dirs.memoryDirPath}/MEMORY.md`, `${dirs.scratchpadDirPath}/a.txt`, dirs.planFilePath]) {
 				expect(decide({ ...accept, ...dirs, toolName: "write", subject }).decision, subject).toBe("allow");
 			}
-			expect(decide({ ...base, ...dirs, toolName: "read", subject: "/home/user/.onecode/agent/auth.json" }).decision).toBe("ask");
+			expect(decide({ ...base, ...dirs, toolName: "read", subject: `/home/user/${brand.stateDir}/agent/auth.json` }).decision).toBe("ask");
 		});
 
 		it("this project's session dir (transcripts + the auto-mode decision log) is readable, never writable, and other projects' are not", () => {
-			const sessionDirPath = "/home/user/.onecode/agent/sessions/--home-user-project";
+			const sessionDirPath = `/home/user/${brand.stateDir}/agent/sessions/--home-user-project`;
 			for (const subject of [`${sessionDirPath}/2026-09-19T07-00-00.jsonl`, `${sessionDirPath}/auto-mode-decisions.jsonl`, sessionDirPath]) {
 				expect(decide({ ...base, sessionDirPath, toolName: "read", subject }).decision, subject).toBe("allow");
 				expect(decide({ ...base, mode: "auto", sessionDirPath, toolName: "read", subject }).decision, subject).toBe("allow");
@@ -632,13 +633,13 @@ describe("decide", () => {
 			// Without the root the same read asks (default) / classifies (auto).
 			expect(decide({ ...base, toolName: "read", subject: `${sessionDirPath}/x.jsonl` }).decision).toBe("ask");
 			// A sibling project's transcripts are outside.
-			expect(decide({ ...base, sessionDirPath, toolName: "read", subject: "/home/user/.onecode/agent/sessions/--home-user-other/x.jsonl" }).decision).toBe("ask");
+			expect(decide({ ...base, sessionDirPath, toolName: "read", subject: `/home/user/${brand.stateDir}/agent/sessions/--home-user-other/x.jsonl` }).decision).toBe("ask");
 			// Reads only: the agent dir stays protected for writes.
 			expect(decide({ ...accept, sessionDirPath, toolName: "write", subject: `${sessionDirPath}/x.jsonl` }).decision).not.toBe("allow");
 		});
 
 		it("plan mode: a read-only shell command over this project's session dir is allowed, like the read tools", () => {
-			const sessionDirPath = "/home/user/.onecode/agent/sessions/--home-user-project";
+			const sessionDirPath = `/home/user/${brand.stateDir}/agent/sessions/--home-user-project`;
 			const plan = { ...base, mode: "plan" as const, sessionDirPath };
 			// bash: with the root the read is plan-readonly; without it, an outside read → ask.
 			expect(decide({ ...plan, toolName: "bash", subject: `head -n 5 ${sessionDirPath}/x.jsonl` }).cause).not.toBe("plan-mode");

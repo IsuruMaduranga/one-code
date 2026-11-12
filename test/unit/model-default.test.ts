@@ -2,10 +2,10 @@ import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import modelDefaultExtension, { applyDefaultModel, PERSIST_DEBOUNCE_MS } from "../../extensions/model-default/index.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { RECORD } from "../../extensions/lib/ledger/records.ts";
+import { foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
+import modelDefaultExtension, { applyDefaultModel, PERSIST_DEBOUNCE_MS } from "../../extensions/ui/model-default/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
+import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("applyDefaultModel", () => {

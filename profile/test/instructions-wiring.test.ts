@@ -1,0 +1,423 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/context/instructions/instructions.ts";
+import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/context/instructions.ts";
+import { resetConfigModeForTest } from "../claude-code/mode.ts";
+import { discoverContextFilePaths, discoverContextFiles } from "../claude-code/instructions.ts";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { truncateIndex } from "../../extensions/lib/context/memory-content.ts";
+
+// Ancestor instruction files on the host must not affect temporary fixtures,
+// including when TMPDIR is inside a checkout that carries its own CLAUDE.md.
+vi.mock("node:fs", async (load) => {
+	const actual = await load<typeof import("node:fs")>();
+	return {
+		...actual,
+		existsSync: (path: Parameters<typeof actual.existsSync>[0]) => {
+			const name = String(path);
+			if (/(?:CLAUDE(?:\.local)?|AGENTS|ONECODE)\.md$/i.test(name) && !name.startsWith(tmpdir() + sep)) return false;
+			return actual.existsSync(path);
+		},
+	};
+});
+
+describe("buildClaudeMdBlock", () => {
+	it("assembles the instructions block byte-for-byte per Claude Code's join rule", () => {
+		const inner = buildClaudeMdBlock({
+			contextFiles: [
+				{
+					path: "/g/CLAUDE.md",
+					content: "Global rules.\n",
+					descriptor: "global",
+				},
+				{
+					path: "/p/CLAUDE.md",
+					content: "Project rules.\n",
+					descriptor: "project",
+				},
+			],
+			memoryIndex: { path: "/m/MEMORY.md", content: "# Memory index\n\n- entry\n" },
+		});
+
+		// Exact bytes: preamble\n\n, sections joined by "\n" (raw content keeps its
+		// trailing "\n", so inter-section gaps are "\n\n"), and the last section
+		// without its final "\n": the reminder frame supplies it.
+		const expected = [
+			"Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.",
+			"",
+			"Contents of /g/CLAUDE.md (user's private global instructions for all projects):",
+			"",
+			"Global rules.",
+			"",
+			"Contents of /p/CLAUDE.md (project instructions, checked into the codebase):",
+			"",
+			"Project rules.",
+			"",
+			"Contents of /m/MEMORY.md (user's auto-memory, persists across conversations):",
+			"",
+			"# Memory index",
+			"",
+			"- entry",
+		].join("\n");
+
+		expect(inner).toBe(expected);
+		expect(wrapReminder(inner ?? "").endsWith("- entry\n</system-reminder>")).toBe(true);
+	});
+
+	it("omits the memory section when the index is empty", () => {
+		const inner = buildClaudeMdBlock({
+			contextFiles: [
+				{ path: "/p/CLAUDE.md", content: "Rules.\n", descriptor: "project" },
+			],
+			memoryIndex: { path: "/m/MEMORY.md", content: "   \n" },
+		});
+		expect(inner).not.toContain("MEMORY.md");
+		expect(inner).toContain("Contents of /p/CLAUDE.md");
+	});
+
+	it("never glues a header onto the last line of a file or a cut index", () => {
+		const cut = truncateIndex(Array.from({ length: 230 }, (_, i) => `- [entry ${i + 1}](e${i + 1}.md) — one line`).join("\n"));
+		const inner = buildClaudeMdBlock({
+			contextFiles: [{ path: "/p/CLAUDE.md", content: "Use tabs.", descriptor: PROJECT_DESCRIPTOR }],
+			memoryIndex: { path: "/m/MEMORY.md", content: cut },
+		});
+		expect(inner).toContain("Use tabs.\n\nContents of /m/MEMORY.md");
+		expect(inner).toContain("- [entry 200](e200.md) — one line\n\n> WARNING: MEMORY.md is 230 lines (limit: 200).");
+		expect(inner?.endsWith("move detail into topic files.")).toBe(true);
+		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: PRODUCT_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: PRODUCT_DESCRIPTOR }]);
+		expect(oneCode).toContain("Be brief.\n\nContents of /q/ONECODE.md");
+		expect(oneCode?.endsWith("x")).toBe(true);
+	});
+
+	it("returns null when there is nothing to inject", () => {
+		expect(buildClaudeMdBlock({ contextFiles: [], memoryIndex: null })).toBeNull();
+	});
+});
+
+describe("buildContextBlock and dateBlock", () => {
+	it("frames the email and the git snapshot with Claude Code's preamble, sentence and footer", () => {
+		const git = "# gitStatus\nThis is the git status at the start of the conversation.\n\nCurrent branch: main";
+		expect(buildContextBlock({ email: "a@b.com", gitStatus: git })).toBe(
+			[
+				"As you answer the user's questions, you can use the following context:",
+				"# userEmail",
+				"The user's email address is a@b.com. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.",
+				git,
+				"",
+				"One Code attached this context automatically; it isn't part of the user's message. It describes the user's own account and workspace, so they don't need it reported back.",
+			].join("\n"),
+		);
+	});
+
+	it("keeps whichever part exists, and is null with neither", () => {
+		expect(buildContextBlock({ email: null, gitStatus: "# gitStatus\nx" })).toContain("context:\n# gitStatus\nx\n\nOne Code attached");
+		expect(buildContextBlock({ email: "a@b.com", gitStatus: null })).toContain("unless the user explicitly asks.\n\nOne Code attached");
+		expect(buildContextBlock({ email: null, gitStatus: null })).toBeNull();
+	});
+
+	it("states the date as its own sentence", () => {
+		expect(dateBlock("2026-10-04")).toBe("Today's date is 2026-10-04.");
+	});
+});
+
+describe("expandImports (@path expansion)", () => {
+	const home = "/home/u";
+	// Virtual filesystem so tests never touch disk. Keys are resolved like the
+	// expander resolves its imports, so `/p/a.md` is looked up as `D:\p\a.md` on
+	// Windows too.
+	const vfs = (files: Record<string, string>) => {
+		const resolved = new Map(Object.entries(files).map(([k, v]) => [resolve(k), v]));
+		return (p: string) => resolved.get(resolve(p)) ?? null;
+	};
+
+	it("inlines a referenced file at the @token's position", () => {
+		const read = vfs({ "/p/AGENTS.md": "AGENT RULES\n" });
+		expect(expandImports("before @AGENTS.md after", "/p", { home, read })).toBe("before AGENT RULES\n after");
+	});
+
+	it("leaves the literal @token when nothing resolves", () => {
+		expect(expandImports("see @missing.md here", "/p", { home, read: vfs({}) })).toBe("see @missing.md here");
+	});
+
+	it("does not treat a non-whitespace-anchored @ (an email) as an import", () => {
+		const read = vfs({ "/p/b.com": "OOPS" });
+		expect(expandImports("mail a@b.com now", "/p", { home, read })).toBe("mail a@b.com now");
+	});
+
+	it("expands recursively, resolving relative to each importing file's dir", () => {
+		const read = vfs({ "/p/a.md": "A @b.md", "/p/b.md": "B" });
+		expect(expandImports("@a.md", "/p", { home, read })).toBe("A B");
+	});
+
+	it("stops after the max import depth without inlining deeper hops", () => {
+		const read = vfs({
+			"/p/f1.md": "@f2.md",
+			"/p/f2.md": "@f3.md",
+			"/p/f3.md": "@f4.md",
+			"/p/f4.md": "@f5.md",
+			"/p/f5.md": "@f6.md",
+			"/p/f6.md": "DEEP",
+		});
+		// Six hops deep; the cutoff leaves the deepest reference literal, never DEEP.
+		expect(expandImports("@f1.md", "/p", { home, read })).toBe("@f6.md");
+	});
+
+	it("does not loop on a self-referential import", () => {
+		const read = vfs({ "/p/a.md": "A @a.md Z" });
+		expect(expandImports("@a.md", "/p", { home, read })).toBe("A @a.md Z");
+	});
+
+	it("ignores @tokens inside inline-code spans and fenced code blocks", () => {
+		const read = vfs({ "/p/x.md": "X" });
+		expect(expandImports("use `@x.md` inline", "/p", { home, read })).toBe("use `@x.md` inline");
+		const fenced = "```\n@x.md\n```";
+		expect(expandImports(fenced, "/p", { home, read })).toBe(fenced);
+	});
+
+	it("re-appends trailing sentence punctuation after the inlined content", () => {
+		const read = vfs({ "/p/x.md": "X" });
+		expect(expandImports("see @x.md.", "/p", { home, read })).toBe("see X.");
+	});
+
+	it("resolves ~ to home and absolute paths as-is", () => {
+		const read = vfs({ "/home/u/g.md": "G", "/abs/x.md": "X" });
+		expect(expandImports("@~/g.md and @/abs/x.md", "/p", { home, read })).toBe("G and X");
+	});
+});
+
+describe("ONECODE.md discovery", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "onecode-ctx-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	const write = (rel: string, content: string) => {
+		const abs = join(root, rel);
+		mkdirSync(join(abs, ".."), { recursive: true });
+		writeFileSync(abs, content);
+		return abs;
+	};
+
+	it("places global then per-directory ONECODE.md after the matching CLAUDE.md", () => {
+		const homeClaude = join(root, "home-claude");
+		const homeOneCode = join(root, "home-onecode");
+		const gClaude = write("home-claude/CLAUDE.md", "g\n");
+		const gOneCode = write("home-onecode/ONECODE.md", "go\n");
+		const pClaude = write("proj/CLAUDE.md", "p\n");
+		const pOneCode = write("proj/ONECODE.md", "po\n");
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj", "sub"),
+			homeClaudeDir: homeClaude,
+			homeOneCodeDir: homeOneCode,
+		});
+
+		expect(paths).toEqual([
+			expect.objectContaining({ path: gClaude }),
+			{ path: gOneCode, descriptor: PRODUCT_GLOBAL_DESCRIPTOR },
+			expect.objectContaining({ path: pClaude }),
+			{ path: pOneCode, descriptor: PRODUCT_DESCRIPTOR },
+		]);
+	});
+
+	it("omits ONECODE.md entirely when homeOneCodeDir is not passed (the memory picker path)", () => {
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/ONECODE.md", "po\n");
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+		});
+		expect(paths.some((p) => p.path.includes("ONECODE"))).toBe(false);
+	});
+
+	it("claude-md-or-agents-md: a project with any CLAUDE.md loads no AGENTS.md (CC decides per project)", () => {
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		const ancestorClaude = write("proj/CLAUDE.md", "c\n");
+		write("proj/AGENTS.md", "ignored\n");
+		write("proj/sub/AGENTS.md", "also ignored\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-or-agents-md" });
+		expect(paths.filter((p) => p.path.startsWith(join(root, "proj")))).toEqual([{ path: ancestorClaude, descriptor: PROJECT_DESCRIPTOR }]);
+	});
+
+	it("claude-md-or-agents-md: a project with no CLAUDE.md loads every AGENTS.md and .claude/AGENTS.md, keeping the global CLAUDE.md", () => {
+		mkdirSync(join(root, "proj", "sub", ".claude"), { recursive: true });
+		const global = write("home-claude/CLAUDE.md", "g\n");
+		const top = write("proj/AGENTS.md", "top\n");
+		const sub = write("proj/sub/AGENTS.md", "sub\n");
+		const dotClaude = write("proj/sub/.claude/AGENTS.md", "dot\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-or-agents-md" });
+		expect(paths).toEqual([
+			expect.objectContaining({ path: global }),
+			{ path: top, descriptor: AGENTS_DESCRIPTOR },
+			{ path: sub, descriptor: AGENTS_DESCRIPTOR },
+			{ path: dotClaude, descriptor: AGENTS_DESCRIPTOR },
+		]);
+	});
+
+	it("claude-md-and-agents-md: skips repeated AGENTS.md, but not a blocked ancestor import", () => {
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		write("proj/CLAUDE.md", "@AGENTS.md\n");
+		write("proj/AGENTS.md", "imported\n");
+		write("proj/sub/CLAUDE.md", "same\n");
+		write("proj/sub/AGENTS.md", "same\n");
+		const opts = { cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-and-agents-md" as const };
+		expect(discoverContextFilePaths(opts).filter((p) => p.descriptor === AGENTS_DESCRIPTOR)).toHaveLength(2);
+		const files = discoverContextFiles({ ...opts, home: root });
+		// The ancestor's @AGENTS.md is outside cwd, so it was not actually
+		// imported. Its independently discovered AGENTS.md must still load.
+		expect(files.filter((f) => f.descriptor === AGENTS_DESCRIPTOR).map((f) => f.path)).toEqual([join(root, "proj", "AGENTS.md")]);
+	});
+
+	it("managed-only drops the user's and the project's files", () => {
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/CLAUDE.md", "p\n");
+		write("proj/AGENTS.md", "a\n");
+		expect(discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude"), rule: "managed-only" })).toEqual([]);
+	});
+
+	it("independent mode reads every AGENTS.md and no Claude Code file", () => {
+		resetConfigModeForTest("independent");
+		mkdirSync(join(root, "proj", ".claude"), { recursive: true });
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/CLAUDE.md", "p\n");
+		write("proj/CLAUDE.local.md", "l\n");
+		write("proj/.claude/AGENTS.md", "dot\n");
+		const agents = write("proj/AGENTS.md", "a\n");
+		const oneCode = write("proj/ONECODE.md", "o\n");
+		const paths = openInstructions(root, undefined).paths({ cwd: join(root, "proj"), homeOneCodeDir: join(root, "home-onecode") });
+		expect(paths).toEqual([
+			{ path: agents, descriptor: AGENTS_DESCRIPTOR },
+			{ path: oneCode, descriptor: PRODUCT_DESCRIPTOR },
+		]);
+	});
+
+	it("never lists AGENTS.md under claude-md, the default rule", () => {
+		mkdirSync(join(root, "proj"), { recursive: true });
+		write("proj/AGENTS.md", "a\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude") });
+		expect(paths.some((p) => p.path.endsWith("AGENTS.md"))).toBe(false);
+	});
+
+	it("accepts lowercase onecode.md as a filename variant", () => {
+		const p = write("proj/onecode.md", "po\n");
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+			homeOneCodeDir: join(root, "home-onecode"),
+		});
+		expect(paths).toContainEqual({ path: p, descriptor: PRODUCT_DESCRIPTOR });
+	});
+
+	it("expands @imports in a discovered file's content (the @AGENTS.md reuse case)", () => {
+		write("proj/CLAUDE.md", "@AGENTS.md\n");
+		write("proj/AGENTS.md", "AGENT RULES\n");
+		const files = discoverContextFiles({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+			homeOneCodeDir: join(root, "home-onecode"),
+			home: root,
+		});
+		const claudeMd = files.find((f) => f.path.endsWith("CLAUDE.md"));
+		expect(claudeMd?.content).toBe("AGENT RULES\n\n");
+	});
+});
+
+describe("the # oneCodeMd block", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "onecode-block-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+	const write = (rel: string, content: string) => {
+		const abs = join(root, rel);
+		mkdirSync(join(abs, ".."), { recursive: true });
+		writeFileSync(abs, content);
+		return abs;
+	};
+
+	it("is null when there are no ONECODE.md files (nothing extra rides)", () => {
+		mkdirSync(join(root, "proj"), { recursive: true });
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
+		expect(buildOneCodeBlock(files)).toBeNull();
+	});
+
+	it("carries the ONECODE files under a precedence-over-CLAUDE.md preamble, nearer last", () => {
+		const globalOne = write(".onecode/ONECODE.md", "global one-code\n");
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		const projOne = write("proj/ONECODE.md", "project one-code\n");
+		const files = discoverOneCodeFiles({
+			cwd: join(root, "proj", "sub"),
+			homeOneCodeDir: join(root, ".onecode"),
+			home: root,
+		});
+		const block = buildOneCodeBlock(files);
+		expect(block).toBeTruthy();
+		const text = block as string;
+		expect(text).toContain("# oneCodeMd");
+		expect(text).toContain("take precedence over the CLAUDE.md instructions");
+		// Global first, project (nearer) after it.
+		expect(text.indexOf(globalOne)).toBeLessThan(text.indexOf(projOne));
+		expect(text).toContain("global one-code");
+		expect(text).toContain("project one-code");
+		expect(text).toContain("(One Code-specific global instructions for all projects, not read by Claude Code)");
+		expect(text).toContain("(One Code-specific instructions, not read by Claude Code)");
+	});
+
+	it("expands @imports inside an ONECODE.md file", () => {
+		write(".onecode/ignore", "x");
+		mkdirSync(join(root, "proj"), { recursive: true });
+		write("proj/ONECODE.md", "@snippet.md\n");
+		write("proj/snippet.md", "SNIPPET BODY\n");
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
+		expect(buildOneCodeBlock(files)).toContain("SNIPPET BODY");
+	});
+});
+
+// Real-capture validation: our preamble/trailer constants and email/date framing
+// must match the wire bytes. Skips gracefully where the capture isn't present
+// (it is an internal-only file, absent from the public repo / CI).
+describe("against a real Claude Code capture", () => {
+	// Any of the internal captures will do — they share the request shape. The
+	// test skips only where none is present (CI, the public checkout); on a dev
+	// machine holding a capture it always runs, so the check is not vacuous.
+	const candidates = ["opus-4-8.json", "cc-opus-5.json", "cc-opus.json", "cc-sonnet.json", "cc-haiku.json"];
+	const capturePath = candidates
+		.map((name) => fileURLToPath(new URL(`../../${name}`, import.meta.url)))
+		.find((path) => existsSync(path));
+	const run = capturePath ? it : it.skip;
+
+	run("the claudeMd block starts/ends exactly as we assemble it", () => {
+		const payload = JSON.parse(readFileSync(capturePath as string, "utf8"));
+		const block: string = payload.messages[0].content
+			.map((b: { text?: string }) => b.text ?? "")
+			.find((t: string) => t.startsWith("<system-reminder>") && t.includes("# claudeMd"));
+		expect(block).toBeTruthy();
+
+		// Same wrapper the injector adds, plus Claude Code's `\n\n` suffix on this block.
+		expect(block.startsWith("<system-reminder>\n")).toBe(true);
+		expect(block.endsWith("\n</system-reminder>\n\n")).toBe(true);
+
+		const inner = block.slice("<system-reminder>\n".length, block.length - "\n</system-reminder>\n\n".length);
+		expect(
+			inner.startsWith(
+				"As you answer the user's questions, you can use the following context:\n# claudeMd\nCodebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\n",
+			),
+		).toBe(true);
+		expect(inner).toMatch(
+			/\n\n {6}IMPORTANT: this context may or may not be relevant to your tasks\. You should not respond to this context unless it is highly relevant to your task\.$/,
+		);
+		expect(inner).toMatch(/\n# userEmail\nThe user's email address is .+\.\n# currentDate\nToday's date is \d{4}-\d{2}-\d{2}\.\n/);
+
+		// A round-trip: our wrapper + suffix reproduces the exact wire block.
+		expect(wrapReminder(inner) + "\n\n").toBe(block);
+	});
+});

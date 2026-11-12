@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { CALLABLE_TOOLS, foldBranch } from "../../extensions/lib/ledger/fold.ts";
-import { type EntryLike, makeRecord, RECORD, type RecordData, type RecordKind, stateOnBranch } from "../../extensions/lib/ledger/records.ts";
-import { encodeRequest, recordedRequest, type WirePayload } from "../../extensions/lib/ledger/wire.ts";
+import { CALLABLE_TOOLS, foldBranch } from "../../extensions/lib/request/ledger/fold.ts";
+import { type EntryLike, makeRecord, RECORD, type RecordData, type RecordKind, stateOnBranch } from "../../extensions/lib/request/ledger/records.ts";
+import { encodeRequest, recordedRequest, type WirePayload } from "../../extensions/lib/request/ledger/wire.ts";
 
 const identity = { api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-5-5", auth: "api-key" };
 const live = identity;

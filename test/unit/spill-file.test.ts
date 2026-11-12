@@ -6,14 +6,15 @@
  * output is a working-space read in every mode.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
-import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/spill-file.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
+import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/shell-run/spill-file.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { createFakeCtx } from "./helpers/fake-pi.ts";
+import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 
 const cwd = mkdtempSync(join(tmpdir(), "spill-cwd-"));
 const resultsDir = mkdtempSync(join(tmpdir(), "spill-results-"));
@@ -27,8 +28,17 @@ const cap = 30_000;
 const bound = { inlineMax: cap, id: "bash-t1" };
 const run = (command: string) =>
 	keepSpillReadable(() => bash.execute("t1", { command }, undefined, undefined, createFakeCtx({ cwd }) as never) as Promise<{ content: Array<{ type: string; text?: string }>; details?: unknown }>, resultsDir, bound);
-/** The file a persisted block names. */
-const savedPath = (text: string) => /Full output saved to: (.+)/.exec(text)?.[1];
+/** A saved output's size as the persisted block gives it. */
+const shownSize = (bytes: number) => (bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${(bytes / (1024 * 1024)).toFixed(1)}MB`);
+/** The profile's line naming a saved output, as the base writes it for `file`. */
+const persistedLine = (file: string) => toolResultsText.persisted({ size: shownSize(statSync(file).size), file });
+/** The file in the results dir a persisted block names, by the profile's line for it. */
+const savedPath = (text: string) =>
+	(readdirSync(resultsDir, { recursive: true }) as string[])
+		.map((name) => join(resultsDir, name))
+		.find((file) => statSync(file).isFile() && text.includes(persistedLine(file)));
+/** The profile's heading over a 2 KB preview, with the line break the block puts after it. */
+const previewHeading = () => `${toolResultsText.previewHeading({ kb: 2 })}\n`;
 
 describe("keepSpillReadable", () => {
 	it("moves a successful run's spill file into the results dir and rewrites the path", async () => {
@@ -96,9 +106,9 @@ describe("keepSpillReadable with Claude Code's cut", () => {
 
 	it("persists an output past the cap with its head as the preview", async () => {
 		const text = (await cut("seq 1 20000")).content[0].text ?? "";
-		expect(text.startsWith("<persisted-output>\nOutput too large (")).toBe(true);
-		expect(text).toContain("Preview (first 2KB):\n1\n2\n3\n");
 		const path = savedPath(text);
+		expect(text.startsWith(`<persisted-output>\n${persistedLine(path!)}\n`)).toBe(true);
+		expect(text).toContain(`${previewHeading()}1\n2\n3\n`);
 		expect(path?.startsWith(resultsDir)).toBe(true);
 		const saved = readFileSync(path!, "utf8").trimEnd().split("\n");
 		expect([saved[0], saved.at(-1)]).toEqual(["1", "20000"]);
@@ -122,7 +132,8 @@ describe("keepSpillReadable with Claude Code's cut", () => {
 	it("persists an output pi did not spill once it passes the cap", async () => {
 		// 1,000 lines of 44 bytes: under pi's limits, over the cap.
 		const text = (await cut("for i in $(seq 1 1000); do echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; done")).content[0].text ?? "";
-		expect(text.startsWith("<persisted-output>\nOutput too large (43.0KB)")).toBe(true);
+		const file = join(resultsDir, "tool-results", "bash-t1.txt");
+		expect(text.startsWith(`<persisted-output>\n${toolResultsText.persisted({ size: "43.0KB", file })}\n`)).toBe(true);
 	});
 
 	it("bounds the output in the error pi throws on a timeout", async () => {
@@ -133,7 +144,7 @@ describe("keepSpillReadable with Claude Code's cut", () => {
 		).catch((error: Error) => error);
 		const message = (failure as Error).message;
 		expect(message.startsWith("<persisted-output>")).toBe(true);
-		expect(message).toContain("Preview (first 2KB):\n1\n2\n");
+		expect(message).toContain(`${previewHeading()}1\n2\n`);
 		expect(message.endsWith("\n\nCommand timed out after 1 seconds")).toBe(true);
 	});
 

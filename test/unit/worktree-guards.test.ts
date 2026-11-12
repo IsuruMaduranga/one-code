@@ -1,8 +1,14 @@
+/**
+ * The worktree guards' decisions (extensions/lib/rules/worktree-guards.ts): which shell
+ * lines a worktree-isolated session refuses, and why, as the refusal data the
+ * profile words. One Code's wording of each refusal is tested in
+ * profile/test/worktree-guards-wording.test.ts.
+ */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
+import { namesGit, worktreeBashGuardReason } from "../../extensions/lib/rules/worktree-guards.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
@@ -16,12 +22,13 @@ describe("worktree git-isolation guard", () => {
 			for (const dir of ["own", "sibling"]) mkdirSync(join(real, dir));
 			const reason = (command: string) => worktreeBashGuardReason({ command, worktreePath: join(link, "own"), sharedRoot: "/repo", otherWorktrees: [join(real, "own"), join(real, "sibling")] });
 			// A sibling spelled through the link is still a sibling.
-			expect(reason(`git -C ${join(link, "sibling")} status`)).toContain("another worktree of the same repository");
+			const sibling = (target: string) => ({ kind: "gitTarget", worktreePath: join(link, "own"), problem: { kind: "sharedTarget", target } });
+			expect(reason(`git -C ${join(link, "sibling")} status`)).toEqual(sibling(join(link, "sibling")));
 			// The session's own worktree spelled by its real path is still its own.
 			expect(reason(`git -C ${join(real, "own")} status`)).toBeUndefined();
 			// A link inside the own worktree that leads to the sibling is the sibling.
 			symlinkSync(join(real, "sibling"), join(real, "own", "to-sibling"));
-			expect(reason(`git -C ${join(link, "own", "to-sibling")} status`)).toContain("another worktree of the same repository");
+			expect(reason(`git -C ${join(link, "own", "to-sibling")} status`)).toEqual(sibling(join(link, "own", "to-sibling")));
 			// A link inside the own worktree that leads to an unrelated repository is not this guard's concern.
 			mkdirSync(join(real, "unrelated"));
 			symlinkSync(join(real, "unrelated"), join(real, "own", "to-unrelated"));
@@ -44,7 +51,7 @@ describe("worktree git-isolation guard", () => {
 	it("refuses git aimed at a linked worktree outside the shared checkout", () => {
 		const outside = resolve("/elsewhere/wt2");
 		const withSiblings = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo", otherWorktrees: [resolve("/repo"), resolve(WT), outside] });
-		expect(withSiblings("git -C /elsewhere/wt2 status")).toContain("another worktree of the same repository");
+		expect(withSiblings("git -C /elsewhere/wt2 status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: outside } });
 		expect(withSiblings("git status")).toBeUndefined();
 		expect(guard("git -C /elsewhere/wt2 status")).toBeUndefined();
 	});
@@ -56,13 +63,10 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("cd src && git add .")).toBeUndefined();
 	});
 
-	it("refuses git fed its arguments from stdin at runtime, in Claude Code's wording", () => {
-		const reason = guard("git merge-base master feature | xargs git log --oneline -1") ?? "";
-		expect(reason).toContain("stdin at runtime (xargs/parallel)");
-		expect(reason).toContain("must target its own worktree");
-		expect(reason).toContain(`Run the equivalent from ${WT} without the redirect.`);
-		expect(guard("ls | parallel git add")).toContain("stdin at runtime (xargs/parallel)");
-		expect(guard("find . -name '*.orig' -exec git rm {} \\;")).toContain("find -exec");
+	it("refuses git fed its arguments from stdin at runtime", () => {
+		expect(guard("git merge-base master feature | xargs git log --oneline -1")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "stdinFed" } });
+		expect(guard("ls | parallel git add")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "stdinFed" } });
+		expect(guard("find . -name '*.orig' -exec git rm {} \\;")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "findExec" } });
 	});
 
 	it("leaves xargs without git alone", () => {
@@ -70,8 +74,8 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses git pointed at the shared checkout or a sibling worktree", () => {
-		expect(guard("git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
-		expect(guard("git -C ../wt2 log")).toContain(resolve("/repo/.claude/worktrees/wt2"));
+		expect(guard("git -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("git -C ../wt2 log")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo/.claude/worktrees/wt2") } });
 		expect(guard("git --git-dir=/repo/.git log")).toBeDefined();
 		expect(guard("git --work-tree /repo status")).toBeDefined();
 		expect(guard("cd /repo && git status")).toBeDefined();
@@ -87,12 +91,18 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses a git target computed at runtime", () => {
-		expect(guard('git -C "$DIR" status')).toContain("cannot be verified");
-		expect(guard("cd $BUILD_DIR && git status")).toContain("unverifiable");
+		expect(guard('git -C "$DIR" status')).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeFlag", flag: "-C" } });
+		expect(guard("cd $BUILD_DIR && git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "precedingCd" } });
 	});
 
-	it.each(["git -C /r*po status", "git -C /re?o status", "git -C ~someone/repo status", "git --work-tree /r*po status", "git --git-dir /r*po/.git status"])("refuses expanded repository targets: %s", (command) => {
-		expect(guard(command)).toContain("cannot be verified");
+	it.each([
+		["git -C /r*po status", "-C"],
+		["git -C /re?o status", "-C"],
+		["git -C ~someone/repo status", "-C"],
+		["git --work-tree /r*po status", "--work-tree"],
+		["git --git-dir /r*po/.git status", "--git-dir"],
+	])("refuses expanded repository targets: %s", (command, flag) => {
+		expect(guard(command)).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeFlag", flag } });
 	});
 
 	it("allows a quoted glob in a git path as a literal directory name", () => {
@@ -100,7 +110,7 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("sees a -C that follows --config-env", () => {
-		expect(guard("git --config-env foo=BAR -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("git --config-env foo=BAR -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 	});
 
 	it("sees through cd options to the real destination", () => {
@@ -114,32 +124,42 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses git in a line that changes directory inside a loop (PR #12 review)", () => {
-		expect(guard("for d in a b; do git status; cd ../../..; done")).toContain("inside a loop");
-		expect(guard("for d in a b; do git status; builtin cd ../../..; done")).toContain("inside a loop");
+		expect(guard("for d in a b; do git status; cd ../../..; done")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInLoop" } });
+		expect(guard("for d in a b; do git status; builtin cd ../../..; done")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInLoop" } });
 		expect(guard("for d in a b; do cd $d; done")).toBeUndefined();
-		expect(guard("for d in a b; do bash -c 'git status'; cd ../../..; done")).toContain("inside a loop");
-		expect(guard("for d in a b; do sh -c 'git status'; cd ../../..; done")).toContain("inside a loop");
+		expect(guard("for d in a b; do bash -c 'git status'; cd ../../..; done")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInLoop" } });
+		expect(guard("for d in a b; do sh -c 'git status'; cd ../../..; done")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInLoop" } });
 	});
 
 	it("refuses git after a cd in the last pipeline member, which lastpipe runs in this shell", () => {
-		expect(guard("shopt -s lastpipe; true | cd /repo; git status")).toContain("last command of a pipeline");
+		expect(guard("shopt -s lastpipe; true | cd /repo; git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInPipeline" } });
 		expect(guard("true | cd /repo")).toBeUndefined();
 		// Only git after the pipeline, spelled any way, and never a cd inside a subshell (PR #13 review).
-		expect(guard("shopt -s lastpipe; true | cd /repo; gi\\t status")).toContain("last command of a pipeline");
+		expect(guard("shopt -s lastpipe; true | cd /repo; gi\\t status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInPipeline" } });
 		expect(guard("git status; true | cd /tmp")).toBeUndefined();
 		expect(guard("true | cd /tmp; echo git")).toBeUndefined();
 		expect(guard('true | echo "$(cd /repo)"; git status')).toBeUndefined();
 		expect(guard("true | (cd /repo); git status")).toBeUndefined();
 		expect(guard('echo "$(true | cd /tmp)"; git status')).toBeUndefined();
 		// git in a script a shell runs counts (PR #13 review).
-		expect(guard("shopt -s lastpipe; true | cd /repo; bash -c 'git status'")).toContain("last command of a pipeline");
-		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
-		expect(guard("x=$(echo | cd /repo; git status)")).toContain("last command of a pipeline");
+		expect(guard("shopt -s lastpipe; true | cd /repo; bash -c 'git status'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInPipeline" } });
+		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInPipeline" } });
+		expect(guard("x=$(echo | cd /repo; git status)")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInPipeline" } });
 	});
 
 	it("refuses git behind a wrapper that can move it", () => {
-		for (const command of ["exec git -C /repo reset --hard", "sudo git -C /repo reset --hard", "env -C /repo git reset --hard", "env --chdir=/repo git status", "busybox git status", "busybox sh -c 'git -C /repo reset --hard'", "sudo bash -c 'git status'", "sudo eval 'git -C /repo reset --hard'", "flock /tmp/l -c 'git -C /repo status'"]) {
-			expect(guard(command), command).toContain("runs git through");
+		for (const [command, wrapper] of [
+			["exec git -C /repo reset --hard", "exec"],
+			["sudo git -C /repo reset --hard", "sudo"],
+			["env -C /repo git reset --hard", "env"],
+			["env --chdir=/repo git status", "env"],
+			["busybox git status", "busybox"],
+			["busybox sh -c 'git -C /repo reset --hard'", "busybox"],
+			["sudo bash -c 'git status'", "sudo"],
+			["sudo eval 'git -C /repo reset --hard'", "sudo"],
+			["flock /tmp/l -c 'git -C /repo status'", "flock"],
+		]) {
+			expect(guard(command), command).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "wrapper", wrapper } });
 		}
 		expect(guard("env git status")).toBeUndefined();
 		expect(guard("nohup git status")).toBeUndefined();
@@ -148,46 +168,46 @@ describe("worktree git-isolation guard", () => {
 
 	it("keeps every directory a cd that may not run leaves possible", () => {
 		for (const moveBack of ["false && cd WT", "if false; then cd WT; fi", "f() { cd WT; }", "true || cd WT", "case x in y) cd WT;; esac"]) {
-			expect(guard(`cd /repo; ${moveBack.replace("WT", WT)}; git reset --hard`)).toContain(`targets ${resolve("/repo")}`);
+			expect(guard(`cd /repo; ${moveBack.replace("WT", WT)}; git reset --hard`)).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		}
-		expect(guard("cd /repo || cd WT; git status".replace("WT", WT))).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("cd /repo || cd WT; git status".replace("WT", WT))).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		// Every possible directory inside the worktree: allowed.
 		expect(guard("cd a && cd b && git status")).toBeUndefined();
 		expect(guard("git status; false && cd sub; git log")).toBeUndefined();
 		expect(guard("test -d build && cd build; git status")).toBeUndefined();
 		// `~user` is another user's home, wherever that is.
-		expect(guard("cd ~someuser/repo && git status")).toContain("unverifiable");
+		expect(guard("cd ~someuser/repo && git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "precedingCd" } });
 	});
 
 	it("judges a script a shell or eval runs from the directory it starts in (PR #13 review)", () => {
-		expect(guard("bash -c 'cd /repo && git status'")).toContain(`targets ${resolve("/repo")}`);
-		expect(guard("sh -c 'git -C /repo status'")).toContain(`targets ${resolve("/repo")}`);
-		expect(guard("cd /repo && bash -c 'git status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("bash -c 'cd /repo && git status'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("sh -c 'git -C /repo status'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("cd /repo && bash -c 'git status'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		expect(guard(`cd /tmp && bash -c 'cd ${WT} && git status'`)).toBeUndefined();
-		expect(guard("bash -c 'git stash'")).toContain("stash stack is shared");
+		expect(guard("bash -c 'git stash'")).toEqual({ kind: "stash", risk: "untagged", command: "git stash" });
 		expect(guard("bash -c 'git status' && git log")).toBeUndefined();
 		// A shell's script runs in a child; eval runs in this shell, so its cd moves later git.
 		expect(guard("bash -c 'cd /repo'; git status")).toBeUndefined();
-		expect(guard("eval 'cd /repo'; git status")).toContain("unverifiable");
-		expect(guard("eval cd /repo '&&' git status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("eval 'cd /repo'; git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "precedingCd" } });
+		expect(guard("eval cd /repo '&&' git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 
 		// fish is a shell too, and a script built at runtime cannot be checked.
-		expect(guard("fish -c 'git -C /repo reset --hard'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("fish -c 'git -C /repo reset --hard'")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		// Only the -c script runs; the words after it are $0, $1 (PR #15 review).
 		expect(guard("bash -c 'echo ok' 'git -C /repo status'")).toBeUndefined();
 		// …unless the script runs them (PR #15 review).
-		expect(guard(`bash -c '"$@"' _ git -C /repo status`)).toContain(`targets ${resolve("/repo")}`);
-		expect(guard("bash -c '$0 \"$@\"' git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard(`bash -c '"$@"' _ git -C /repo status`)).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("bash -c '$0 \"$@\"' git -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		// A script sourced from a substitution may cd; a literal file keeps the directory.
-		expect(guard("source <(echo cd /repo); git status")).toContain("unverifiable");
-		expect(guard("bash -o pipefail -lc 'git -C /repo status' x")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("source <(echo cd /repo); git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "precedingCd" } });
+		expect(guard("bash -o pipefail -lc 'git -C /repo status' x")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		// An eval in a loop may cd on the next pass.
-		expect(guard("for i in 1 2; do git status; eval cd /repo; done")).toContain("inside a loop");
-		expect(guard("source <(echo git -C /repo reset --hard)")).toContain("too complex to verify");
+		expect(guard("for i in 1 2; do git status; eval cd /repo; done")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "cdInLoop" } });
+		expect(guard("source <(echo git -C /repo reset --hard)")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "tooComplex" } });
 		expect(guard("source .venv/bin/activate && git status")).toBeUndefined();
 		// Past three levels of nesting, git anywhere in the script is refused.
-		expect(guard("eval eval eval git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
-		expect(guard("eval eval eval eval git -C /repo status")).toContain("too complex to verify");
+		expect(guard("eval eval eval git -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("eval eval eval eval git -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "tooComplex" } });
 		expect(guard("eval eval eval eval echo hi")).toBeUndefined();
 	});
 
@@ -211,24 +231,22 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses an unparseable command only when it involves git", () => {
-		expect(guard('git commit -m "unterminated')).toContain("too complex to verify");
+		expect(guard('git commit -m "unterminated')).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "tooComplex" } });
 		expect(guard('echo "unterminated')).toBeUndefined();
 	});
 
 	it("names the worktree in every refusal", () => {
-		const reason = guard("git -C /repo status") ?? "";
-		expect(reason).toContain(`isolated in the worktree ${WT}`);
-		expect(reason).toContain(`against ${WT}`);
+		expect(guard("git -C /repo status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 	});
 });
 
 describe("worktree shared-stash guard", () => {
 	it("refuses stash forms that collide with parallel sessions", () => {
-		expect(guard("git stash")).toContain("untagged");
-		expect(guard("git stash push -u")).toContain("untagged");
-		expect(guard("git stash pop")).toContain("another session's entry");
-		expect(guard("git stash clear")).toContain("every session's stashes");
-		expect(guard("git stash drop")).toContain("stash@{0}");
+		expect(guard("git stash")).toEqual({ kind: "stash", risk: "untagged", command: "git stash" });
+		expect(guard("git stash push -u")).toEqual({ kind: "stash", risk: "untagged", command: "git stash push" });
+		expect(guard("git stash pop")).toEqual({ kind: "stash", risk: "pop", command: "git stash pop" });
+		expect(guard("git stash clear")).toEqual({ kind: "stash", risk: "clear", command: "git stash clear" });
+		expect(guard("git stash drop")).toEqual({ kind: "stash", risk: "drop", command: "git stash drop" });
 	});
 
 	it("allows the tagged, apply-by-ref workflow", () => {
@@ -241,13 +259,7 @@ describe("worktree shared-stash guard", () => {
 	});
 
 	it("catches a subshell-wrapped stash", () => {
-		expect(guard("(git stash)")).toContain("untagged");
-	});
-
-	it("gives the full recipe in the refusal", () => {
-		const reason = guard("git stash pop") ?? "";
-		expect(reason).toContain('git stash push -u -m "<unique-tag>"');
-		expect(reason).toContain("git stash apply <sha>");
+		expect(guard("(git stash)")).toEqual({ kind: "stash", risk: "untagged", command: "git stash" });
 	});
 
 	it("does not police another repository's stash", () => {
@@ -260,7 +272,7 @@ describe.skipIf(process.platform !== "win32")("worktree git-isolation guard: Git
 	const drive = resolve("/").charAt(0).toLowerCase();
 
 	it("refuses git pointed at the shared checkout spelled /<drive>/repo", () => {
-		expect(guard(`git -C /${drive}/repo status`)).toContain(`targets ${resolve("/repo")}`);
+		expect(guard(`git -C /${drive}/repo status`)).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 		expect(guard(`cd /${drive}/repo && git status`)).toBeDefined();
 		expect(guard(`git --git-dir=/${drive}/repo/.git log`)).toBeDefined();
 	});
@@ -272,19 +284,19 @@ describe.skipIf(process.platform !== "win32")("worktree git-isolation guard: Git
 
 describe("worktree git-isolation guard: environment and config spellings", () => {
 	it("refuses a repository variable that points at the shared checkout", () => {
-		expect(guard("GIT_WORK_TREE=/repo git checkout .")).toContain("shared checkout");
-		expect(guard("env GIT_DIR=/repo/.git git reset --hard")).toContain("shared checkout");
-		expect(guard("export GIT_DIR=/repo/.git; git log")).toContain("shared checkout");
-		expect(guard("declare -x GIT_COMMON_DIR=/repo/.git && git status")).toContain("shared checkout");
-		expect(guard("git -c core.worktree=/repo checkout .")).toContain("shared checkout");
-		expect(guard("git -c Core.WorkTree=/repo checkout .")).toContain("shared checkout");
+		expect(guard("GIT_WORK_TREE=/repo git checkout .")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("env GIT_DIR=/repo/.git git reset --hard")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo/.git") } });
+		expect(guard("export GIT_DIR=/repo/.git; git log")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo/.git") } });
+		expect(guard("declare -x GIT_COMMON_DIR=/repo/.git && git status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo/.git") } });
+		expect(guard("git -c core.worktree=/repo checkout .")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
+		expect(guard("git -c Core.WorkTree=/repo checkout .")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "sharedTarget", target: resolve("/repo") } });
 	});
 
 	it("refuses a repository variable whose value is only known at runtime", () => {
-		expect(guard('GIT_DIR="$MAIN/.git" git log')).toContain("decided at runtime");
-		expect(guard("export GIT_DIR; git log")).toContain("decided at runtime");
-		expect(guard("git --config-env core.worktree=WT status")).toContain("decided at runtime");
-		expect(guard("git --config-env=core.worktree=WT status")).toContain("decided at runtime");
+		expect(guard('GIT_DIR="$MAIN/.git" git log')).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeEnv", name: "GIT_DIR" } });
+		expect(guard("export GIT_DIR; git log")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeEnv", name: "GIT_DIR" } });
+		expect(guard("git --config-env core.worktree=WT status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeEnv", name: "core.worktree" } });
+		expect(guard("git --config-env=core.worktree=WT status")).toEqual({ kind: "gitTarget", worktreePath: WT, problem: { kind: "runtimeEnv", name: "core.worktree" } });
 	});
 
 	it("leaves the same spellings alone when they stay in the worktree or name unrelated settings", () => {
@@ -298,7 +310,7 @@ describe("worktree git-isolation guard: environment and config spellings", () =>
 
 describe("worktree shared-stash guard: stash branch", () => {
 	it("refuses a ref-less `stash branch`, which pops stash@{0}", () => {
-		expect(guard("git stash branch tmp")).toContain("stash@{0}");
+		expect(guard("git stash branch tmp")).toEqual({ kind: "stash", risk: "branch", command: "git stash branch" });
 		expect(guard("git stash branch tmp stash@{2}")).toBeUndefined();
 	});
 });

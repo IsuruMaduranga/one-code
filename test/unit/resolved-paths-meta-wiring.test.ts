@@ -3,21 +3,22 @@
  * directly above the action in the transcript the classifier is handed when
  * the action's in-project path a symlink takes outside the working
  * directory, and no line when it stays inside; the session's own transcript
- * never holds it (auto-mode/resolved-paths-meta.ts). The classifier is
+ * never holds it (safety/permissions/auto-mode/resolved-paths-meta.ts). The classifier is
  * stubbed to capture what it is handed.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import type { TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 const seen: TranscriptEntry[][] = [];
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async (request: { transcript: TranscriptEntry[] }) => {
 		seen.push(request.transcript);
 		return { decision: "block", reason: "stub", tier: "stage2" };
@@ -42,8 +43,7 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 		// The user's real settings may list a workspace directory that holds the
 		// temp dir (an additionalDirectories entry under /private/tmp), which
 		// would put the link's target inside the workspace.
-		vi.stubEnv("HOME", stateDir);
-		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
+		stubHome(stateDir);
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		seen.length = 0;
 		branch = [];

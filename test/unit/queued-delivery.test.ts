@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QueuedDelivery } from "../../extensions/lib/queued-delivery.ts";
+import { QueuedDelivery } from "../../extensions/lib/notify/queued-delivery.ts";
 
 describe("QueuedDelivery", () => {
 	it("releases each payload once, oldest first for a repeated text, and clears", () => {

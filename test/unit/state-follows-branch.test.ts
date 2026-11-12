@@ -9,16 +9,19 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import effortExtension from "../../extensions/effort/index.ts";
-import { makeRecord, RECORD } from "../../extensions/lib/ledger/records.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
-import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/lib/rules/modes.ts";
+import { MODE_ENV } from "../../extensions/lib/agents/permission-gate.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 /** A request recorded on the branch: its model was told the mode in force. */
 const requestEntry = {
@@ -33,7 +36,7 @@ describe("the permission mode follows the branch (H4)", () => {
 	let dir: string;
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "mode-follows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(dir, ".onecode"));
+		vi.stubEnv(envName("STATE_DIR"), join(dir, brand.stateDir));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(dir, "agent"));
 		vi.stubEnv(MODE_ENV, "");
 	});
@@ -87,7 +90,7 @@ describe("the permission mode follows the branch (H4)", () => {
 		// `pi --continue --permission-mode default`: the process's first runtime starts with reason "startup".
 		const resumed = await start([stateEntry("permission-mode", "plan"), requestEntry], { "permission-mode": "default" }, "startup", reminders);
 		expect(resumed.mode()).toBe("default");
-		expect(reminders.find((r) => r.key === "permission-mode-change")?.text).toBe('The user\'s permission mode is now "default".');
+		expect(reminders.find((r) => r.key === "permission-mode-change")?.text).toBe(permissionText().modeChanged({ mode: "default" }));
 	});
 
 	it("says nothing to a branch whose model was never told a mode, or that keeps it", async () => {
@@ -116,7 +119,7 @@ describe("the permission mode follows the branch (H4)", () => {
 describe("ultracode follows the branch (H3)", () => {
 	/** The told fact of the standing block's first delivery: what a request that carried it records. */
 	const standingTold: ToldFact = { kind: "block", key: "sticky:ultracode-mode", hash: "standing-delivered" };
-	const isOffNotice = (text: string | undefined) => !!text?.startsWith("Ultracode mode is off now");
+	const isOffNotice = (text: string | undefined) => text === requireText("effort").ultracodeOff;
 
 	async function start(branch: unknown[], level = "xhigh") {
 		const fake = createFakePi();
@@ -168,7 +171,7 @@ describe("ultracode follows the branch (H3)", () => {
 
 	it("says nothing about ultracode ending when the model never saw it on", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		vi.stubEnv(envName("STATE_DIR"), dir);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
 		try {
 			const run = await start([], "medium");
@@ -216,7 +219,7 @@ describe("ultracode follows the branch (H3)", () => {
 
 	it("leaves the standing block out while workflows are turned off (R3-M21)", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "ultracode-workflows-"));
-		vi.stubEnv("ONECODE_STATE_DIR", dir);
+		vi.stubEnv(envName("STATE_DIR"), dir);
 		writeFileSync(join(dir, "settings.json"), JSON.stringify({ disableWorkflows: true }));
 		try {
 			expect((await start([stateEntry("ultracode", { on: true, level: "xhigh" })])).standing()).toMatchObject({ remove: true });

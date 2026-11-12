@@ -1,0 +1,19 @@
+/**
+ * The words of the one-shot session note and its interactive counterpart.
+ * Where the base places them: system-prompt-one-shot.test.ts.
+ */
+import { describe, expect, it } from "vitest";
+import { interactiveSessionNote, oneShotSessionNote } from "../../extensions/lib/notify/notifications.ts";
+
+describe("the one-shot session note", () => {
+	it("says background work blocks, scheduled jobs never fire, and the session is not interactive", () => {
+		const note = oneShotSessionNote();
+		expect(note).toContain("runs to completion before its call returns");
+		expect(note).toContain("Scheduled and recurring jobs never fire");
+		expect(note).toContain("non-interactive one-shot session");
+	});
+
+	it("tells a continued session that it is interactive now", () => {
+		expect(interactiveSessionNote()).toContain("This session is interactive now");
+	});
+});

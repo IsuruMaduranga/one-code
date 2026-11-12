@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PromptContextRouter } from "../../extensions/hooks/prompt-context.ts";
+import { PromptContextRouter } from "../../extensions/safety/hooks/prompt-context.ts";
 
 describe("PromptContextRouter", () => {
 	it("gives a queued message its own context, matched by the typed text, once", () => {

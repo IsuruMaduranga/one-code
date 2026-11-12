@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ToldFact } from "../../extensions/lib/ledger/records.ts";
-import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
+import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
+import { mcpChangeNotices, mcpDelta, mcpFacts, type McpSnapshot, mcpStartupNotices } from "../../extensions/tools/mcp/announce.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 /** What an epoch has told, as the ledger folds it: the latest hash per whole-text block key. */
 type Told = Map<string, string>;
@@ -103,7 +104,7 @@ describe("mcpChangeNotices", () => {
 		expect(mcpChangeNotices({ ...nothing, facts: [] })).toEqual([]);
 	});
 
-	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {
+	it("renders one notice per kind of change, in order: recovered, connected with instructions, failed, dropped", () => {
 		const texts = mcpChangeNotices({
 			newInstructions: [{ name: "deepwiki", instructions: "Use ask_question." }],
 			newFailures: [{ name: "gh", error: "401 bad token" }],
@@ -111,15 +112,12 @@ describe("mcpChangeNotices", () => {
 			dropped: ["old"],
 			facts: [],
 		});
-		expect(texts).toHaveLength(4);
-		expect(texts[0]).toContain("ctx7");
-		expect(texts[0]).toContain("connected after this conversation started");
-		expect(texts[1]).toContain("# MCP Server Instructions");
-		expect(texts[1]).toContain("## deepwiki\nUse ask_question.");
-		expect(texts[2]).toContain("- gh: 401 bad token");
-		expect(texts[2]).toContain("failed to connect");
-		expect(texts[3]).toContain("old");
-		expect(texts[3]).toContain("disconnected");
+		expect(texts).toEqual([
+			mcpResultText.notices.recovered(["ctx7"]),
+			mcpResultText.notices.connected([{ name: "deepwiki", text: "Use ask_question." }]),
+			mcpResultText.failed([{ name: "gh", error: "401 bad token" }]),
+			mcpResultText.notices.dropped(["old"]),
+		]);
 	});
 });
 

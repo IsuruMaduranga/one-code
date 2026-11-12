@@ -1,6 +1,6 @@
 /** A deterministic notification producer for rpc-lifecycle-test.mjs. */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createTaskNotifier, taskNotification } from "../../extensions/lib/notifications.ts";
+import { createTaskNotifier, taskNotification } from "../../extensions/lib/notify/notifications.ts";
 
 export default function rpcLifecycleFixture(pi: ExtensionAPI) {
 	const notify = createTaskNotifier(pi, { coalesceMs: 0 });

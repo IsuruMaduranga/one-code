@@ -1,15 +1,19 @@
 /**
- * The agent catalog's tools clause for an agent that lists no tools: Claude
- * Code writes "(Tools: *)" for its built-in agents and "(Tools: All tools)"
- * for an agent file.
+ * The agent catalog's tools clause for an agent that lists no tools: the base
+ * tells the profile whether the agent is built in (a bundled agent) or an
+ * agent file, so it can word the two apart (Claude Code writes "(Tools: *)"
+ * for its built-in agents and "(Tools: All tools)" for an agent file).
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as defaults from "../../extensions/subagents/default-model.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
+import { userConfigDir } from "../../extensions/lib/profile/sources.ts";
+import { BUNDLED_AGENTS_DIR, parseAgentFile } from "../../extensions/lib/agents/agent-catalog.ts";
+import * as defaults from "../../extensions/lib/models/subagent-default.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 
 const session = { provider: "openai", id: "gpt-5-main", name: "gpt-5-main", input: ["text"], cost: { input: 2, output: 8 } };
 
@@ -28,9 +32,10 @@ afterEach(() => {
 });
 
 describe("agent catalog tools clause", () => {
-	it("says All tools for an agent file with no tools list, * for a bundled agent", async () => {
-		mkdirSync(join(dir, ".claude", "agents"), { recursive: true });
-		writeFileSync(join(dir, ".claude", "agents", "mine.md"), "---\nname: mine\ndescription: My agent\n---\nDo it.\n");
+	it("marks an agent file with no tools list as not built in, a bundled agent as built in", async () => {
+		const agents = join(userConfigDir(dir), "agents");
+		mkdirSync(agents, { recursive: true });
+		writeFileSync(join(agents, "mine.md"), "---\nname: mine\ndescription: My agent\n---\nDo it.\n");
 		const fake = createFakePi();
 		subagentsExtension(fake.pi as never);
 		const ctx = createFakeCtx({
@@ -40,9 +45,15 @@ describe("agent catalog tools clause", () => {
 			sessionManager: { getSessionId: () => "s", getSessionDir: () => dir, getSessionFile: () => undefined, getBranch: () => [] },
 		});
 		await fake.fire("session_start", {}, ctx);
+		const listSpy = vi.spyOn(subagentResultText(), "catalogList");
 		const result = (await fake.tools.get("Agent")!.execute("call", { action: "list" }, undefined, undefined, ctx)) as { content: { text: string }[] };
 		const text = result.content[0].text;
-		expect(text).toContain("\n- mine: My agent (Tools: All tools)\n");
-		expect(text).toMatch(/\n- general-purpose: [^\n]* \(Tools: \*\)\n/);
+		const bundledPath = join(BUNDLED_AGENTS_DIR, "general-purpose.md");
+		const general = parseAgentFile(bundledPath, readFileSync(bundledPath, "utf8"))!;
+		expect(listSpy).toHaveBeenCalledTimes(1);
+		expect(text).toBe(listSpy.mock.results[0].value);
+		const { rows } = listSpy.mock.calls[0][0];
+		expect(rows).toContain(subagentResultText().catalogRow({ name: "mine", description: "My agent", tools: { kind: "all", builtIn: false } }));
+		expect(rows).toContain(subagentResultText().catalogRow({ name: "general-purpose", description: general.description, tools: { kind: "all", builtIn: true } }));
 	});
 });

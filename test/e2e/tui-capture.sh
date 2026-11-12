@@ -11,7 +11,7 @@
 #
 # Examples:
 #   test/e2e/tui-capture.sh .                       # startup screen of this repo
-#   test/e2e/tui-capture.sh /tmp/proj 8 --theme ./themes/claude-code.json
+#   test/e2e/tui-capture.sh /tmp/proj 8 --theme ./profile/themes/onecode.json
 #
 # Prints the visible pane. Add -e to capture escape sequences instead of plain
 # text by setting CAPTURE_ANSI=1 (useful for checking colours).

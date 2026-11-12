@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundConsentItems } from "../../extensions/lib/consent-preview.ts";
+import { boundConsentItems } from "../../extensions/lib/consent/consent-preview.ts";
 
 describe("boundConsentItems (review: bound consent modals)", () => {
 	it("shows every item in full when the list is small", () => {

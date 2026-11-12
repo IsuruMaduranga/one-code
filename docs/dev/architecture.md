@@ -46,7 +46,7 @@ flowchart TB
         direction LR
         exts["extensions/&lt;name&gt;/index.ts<br/>loaded in package.json order"]
         lib["extensions/lib/<br/>shared pure modules"]
-        catalogs["agents/ · skills/ · themes/<br/>bundled catalogs"]
+        catalogs["profile/<br/>text, brand, bundled catalogs"]
     end
 
     subgraph outside["Outside the process"]
@@ -76,13 +76,14 @@ Start with `package.json` (the `pi.extensions` list) and `app/bin.mjs`.
 
 Each folder under `extensions/` is one pi extension with a thin `index.ts`
 that wires pi events to pure logic modules beside it. Shared logic lives in
-`extensions/lib/`. `extensions/auto-mode/` is the one folder that is not an
-extension: it is the auto-mode classifier library that `permissions` calls.
+`extensions/lib/`. `extensions/safety/permissions/auto-mode/` is not an
+extension of its own: it is the auto-mode classifier library that
+`permissions` calls.
 
 ```mermaid
 flowchart LR
     subgraph ctx["Prompt and context"]
-        c1["system-prompt<br/>claude-context · memory"]
+        c1["system-prompt<br/>instructions · memory"]
         c2["system-reminder<br/>context-budget"]
         c3["tool-search · cache-marks<br/>search-tools"]
         c4["compaction · idle-compact<br/>kept-thinking · context-management"]
@@ -92,11 +93,11 @@ flowchart LR
         s1["permissions<br/>+ auto-mode library"]
         s2["hooks"]
         s3["file-tracker<br/>worktree"]
-        s4["tool-call-corruption"]
+        s4["tool-call-corruption<br/>secret-values"]
     end
 
     subgraph eco["Ecosystem"]
-        e1["claude-compat"]
+        e1["resources"]
         e2["plugins"]
         e3["skill"]
         e4["mcp"]
@@ -117,18 +118,18 @@ flowchart LR
         u1["branding · tool-style<br/>footer · spinner"]
         u2["turn-duration · interrupted<br/>send-now · session-title"]
         u3["recap · btw · effort<br/>model-default · newer-model"]
-        u4["doctor<br/>exit · init · clear"]
+        u4["doctor · run-status<br/>exit · init · clear"]
     end
 ```
 
 | Role | What the group does |
 |---|---|
 | Prompt and context | Builds the system prompt per model tier, loads project instructions and memory into the first message, steers the model through `<system-reminder>` blocks, defers rarely used tools behind `tool_search`, and compacts long sessions. |
-| Safety | Decides whether each tool call runs (rules, modes, the auto-mode classifier), runs user hooks, guards against stale edits, confines work to a Git worktree, and stops calls from damaged provider streams. |
+| Safety | Decides whether each tool call runs (rules, modes, the auto-mode classifier), runs user hooks, guards against stale edits, confines work to a Git worktree, stops calls from damaged provider streams, and redacts a product's secret values from tool results. |
 | Tools | The tools the model calls, beyond pi's built-in `read`, `edit` and `write`. |
 | Agents | Background subagents with two-way messaging, and JavaScript workflow scripts that fan work out across many agents. |
 | Ecosystem | Discovers Claude Code skills, commands, agents and plugins, and connects MCP servers. |
-| Terminal UI and commands | Everything the user sees around the conversation, plus small slash commands. |
+| Terminal UI and commands | Everything the user sees around the conversation, plus small slash commands. `run-status` makes a failed one-shot run exit non-zero. |
 
 The architecture rules that keep these extensions working together are in
 [Extension rules](extension-rules.md).
@@ -153,7 +154,7 @@ sequenceDiagram
     pi->>ext: input
     Note right of ext: hooks (UserPromptSubmit),<br/>subagents (message to a viewed agent)
     pi->>ext: before_agent_start
-    Note right of ext: system-prompt builds the tiered prompt,<br/>claude-context queues CLAUDE.md, memory and date,<br/>skill queues the skill listing
+    Note right of ext: system-prompt builds the tiered prompt,<br/>instructions queues CLAUDE.md, memory and date,<br/>skill queues the skill listing
 
     loop until the model stops calling tools
         pi->>ext: context
@@ -186,8 +187,8 @@ Handlers for the same event run in the order the extensions appear in
 ## How a tool call is decided
 
 Every tool call passes the `tool_call` handler in
-`extensions/permissions/index.ts`. The pure decision is `decide()` in
-`extensions/permissions/matcher.ts`. In auto mode, calls the rules do not
+`extensions/safety/permissions/index.ts`. The pure decision is `decide()` in
+`extensions/lib/rules/matcher.ts`. In auto mode, calls the rules do not
 settle go to the classifier in `extensions/auto-mode/`.
 
 ```mermaid
@@ -246,7 +247,7 @@ the provider's prompt cache keeps hitting.
 ```mermaid
 flowchart LR
     subgraph emitters["Any extension"]
-        e1["claude-context<br/>tool-search · skill · mcp"]
+        e1["instructions<br/>tool-search · skill · mcp"]
         e2["permissions · plan-mode<br/>worktree · effort"]
         e3["file-tracker · lsp<br/>tool-search · context-budget"]
         e4["clear · model-default<br/>panel commands"]
@@ -283,14 +284,14 @@ flowchart LR
 | `user-prepend` | Breadcrumbs from slash commands the user ran | Before the user's text on the next prompt |
 
 The contract and the full rules are in the header of
-`extensions/lib/reminders.ts`.
+`extensions/lib/request/reminders.ts`.
 
 ## Subagents and workflows
 
 Subagents and workflow agents run in the same process as the main session.
 Each one is a separate pi `AgentSession` opened through
-`openChildSession` in `extensions/lib/agent-loader.ts`, with a curated set of
-extensions (`extensions/lib/child-extensions.ts`). Safety and hooks reach the
+`openChildSession` in `extensions/lib/agents/agent-loader.ts`, with a curated set of
+extensions (`extensions/lib/agents/child-extensions.ts`). Safety and hooks reach the
 child through bridges published by the parent, and completions come back to
 the main session as notifications.
 
@@ -304,14 +305,14 @@ flowchart LR
         gates["permissions · hooks"]
         mcpExt["mcp"]
         panel["Agent panel<br/>/agents · /tasks"]
-        notifier["Task notifier<br/>lib/notifications.ts"]
+        notifier["Task notifier<br/>lib/notify/notifications.ts"]
     end
 
     subgraph child["Child session, one per agent"]
         direction TB
         childLoop["AgentSession<br/>own model · own transcript on disk"]
-        childExt["Child extensions<br/>system-reminder · tool-search<br/>claude-context · file-tracker<br/>search-tools · skill · bash<br/>powershell · web · web-fetch · notebook"]
-        childGate["Gate bridges<br/>lib/permission-gate.ts<br/>lib/hook-gate.ts"]
+        childExt["Child extensions<br/>system-reminder · tool-search<br/>instructions · file-tracker<br/>search-tools · skill · bash<br/>powershell · web · web-fetch · notebook"]
+        childGate["Gate bridges<br/>lib/agents/permission-gate.ts<br/>lib/agents/hook-gate.ts"]
     end
 
     wtree[("Optional<br/>Git worktree")]
@@ -368,8 +369,8 @@ flowchart LR
     exts <--> memDir
 ```
 
-The path helpers are `extensions/lib/paths.ts` (Claude Code locations),
-`extensions/lib/one-code-settings.ts` (One Code's own settings) and pi's
+The path helpers are `extensions/lib/profile/paths.ts` (Claude Code locations),
+`extensions/lib/profile/product-settings.ts` (One Code's own settings) and pi's
 `getAgentDir()` (pi state). The rules for using them are in
 [Extension rules](extension-rules.md#paths-state-and-shells), and the
 [configuration guide](../guide/configuration.md#what-is-stored-under-onecode)

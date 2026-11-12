@@ -2,7 +2,7 @@
 /**
  * Auto-mode classifier cache check over one pi run (cache-probe.sh's
  * classifier phase). Reads the log the classifier writes under
- * CC_AUTO_MODE_LOG (auto-mode/classifier.ts): one line per classifier reply
+ * ONECODE_AUTO_MODE_LOG (safety/permissions/auto-mode/classifier.ts): one line per classifier reply
  * with its system and user text and pi-ai's normalized usage, in call order
  * (stage 1 and stage 2 of one gated call are consecutive lines). Being written
  * by the classifier itself, it covers every transport, Codex's WebSocket

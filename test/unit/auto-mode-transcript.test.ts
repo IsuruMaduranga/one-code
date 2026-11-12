@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionLength, ccToolName, MAX_ACTION_CHARS, renderTranscript, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
+import { actionLength, ccToolName, MAX_ACTION_CHARS, renderTranscript, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 describe("ccToolName", () => {
 	it("maps native snake_case names to Claude Code's PascalCase", () => {

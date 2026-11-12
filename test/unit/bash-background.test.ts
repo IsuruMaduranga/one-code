@@ -5,17 +5,20 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	type BashFinishSummary,
-	EMPTY_OUTPUT_MARKER,
 	runBackgroundBashBlocking,
 	startBackgroundBash,
 	tailCap,
-} from "../../extensions/bash/background.ts";
-import type { BackgroundTask } from "../../extensions/background/registry.ts";
+} from "../../extensions/lib/shell-run/bash-background.ts";
+import type { BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { localPwsh } from "./helpers/local-pwsh.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
+
+const text = shellResultText();
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;
 	const task = startBackgroundBash({
+		text,
 		id: "btest001",
 		command,
 		description: "test",
@@ -66,8 +69,8 @@ describe("startBackgroundBash", () => {
 		const { task, summary } = start("true");
 		await task.finished;
 		expect(task.status).toBe("completed");
-		expect(task.output()).toBe(EMPTY_OUTPUT_MARKER);
-		expect(summary()?.output).toBe(EMPTY_OUTPUT_MARKER);
+		expect(task.output()).toBe(shellResultText().emptyOutput);
+		expect(summary()?.output).toBe(shellResultText().emptyOutput);
 	});
 
 	it("stop() ends the run with status stopped", async () => {
@@ -115,15 +118,14 @@ describe("startBackgroundBash", () => {
 
 describe("tailCap", () => {
 	it("keeps short text and truncates long text with a marker", () => {
-		expect(tailCap("short", 100)).toBe("short");
-		const capped = tailCap("x".repeat(500), 100);
-		expect(capped).toContain("earlier output truncated");
-		expect(capped.endsWith("x".repeat(100))).toBe(true);
+		expect(tailCap("short", 100, shellResultText().earlierTruncated)).toBe("short");
+		const capped = tailCap("x".repeat(500), 100, shellResultText().earlierTruncated);
+		expect(capped).toBe(`${shellResultText().earlierTruncated}${"x".repeat(100)}`);
 	});
 });
 
 describe("runBackgroundBashBlocking (one-shot modes, STEERING-REVIEW-2026-09-05 H3)", () => {
-	const options = (command: string) => ({ id: "bblock01", command, description: "test", cwd: process.cwd() });
+	const options = (command: string) => ({ text, id: "bblock01", command, description: "test", cwd: process.cwd() });
 
 	it("resolves with the finished command's summary and output", async () => {
 		const summary = await runBackgroundBashBlocking(options("echo blocking-ok"));
@@ -168,12 +170,13 @@ const pwsh = localPwsh();
 /**
  * The powershell extension runs its `run_in_background` through the same
  * starter with its own spawn spec; stop and timeout must end a PowerShell tree
- * the way they end a bash one (on Windows: taskkill /T /F, lib/process-tree.ts).
+ * the way they end a bash one (on Windows: taskkill /T /F, lib/shell-run/process-tree.ts).
  */
 describe.skipIf(!pwsh)("startBackgroundBash with a PowerShell spec (real pwsh)", { timeout: 45_000 }, () => {
 	const startPwsh = (command: string, extra?: { timeoutSeconds?: number }) => {
 		let summary: BashFinishSummary | undefined;
 		const task = startBackgroundBash({
+			text,
 			id: "bpwsh001",
 			command,
 			description: "test",

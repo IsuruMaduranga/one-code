@@ -8,9 +8,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as agentLoader from "../../extensions/lib/agent-loader.ts";
-import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
-import { keptWorktreeOf } from "../../extensions/workflow/types.ts";
+import * as agentLoader from "../../extensions/lib/agents/agent-loader.ts";
+import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
+import { keptWorktreeOf } from "../../extensions/agents/workflow/types.ts";
+import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
 
 const git = (cwd: string, ...args: string[]) =>
 	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" }).trim();
@@ -47,7 +48,7 @@ describe("workflow agent worktrees", () => {
 		const runner = await AgentRunner.create({ cwd: repo, defaultModel: undefined });
 		await expect(
 			runner.run("do it", { isolation: "worktree", schema: { type: "array", items: { type: "string" } } }, new AbortController().signal),
-		).rejects.toThrow(/top-level type "object"/);
+		).rejects.toThrow(workflowResultText.callProblem({ kind: "schemaNotObjectWithProperties" }));
 		expect(worktreeCount()).toBe(1);
 		expect(branches()).toBe("");
 	});
@@ -89,6 +90,6 @@ describe("workflow agent worktrees", () => {
 		expect(kept?.branch).toMatch(/^cc-subagent\/migrate-/);
 		expect(worktreeCount()).toBe(2);
 		expect(branches()).toContain(kept!.branch!);
-		expect(notices.some((notice) => notice.includes(`worktree kept at ${kept!.path}`))).toBe(true);
+		expect(notices).toContain(workflowResultText.notice({ kind: "worktreeKept", label: "migrate", path: kept!.path, branch: kept!.branch }));
 	});
 });

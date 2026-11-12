@@ -1,19 +1,23 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { startCallbackServer } from "../../extensions/mcp/oauth/callback.ts";
-import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/mcp-overrides.ts";
-import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/mcp/oauth/store.ts";
-import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
+import { startCallbackServer } from "../../extensions/tools/mcp/oauth/callback.ts";
+import { readDisabledMcpServers, setMcpServerDisabled } from "../../extensions/lib/plugins/mcp-overrides.ts";
+import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensions/tools/mcp/oauth/store.ts";
+import { McpOAuthProvider } from "../../extensions/tools/mcp/oauth/provider.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 let home: string;
-const env: NodeJS.ProcessEnv = {}; // no ONECODE_STATE_DIR → <home>/.onecode
+const env: NodeJS.ProcessEnv = {}; // no <envPrefix>_STATE_DIR → <home>/<stateDir>
+/** The product's auth record directory under the temp home. */
+const authDir = () => join(home, brand.stateDir, "mcp-auth");
 const server = (name: string, url = "https://mcp.example.com/mcp", headers?: Record<string, string>) => ({ name, url, headers });
 const srv = server("srv");
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "onecode-mcp-"));
+	home = mkdtempSync(join(tmpdir(), "mcp-oauth-"));
 });
 afterEach(() => {
 	rmSync(home, { recursive: true, force: true });
@@ -80,15 +84,15 @@ describe("oauth store", () => {
 	it("never offers a record whose recorded URL differs from the server's", () => {
 		const a = server("s", "https://a.example.com/mcp");
 		writeAuth(a, { tokens: { access_token: "t", token_type: "bearer" } }, home, env);
-		const file = readdirSync(join(home, ".onecode", "mcp-auth"))[0];
-		const path = join(home, ".onecode", "mcp-auth", file);
+		const file = readdirSync(authDir())[0];
+		const path = join(authDir(), file);
 		writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), serverUrl: "https://b.example.com/mcp" }));
 		expect(hasStoredTokens(a, home, env)).toBe(false);
 	});
 
 	it("does not read a record written under the old name-only key", () => {
-		mkdirSync(join(home, ".onecode", "mcp-auth"), { recursive: true });
-		writeFileSync(join(home, ".onecode", "mcp-auth", "github-0badc0de.json"), JSON.stringify({ tokens: { access_token: "old", token_type: "bearer" } }));
+		mkdirSync(authDir(), { recursive: true });
+		writeFileSync(join(authDir(), "github-0badc0de.json"), JSON.stringify({ tokens: { access_token: "old", token_type: "bearer" } }));
 		expect(hasStoredTokens(server("github"), home, env)).toBe(false);
 	});
 
@@ -169,7 +173,7 @@ describe("McpOAuthProvider", () => {
 	});
 
 	it("throws when asked to redirect without an opener (silent reconnect)", () => {
-		expect(() => make().redirectToAuthorization(new URL("https://auth.example/authorize"))).toThrow(/needs authentication/);
+		expect(() => make().redirectToAuthorization(new URL("https://auth.example/authorize"))).toThrow(mcpResultText.needsAuthentication({ server: "srv" }));
 	});
 
 	it("opens the authorization URL when an opener is provided", () => {

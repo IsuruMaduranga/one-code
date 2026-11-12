@@ -2,8 +2,9 @@ import { runAgentLoop, type BeforeToolCallResult } from "@earendil-works/pi-agen
 import { createAssistantMessageEventStream, type AssistantMessage, type Message, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
+import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
 
 const model: Model<"openai-completions"> = {
 	id: "z-ai/glm-5.3", name: "GLM", provider: "openrouter", api: "openai-completions", baseUrl: "https://openrouter.ai/api/v1",
@@ -79,7 +80,12 @@ describe("corruption guard against pi's offline agent loop", () => {
 			expect(notice).toHaveBeenCalledWith(expect.stringContaining("Morph"));
 			const result = messages.find((message) => message.role === "toolResult");
 			expect(result).toMatchObject({ isError: true });
-			if (damage !== "schema-invalid") expect(JSON.stringify(result)).toContain("OpenRouter tool-call corruption");
+			if (damage !== "schema-invalid") {
+				const words = toolCallCorruptionText;
+				const reason = words.damage({ kind: damage === "truncated" ? "unbalancedQuote" : "notOneJson" });
+				const text = (result as { content: Array<{ text?: string }> }).content.map((part) => part.text ?? "").join("");
+				expect(text).toBe(words.corruptBlock({ reason, repeat: false }));
+			}
 		} finally {
 			await fake.fire("session_shutdown", {}, ctx);
 		}

@@ -14,7 +14,7 @@ import {
 	reasoningRetryLevel,
 	stripSnapshotDate,
 	withReasoningFallback,
-} from "../../extensions/lib/model-policy.ts";
+} from "../../extensions/lib/models/model-policy.ts";
 
 describe("isSelectableVariant", () => {
 	it("excludes batch/free/online/thinking endpoint variants and OpenRouter's moving ~…-latest redirect aliases", () => {

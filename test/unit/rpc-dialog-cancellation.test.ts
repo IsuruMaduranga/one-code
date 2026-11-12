@@ -2,13 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import askUserExtension from "../../extensions/ask-user/index.ts";
-import { askThroughDialogs, TYPE_OWN } from "../../extensions/ask-user/dialogs.ts";
-import { selectPlanChoice } from "../../extensions/plan-mode/viewer.ts";
-import planModeExtension from "../../extensions/plan-mode/index.ts";
-import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
+import askUserExtension from "../../extensions/tools/ask-user/index.ts";
+import { askThroughDialogs, TYPE_OWN } from "../../extensions/tools/ask-user/dialogs.ts";
+import { selectPlanChoice } from "../../extensions/safety/plan-mode/viewer.ts";
+import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 function rpcDialog(options?: { signal?: AbortSignal }): Promise<undefined> {
 	return new Promise((resolve) => {
@@ -25,7 +26,7 @@ describe("RPC tool dialog cancellation", () => {
 	let root: string;
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "rpc-dialog-"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();

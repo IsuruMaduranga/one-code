@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { boundConsentItems } from "../../extensions/lib/consent-preview.ts";
-import { escapeControlText, sanitizeDisplayText, sanitizeTitle, terminalLink } from "../../extensions/lib/terminal-text.ts";
+import { boundConsentItems } from "../../extensions/lib/consent/consent-preview.ts";
+import { escapeControlText, sanitizeDisplayText, sanitizeTitle, terminalLink } from "../../extensions/lib/ui/terminal-text.ts";
 import {
 	callLine,
-	ccToolRenderers,
+	toolRenderers,
 	notificationComponent,
 	resultLines,
 	scheduledTaskComponent,
 	summarizeArgs,
 	type ThemeLike,
-} from "../../extensions/lib/tui-render.ts";
-import { promptTitle } from "../../extensions/mcp/trust.ts";
-import { parseTitle } from "../../extensions/session-title/title.ts";
-import { LiveRunRegistry } from "../../extensions/subagents/live-runs.ts";
+} from "../../extensions/lib/ui/tui-render.ts";
+import { promptTitle } from "../../extensions/tools/mcp/trust.ts";
+import { parseTitle } from "../../extensions/agents/session-title/title.ts";
+import { LiveRunRegistry } from "../../extensions/agents/subagents/live-runs.ts";
 
 // Text One Code did not write, carrying what a hostile or merely noisy source
 // can put in it: a terminal retitle (OSC 0), a clipboard write (OSC 52), a
@@ -50,8 +50,8 @@ describe("sanitizeDisplayText", () => {
 });
 
 describe("every tool renderer path strips control characters", () => {
-	it("renderResult, for every ccToolRenderers tool (task_output, monitor, MCP, web_fetch)", () => {
-		const r = ccToolRenderers("Task Output");
+	it("renderResult, for every toolRenderers tool (task_output, monitor, MCP, web_fetch)", () => {
+		const r = toolRenderers("Task Output");
 		for (const expanded of [false, true]) {
 			const component = r.renderResult({ content: [{ type: "text", text: HOSTILE }] }, { expanded, isPartial: false }, plain, {
 				isError: false,
@@ -61,7 +61,7 @@ describe("every tool renderer path strips control characters", () => {
 		assertClean(resultLines(plain, HOSTILE, true, true));
 	});
 	it("renderCall, for tool arguments and a server-supplied label", () => {
-		const r = ccToolRenderers("\x1b]0;evil\x07server: tool");
+		const r = toolRenderers("\x1b]0;evil\x07server: tool");
 		const component = r.renderCall({ command: "echo \x1b]52;c;aGk=\x07 \rhi" }, plain, { isPartial: false, isError: false });
 		assertClean(component.render(200));
 		expect(summarizeArgs({ command: "a\x1b[2Kb" })).toBe("ab");

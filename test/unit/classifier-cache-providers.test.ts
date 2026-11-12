@@ -9,8 +9,8 @@ import type { Model } from "@earendil-works/pi-ai";
 import { stream as bedrockStream } from "@earendil-works/pi-ai/api/bedrock-converse-stream";
 import { stream as completionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { cacheClassifierHistory } from "../../extensions/auto-mode/cache.ts";
-import { cacheSideCallConversation } from "../../extensions/lib/side-call-cache.ts";
+import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { cacheSideCallConversation } from "../../extensions/lib/side-calls/side-call-cache.ts";
 
 const base = { reasoning: false, input: ["text"], contextWindow: 200_000, maxTokens: 4000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 const openrouterClaude = { ...base, id: "anthropic/claude-sonnet-5", name: "Claude via OpenRouter", api: "openai-completions", provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" } as Model<"openai-completions">;

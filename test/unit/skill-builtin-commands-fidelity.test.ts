@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { PI_BUILTIN_COMMANDS } from "../../extensions/skill/invoke.ts";
+import { PI_BUILTIN_COMMANDS } from "../../extensions/lib/plugins/skill-invoke.ts";
 
 // The package's `exports` map hides dist/, so resolve it by path, not by specifier.
 const piDist = fileURLToPath(new URL("../../node_modules/@earendil-works/pi-coding-agent/dist/", import.meta.url));

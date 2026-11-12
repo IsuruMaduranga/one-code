@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import { decodePanelKey, type PanelKey } from "../../extensions/permissions/panel/keys.ts";
-import { describeRule, type PanelPaint, renderPanel } from "../../extensions/permissions/panel/render.ts";
-import { type AutoEntryRow, applyPanelKey, initialPanelState, type PanelEffect, type PanelState, type PanelView, type RuleRow } from "../../extensions/permissions/panel/state.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { decodePanelKey, type PanelKey } from "../../extensions/safety/permissions/panel/keys.ts";
+import { describeRule, type PanelPaint, renderPanel } from "../../extensions/safety/permissions/panel/render.ts";
+import { type AutoEntryRow, applyPanelKey, initialPanelState, type PanelEffect, type PanelState, type PanelView, type RuleRow } from "../../extensions/safety/permissions/panel/state.ts";
 
 const paint: PanelPaint = { fg: (_color, text) => text, bold: (text) => text, inverse: (text) => `[${text}]` };
 
@@ -10,7 +11,7 @@ const rule = (raw: string, editable = true, behavior: "allow" | "ask" | "deny" =
 	key: `src\0${raw}`,
 	behavior,
 	raw,
-	sourceLabel: editable ? "From One Code user settings (~/.onecode/settings.json)" : "From Claude Code user settings (~/.claude/settings.json)",
+	sourceLabel: editable ? `From One Code user settings (~/${brand.stateDir}/settings.json)` : "From Claude Code user settings (~/.claude/settings.json)",
 	editable,
 	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
 });
@@ -19,7 +20,7 @@ const autoEntry = (section: AutoEntryRow["section"], text: string, editable = tr
 	key: `src\0${section}\0${text}`,
 	section,
 	text,
-	sourceLabel: editable ? "From One Code user settings (~/.onecode/settings.json)" : "From Claude Code user settings (~/.claude/settings.json)",
+	sourceLabel: editable ? `From One Code user settings (~/${brand.stateDir}/settings.json)` : "From Claude Code user settings (~/.claude/settings.json)",
 	editable,
 	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
 });
@@ -44,8 +45,8 @@ const view = (overrides: Partial<PanelView> = {}): PanelView => ({
 	],
 	rules: { allow: [rule("Bash(npm test:*)"), rule("Read", false)], ask: [], deny: [rule("Bash(rm:*)", true, "deny")] },
 	destinations: [
-		{ id: "onecode-project", label: "One Code project settings", description: "Saved in ~/.onecode/projects/p/settings.json" },
-		{ id: "onecode-user", label: "One Code user settings", description: "Saved in ~/.onecode/settings.json" },
+		{ id: "onecode-project", label: "One Code project settings", description: `Saved in ~/${brand.stateDir}/projects/p/settings.json` },
+		{ id: "onecode-user", label: "One Code user settings", description: `Saved in ~/${brand.stateDir}/settings.json` },
 	],
 	ruleError: (raw) => (/^[A-Za-z_]+(\(.*\))?$/.test(raw) ? undefined : `Could not parse "${raw}".`),
 	...overrides,
@@ -212,7 +213,7 @@ describe("/permissions panel Auto mode tab", () => {
 		press(state, v, DOWN, ENTER);
 		expect(state.dialog).toEqual({ kind: "builtinsInfo", section: "allow" });
 		const text = renderPanel({ state, view: v, width: 100, height: 30 }, paint).join("\n");
-		expect(text).toContain("always in effect in One Code");
+		expect(text).toContain(`always in effect in ${brand.name}.`);
 		expect(text).not.toMatch(/Disable built-in/);
 		expect(press(state, v, ENTER)).toEqual([]);
 		expect(state.dialog).toBeUndefined();
@@ -307,7 +308,7 @@ describe("/permissions panel Workspace tab", () => {
 	it("shows the working directory first, then the directories and where they come from", () => {
 		const v = view();
 		const text = renderPanel({ state: onWorkspace(v), view: v, width: 120, height: 30 }, paint).join("\n");
-		expect(text).toContain("One Code can read files in the workspace, and make edits when auto-accept edits is on.");
+		expect(text).toContain(`${brand.name} can read files in the workspace, and make edits when auto-accept edits is on.`);
 		expect(text).toContain("   -  /work/project  (Original working directory)");
 		expect(text).toContain("❯ /work/shared");
 		expect(text).toContain("  /work/libs  · Claude Code user settings (~/.claude/settings.json)");
@@ -333,7 +334,7 @@ describe("/permissions panel rendering", () => {
 
 	it("says so when nothing was denied", () => {
 		const text = render(initialPanelState(false), view({ denials: [] }), 100).join("\n");
-		expect(text).toContain("One Code won't ask before using allowed tools.");
+		expect(text).toContain(`${brand.name} won't ask before using allowed tools.`);
 		const state = initialPanelState(false);
 		press(state, view({ denials: [] }), LEFT);
 		expect(render(state, view({ denials: [] })).join("\n")).toContain("No recent denials.");

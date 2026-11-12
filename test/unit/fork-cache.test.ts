@@ -1,11 +1,11 @@
 /**
- * subagents/fork-cache.ts: the inline extension that sends a fork's requests
+ * agents/subagents/fork-cache.ts: the inline extension that sends a fork's requests
  * as the parent's captured request plus the fork's tail.
  */
 import { describe, expect, it } from "vitest";
-import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
-import { captureRequest, type RequestCapture } from "../../extensions/lib/request-replay.ts";
-import { forkCacheExtension } from "../../extensions/subagents/fork-cache.ts";
+import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
+import { captureRequest, type RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
+import { forkCacheExtension } from "../../extensions/agents/subagents/fork-cache.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const model = { api: "openai-completions", provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", id: "deepseek/deepseek-v4-flash" };

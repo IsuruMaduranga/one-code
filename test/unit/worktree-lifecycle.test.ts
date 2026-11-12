@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
-import { resetProcessStateForTest } from "../../extensions/lib/process-state.ts";
-import worktreeExtension from "../../extensions/worktree/index.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
+import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
+import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
+import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { worktreeResultText } from "../../extensions/safety/worktree/text.ts";
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 type Result = { isError?: boolean; content: { text: string }[]; details: { worktreeState?: unknown } };
@@ -14,13 +16,16 @@ let root: string;
 let repo: string;
 let fake: FakePi;
 let location: WorktreeLocation | null;
+/** The worktree session the last enter_worktree recorded (the state the tools' texts name). */
+let session: { path: string } | null | undefined;
 const ctx = () => createFakeCtx({ cwd: repo });
 const enter = (params: Record<string, unknown>, context = ctx()) => fake.tools.get("enter_worktree")!.execute("enter", params, undefined, undefined, context) as Promise<Result>;
 const exit = (params: Record<string, unknown>) => fake.tools.get("exit_worktree")!.execute("exit", params, undefined, undefined, ctx()) as Promise<Result>;
 const start = async () => {
 	const result = await enter({ name: "feature" });
 	expect(result.isError).toBeUndefined();
-	return join(repo, ".claude", "worktrees", "feature");
+	session = result.details.worktreeState as typeof session;
+	return join(projectConfigDir(repo), "worktrees", "feature");
 };
 
 beforeEach(() => {
@@ -81,8 +86,8 @@ describe("worktree lifecycle safety", () => {
 		git(repo, "config", "filter.fixture.smudge", "printf executed > filter-ran.txt; cat");
 		const result = await enter({ name: "feature" });
 		expect(result.isError).toBe(true);
-		expect(result.content[0].text).toContain("filter");
-		expect(existsSync(join(repo, ".claude", "worktrees", "feature", "filter-ran.txt"))).toBe(false);
+		expect(result.content[0].text).toBe(worktreeResultText.enter.failed({ kind: "checkoutRunsProgram", program: { kind: "configSetsProgram", key: "filter.smudge" } }));
+		expect(existsSync(join(projectConfigDir(repo), "worktrees", "feature", "filter-ran.txt"))).toBe(false);
 	});
 
 	it("does not replace an existing branch", async () => {
@@ -131,7 +136,7 @@ describe("worktree lifecycle safety", () => {
 		const result = await exit({ action: "remove" });
 		expect(result.isError).toBe(true);
 		expect(existsSync(path)).toBe(true);
-		expect(result.content[0].text).toContain("commit");
+		expect(result.content[0].text).toBe(worktreeResultText.exit.removeRefused({ session: session as never, blockers: [{ kind: "commitsAhead", count: "1", branch: "feature" }] }));
 	});
 
 	it("refuses to remove commits left on its branch after HEAD moves back", async () => {
@@ -152,7 +157,8 @@ describe("worktree lifecycle safety", () => {
 		const result = await exit({ action: "keep" });
 		expect(result.isError).toBeUndefined();
 		// The re-entry hint names the real argument, not a `{path}` placeholder.
-		expect(result.content[0].text).toContain(`re-enter it with enter_worktree (path: "${path}")`);
+		expect(session?.path).toBe(path);
+		expect(result.content[0].text).toBe(worktreeResultText.exit.kept({ session: session as never, exists: true }));
 		expect(existsSync(join(path, "new.txt"))).toBe(true);
 		expect(location).toBeNull();
 		const input = { command: "pwd" };
@@ -167,7 +173,12 @@ describe("worktree lifecycle safety", () => {
 		expect(existsSync(path)).toBe(false);
 		expect(location).toBeNull();
 		expect(result.details.worktreeState).toBeNull();
-		expect(result.content[0].text).toContain("branch");
+		// git's own message sits in the middle of the profile's words.
+		const [before, after] = worktreeResultText.exit.branchDeleteFailed({ session: session as never, branch: "feature", osMessage: "GITSAYS" }).split("GITSAYS");
+		expect(after).toBeDefined();
+		expect(result.content[0].text.startsWith(before)).toBe(true);
+		expect(result.content[0].text.endsWith(after)).toBe(true);
+		expect(result.content[0].text).toContain("feature");
 	});
 
 	it("rejects a listed worktree whose directory was removed outside the harness", async () => {
@@ -185,7 +196,7 @@ describe("worktree lifecycle safety", () => {
 		for (const toolName of ["Agent", "workflow", "bash", "read"]) {
 			const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, toolCallId: toolName, input: { command: "pwd", path: "a.txt" } }, ctx());
 			expect(result?.block, toolName).toBe(true);
-			expect(result?.reason).toContain("no longer exists");
+			expect(result?.reason).toBe(worktreeResultText.activeMissing(session as never));
 		}
 		expect((await exit({ action: "keep" })).details.worktreeState).toBeNull();
 	}, 20_000); // four gated tool calls plus git on a Windows runner take over 5 s
@@ -195,7 +206,7 @@ describe("worktree lifecycle safety", () => {
 		await exit({ action: "keep" });
 		const alias = join(root, "alias");
 		symlinkSync(repo, alias, process.platform === "win32" ? "junction" : "dir");
-		const result = await enter({ path: join(alias, ".claude", "worktrees", "feature") });
+		const result = await enter({ path: join(projectConfigDir(alias), "worktrees", "feature") });
 		expect(result.isError).toBeUndefined();
 		expect(location?.path).toBe(path);
 	});

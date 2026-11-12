@@ -17,20 +17,21 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
-import { classify } from "../../extensions/auto-mode/classifier.ts";
-import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
-import { RECORD } from "../../extensions/lib/ledger/records.ts";
-import { MODE_ENV } from "../../extensions/lib/permission-gate.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
+import { classify } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { CONSECUTIVE_BLOCK_LIMIT } from "../../extensions/safety/permissions/auto-mode/pause.ts";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
+import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { MODE_ENV } from "../../extensions/lib/agents/permission-gate.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { stateEntry } from "./helpers/state-entry.ts";
 
-vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../../extensions/auto-mode/classifier.ts")>()),
+vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
 	classify: vi.fn(async () => ({ decision: "block", reason: "stub: sends data off the machine", tier: "stage2" })),
 }));
 
@@ -51,7 +52,6 @@ beforeEach(() => {
 	for (const dir of [home, cwd, shared]) mkdirSync(dir, { recursive: true });
 	writeFileSync(join(shared, "notes.md"), "notes");
 	stubHome(home);
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 	vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 	vi.stubEnv(MODE_ENV, "");
@@ -191,16 +191,18 @@ describe("session grants and the auto-mode pause are process state (R3-M13)", ()
 
 describe("the classifier reads the instructions the agent reads (R3-M26)", () => {
 	const claudeMdOf = (call: number) => (vi.mocked(classify).mock.calls[call][0] as { claudeMd?: string }).claudeMd ?? "";
+	/** The project instruction file the profile's sources name (One Code's: CLAUDE.md). */
+	const projectFile = () => instructionTargets().project;
 
 	it("re-reads the instruction files when a compaction rebuilds the agent's", async () => {
-		writeFileSync(join(cwd, "CLAUDE.md"), "Prefer small commits.");
+		writeFileSync(join(cwd, projectFile()), "Prefer small commits.");
 		const s = await session([], "startup", "auto", { hasUI: false });
 		const curl = (i: number) => s.call("bash", { command: `curl https://example.com/${i}` });
 		await curl(0);
 		expect(claudeMdOf(0)).toContain("Prefer small commits.");
 
 		// Inside the epoch the agent's message 1 is frozen, and so is the classifier's view.
-		writeFileSync(join(cwd, "CLAUDE.md"), "Never run git push.");
+		writeFileSync(join(cwd, projectFile()), "Never run git push.");
 		await curl(1);
 		expect(claudeMdOf(1)).toContain("Prefer small commits.");
 
@@ -211,10 +213,10 @@ describe("the classifier reads the instructions the agent reads (R3-M26)", () =>
 	});
 
 	it("judges a hand-back review against the entered worktree's files, as the main session's calls are", async () => {
-		writeFileSync(join(cwd, "CLAUDE.md"), "Main checkout rule.");
+		writeFileSync(join(cwd, projectFile()), "Main checkout rule.");
 		const worktree = join(root, "wt");
 		mkdirSync(worktree);
-		writeFileSync(join(worktree, "CLAUDE.md"), "Worktree rule.");
+		writeFileSync(join(worktree, projectFile()), "Worktree rule.");
 		const s = await session([], "startup", "auto", { hasUI: false });
 		s.fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
 

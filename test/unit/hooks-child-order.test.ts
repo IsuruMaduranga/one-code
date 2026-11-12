@@ -4,10 +4,11 @@ import { join } from "node:path";
 import { AgentSession, SessionManager, type ToolCallEventResult, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HookBridge } from "../../extensions/hooks/subagent-bridge.ts";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
+import type { HookBridge } from "../../extensions/lib/agents/hook-bridge.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
+import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 describe("child hook and permission order", () => {
 	let root: string;
@@ -32,7 +33,7 @@ describe("child hook and permission order", () => {
 
 	it.each(["Agent", "SendMessage"])("runs the parent's hooks for a child's %s call even though permission autoallows it", async (toolName) => {
 		let decision: ToolCallEventResult | undefined;
-		const hooks: HookBridge = { preToolUse: async () => ({ block: { reason: "no nested work" } }), postToolUse: async () => ({}) };
+		const hooks: HookBridge = { preToolUse: async () => ({ refusal: "PreToolUse hook: no nested work" }), postToolUse: async () => ({}) };
 		const permission = vi.fn(async () => undefined);
 		vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (this: AgentSession) {
 			expect(this.getToolDefinition(toolName)).toBeDefined();
@@ -47,7 +48,7 @@ describe("child hook and permission order", () => {
 
 	it("stops at a child's hook denial before asking the permission bridge", async () => {
 		const permission = vi.fn(async () => undefined);
-		const hooks: HookBridge = { preToolUse: async () => ({ block: { reason: "child hook denied" } }), postToolUse: async () => ({}) };
+		const hooks: HookBridge = { preToolUse: async () => ({ refusal: "PreToolUse hook: child hook denied" }), postToolUse: async () => ({}) };
 		const session = await openChildSession({
 			loader: { cwd, agentDir, noContextFiles: true, getHookBridge: () => hooks, getPermissionBridge: () => permission },
 			session: { cwd, agentDir, sessionManager: SessionManager.inMemory(cwd) },
@@ -92,7 +93,16 @@ describe("child hook and permission order", () => {
 		try {
 			const outcome = await session.extensionRunner!.emitToolCall({ type: "tool_call", toolCallId: "child-3", toolName: "write", input: { path: "own.txt", content: "text" } });
 			expect(outcome?.block).toBe(true);
-			expect(outcome?.reason).toContain("Refusing the write");
+			expect(outcome?.reason).toBe(
+				worktreeGuardText.refusal({
+					kind: "sharedCheckoutWrite",
+					worktreePath: worktree,
+					sharedRoot: cwd,
+					target: join(cwd, "shared.txt"),
+					inCommand: false,
+					mapped: join(worktree, "shared.txt"),
+				}),
+			);
 			expect(permission).not.toHaveBeenCalled();
 		} finally {
 			session.dispose();

@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseServer } from "../../extensions/mcp/config.ts";
-import { describeServers, reconnectRefusal } from "../../extensions/mcp/trust.ts";
-import { decide, parseRule, parseRules, ruleCoversTool } from "../../extensions/permissions/matcher.ts";
+import { parseServer } from "../../extensions/tools/mcp/config.ts";
+import { describeServers, reconnectRefusal } from "../../extensions/tools/mcp/trust.ts";
+import { decide, parseRule, parseRules, ruleCoversTool } from "../../extensions/lib/rules/matcher.ts";
 
 describe("pi MCP working-directory variables", () => {
 	it("withholds a server whose working-directory variable is unset", () => {

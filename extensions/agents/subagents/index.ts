@@ -1,0 +1,3123 @@
+/**
+ * subagents extension — Claude Code's Agent/Task tool, plus send_message.
+ *
+ * Delegates a task to a specialist agent running in-process (its own
+ * AgentSession, see runner.ts) with its own context window. Agent definitions
+ * come from `.claude/agents/*.md`
+ * (project), `~/.claude/agents/*.md` (user), and the catalog bundled with this
+ * package — the same markdown + frontmatter format Claude Code uses.
+ *
+ * Claude Code features covered: parallel tasks, per-call `model`/`thinking`
+ * overrides, `fork` (a child inheriting this conversation), `isolation:
+ * "worktree"`, background execution (every run returns immediately — CC parity
+ * — stays addressable via task_output/task_stop, and steers its completion
+ * into the conversation as a system notification), and SendMessage (reach a
+ * running agent live, or resume a finished one with its context intact —
+ * children persist their sessions per run to make that possible).
+ */
+
+import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
+import { INSTALL_METHOD_VAR } from "../../lib/app/app-launch.mjs";
+import { brand } from "../../lib/profile/brand.mjs";
+import { knobLimit, knobNames } from "../../lib/profile/knobs.ts";
+import { feature } from "../../lib/profile/feature.ts";
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
+import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../../lib/agents/agent-cron.ts";
+import { profileText, toolLive } from "../../lib/profile/profile.ts";
+import os from "node:os";
+import { dirname, join } from "node:path";
+import { isPathAtOrUnder } from "../../lib/profile/paths.ts";
+import { createHash } from "node:crypto";
+import { PACKAGE_ROOT } from "../../lib/core/package-root.ts";
+import { StringEnum } from "../../lib/core/string-enum.ts";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
+import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type Static, Type } from "typebox";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../../lib/agents/agent-catalog.ts";
+import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../../lib/models/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../../lib/models/model-unusable.ts";
+import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
+import {
+	expensiveModelGate,
+	resolveSubagentModel,
+	type SubagentModelResolution,
+	SUBAGENT_STATUS_CHANNEL,
+	subagentModelNotes,
+	refusedModelNote,
+	subagentModelsReminder,
+	subagentStatusModel,
+} from "../../lib/models/subagent-model.ts";
+import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../../lib/models/model-picker.ts";
+import { chosenModelWarnings } from "../../lib/models/model-choice-warnings.ts";
+import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../../lib/plugins/plugins.ts";
+import { guideDocs } from "../../lib/agents/guide-docs.ts";
+import { extensionVersion } from "../../lib/app/package-version.ts";
+import { scanSkills } from "../../lib/plugins/skill-scan.ts";
+import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../../lib/plugins/mcp-status.ts";
+
+import { DEFER_CHANNEL, queryDeferred } from "../../lib/request/deferred.ts";
+import { requestSystemPrompt } from "../../lib/ui/prompt-options.ts";
+import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../../lib/side-calls/request-replay.ts";
+import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../../lib/side-calls/btw-fork.ts";
+import { watchMcpTools } from "../../lib/plugins/mcp-share.ts";
+import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
+import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../../lib/profile/tool-variants.ts";
+import { prepareAgentArguments } from "./agent-args.ts";
+import { projectConfigDirName } from "../../lib/profile/sources.ts";
+import { instructionFileNames } from "../../lib/context/instructions.ts";
+import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
+import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
+import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../../lib/request/reminders.ts";
+import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../../lib/agents/task-registry.ts";
+import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
+import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
+import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
+import { SubagentRuntime } from "./runner.ts";
+import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usage.ts";
+import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
+import type { SubagentsText } from "./text.ts";
+import { subagentWords } from "./words.ts";
+import { findProjectRoot } from "../../lib/context/git.ts";
+import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";
+import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
+import {
+	agentNote,
+	agentMessage,
+	agentSummary,
+	createTaskNotifier,
+	type HandBackVerdict,
+	handBackPointer,
+	handBackWarning,
+	oneShotNote,
+	sessionOutlivesTurn,
+	taskNotification,
+	type TaskStatus,
+	withReview,
+} from "../../lib/notify/notifications.ts";
+import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
+import { awaitHandBackReview } from "./hand-back-review.ts";
+import type { LiveSink } from "./runner.ts";
+import { recordUsage } from "../../lib/notify/usage-bus.ts";
+import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-channels.ts";
+import { SubagentWidget } from "./panel-widget.ts";
+import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
+import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../../lib/agents/agent-view.ts";
+import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
+import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
+import { reduceShellKey, shellRows } from "./shell-panel.ts";
+import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
+import { createMarkdownProse } from "../../lib/ui/prose.ts";
+import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
+import { registerLocalCommand } from "../../lib/ui/local-command.ts";
+import { extendingCompletions } from "../../lib/ui/argument-hints.ts";
+import { readStringsState, recordState } from "../../lib/request/ledger/state.ts";
+import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
+import { cronWords } from "../../lib/agents/cron-text.ts";
+import { type AgentTools, type LaunchLine, type RunStatus, type SubagentRefusal, subagentResultText } from "../../lib/agents/subagent-text.ts";
+
+/** How the guide's setup list names a server that is not connected. */
+const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
+	connected: undefined,
+	failed: "failed to connect",
+	authNeeded: "needs authentication",
+	connecting: "connecting",
+	disabled: "disabled",
+};
+
+
+interface RunRequest {
+	agent: string;
+	task: string;
+	name: string;
+	/** Inherit the caller's conversation instead of starting from an agent prompt. */
+	fork?: boolean;
+	model?: string;
+	/**
+	 * Session model to fall back to if `model` (a non-per-call automatic/default
+	 * pick) cannot spawn. Unset for a per-call model, which surfaces its error to
+	 * the main model to retry rather than being silently swapped. See the runner's
+	 * buildChildSession.
+	 */
+	fallbackModel?: string;
+	thinking?: string;
+	worktree?: boolean;
+	/** Claude Code's `description`: the run's title (AgentRunRecord.description). */
+	description?: string;
+}
+
+/**
+ * The session model a broken *automatic* pick should fall back to at spawn.
+ * Undefined for a per-call model (source "call") — that surfaces its error to
+ * the main model to retry rather than being silently swapped — and when the
+ * pick already IS the session model. `resolvedSpec` is the caller's already-
+ * computed `provider/id` for the resolved model.
+ */
+function spawnFallbackModel(
+	resolvedSpec: string | undefined,
+	source: SubagentModelResolution["source"],
+	sessionModel: { provider: string; id: string } | undefined,
+): string | undefined {
+	if (!sessionModel || source === "call" || !resolvedSpec) return undefined;
+	const sessionSpec = modelSpec(sessionModel);
+	return resolvedSpec !== sessionSpec ? sessionSpec : undefined;
+}
+
+interface TaskResult {
+	agent: string;
+	name: string;
+	taskId: string;
+	task: string;
+	output: string;
+	toolCalls: number;
+	usage: UsageTotals;
+	failed?: boolean;
+	worktreePath?: string;
+	/** The kept worktree's branch, which holds any commits the agent made. */
+	worktreeBranch?: string;
+	worktreeKept?: boolean;
+	/** What the child did, for auto mode's return review. */
+	actions?: ChildAction[];
+}
+
+/** The Agent tool's schema, in the profile's words. */
+const subagentParams = (words: SubagentsText) => {
+	const d = words.agentParams;
+	return Type.Object({
+		subagent_type: Type.Optional(Type.String({ description: d.subagent_type })),
+		task: Type.String({ description: d.task }),
+		// `prompt` is Claude Code's name for the task text and `description` its short
+		// title. A CC-trained model writes `{subagent_type, description, prompt}`; pi
+		// does not reject unknown keys, so without these the task silently became ""
+		// (TOOL-FIDELITY-REVIEW-2026-09-07 H1). Accept both as aliases.
+		prompt: Type.Optional(Type.String({ description: d.prompt })),
+		description: Type.Optional(Type.String({ description: d.description })),
+		name: Type.Optional(Type.String({ description: d.name })),
+		model: Type.Optional(Type.String({ description: d.model })),
+		allow_expensive: Type.Optional(Type.Boolean({ description: d.allow_expensive })),
+		thinking: Type.Optional(StringEnum(["off", "minimal", "low", "medium", "high"] as const, { description: d.thinking })),
+		isolation: Type.Optional(StringEnum(["worktree"] as const, { description: d.isolation })),
+		action: Type.Optional(StringEnum(["run", "list"] as const, { description: d.action })),
+	});
+};
+type SubagentParams = Static<ReturnType<typeof subagentParams>>;
+
+/** The Agent tool's schema inside a non-fork child: the nested run's options only. */
+const nestedAgentParams = (words: SubagentsText) => {
+	const d = words.nestedAgentParams;
+	return Type.Object({
+		subagent_type: Type.Optional(Type.String({ description: d.subagent_type })),
+		task: Type.String({ description: d.task }),
+		prompt: Type.Optional(Type.String({ description: d.prompt })),
+		description: Type.Optional(Type.String({ description: d.description })),
+		name: Type.Optional(Type.String({ description: d.name })),
+	});
+};
+
+/** Floor between interim output.log rewrites (onProgress fires per tool call/message). */
+const LOG_WRITE_INTERVAL_MS = 250;
+/** Idle time after which a resident agent session is released (its session file keeps it reachable). */
+const RESIDENT_IDLE_MS = 15 * 60_000;
+
+/** A background agent's process, kept alive after its run so it can be messaged. */
+interface Resident {
+	handle: RpcChildHandle;
+	/** When the resident was started: its hand-backs report tokens and tool uses cumulatively, so the duration is too. */
+	startedAt: number;
+	/**
+	 * FIFO — the head entry handles the next turn_end (initial task, then one per
+	 * idle-time message). `review` is auto mode's rendered hand-back flag for
+	 * that turn (undefined when clean or auto mode is off); the handler puts it
+	 * ahead of the report in its notification.
+	 */
+	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
+	/** Finished turns whose hand-back is still waiting on auto mode's review, so not yet delivered. */
+	reviewing: number;
+}
+
+/**
+ * Whether a resident has a report still to deliver: a turn is running, a turn's
+ * handler is queued, or a finished turn waits on its review. A resident that
+ * has delivered stays alive and idle for SendMessage; counting it as pending
+ * told a cheap-tier model to retract an answer the agent really gave
+ * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4).
+ */
+function residentPending(resident: Resident): boolean {
+	return !resident.handle.exited() && (resident.handle.busy() || resident.turnHandlers.length > 0 || resident.reviewing > 0);
+}
+
+/** The three capability blocks subagents owns on message 1. */
+type SubagentBlockKey = "subagent-models" | "subagent-agents" | "subagent-delegation";
+const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
+	"subagent-models": CONTEXT_ORDER.subagentModels,
+	"subagent-agents": CONTEXT_ORDER.agents,
+	"subagent-delegation": CONTEXT_ORDER.delegation,
+};
+/** The `one-code:state` key of the models this account refused (lib/models/model-unusable.ts). */
+const REFUSED_MODELS_STATE = "subagents:refused-models";
+
+function subagentsExtension(pi: ExtensionAPI) {
+	/** The profile's subagent words (fails closed: every Agent call reads them). */
+	const words = subagentWords();
+	/** A refused Agent call (the nested Agent tool's too). */
+	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: subagentResultText().refused(r) }], details: {}, isError: true });
+	const requestTier = sessionModelTier(pi);
+	const registry = new RunRegistry();
+	/**
+	 * The session's permission mode as the permissions extension last announced
+	 * it; auto (the shipped default) until the first announcement. It picks the
+	 * hand-back's shape (notifyHandBack).
+	 */
+	let permissionMode = "auto";
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		const mode = (data as Partial<PermissionStatus> | undefined)?.mode;
+		if (typeof mode === "string") permissionMode = mode;
+	});
+	/**
+	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
+	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
+	 * run NAMES repeat across a session (the model reuses "reviewer"), and a name key
+	 * routed a message addressed to the older task id to the newer agent (M1).
+	 */
+	const runningIds = new Set<string>();
+	/** Task id → live resident. */
+	const residents = new Map<string, Resident>();
+	/**
+	 * Task id → the main session's tool call that started the run's current
+	 * turn (its Agent call, or the latest SendMessage to it); a nested run
+	 * answers with its parent's (`parentTaskOf`). The permission gate reads the
+	 * main session only as far as that call (safety/permissions/auto-mode/history.ts
+	 * childHistoryCursor). Ids only, a few per run.
+	 */
+	const mainCallFor = new Map<string, string>();
+	const parentTaskOf = new Map<string, string>();
+	const mainCallOf = (taskId: string): string | undefined => {
+		// Bounded: nesting is capped far below this, and a cycle must not hang the gate.
+		for (let id: string | undefined = taskId, depth = 0; id !== undefined && depth < 8; id = parentTaskOf.get(id), depth++) {
+			const call = mainCallFor.get(id);
+			if (call) return call;
+		}
+		return undefined;
+	};
+	/**
+	 * Task ids of background runs spawned during the agent loop now in flight.
+	 * Cleared at `agent_start`; read at `agent_end` to notice a turn that ended
+	 * with an agent still pending, which is the shape of the fabricated-result
+	 * failure (pending-claim.ts, WEAK-MODEL-REVIEW-2026-09-06 H1).
+	 */
+	const spawnedThisLoop = new Set<string>();
+
+	// The live subagent panel (Claude Code's below-editor agent tree): a registry
+	// of every in-process child fed by the runner's live sink, a below-editor
+	// strip, and taskId→kill handles for the viewer's stop/stop-all. The same
+	// widget carries the background-shell manager (chip → list → details), fed
+	// by the bash tasks that cross TASK_REGISTER_CHANNEL.
+	const liveRuns = new LiveRunRegistry();
+	/** taskId → kill handle: a resident's kill resolves when it has exited; a blocking run exposes `result`. */
+	const liveHandles = new Map<string, { kill(): void | Promise<void>; result?: Promise<unknown> }>();
+	/**
+	 * Task ids the user asked to stop (task_stop / x / ctrl+x ctrl+k / session teardown). A
+	 * kill still surfaces as an exit, but it neither completed nor failed — so the
+	 * strip and the notification read this to say "Stopped" instead of the
+	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
+	 */
+	const stoppedTaskIds = new Set<string>();
+	let lastCtx: ExtensionContext | undefined;
+	const shellTasks = trackShellTasks(pi);
+	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
+	// The other strips below the editor (workflow status rows), so the agent view leaves their rows free.
+	const dock = trackDockRows(pi.events);
+
+	/**
+	 * Register a child in the live panel and return the wiring the spawn sites
+	 * need: a runner `sink` (activity + transcript blocks), a `progress` hook to
+	 * fold into the existing onProgress, and settle/finish terminal marks.
+	 */
+	const trackLiveRun = (record: AgentRunRecord, request: RunRequest, parent?: { taskId: string; depth: number }) => {
+		// A (re)starting run is no longer stopped — a resumed agent that was killed
+		// earlier must not inherit the "Stopped" mark.
+		stoppedTaskIds.delete(record.taskId);
+		// A resumed run (SendMessage to a finished agent) re-enters its existing
+		// panel entry; only a never-seen taskId registers fresh.
+		if (!liveRuns.reactivate(record.taskId, request.task, Date.now())) {
+			liveRuns.register({
+				taskId: record.taskId,
+				name: record.name,
+				description: record.description,
+				agentType: request.agent,
+				model: request.model,
+				thinking: request.thinking,
+				task: request.task,
+				startedAt: Date.now(),
+				parentTaskId: parent?.taskId,
+				depth: record.depth ?? 0,
+			});
+		}
+		const sink: LiveSink = {
+			onActivity: (tool, args, text) => liveRuns.setActivity(record.taskId, deriveActivity(tool, args, text)),
+			onBlock: (block) => liveRuns.block(record.taskId, block),
+			onStreaming: (message) => liveRuns.setStreaming(record.taskId, message),
+			onUsage: (usage) => recordUsage(pi, "subagent", usage),
+		};
+		return {
+			sink,
+			progress: (toolCalls: number, usage: UsageTotals) => liveRuns.stats(record.taskId, toolCalls, usage),
+			settle: () => liveRuns.settle(record.taskId),
+			finish: (outcome: FinishOutcome) => {
+				liveRuns.finish(record.taskId, outcome);
+				liveHandles.delete(record.taskId);
+			},
+		};
+	};
+
+	// Live MCP tool definitions published by the mcp extension; injected into
+	// child sessions so subagents share the parent's open connections (no reconnect).
+	const awaitMcpTools = watchMcpTools(pi.events);
+
+	// The parent permissions extension's decision closure, used to gate a child's
+	// tool calls through the real pipeline (mode inheritance, classifier, prompts
+	// bubbled to the user). Undefined until permissions emits it at session start;
+	// a child built before then falls back to the fail-closed local gate.
+	const getPermissionBridge = watchPermissionBridge(pi);
+	// Likewise the hooks extension's bridge: the user's PreToolUse/PostToolUse
+	// hooks run for a child's tool calls too (lib/agents/hook-bridge.ts).
+	const getHookBridge = watchHookBridge(pi);
+
+	/**
+	 * Models this account cannot run, learned during the session: the auto-mode
+	 * classifier's rejections arrive on the shared channel, a child's own
+	 * provider refusal is reported by the runtime. Both roles pick from one
+	 * floor, so both would otherwise keep landing on the same refused model
+	 * (lib/models/model-unusable.ts). `usableModels` is the catalog every resolution
+	 * and menu here reads.
+	 */
+	const unusableModels = new Set<string>();
+	const usableModels = (ctx: ExtensionContext) => withoutUnusable(ctx.modelRegistry.getAvailable(), unusableModels);
+	const rememberUnusable = (model: string) => {
+		if (unusableModels.has(model)) return false;
+		unusableModels.add(model);
+		// A refusal is a durable fact of the account, not UI prose: a resumed
+		// session must not pick the same model and announce it again.
+		recordState(pi, REFUSED_MODELS_STATE, [...unusableModels]);
+		return true;
+	};
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		// The default may have been that model: recompute and republish the
+		// reminder/banner so the next request already names the replacement.
+		const event = data as ModelUnusableEvent;
+		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx, lastCtx.model, event.model);
+	});
+
+	// After `enter_worktree` the session works in the worktree, but pi keeps
+	// ctx.cwd at the original checkout: spawns start where the session works.
+	const enteredWorktree = followEnteredWorktree(pi.events);
+	const workCwd = (ctx: ExtensionContext) => sessionWorkCwd(enteredWorktree(), ctx.cwd);
+
+	/**
+	 * The in-process runner, built lazily on first run and shared across all runs.
+	 * A failed build (a malformed models.json or auth.json) is forgotten, so the
+	 * next spawn tries again instead of every later spawn failing on the same
+	 * rejected promise; callers await it before they mark a run as running
+	 * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 L8).
+	 */
+	let runtimePromise: Promise<SubagentRuntime> | undefined;
+	const getRuntime = (ctx: ExtensionContext) =>
+		(runtimePromise ??= SubagentRuntime.create(
+			ctx.cwd,
+			awaitMcpTools,
+			getPermissionBridge,
+			getHookBridge,
+			// A child extension handler threw. pi's wrapper swallows it inside the
+			// child, so this is the only trace; shown in the parent's UI (stderr
+			// when headless), through the live ctx so a late one cannot throw.
+			(runName, error) => {
+				const text = `Subagent ${runName ?? "(unnamed)"}: extension error in ${error.event} (${error.extensionPath}): ${error.error}`;
+				const live = liveUiCtx(lastCtx);
+				if (live) live.ui.notify(text, "warning");
+				else process.stderr.write(`${text}\n`);
+			},
+			(model, reason) => {
+				if (!rememberUnusable(model)) return;
+				pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
+				const live = liveUiCtx(lastCtx);
+				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
+				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
+			},
+			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
+			() => queryDeferred(pi.events),
+			// The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts).
+			() => permissionMode,
+		).catch((error: unknown) => {
+			runtimePromise = undefined;
+			throw error;
+		}));
+	/** The runtime, or the startup error as a message a failed run can report. */
+	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
+		getRuntime(ctx)
+			.then((runtime) => (shuttingDown ? subagentResultText().runtimeProblem({ kind: "sessionEnded" }) : runtime))
+			.catch((error: unknown) => subagentResultText().runtimeProblem({ kind: "failed", osMessage: error instanceof Error ? error.message : String(error) }));
+
+	// The mcp extension answers a status request synchronously on the bus.
+	let mcpStatus: McpServerStatus[] | undefined;
+	pi.events.on(MCP_STATUS_CHANNEL, (data) => {
+		mcpStatus = (data as McpStatusEvent).servers;
+	});
+	/** The configured servers now; empty when the mcp extension is not loaded. */
+	const requestMcpStatus = (): McpServerStatus[] => {
+		mcpStatus = undefined;
+		pi.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
+		return (mcpStatus as McpServerStatus[] | undefined) ?? [];
+	};
+
+	/**
+	 * What the code-defined `one-code-guide`'s prompt lists (guide-agent.ts): the
+	 * user's custom skills and agents, enabled plugins, MCP servers, installed pi
+	 * packages and extensions, and pi's settings keys. Read only when a spawn
+	 * reads the guide's prompt.
+	 */
+	const guideInput = (cwd: string, catalog: readonly AgentDefinition[], plugins: ReturnType<typeof discoverPlugins>): GuideInput => {
+		const agentDir = getAgentDir();
+		let settingsText: string | undefined;
+		try {
+			settingsText = readFileSync(join(agentDir, "settings.json"), "utf-8");
+		} catch {
+			// No settings file yet: no packages or keys to list.
+		}
+		let extensions: string[] = [];
+		try {
+			extensions = readdirSync(join(agentDir, "extensions")).filter((entry) => !entry.startsWith("."));
+		} catch {
+			// No user extensions directory.
+		}
+		// Every configured server, from the mcp extension's status snapshot: a
+		// failed, disabled or resource-only server registers no tools.
+		const mcpServers = requestMcpStatus().map((server) => ({ name: server.name, status: MCP_STATUS_LABELS[server.status] }));
+		return {
+			docs: guideDocs(),
+			install: {
+				shape: process.env[INSTALL_METHOD_VAR] ? "app" : "extension",
+				method: process.env[INSTALL_METHOD_VAR],
+				agentDir,
+				version: process.env[VERSION_VAR] ?? extensionVersion(),
+			},
+			setup: {
+				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),
+				agents: catalog.filter((agent) => agent.source !== "built-in" && !isPathAtOrUnder(agent.source, BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
+				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
+				mcpServers,
+				extensions,
+				...settingsSetup(settingsText, PACKAGE_ROOT),
+			},
+			config: { instructionFiles: instructionFileNames(), configDir: projectConfigDirName() },
+		};
+	};
+
+	// Plugin agents sit between bundled and user definitions, and are exposed
+	// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
+	const agentSources = (cwd: string) => {
+		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
+		return { plugins, fileSources: agentFileSources(cwd, os.homedir(), plugins.agentDirs) };
+	};
+	type AgentSources = ReturnType<typeof agentSources>;
+
+	/** `sources` when the caller already resolved them (the catalog stamp). */
+	const loadAgents = (cwd: string, sources: AgentSources = agentSources(cwd)) => {
+		// The code-defined guide ranks below every agent file, so one of the same
+		// name replaces it.
+		const { plugins, fileSources } = sources;
+		// The prompt is built from the catalog it sits in, when a spawn reads it.
+		let catalog: AgentDefinition[] = [];
+		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
+		catalog = discoverAgents([...(guide ? [{ agents: [guide] }] : []), ...fileSources]);
+		return catalog;
+	};
+
+	/**
+	 * What an agent may use, for its catalog row (the profile words the
+	 * clause). Tools the session cannot have are left out: the agent cannot use
+	 * them either way, and the row must not name them (lib/profile/live-tools.ts).
+	 */
+	const agentTools = (a: AgentDefinition): AgentTools => {
+		const listed = (a.tools ?? []).filter(toolLive);
+		const excluded = (a.excludeTools ?? []).filter(toolLive);
+		if (a.tools && a.tools.length > 0) return { kind: "listed", tools: listed };
+		if (excluded.length > 0) return { kind: "allExcept", tools: excluded };
+		return { kind: "all", builtIn: a.source === "built-in" || isPathAtOrUnder(a.source, BUNDLED_AGENTS_DIR) };
+	};
+
+	/** One catalog row per agent, the shape every catalog the model reads uses. */
+	const catalogLines = (agents: AgentDefinition[]): string[] =>
+		agents.map((a) => subagentResultText().catalogRow({ name: a.name, description: a.description, tools: agentTools(a) }));
+
+	/** The catalog rows with the fork's. */
+	const describeAgents = (cwd: string, sources?: AgentSources): string[] => [...catalogLines(loadAgents(cwd, sources)), subagentResultText().forkRow];
+
+	/** A background launch's line, in the profile's words. */
+	const launchLine = (line: LaunchLine): string => subagentResultText().launchLine(line);
+
+	const reconstructRuns = (ctx: ExtensionContext) => {
+		/** Loop-invariant; computed lazily so worktree-free histories pay nothing. */
+		let sharedRoot: string | undefined;
+		/** A resident messaged N times embeds its record N times; stat and register each worktree once. */
+		const worktreesSeen = new Set<string>();
+		for (const entry of ctx.sessionManager.getBranch()) {
+			if (entry.type !== "message") continue;
+			const msg = entry.message;
+			// Both the current names and the pre-rename ones, so runs recorded before the
+			// Agent/SendMessage rename still reconstruct on resume.
+			if (msg.role !== "toolResult" || !["Agent", "SendMessage", "subagent", "send_message"].includes(msg.toolName ?? "")) continue;
+			const records = (msg.details as { agentRuns?: AgentRunRecord[] } | undefined)?.agentRuns;
+			for (const record of records ?? []) {
+				registry.add(record);
+				// A kept worktree can host a resumed run in a NEW process, where
+				// createWorktree's registration no longer exists — re-register so the
+				// git-isolation guard survives the restart. A removed worktree's entry
+				// is inert (no session runs there any more). findProjectRoot instead of
+				// `git rev-parse` because session_start handlers must stay fast
+				// (findings §15); a slightly-off sharedRoot only softens one message —
+				// the worktree containment check itself uses the exact record.cwd.
+				if (record.worktree && !worktreesSeen.has(record.cwd)) {
+					worktreesSeen.add(record.cwd);
+					if (!existsSync(record.cwd)) continue;
+					sharedRoot ??= findProjectRoot(ctx.cwd) ?? ctx.cwd;
+					registerWorktreeIsolation(record.cwd, sharedRoot);
+				}
+			}
+		}
+	};
+	/** Notices about model fallbacks/crossings, shown once per distinct message. */
+	const noticedModels = new Set<string>();
+	const notifyModelOnce = (ctx: ExtensionContext, message: string) => {
+		if (noticedModels.has(message)) return;
+		noticedModels.add(message);
+		ctx.ui.notify(message, "warning");
+	};
+
+	/**
+	 * Session-scoped cache of the AUTOMATIC subagent default (no per-call or agent
+	 * override), so the O(catalog) ranking is not rebuilt on every turn (the
+	 * every-turn reminder/banner) or every no-override spawn. Keyed on the session
+	 * model plus the configured default; catalog churn is deliberately ignored,
+	 * matching the classifier's pin — the session commits to one default worker,
+	 * and /model or /subagent both change the signature and recompute. A per-call
+	 * `model` or an agent's frontmatter model still resolves fresh (they vary).
+	 */
+	let autoDefaultCache: { signature: string; resolution: SubagentModelResolution } | undefined;
+	const resolveAutoDefault = (
+		sessionModel: Model<Api> | undefined,
+		available: Model<Api>[],
+		configured: SubagentDefault | undefined,
+	): SubagentModelResolution => {
+		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
+		const signature = `${session}|${configured?.spec ?? ""}|${configured?.source === "subagentModel setting" ? (configured.setForContainment ?? "") : ""}|${configured?.source ?? ""}|${unusableModels.size}`;
+		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
+		// The image-modality gate keys off the session model, which is part of the
+		// cache signature above, so the cached resolution stays correct per session.
+		const resolution = resolveSubagentModel({
+			configuredDefault: configured,
+			sessionModel,
+			available,
+			requireImageInput: supportsImageInput(sessionModel),
+		});
+		autoDefaultCache = { signature, resolution };
+		return resolution;
+	};
+
+	// The three blocks are live state: what an epoch's message 1 says. Inside an
+	// epoch message 1 is the record (extensions/request/ledger), so a refused model, a
+	// /model or a /subagent change rides the request's tail, decided at render
+	// time from the text the epoch last told, never a rewrite of the menu that
+	// would re-cache the conversation and drop its earlier thinking (findings §46).
+	/** The live text of each block; null when the block is absent. */
+	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
+	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
+	let refusal: { refused: string[]; replacement: Model<Api> | undefined } | undefined;
+	const publishBlock = (key: SubagentBlockKey, text: string | null) => {
+		liveBlocks[key] = text;
+		if (text === null) pi.events.emit(REMINDER_CHANNEL, { key, remove: true });
+		else pi.events.emit(REMINDER_CHANNEL, { text, key, placement: "first-prepend", order: BLOCK_ORDER[key], facts: [toldBlockFact(key, text)] });
+	};
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) {
+			refusal = undefined;
+			return;
+		}
+		for (const key of Object.keys(liveBlocks) as SubagentBlockKey[]) {
+			const text = liveBlocks[key];
+			// An absent block is told as its empty text; one never told needs no withdrawal.
+			const told = request.toldBlocks.get(key);
+			const fact = toldBlockFact(key, text ?? "");
+			if (told === fact.hash || (text === null && told === undefined)) continue;
+			const facts = [fact];
+			if (text === null) request.blocks.push({ text: words.delegationWithdrawn, facts });
+			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
+			else request.blocks.push({ text, facts });
+		}
+		refusal = undefined;
+	});
+
+	/**
+	 * The every-turn menu reminder and the banner's subagent-default status.
+	 * `refused` names a model the account just refused: inside an epoch that
+	 * change rides a narrow correction instead of the whole menu.
+	 */
+	const modelMenu = (ctx: ExtensionContext, sessionModel = ctx.model) => {
+		const available = usableModels(ctx);
+		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
+		const resolution = resolveAutoDefault(sessionModel, available, configured);
+		const text = subagentModelsReminder({
+			available, sessionModel, defaultModel: resolution.model, defaultSource: resolution.source, configured,
+			requireImageInput: supportsImageInput(sessionModel),
+		});
+		return { available, configured, resolution, text };
+	};
+	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
+		const { available, configured, resolution, text } = modelMenu(ctx, sessionModel);
+		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		// The user's own subagentModel setting is honoured, so say what it costs:
+		// a newer model in its line, or a model far weaker than the session's.
+		if (resolution.source === "default" && resolution.model) {
+			for (const warning of chosenModelWarnings({ available, sessionModel, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) })) {
+				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
+			}
+		}
+		// Every refusal since the menu was last told, each named, with the default as it is now.
+		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
+		else if (refusal) refusal = { ...refusal, replacement: resolution.model };
+		publishBlock("subagent-models", text);
+		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
+	};
+
+	/** The last catalog text and the stamp of the agent files it was built from. */
+	let catalogMemo: { stamp: string; text: string } | undefined;
+	/**
+	 * The agent catalog as an every-turn reminder, as Claude Code does ("Available
+	 * agent types are listed in <system-reminder> messages") — without it the
+	 * model has to guess names or make a discovery call first. Rebuilt only when
+	 * the agent files changed: every run start asks, and stating the files is
+	 * cheaper than reading and parsing each one. The sources are resolved once
+	 * per check (the plugin discovery behind them is a process-wide memo), and a
+	 * rebuild reads the same ones the stamp stated.
+	 */
+	const agentCatalog = (ctx: ExtensionContext) => {
+		const sources = agentSources(ctx.cwd);
+		const stamp = `${ctx.cwd}\n${agentSourcesStamp(sources.fileSources)}`;
+		if (catalogMemo?.stamp !== stamp) {
+			catalogMemo = {
+				stamp,
+				text: subagentResultText().catalogBlock({ rows: describeAgents(ctx.cwd, sources) }),
+			};
+		}
+		return catalogMemo.text;
+	};
+	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
+
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? words.delegationSteer : null);
+
+	let shuttingDown = false;
+
+	/**
+	 * The fabricated-result backstop (pending-claim.ts). Only the tiers that were
+	 * measured to need it: a frontier model that correctly said "I'm waiting"
+	 * would get the reminder on every delegating turn for nothing, and the
+	 * trigger fires on correct behaviour as readily as on the failure.
+	 */
+	const backstopApplies = () => {
+		const tier = requestTier();
+		return tier === "cheap" || tier === "tiny";
+	};
+	/** A run that is still working: a live child, or a resident with a turn pending. */
+	const stillRunning = (taskId: string): boolean => {
+		const resident = residents.get(taskId);
+		return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
+	};
+	pi.on("agent_start", () => {
+		spawnedThisLoop.clear();
+		parentBusy = true;
+		return undefined;
+	});
+	pi.on("agent_settled", () => {
+		parentBusy = false;
+	});
+	pi.on("agent_end", () => {
+		const spawned = [...spawnedThisLoop];
+		spawnedThisLoop.clear();
+		// Tier check first: on a frontier session the backstop never fires, so the
+		// lookups below would be discarded work on every turn that delegated.
+		if (!backstopApplies()) return undefined;
+		const pending = spawned
+			.filter(stillRunning)
+			.map((taskId) => registry.resolve(taskId))
+			.filter((record): record is AgentRunRecord => record !== undefined)
+			.map((record) => ({ name: record.name, taskId: record.taskId }));
+		const text = pendingClaimReminder(pending);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
+		return undefined;
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		// The account's refusals follow the branch: restore the selection floor
+		// before building the menu, or this process picks the refused model again.
+		for (const model of readStringsState(ctx, REFUSED_MODELS_STATE)) unusableModels.add(model);
+		lastCtx = ctx;
+		// A replaced session (/clear, /new, /resume) never reaches this instance
+		// with the old one's agents: pi emits `session_shutdown` (reason "new" /
+		// "resume") to the OLD extension instance, which stops every agent below,
+		// then re-runs this factory for the new session (verified live on pi
+		// 0.84.1, SUBAGENT-REVIEW-2026-09-04 appendix B). So the state here is
+		// always fresh; only a resumed session's persisted run records are rebuilt.
+		reconstructRuns(ctx);
+		emitModelStatus(ctx);
+		emitAgentCatalog(ctx);
+		emitDelegationSteer();
+		registerPanelInputHook(ctx);
+	});
+	pi.on("model_select", (event, ctx) => {
+		emitModelStatus(ctx, event.model);
+		emitDelegationSteer();
+	});
+	// Another extension wrote `subagentModel` on disk (`/doctor preset`): drop the
+	// cached automatic default and republish the reminder + banner status, the
+	// same refresh `/subagent` itself performs after its own write.
+	pi.events.on(SUBAGENT_DEFAULT_CHANGED_CHANNEL, () => {
+		autoDefaultCache = undefined;
+		const live = liveUiCtx(lastCtx);
+		if (live) emitModelStatus(live);
+	});
+	/**
+	 * The main conversation's runs still going at the last compaction, and the
+	 * compaction entry they belong to: named on the next request, as far as
+	 * they are still going then.
+	 */
+	let runningAtCompaction: { entryId: string | undefined; taskIds: string[] } | undefined;
+	// A compaction opens an epoch, which renders the three blocks from live state:
+	// refresh them, so a catalog that changed on disk since is current. The calls
+	// that started the background runs went into the summary, so the runs still
+	// going are named once on the new epoch's first request. Only the main
+	// conversation's own runs: a nested run reports to the agent that spawned it.
+	pi.on("session_compact", (event, ctx) => {
+		emitModelStatus(ctx);
+		emitAgentCatalog(ctx);
+		emitDelegationSteer();
+		const taskIds = [...registry.list()].filter((record) => (record.depth ?? 0) === 0 && stillRunning(record.taskId)).map((record) => record.taskId);
+		runningAtCompaction = taskIds.length > 0 ? { entryId: event?.compactionEntry?.id, taskIds } : undefined;
+	});
+	// Named when the request is built, not at the compaction: the next request can
+	// come much later (a manual /compact waits for the next prompt), and a run that
+	// finished meanwhile is not running. The run's own notification says it ended.
+	// A /tree to a branch without that compaction still shows the calls.
+	pi.on("turn_start", (_event, ctx) => {
+		const owed = runningAtCompaction;
+		if (!owed) return;
+		runningAtCompaction = undefined;
+		if (owed.entryId !== undefined && !ctx.sessionManager.getBranch().some((entry) => entry.id === owed.entryId)) return;
+		const going = owed.taskIds
+			.filter(stillRunning)
+			.map((taskId) => registry.resolve(taskId))
+			.filter((record): record is AgentRunRecord => record !== undefined)
+			.map((record) => ({ name: record.name, taskId: record.taskId }));
+		const text = runningAfterCompactionReminder(going);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, key: "subagents-running-after-compaction", untilCompaction: true });
+	});
+	// The catalog is read from disk at each run's start, so an agent file added
+	// or deleted mid-session reaches the model: the render step announces a
+	// changed catalog, live minus what the epoch told (R3-M28).
+	pi.on("before_agent_start", (_event, ctx) => {
+		emitAgentCatalog(ctx);
+	});
+	// The selected branch's runs: the abandoned branch's finished ones are not
+	// addressable from it (SendMessage, list_agents), as on a resume. A run still
+	// going, a resident between turns and a nested run (recorded only in memory)
+	// stay reachable, and so do names held for spawns in flight.
+	pi.on("session_tree", (_event, ctx) => {
+		registry.retain((record) => liveRuns.get(record.taskId)?.status === "running" || residents.has(record.taskId) || parentTaskOf.has(record.taskId));
+		reconstructRuns(ctx);
+	});
+	pi.on("session_shutdown", async () => {
+		// Teardown — at process exit AND on /clear, /new, /resume (pi replaces the
+		// session and re-runs this factory; afterwards every use of this
+		// instance's ctx or pi throws). Kills must not surface as "terminated"
+		// notifications; the panel and the transcript view must stop painting
+		// before the ctx goes stale (a timer painting on the dead ctx took the
+		// whole process down — SUBAGENT-REVIEW H1); and the exits — including the
+		// worktree cleanups they trigger — get a bounded moment to finish (S14).
+		shuttingDown = true;
+		closeView();
+		const exits = stopAllAgents();
+		panel.dispose();
+		lastCtx = undefined;
+		await Promise.race([Promise.allSettled(exits), new Promise((resolve) => setTimeout(resolve, 1_500))]);
+	});
+
+	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
+
+	/** Stop an agent, recording its persistent id before kill can settle its turn. */
+	const stopAgent = (taskId: string, handle = liveHandles.get(taskId)) => {
+		// An old task can still await review after the agent has resumed. Its
+		// captured handle must not mark the replacement run as stopped.
+		if (handle && liveHandles.get(taskId) === handle) stoppedTaskIds.add(taskId);
+		return handle?.kill();
+	};
+	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
+	const stopAllAgents = (): Promise<unknown>[] => {
+		const exits: Promise<unknown>[] = [];
+		for (const [taskId, handle] of liveHandles) {
+			const killed = stopAgent(taskId, handle);
+			const settled = handle.result ?? killed;
+			if (settled) exits.push(settled);
+		}
+		return exits;
+	};
+
+	/**
+	 * Markdown prose for the transcript views — pi-tui's real renderer, loaded
+	 * lazily on first view; falls back to plain wrapped text with one warning.
+	 */
+	let prosePromise: Promise<ProseRenderer | undefined> | undefined;
+	const getProse = (ctx: ExtensionContext): Promise<ProseRenderer | undefined> =>
+		(prosePromise ??= createMarkdownProse().catch((error) => {
+			try {
+				ctx.ui.notify(`Subagent viewer: markdown rendering unavailable (${(error as Error).message}) — using plain text.`, "warning");
+			} catch {
+				// no UI — plain text is fine
+			}
+			return undefined;
+		}));
+
+	/**
+	 * Liveness for the transcript view: change-driven repaints (one registry
+	 * event per provider delta, coalesced to ~80ms) plus a 1s ticker for elapsed
+	 * time. `relevant` filters by the event's taskId so unrelated concurrent
+	 * children's deltas don't invalidate the view's cache.
+	 */
+	const liveRepaint = (tui: { requestRender(): void }, invalidate: () => void, relevant: (taskId?: string) => boolean = () => true) => {
+		let coalesce: ReturnType<typeof setTimeout> | undefined;
+		const repaint = () => {
+			invalidate();
+			tui.requestRender();
+		};
+		const unsubscribe = liveRuns.subscribe((taskId) => {
+			if (!relevant(taskId) || coalesce) return;
+			coalesce = setTimeout(() => {
+				coalesce = undefined;
+				repaint();
+			}, 80);
+			coalesce.unref?.();
+		});
+		const ticker = setInterval(repaint, 1000);
+		ticker.unref?.();
+		return {
+			repaint,
+			cleanup: () => {
+				clearInterval(ticker);
+				if (coalesce) clearTimeout(coalesce);
+				unsubscribe();
+			},
+		};
+	};
+
+	/**
+	 * Claude Code's agent view: with no view open, arrows move the strip
+	 * selection and Enter swaps the transcript region to the selected child (a
+	 * non-capturing full-width overlay composited over the main transcript; the
+	 * editor keeps focus, strip keys keep working). Once a view IS open the panel
+	 * switches to read mode (see the input hook): arrows/page keys scroll it, Tab
+	 * retargets to the next agent, Enter/esc close it and the main transcript is
+	 * back.
+	 */
+	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
+	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + other strips + cwd/status(2) + one spare. */
+	const viewReserve = () => {
+		const shellLines = panel.shellLineCount();
+		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + dock.others("subagents") + 9;
+	};
+
+	/**
+	 * Tell the editor which agent it now addresses (lib/agents/agent-view.ts), or that
+	 * it is back on main. Viewing a run also puts it on `/tasks`' Completed list
+	 * once it settles, as Claude Code keeps a viewed agent (findings §40).
+	 */
+	const announceView = (taskId: string | undefined) => {
+		const run = taskId === undefined ? undefined : liveRuns.get(taskId);
+		if (run) liveRuns.markViewed(run.taskId);
+		const announcement: AgentViewAnnouncement = run ? { target: agentViewTarget(run, run.agentType === FORK_AGENT) } : {};
+		pi.events.emit(AGENT_VIEW_CHANNEL, announcement);
+	};
+
+	const openView = (ctx: ExtensionContext, taskId: string) => {
+		if (ctx.mode !== "tui") {
+			ctx.ui.notify("The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task.", "warning");
+			return;
+		}
+		if (view) return view.retarget(taskId);
+		let currentId = taskId;
+		let scroll = 0;
+		let maxScroll = 0;
+		let closed = false;
+		let repaintFn: (() => void) | undefined;
+		let doneFn: ((result: null) => void) | undefined;
+		/** Fullscreen only: turns pi's own viewport scrolling into view scrolling. */
+		let mirror: ViewportMirror | undefined;
+		const entry = {
+			retarget(id: string) {
+				if (currentId === id) return;
+				currentId = id;
+				scroll = 0;
+				mirror?.park(0);
+				panel.setView(id);
+				announceView(id);
+				repaintFn?.();
+			},
+			scrollBy(delta: number) {
+				scroll = Math.max(0, Math.min(maxScroll, scroll + delta));
+				repaintFn?.();
+			},
+			close() {
+				if (closed) return;
+				closed = true;
+				if (view === entry) view = undefined;
+				mirror?.restore();
+				mirror = undefined;
+				panel.setView(undefined);
+				announceView(undefined);
+				doneFn?.(null);
+			},
+		};
+		view = entry;
+		panel.setView(currentId);
+		announceView(currentId);
+		void (async () => {
+			const prose = await getProse(ctx);
+			if (closed) return;
+			await panelUi(pi.events, ctx.ui).custom<null>(
+				(tui, theme, _keybindings, done) => {
+					doneFn = done;
+					// close() raced ahead of the factory — dissolve as soon as we exist.
+					if (closed) queueMicrotask(() => done(null));
+					const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+					let cache: { width: number; height: number; lines: string[] } | undefined;
+					const live = liveRepaint(
+						tui,
+						() => {
+							cache = undefined;
+						},
+						(taskId) => taskId === undefined || taskId === currentId,
+					);
+					repaintFn = live.repaint;
+					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
+					const viewport = asScrollableViewport(tui);
+					if (viewport && !closed) mirror = new ViewportMirror(viewport);
+					return {
+						render: (width: number) => {
+							// The page keys and the wheel scroll pi's main viewport, under
+							// this overlay; take the move as ours and park main again.
+							if (mirror) {
+								const next = mirror.absorb(scroll, maxScroll);
+								if (next !== scroll) {
+									scroll = next;
+									cache = undefined;
+								}
+							}
+							// Keyed by height too: a resize or another strip changing size moves the room.
+							const viewHeight = height();
+							if (cache?.width === width && cache.height === viewHeight) return cache.lines;
+							const run = liveRuns.get(currentId);
+							let lines: string[];
+							if (run) {
+								const transcript = renderTranscript({ run, width, height: viewHeight, scroll, now: Date.now(), prose }, paint);
+								maxScroll = transcript.maxScroll;
+								lines = transcript.lines;
+							} else {
+								lines = [paint.fg("dim", "agent gone")];
+							}
+							cache = { width, height: viewHeight, lines: lines.map((line) => truncateLine(line, width)) };
+							return cache.lines;
+						},
+						invalidate: () => {
+							cache = undefined;
+						},
+						dispose: () => live.cleanup(),
+					};
+				},
+				{ overlay: true, overlayOptions: { row: 0, col: 0, width: "100%", nonCapturing: true } },
+			);
+		})().catch(() => entry.close()); // full teardown (clears view + panel.setView) so state can't desync
+	};
+	const closeView = () => view?.close();
+
+	let panelHookRegistered = false;
+	const registerPanelInputHook = (registerCtx: ExtensionContext) => {
+		if (panelHookRegistered || !registerCtx.hasUI) return;
+		panelHookRegistered = true;
+		let chordArmed = false;
+		// Leaving the strip hands focus back to the editor and keeps any open view,
+		// as Claude Code's Esc does: the editor then addresses the viewed agent.
+		const leave = () => {
+			panel.setFocus(undefined);
+		};
+		const editorEmpty = () => (panel.editorBaseline as { getText?(): string } | undefined)?.getText?.() === "";
+		type KeyResult = { consume: boolean } | undefined;
+		// Actions shared by both key modes (browse and read), declared once so the
+		// two switches below never drift. esc consumes only when idle — a streaming
+		// turn must stay interruptible.
+		const doLeave = (ctx: ExtensionContext): KeyResult => {
+			leave();
+			return ctx.isIdle() ? { consume: true } : undefined;
+		};
+		// `taskId` targets a specific run (read mode stops the VIEWED agent, which
+		// can differ from the windowed strip selection); default is the selection.
+		const doStop = (taskId?: string): KeyResult => {
+			const id = taskId ?? panel.selectedRun()?.taskId;
+			if (id) stopAgent(id);
+			return { consume: true };
+		};
+		const doStopAll = (): KeyResult => {
+			stopAllAgents();
+			return { consume: true };
+		};
+		/** Unrecognized key: ctrl+x keeps the stop-all chord armed, else drop focus
+		 * (any open view stays) and let the byte resume in the editor. */
+		const closeAndPassthrough = (): KeyResult => {
+			if (chordArmed) return { consume: true };
+			leave();
+			return undefined;
+		};
+		/** Keys the agents branch owns; any other decode (typing) drops focus and
+		 * passes through — stated positively so a future StripKey addition is
+		 * foreign here by default. */
+		const AGENT_KEYS = new Set<StripKey>(["up", "down", "open", "leave", "stop", "stopAll", "pageUp", "pageDown"]);
+		/** Row 0 exists only past the synthetic `main` row. */
+		const focusFirstAgentRow = (): boolean => {
+			if (panel.rowCount() <= 1) return false;
+			panel.setFocus(0);
+			return true;
+		};
+		/** The focused shells chip; agents keys untouched. */
+		const handleShellKey = (data: string, ctx: ExtensionContext): KeyResult => {
+			// Focus moved to a dialog/overlay, or the chip cleared under us: drop
+			// soft focus and let the key through.
+			if (!panel.editorFocused() || !panel.shellChipAvailable()) {
+				panel.setShellChipFocus(false);
+				return undefined;
+			}
+			const decoded = decodeStripKey(data, false);
+			// ctrl+x (the agents stop-all chord arm) means nothing on the chip:
+			// swallow it rather than leaking the raw \x18 into the editor.
+			if (decoded.chordArmed) return { consume: true };
+			const effect = reduceShellKey(decoded.key);
+			panel.setShellChipFocus(false);
+			if (effect === "passthrough") return undefined; // typing resumes in the editor, byte included
+			if (effect === "toAgents") {
+				if (focusFirstAgentRow()) return { consume: true };
+				// No agent rows below the chip: stay on it. Dropping focus here handed
+				// the NEXT key to the editor, where ↑ recalls the last prompt — the
+				// "sometimes ↓ recalls history" seen on the Windows VM (2026-09-19):
+				// ↓ chip, ↓ (nothing below, focus silently gone), ↑ → history.
+				panel.setShellChipFocus(true);
+				return { consume: true };
+			}
+			if (effect === "openTasks") {
+				void openTasksDialog(ctx).catch((error: unknown) => {
+					ctx.ui.notify(`Could not open the tasks dialog: ${error instanceof Error ? error.message : String(error)}`, "error");
+				});
+				return { consume: true };
+			}
+			// While the model streams, esc must still interrupt it — consume only when idle.
+			if (decoded.key === "leave") return ctx.isIdle() ? { consume: true } : undefined;
+			return { consume: true };
+		};
+		try {
+			registerCtx.ui.onTerminalInput((data) => {
+				// pi-tui calls input listeners before it filters key releases, and a
+				// kitty terminal sends one after every press: a release is never a
+				// key here (it used to read as typing and drop focus).
+				if (isKeyRelease(data)) return undefined;
+				const ctx = lastCtx ?? registerCtx;
+				// Enter focus: down-arrow while the editor holds real focus. Unlike the
+				// workflow strip we do NOT require the editor to be idle — the whole
+				// point is inspecting agents (and shells) that run while the main turn
+				// is in flight. This branch is the per-keystroke hot path — the
+				// O(rows) checks run only once a Down actually asks to focus, never on
+				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
+				// chip when shells are running; the next ↓ moves into the agent rows.
+				if (panel.focusIndex === undefined && !panel.shellChipFocused) {
+					// Viewing an agent with the editor focused: the page keys scroll the
+					// view, and Esc in an empty editor goes back to main.
+					if (view && panel.editorFocused()) {
+						const id = keyId(data);
+						if (id === "pageUp" || id === "pageDown") {
+							view.scrollBy(id === "pageUp" ? 10 : -10);
+							return { consume: true };
+						}
+						if (id === "escape" && editorEmpty()) {
+							closeView();
+							return { consume: true };
+						}
+					}
+					if (!isStripEntryKey(data) || !panel.editorFocused()) return undefined;
+					// In a draft, ↓ first moves the cursor, walks recalled history or the
+					// autocomplete list; the strip takes it only past the draft's last line.
+					if (!editorYieldsDown(panel.editorBaseline)) return undefined;
+					if (panel.shellChipAvailable()) {
+						panel.setShellChipFocus(true);
+						return { consume: true };
+					}
+					return focusFirstAgentRow() ? { consume: true } : undefined;
+				}
+				if (panel.shellChipFocused) return handleShellKey(data, ctx);
+				const focusIndex = panel.focusIndex;
+				if (focusIndex === undefined) return undefined; // unreachable: one of the two focuses was set
+				// The strip emptied under us (finished rows lingered out) — let go.
+				if (panel.rowCount() <= 1) {
+					leave();
+					return undefined;
+				}
+				// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
+				if (!panel.editorFocused()) {
+					leave();
+					return undefined;
+				}
+				const decoded = decodeStripKey(data, chordArmed);
+				chordArmed = decoded.chordArmed;
+				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) return closeAndPassthrough();
+				switch (decoded.key) {
+					case "up":
+						if (focusIndex === 0) {
+							// Back up out of the agent rows: onto the shells chip when
+							// shells are running, otherwise out of the panel entirely.
+							leave();
+							if (panel.shellChipAvailable()) panel.setShellChipFocus(true);
+						} else panel.setFocus(focusIndex - 1);
+						return { consume: true };
+					case "down":
+						panel.setFocus(Math.min(panel.rowCount() - 1, focusIndex + 1));
+						return { consume: true };
+					case "leave":
+						return doLeave(ctx);
+					case "open": {
+						// Claude Code's model: Enter swaps the view to the selection (and
+						// switches an open view); Enter on `main` restores the main
+						// transcript. Focus stays in the strip for the next switch.
+						const run = panel.selectedRun();
+						if (run) openView(ctx, run.taskId);
+						else closeView();
+						return { consume: true };
+					}
+					case "stop":
+						return doStop();
+					case "stopAll":
+						return doStopAll();
+					case "pageUp":
+					case "pageDown":
+						// Scroll an open view; with none open, swallow so the page keys
+						// never leak into the editor while the strip holds focus.
+						view?.scrollBy(decoded.key === "pageUp" ? 10 : -10);
+						return { consume: true };
+				}
+			});
+		} catch {
+			// Mode without raw terminal input (print/RPC) — the strip is view-only.
+		}
+	};
+
+	// Compact transcript rendering for the notifications this extension injects
+	// (full body on ctrl+o); the verbose framing stays model-only.
+	// A message is addressed from the agent's task id; its headline names the
+	// agent, from the live registry or the message's own details (a resumed
+	// session has no live runs).
+	for (const customType of ["subagent-message", "subagent-result"]) {
+		pi.registerMessageRenderer(customType, (message, options, theme) => {
+			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
+			const agentName = (from: string): string | undefined =>
+				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
+			return notificationComponent(theme, customMessageText(message.content), options.expanded, { agentName, hint: expandHintFor(options) });
+		});
+	}
+
+	// A hand-back the model already read through task_output (block: true on the
+	// agent's task) is withdrawn — One Code's task_output returns the full report,
+	// so the message and its pointer would only repeat it (see decisions).
+	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
+	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
+	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {
+		if (shuttingDown) return;
+		notifier(customType, text, details);
+	};
+
+	/**
+	 * Anything a child sends the parent — a mid-run message or its final report —
+	 * is unmetered model output landing in the parent's context, N children at
+	 * once (review S4). Past the cap it is PERSISTED, not cut: the full text goes
+	 * to `<session-dir>/tool-results/<id>.txt` (Claude Code's convention, the
+	 * same block MCP results use) and the notification carries a preview plus
+	 * the path, so nothing is lost — the parent reads the file when it needs it.
+	 */
+	const MESSAGE_TO_MAIN_CAP = 10_000;
+	const bounded = (text: string, id: string, maxBytes: number): string =>
+		persistIfLarge(text, { dir: sessionResultsDir(lastCtx), id, maxBytes });
+
+	/**
+	 * Route a nested run's SendMessage {to: "main"}: to the CHILD that spawned it
+	 * (steered into the turn that is blocking on the grandchild's result) when
+	 * that child is a live resident, else to the main conversation. Without this
+	 * the spawning child never saw the message and the main model was told about
+	 * work it did not delegate (SUBAGENT-REVIEW L4).
+	 */
+	const relayToParent = (parentTaskId: string, from: string, name: string, message: string, summary?: string) => {
+		// Bounded once: the fallback reuses the same body (and persisted file).
+		const body = boundedMessage(name, message);
+		const toMain = () => announceAgentMessage(from, name, body);
+		const parent = residents.get(parentTaskId);
+		if (!parent || parent.handle.exited()) {
+			toMain();
+			return;
+		}
+		void parent.handle.send(subagentResultText().fromSubagent({ name, summary, body })).catch(toMain);
+	};
+
+	const boundedMessage = (name: string, message: string) => bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
+	/** True between agent_start and agent_settled: a child's mid-run message then lands mid-turn (CC's other opener). */
+	let parentBusy = false;
+	/**
+	 * A child's mid-run message as CC's `<agent-message>` (no hand-back preamble:
+	 * it is not a report), addressed from the child's task id — the address
+	 * SendMessage reaches it by. CC's frame has no slot for the child's own
+	 * one-line summary, so it is dropped here (it still labels the relay to a
+	 * parent child).
+	 */
+	const announceAgentMessage = (from: string, name: string, body: string) =>
+		notify("subagent-message", agentMessage({ from, body, midTurn: parentBusy }), { taskId: from, name });
+	/** Relay a child's send_message {to: "main"} into this conversation. */
+	const notifyAgentMessage = (from: string, name: string, message: string) => announceAgentMessage(from, name, boundedMessage(name, message));
+
+	/** The spool a resident's turns are written to (`task_output` and the notification's `<output-file>`). */
+	const outputLogPath = (record: AgentRunRecord): string | undefined =>
+		record.sessionSearchDir ? join(record.sessionSearchDir, "output.log") : undefined;
+
+	/**
+	 * The hand-back for a resident agent's finished turn (its first report, an
+	 * update, a reply). Claude Code 2.1.283 sends one `<task-notification>` with
+	 * the report inline in `<result>` for a fork in every mode and for every agent
+	 * outside auto mode (findings §40). In auto mode a non-fork agent keeps the
+	 * two-message form: the report goes out as an `<agent-message>` from the
+	 * agent — the preamble, every line indented, auto mode's review flag above it
+	 * — and the agent's own `<task-notification>` follows, its `<result>` a
+	 * pointer at that message, never the report again. A turn that failed or was
+	 * stopped delivered no report, so it is always one notification with the
+	 * output (and any flag) inline. Both go through the same notifier, in this
+	 * order, so a coalesced round keeps the report ahead of the pointer.
+	 */
+	const notifyHandBack = (opts: {
+		/** The agent's persistent id: `from=` on the message, the SendMessage address. */
+		from: string;
+		/** The registered task this turn is (the agent's own id, or a SendMessage task's). */
+		taskId: string;
+		name: string;
+		toolUseId?: string;
+		outputFile?: string;
+		/** The turn's outcome: its status, tool count and tokens come from here. */
+		outcome: ChildOutcome;
+		/** The turn ended because the user or the model stopped the agent (CC's `killed`). */
+		stopped?: boolean;
+		/** Start of the span `outcome`'s tokens and tool uses cover, for CC's `<duration_ms>`. */
+		startedAt: number;
+		/** The bounded report text (a failed turn's output rides `<result>` instead). */
+		report: string;
+		review: HandBackVerdict | undefined;
+		details?: Record<string, unknown>;
+	}) => {
+		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
+		const warning = opts.review ? handBackWarning(opts.review) : undefined;
+		const record = registry.resolve(opts.from);
+		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined };
+		const envelope = (result: string) =>
+			taskNotification({
+				kind: "agent",
+				taskId: opts.taskId,
+				toolUseId: opts.toolUseId,
+				outputFile: opts.outputFile,
+				status,
+				summary: agentSummary(record?.description ?? opts.name, status),
+				note: agentNote(),
+				result,
+				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
+			});
+		if (status !== "completed" || record?.agent === FORK_AGENT || permissionMode !== "auto") {
+			notify("subagent-result", envelope(withReview(opts.report, warning)), details);
+			return;
+		}
+		// CC's mid-turn form applies to hand-backs too (observed live: a report
+		// landing while the parent works takes the other opener and the hint).
+		notify("subagent-message", agentMessage({ from: opts.from, body: opts.report, handBack: true, warning, midTurn: parentBusy }), details);
+		notify("subagent-result", envelope(handBackPointer(opts.from, opts.review !== undefined)), details);
+	};
+
+	/**
+	 * The prompt a fork inherits: the one this session's next request carries.
+	 * pi's `getSystemPrompt()` is its own stock prompt between turns, before the
+	 * first prompt and in a turn opened from idle, so it is only the fallback
+	 * for a prompt pi builds itself (a named agent's).
+	 */
+	const forkSystemPrompt = (ctx: ExtensionContext): string => requestSystemPrompt(pi.events, ctx) ?? ctx.getSystemPrompt();
+
+	/**
+	 * The parent's last provider request (the compaction extension publishes
+	 * each one). A fork's requests are built from it so the fork reads the
+	 * parent's prompt cache (fork-cache.ts; decisions/caching.md). None before
+	 * the first request, or for another model: that fork has no cache to read.
+	 */
+	let lastRequest: RequestCapture | undefined;
+	pi.events.on(LAST_REQUEST_CHANNEL, (data) => {
+		lastRequest = data as RequestCapture | undefined;
+	});
+	const forkRequest = (ctx: ExtensionContext): RequestCapture | undefined =>
+		lastRequest?.covers && captureMatches(lastRequest, ctx.model as { api?: string; provider?: string; id?: string } | undefined) ? lastRequest : undefined;
+
+	/**
+	 * The capture is persisted too, so a resumed fork still reads the cache its
+	 * earlier turns wrote. One file per distinct capture (a fan-out of forks
+	 * shares one), named by its hash, beside the fork session directories.
+	 */
+	const FORK_REQUEST_FILE = "parent-request";
+	const forkRequestsDir = (sessionSearchDir: string) => join(dirname(sessionSearchDir), "parent-requests");
+	/** Each capture is serialized and hashed once, however many forks share it. */
+	const persistedCaptures = new WeakMap<RequestCapture, string>();
+	const persistForkRequest = (record: AgentRunRecord, capture: RequestCapture) => {
+		if (!record.sessionSearchDir) return;
+		try {
+			const dir = forkRequestsDir(record.sessionSearchDir);
+			let name = persistedCaptures.get(capture);
+			if (!name || !existsSync(join(dir, name))) {
+				const body = JSON.stringify(capture);
+				name = `${createHash("sha256").update(body).digest("hex").slice(0, 24)}.json`;
+				mkdirSync(dir, { recursive: true });
+				if (!existsSync(join(dir, name))) {
+					// Atomic: a partial file would be skipped as present by every later fork.
+					const temp = join(dir, `${name}.${process.pid}.tmp`);
+					writeFileSync(temp, body);
+					renameSync(temp, join(dir, name));
+				}
+				persistedCaptures.set(capture, name);
+			}
+			writeFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), name);
+		} catch {
+			// The run still reads the cache; only a later resume re-reads uncached.
+		}
+	};
+	const readForkRequest = (record: AgentRunRecord): RequestCapture | undefined => {
+		if (!record.sessionSearchDir) return undefined;
+		try {
+			const name = readFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), "utf-8").trim();
+			return JSON.parse(readFileSync(join(forkRequestsDir(record.sessionSearchDir), name), "utf-8")) as RequestCapture;
+		} catch {
+			return undefined;
+		}
+	};
+
+	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
+	const FORK_PROMPT_FILE = "system-prompt.md";
+	const persistForkPrompt = (record: AgentRunRecord, prompt: string) => {
+		if (!record.sessionSearchDir) return;
+		try {
+			writeFileSync(join(record.sessionSearchDir, FORK_PROMPT_FILE), prompt);
+		} catch {
+			// The run still works; only a later resume loses the prompt (and says so).
+		}
+	};
+	/**
+	 * A fork's inputs from this conversation (its system prompt and the parent's
+	 * last request, for the cache), saved beside its session so a SendMessage
+	 * can resume it later. Undefined for a named agent.
+	 */
+	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
+		const parentSystemPrompt = forkSystemPrompt(ctx);
+		persistForkPrompt(record, parentSystemPrompt);
+		const parentRequest = forkRequest(ctx);
+		if (parentRequest) persistForkRequest(record, parentRequest);
+		return { parentSystemPrompt, parentRequest };
+	};
+	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
+		if (!record.sessionSearchDir) return undefined;
+		try {
+			return readFileSync(join(record.sessionSearchDir, FORK_PROMPT_FILE), "utf-8");
+		} catch {
+			return undefined;
+		}
+	};
+
+	/** Session dir for a run's persisted child session; undefined → child runs --no-session. */
+	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
+		try {
+			const dir = join(ctx.sessionManager.getSessionDir(), "subagents", taskId);
+			mkdirSync(dir, { recursive: true });
+			return dir;
+		} catch {
+			return undefined;
+		}
+	};
+
+	interface PreparedRun {
+		request: RunRequest;
+		record: AgentRunRecord;
+		agentDef?: AgentDefinition;
+	}
+
+	/**
+	 * How deep Agent-in-Agent nesting goes: a run at depth < MAX_SPAWN_DEPTH
+	 * gets the spawn tool, so main(–) → child(0) → grandchild(1) and no further.
+	 * Matches CC (its subagents/forks spawn their own agents) while bounding
+	 * runaway fan-out — every session shares one in-process event loop.
+	 */
+	const MAX_SPAWN_DEPTH = 1;
+
+	/**
+	 * Catalog text for the injected spawn tool, cached per cwd: building a
+	 * child's toolset must not re-scan the agent dirs on every spawn — a wide
+	 * fan-out would pay the filesystem walk N times for a description most
+	 * children never use. Fork is not listed (unavailable inside a child).
+	 * Validation in execute() still loads fresh; only this string is pinned,
+	 * which is what tool descriptions are anyway — static for the session.
+	 */
+	const childCatalogCache = new Map<string, string[]>();
+	const childCatalog = (cwd: string): string[] => {
+		let rows = childCatalogCache.get(cwd);
+		if (rows === undefined) {
+			rows = catalogLines(loadAgents(cwd));
+			childCatalogCache.set(cwd, rows);
+		}
+		return rows;
+	};
+
+	/**
+	 * The Agent tool injected into a child session (CC parity: subagents can
+	 * spawn subagents). It delegates to THIS extension's runtime and registries,
+	 * so a nested run streams into the same panel (as a `└` row under its
+	 * parent), is gated through the parent's real permission pipeline, and is
+	 * addressable by SendMessage like any other run. Foreground-only: the call
+	 * returns when the nested agent finishes — no fork, worktree, or background
+	 * from inside a child.
+	 */
+	const childAgentTool = (parentRecord: AgentRunRecord, parentDepth: number): ToolDefinition => {
+		return {
+			name: "Agent",
+			label: "Agent",
+			description: words.nestedAgentDescription({ catalog: childCatalog(parentRecord.cwd) }),
+			// Same CC-parity surface as the main Agent tool (H1): `prompt` is
+			// accepted as `task`, `description` is tolerated, and the agent name is
+			// matched case-insensitively — a nested subagent is just as likely to be
+			// CC-trained.
+			// A fork inherits the parent's tools block byte for byte (its first request
+			// extends the parent's recorded one, decisions/caching.md), so its spawn
+			// tool takes the parent's Agent schema: the ledger keeps the recorded
+			// declaration only while the live schema matches it, and pi validates the
+			// call against the live one. The options a nested run lacks are refused in
+			// execute() with the fix named.
+			parameters: (parentRecord.agent === FORK_AGENT ? subagentParams(words) : nestedAgentParams(words)) as never,
+			prepareArguments: prepareAgentArguments as never,
+			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+				const ctx = lastCtx;
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown; model?: unknown; thinking?: unknown; isolation?: unknown; action?: unknown };
+				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
+				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
+				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
+				const task = taskInput.trim();
+				if (!ctx) return refuseCall({ kind: "hostNotReady" });
+				if (agentName.toLowerCase() === FORK_AGENT) return refuseCall({ kind: "nestedFork" });
+				const agents = loadAgents(parentRecord.cwd);
+				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
+				if (p.action === "list") return { content: [{ type: "text" as const, text: subagentResultText().catalogList({ rows: catalogLines(agents) }) }], details: {} };
+				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
+				if (unsupported.length > 0) return refuseCall({ kind: "nestedOptions", options: unsupported });
+				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
+				if (!agentDef) {
+					return refuseCall({ kind: "nestedUnknownAgent", ...(agentName ? { name: agentName } : {}), catalog: catalogLines(agents) });
+				}
+				if (!task) return refuseCall({ kind: "taskRequired", aliasNote: words.taskAliasNote });
+
+				const { name, note: renamedNote } = resolveRunName(registry, agentDef.name, typeof p.name === "string" ? p.name : undefined);
+				// Same parent-side model resolution as the main Agent tool, minus
+				// per-call overrides: the agent's own model, else the configured
+				// default, else the session model.
+				const available = usableModels(ctx);
+				const resolution = resolveSubagentModel({
+					agentModel: agentDef.model,
+					configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
+					sessionModel: ctx.model,
+					available,
+					requireImageInput: supportsImageInput(ctx.model),
+				});
+				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				const modelNotes = subagentModelNotes(resolution);
+				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
+
+				const taskId = generateTaskId();
+				const record: AgentRunRecord = {
+					name,
+					agent: agentDef.name,
+					taskId,
+					sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+					// The SPAWNING agent's cwd, not the top-level session's: a worktree-
+					// isolated parent's nested spawns must work in the same worktree.
+					cwd: parentRecord.cwd,
+					model: resolved,
+					thinking: undefined,
+					depth: parentDepth + 1,
+					...(description ? { description } : {}),
+				};
+				registry.add(record); // SendMessage from main can reach the nested run too
+				parentTaskOf.set(taskId, parentRecord.taskId);
+
+				// The main conversation's Agent calls are classified as delegations
+				// (matcher DELEGATION_TOOLS); a child's nested spawn must be judged the
+				// same way — a prompt-injected child could otherwise hand a task the
+				// parent would never be allowed to a grandchild unclassified (review
+				// S8). The child's own gate never sees this call (Agent is NEVER_GATE
+				// there), so route it through the parent's bridge here. Fails closed.
+				try {
+					const bridge = getPermissionBridge();
+					const verdict = bridge
+						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal, parentToolCallId: mainCallOf(parentRecord.taskId) })
+						: undefined;
+					if (!bridge || verdict?.block) {
+						return {
+							content: [{ type: "text" as const, text: subagentResultText().refused(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" }) }],
+							details: { agentRuns: [] as AgentRunRecord[] },
+							isError: true,
+						};
+					}
+				} catch (error) {
+					return {
+						content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "nestedCheckFailed", osMessage: (error as Error).message }) }],
+						details: { agentRuns: [] as AgentRunRecord[] },
+						isError: true,
+					};
+				}
+
+				const result = await executeRun(
+					{
+						request: {
+							agent: agentDef.name,
+							task,
+							name,
+							description,
+							model: resolved,
+							fallbackModel: spawnFallbackModel(resolved, resolution.source, ctx.model),
+						},
+						record,
+						agentDef,
+					},
+					ctx,
+					signal, // the spawning child aborting (stop/esc) kills the nested run
+					undefined,
+					{ taskId: parentRecord.taskId, depth: parentDepth },
+				);
+				const notes = [...(renamedNote ? [renamedNote] : []), ...modelNotes];
+				return {
+					content: [
+						{
+							type: "text" as const,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${bounded(result.output, `${record.taskId}-report`, OUTPUT_CAP)}\n\n(${formatStats(result.toolCalls, result.usage)})`,
+						},
+					],
+					details: { agentRuns: [record] },
+					isError: result.failed ?? false,
+				};
+			},
+		} as ToolDefinition;
+	};
+
+	/**
+	 * The spawn tool a run is entitled to. THE one depth gate: it reads the
+	 * record's own depth (set once at creation), so every handout site —
+	 * fresh spawn, background resident, SendMessage resume — enforces
+	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped. Only a
+	 * `resident` run can receive a cron fire, so any other run's cron_create refuses.
+	 */
+	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
+		const depth = record.depth ?? 0;
+		// The child's cron tools reach this session's store (lib/agents/agent-cron.ts);
+		// none when the background feature is off (no store answers them).
+		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
+		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]) : [];
+		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
+	};
+
+	// A fired cron job of a subagent's: to that agent while it lives (Claude
+	// Code's task-notification delivery); otherwise the background extension drops it.
+	pi.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
+		const fire = data as AgentCronFire;
+		const resident = residents.get(fire.agentId);
+		if (!resident || resident.handle.exited()) return;
+		fire.delivered = true;
+		// A send that fails after all ends the job, as a fire to an ended agent does.
+		void resident.handle.send(fire.text(resident.handle.conversation)).catch(() => {
+			pi.events.emit(AGENT_CRON_CHANNEL, { op: "delete", agentId: fire.agentId, id: fire.jobId } satisfies AgentCronRequest);
+		});
+	});
+
+	/**
+	 * The text a child's first turn is prompted with: a fork gets the inherited-
+	 * context framing (plus, in a worktree, where its paths moved to); a named
+	 * agent gets the task as written. Shared by both spawn paths.
+	 */
+	const frameTask = (request: RunRequest, worktree: Worktree | undefined, parentCwd: string): string =>
+		request.fork ? forkTaskMessage(request.task, worktree ? { worktreePath: worktree.path, parentCwd } : undefined) : request.task;
+
+	/** Create a run's isolation worktree and point its record at it (both spawn paths). */
+	const isolateInWorktree = async (base: string, record: AgentRunRecord, name: string): Promise<Worktree> => {
+		const worktree = await createWorktree(base, name);
+		record.cwd = worktree.path;
+		record.worktree = true;
+		return worktree;
+	};
+
+	/**
+	 * Run one child to completion, blocking until it finishes — the shape a
+	 * NESTED spawn needs (a child's own Agent call has no notification surface,
+	 * so it waits for the result) and the one-shot modes need (a `-p` process
+	 * exits when the turn settles, so a background run would be orphaned).
+	 * Main-conversation runs in TUI/RPC sessions are background residents
+	 * instead. Creates a worktree first if asked and finalizes the record when
+	 * done. `parent` links the run under its parent in the panel tree.
+	 */
+	const executeRun = async (
+		prepared: PreparedRun,
+		ctx: ExtensionContext,
+		signal: AbortSignal | undefined,
+		forkFrom?: string,
+		parent?: { taskId: string; depth: number },
+		onProgress?: (toolCalls: number, text: string, usage: UsageTotals) => void,
+	): Promise<TaskResult> => {
+		const { request, record, agentDef } = prepared;
+		// The session's working directory: the entered worktree, if any.
+		const base = workCwd(ctx);
+
+		// Before anything marks the run as running: a failed build must not leave
+		// the task id in runningIds, where SendMessage would call it "still running".
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentResultText().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
+		}
+
+		let worktree: Worktree | undefined;
+		if (request.worktree) {
+			try {
+				worktree = await isolateInWorktree(base, record, request.name);
+			} catch (error) {
+				return {
+					agent: request.agent,
+					name: request.name,
+					taskId: record.taskId,
+					task: request.task,
+					output: subagentResultText().failure({ kind: "worktree", osMessage: (error as Error).message }),
+					toolCalls: 0,
+					usage: emptyUsage(),
+					failed: true,
+				};
+			}
+		}
+
+		runningIds.add(record.taskId);
+		const live = trackLiveRun(record, request, parent);
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
+		const handle = runtime.run({
+			name: request.name,
+			agent: agentDef,
+			task: frameTask(request, worktree, base),
+			cwd: record.cwd,
+			forkFrom: request.fork ? forkFrom : undefined,
+			parentSystemPrompt: forkPrompt,
+			parentRequest,
+			sessionDir: record.sessionSearchDir || undefined,
+			model: request.model,
+			fallbackModel: request.fallbackModel,
+			thinking: request.thinking,
+			signal,
+			onProgress: (toolCalls, text, usage) => {
+				live.progress(toolCalls, usage);
+				onProgress?.(toolCalls, text, usage);
+			},
+			sink: live.sink,
+			onMessageToMain: (message, summary) =>
+				parent ? relayToParent(parent.taskId, record.taskId, request.name, message, summary) : notifyAgentMessage(record.taskId, request.name, message),
+			extraTools: spawnToolsFor(record),
+			mainToolCallId: () => mainCallOf(record.taskId),
+		});
+		liveHandles.set(record.taskId, handle);
+
+		try {
+			const outcome: ChildOutcome = await handle.result;
+			registry.sessionFileFor(record); // resolve now that the child has written it
+			live.finish(Boolean(outcome.failed));
+			let worktreeKept: boolean | undefined;
+			if (worktree) {
+				worktreeKept = !(await cleanupWorktree(base, worktree));
+			}
+			return {
+				agent: request.agent,
+				name: request.name,
+				taskId: record.taskId,
+				task: request.task,
+				...outcome,
+				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+				worktreeKept,
+			};
+		} catch (error) {
+			live.finish(true);
+			// A failed run can still have committed or edited in its worktree:
+			// a kept one is reported like a finished run's.
+			const worktreeKept = worktree ? !(await cleanupWorktree(base, worktree)) : undefined;
+			return {
+				agent: request.agent,
+				name: request.name,
+				taskId: record.taskId,
+				task: request.task,
+				output: subagentResultText().failure({ kind: "failed", osMessage: (error as Error).message }),
+				toolCalls: 0,
+				usage: emptyUsage(),
+				failed: true,
+				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+				worktreeKept,
+			};
+		} finally {
+			runningIds.delete(record.taskId);
+		}
+	};
+
+	/**
+	 * Launch one prepared run as a background resident (Claude Code parity):
+	 * it returns as soon as the child starts, the report arrives as a steered
+	 * task notification, and the child stays resident so SendMessage can reach
+	 * it live (steer mid-turn, prompt when idle). `sessionFile` is the parent
+	 * transcript a fork clones; `toolCallId` links the notifications to the
+	 * spawning Agent call (none for a `/btw` fork); `forkMessages` are appended
+	 * to a fork's transcript. Returns the line reported for the run.
+	 */
+	const launchResident = async (
+		p: PreparedRun,
+		ctx: ExtensionContext,
+		runtime: SubagentRuntime,
+		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
+	): Promise<{ launched: boolean; line: string }> => {
+		const ended = () => {
+			registry.remove(p.record.taskId);
+			return { launched: false, line: launchLine({ kind: "sessionEnded", name: p.record.name }) };
+		};
+		if (shuttingDown) return ended();
+		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
+		// Captured as a string: onExit runs from a `.finally` long after this
+		// turn's ctx may be stale (review S5). The entered worktree, if any.
+		const parentCwd = workCwd(ctx);
+		let worktree: Worktree | undefined;
+		if (p.request.worktree) {
+			try {
+				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
+			} catch (error) {
+				return { launched: false, line: launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }) };
+			}
+			// Shutdown can begin while git creates the worktree: build no child
+			// after its sweep, and remove the worktree within its grace.
+			if (shuttingDown) {
+				await cleanupWorktree(parentCwd, worktree);
+				return ended();
+			}
+		}
+
+		const logPath = outputLogPath(p.record);
+		let lastLogWrite = 0;
+		let finish!: () => void;
+		const finished = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+
+		// The child's final output. task.output() falls back to this
+		// because handle.snapshot().text can be blank at a turn boundary —
+		// the same reason the log write below uses `|| outcome.output`.
+		// Keeps task_output consistent with the log and the completion
+		// notification rather than showing an empty body in that case.
+		let lastOutput = "";
+		// The initial task's own report. task_output for THIS task must return the
+		// first turn's reply — not the resident's growing multi-turn transcript —
+		// the same way a SendMessage task returns one reply (review S12).
+		let firstTurnOutput: string | undefined;
+		const live = trackLiveRun(p.record, p.request);
+		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [], reviewing: 0 };
+		const worktreeNote = worktree
+			? `\n\n${subagentResultText().worktreeRunning({ path: worktree.path, branch: worktree.branch })}`
+			: "";
+		resident.turnHandlers.push((outcome, review, stopped) => {
+			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+			task.finishedAt = Date.now();
+			firstTurnOutput = outcome.output;
+			finish();
+			notifyHandBack({
+				from: p.record.taskId,
+				taskId: p.record.taskId,
+				name: p.record.name,
+				toolUseId: toolCallId,
+				outputFile: logPath,
+				outcome,
+				stopped,
+				startedAt: task.startedAt,
+				report: `${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
+				review,
+			});
+		});
+
+		// Idle reaper: every run is a resident now, so without this a long
+		// session accumulates one live AgentSession (extension instances,
+		// message array, MCP tool refs) per delegation for its whole life.
+		// After RESIDENT_IDLE_MS idle the session is released quietly; the
+		// agent stays reachable — SendMessage resumes it from its session
+		// file. Worktree residents are exempt: release would remove the
+		// worktree a resume still needs. So is one that owns a cron job, which
+		// fires only to a live agent (lib/agents/agent-cron.ts). Armed from every turn end.
+		let reaper: ReturnType<typeof setTimeout> | undefined;
+		const armReaper = () => {
+			if (worktree) return;
+			if (reaper) clearTimeout(reaper);
+			reaper = setTimeout(() => {
+				reaper = undefined;
+				if (handle.exited()) return;
+				if (handle.busy() || agentOwnsCronJobs(pi.events, p.record.taskId)) {
+					armReaper();
+					return;
+				}
+				handle.release();
+			}, RESIDENT_IDLE_MS);
+			reaper.unref?.();
+		};
+		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
+		// No `signal` here on purpose: a resident outlives the spawning turn and
+		// is stopped through task_stop / the panel, not by the turn ending (S15).
+		const started = await runtime.runResident({
+			name: p.record.name,
+			agent: p.agentDef,
+			cwd: p.record.cwd,
+			forkFrom: p.request.fork ? sessionFile : undefined,
+			forkMessages: p.request.fork ? forkMessages : undefined,
+			parentSystemPrompt: forkPrompt,
+			parentRequest,
+			sessionDir: p.record.sessionSearchDir || undefined,
+			model: p.request.model,
+			fallbackModel: p.request.fallbackModel,
+			thinking: p.request.thinking,
+			onProgress: (toolCalls, text, usage) => {
+				live.progress(toolCalls, usage);
+				// Throttled: onProgress fires per tool call/message with the whole
+				// turn text so far, and this path now carries EVERY run — an
+				// unthrottled sync rewrite would be O(n²) bytes on the hot path.
+				// onTurnEnd below flushes the final state, so the tail is never lost.
+				if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
+					lastLogWrite = Date.now();
+					writeFileSync(logPath, text);
+				}
+			},
+			sink: live.sink,
+			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
+			extraTools: spawnToolsFor(p.record, { resident: true }),
+			mainToolCallId: () => mainCallOf(p.record.taskId),
+			onTurnEnd: (outcome) => {
+				registry.sessionFileFor(p.record);
+				live.settle();
+				lastOutput = resident.handle.snapshot().text || outcome.output;
+				if (logPath) writeFileSync(logPath, lastOutput);
+				// The handler is claimed now (so a message arriving mid-review pairs
+				// with the NEXT turn), but runs only once auto mode's hand-back
+				// review of this turn's action sequence has answered, so the
+				// verdict rides in the same notification as the report instead of
+				// trailing it. The wait is bounded (hand-back-review.ts) and
+				// answered synchronously when auto mode is off.
+				const handler = resident.turnHandlers.shift();
+				// A stop or resume during review must not change this turn's outcome.
+				const stopped = stoppedTaskIds.has(p.record.taskId);
+				armReaper();
+				resident.reviewing++;
+				void awaitHandBackReview(pi.events, p.record, outcome.actions, undefined, mainCallOf(p.record.taskId)).then((review) => {
+					resident.reviewing--;
+					if (handler) {
+						handler(outcome, review, stopped);
+					} else {
+						// A turn nobody is waiting on (e.g. a steer that raced past its
+						// target turn and ran on its own) must still surface.
+						// Only the launch's notification names its tool call; a later
+						// turn's notifies without one, as Claude Code's do (findings §40).
+						notifyHandBack({
+							from: p.record.taskId,
+							taskId: p.record.taskId,
+							name: p.record.name,
+							outputFile: logPath,
+							outcome,
+							stopped,
+							startedAt: resident.startedAt,
+							report: bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP),
+							review,
+							details: { update: true },
+						});
+					}
+				});
+			},
+			onExit: () => {
+				if (reaper) clearTimeout(reaper);
+				live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
+				if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
+				liveHandles.delete(p.record.taskId);
+				// Returned, not voided: kill() settles after the cleanup, so the
+				// session_shutdown grace covers it.
+				if (worktree) return cleanupWorktree(parentCwd, worktree);
+				return undefined;
+			},
+		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+		if (started instanceof Error) {
+			// The child never started: settle its panel row and forget the run, so
+			// neither the panel nor list_agents offers it.
+			live.finish(true);
+			registry.remove(p.record.taskId);
+			if (worktree) void cleanupWorktree(parentCwd, worktree);
+			return { launched: false, line: launchLine({ kind: "startFailed", name: p.record.name, osMessage: started.message }) };
+		}
+		const handle = started;
+		resident.handle = handle;
+		// Construction can finish after shutdown's stop-all sweep. The handle
+		// was not registered then, so dispose it before sending any task now.
+		if (shuttingDown) {
+			await handle.kill();
+			return ended();
+		}
+		residents.set(p.record.taskId, resident);
+		liveHandles.set(p.record.taskId, handle);
+
+		const task: BackgroundTask = {
+			id: p.record.taskId,
+			kind: "subagent",
+			ownUI: true, // rendered live by the subagents panel's agent strip
+			description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
+			status: "running",
+			startedAt: Date.now(),
+			logPath,
+			output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
+			stop: () => stopAgent(p.record.taskId, handle),
+			resident: () => !handle.exited(),
+			finished,
+		};
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		void handle.send(frameTask(p.request, worktree, parentCwd));
+
+		return {
+			launched: true,
+			line: launchLine({ kind: "running", name: p.record.name, taskId: p.record.taskId, ...(logPath ? { logPath } : {}) }),
+		};
+	};
+
+	/**
+	 * `/btw`'s `f to fork` (lib/side-calls/btw-fork.ts): a background fork that inherits
+	 * the conversation (if the session has one yet), then the side question and
+	 * its answer, and takes the question as its task. It reports back like any
+	 * spawned fork.
+	 */
+	const forkFromBtw = async (request: BtwForkRequest): Promise<BtwForkResult> => {
+		const ctx = request.ctx as ExtensionContext;
+		// Before the first turn the file is not written yet and the fork starts from
+		// the side exchange alone, as Claude Code's does (newChildSessionManager).
+		// Without a session file at all the conversation cannot be cloned, and a
+		// fork framed as inheriting it would confabulate (the Agent tool refuses too).
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
+		// Named from the question, as Claude Code names a /btw fork.
+		const name = freeRunName(registry.names(), btwForkName(request.question));
+		const taskId = btwForkTaskId(name);
+		// The session's current model and thinking, explicitly: before the first
+		// turn there is no transcript for the fork to restore them from.
+		const prepared: PreparedRun = {
+			request: {
+				agent: FORK_AGENT,
+				task: request.question,
+				name,
+				description: btwForkDescription(request.question),
+				fork: true,
+				model: ctx.model ? modelSpec(ctx.model) : undefined,
+				thinking: pi.getThinkingLevel(),
+			},
+			agentDef: undefined,
+			record: {
+				name,
+				agent: FORK_AGENT,
+				taskId,
+				sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+				cwd: workCwd(ctx),
+				depth: 0,
+				description: btwForkDescription(request.question),
+			},
+		};
+		registry.add(prepared.record);
+		// The session can be torn down while the runtime or the child starts; a
+		// fork launched after shutdown's stop-all sweep would outlive it.
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			registry.remove(taskId);
+			return { error: `Cannot fork: ${runtime}` };
+		}
+		if (shuttingDown) return { error: "The session ended before the fork started." };
+		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
+		if (shuttingDown) {
+			void stopAgent(taskId);
+			return { error: "The session ended before the fork started." };
+		}
+		if (!launched) return { error: line };
+		for (const text of btwForkRecord(name, taskId, request.question)) {
+			pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", raw: true } satisfies ReminderPayload);
+		}
+		return { name, taskId };
+	};
+	pi.events.on(BTW_FORK_CHANNEL, (data) => {
+		const request = data as BtwForkRequest;
+		request.handled = true;
+		void forkFromBtw(request).then(request.respond, (error: unknown) =>
+			request.respond({ error: `Failed to fork: ${error instanceof Error ? error.message : String(error)}` }),
+		);
+	});
+
+	// Claude Code's Agent text, short or long by the model's tier
+	// (agent-description.ts, lib/profile/tool-variants.ts); registered again when the
+	// form changes.
+	const agentParams = subagentParams(words);
+	const agentTool = defineTool({
+		name: "Agent",
+		label: "Agent",
+		...toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
+			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
+		}),
+		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
+		promptSnippet: words.agentPromptSnippet,
+		parameters: agentParams,
+		prepareArguments: prepareAgentArguments as (args: unknown) => SubagentParams,
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const agents = loadAgents(ctx.cwd);
+
+			// `task` is our name, `prompt` Claude Code's; a CC-trained model sends
+			// the latter (H1). Resolve to one value here so the rest of execute is
+			// unaffected.
+			const taskText = params.task ?? params.prompt;
+
+			// A call carrying run options (a task, a name, a model/thinking/isolation
+			// override, or action:"run") is a run; prepareAgentArguments gave one that
+			// named no agent general-purpose, as Claude Code does (a tiny model
+			// repeated such a call 30 times against an error naming the fix, battery
+			// round 7). A call with neither lists the catalog.
+			const wantsRun =
+				params.action === "run" ||
+				taskText != null ||
+				params.name != null ||
+				params.model != null ||
+				params.isolation != null ||
+				params.thinking != null;
+
+			if (params.action === "list" || (!params.subagent_type && !wantsRun)) {
+				return {
+					content: [{ type: "text", text: subagentResultText().catalogList({ rows: describeAgents(ctx.cwd) }) }],
+					details: { agents: agents.map((a) => a.name) },
+				};
+			}
+
+			// A run needs a task. A CC-shaped call that put its instruction in an
+			// unrecognized key, or none at all, must fail loud rather than start a
+			// child prompted with "" (H1). Fork included — cloning to do nothing is
+			// never intended.
+			if (!taskText || !taskText.trim()) {
+				return refuseCall({ kind: "taskRequired", aliasNote: words.taskAliasNote });
+			}
+
+			// Match `subagent_type` against the catalog case-insensitively and run
+			// the agent under its canonical name: a CC-trained model writes
+			// `Explore`/`Plan` where our bundled agents are `explore`/`plan` (H1).
+			// "Fork" is canonicalized the same way so downstream fork detection
+			// (entry.agent === FORK_AGENT) is case-insensitive too.
+			const requestedType = params.subagent_type!;
+			const canonicalType =
+				requestedType.toLowerCase() === FORK_AGENT
+					? FORK_AGENT
+					: (agents.find((a) => a.name.toLowerCase() === requestedType.toLowerCase())?.name ?? requestedType);
+
+			/** A requested name already used this session → the run gets a fresh one, and the result says so (M1). */
+			const renamed: string[] = [];
+			const requested: RunRequest[] = [{ agent: canonicalType, task: taskText, name: params.name }].map((entry) => {
+				const { name, note } = resolveRunName(registry, entry.agent, entry.name);
+				if (note) renamed.push(note);
+				return {
+					agent: entry.agent,
+					task: entry.task,
+					name,
+					description: params.description?.trim() || undefined,
+					fork: entry.agent === FORK_AGENT,
+					model: params.model,
+					thinking: params.thinking,
+					worktree: params.isolation === "worktree",
+				};
+			});
+
+			const sessionFile = ctx.sessionManager.getSessionFile();
+			let prepared: PreparedRun[] = [];
+			/**
+			 * What the model is told about its own model choice: the same sentences
+			 * the user gets, plus the model each child actually runs on. Deduped —
+			 * a batch of spawns that all requested one unavailable alias says it
+			 * once. See `subagentModelNotes` for why the model needs this.
+			 */
+			const modelNotes = new Set<string>();
+			// Every check before the records land: a rejection, or a throw on the way,
+			// frees the spawn's names for the retry.
+			let landed = false;
+			try {
+				// A fork continues this conversation; running it on a different model or
+				// reasoning effort is how the fork-confabulation incident happened (a
+				// minimal-thinking fork resumed the inherited topic instead of its task).
+				// Claude Code silently ignores `model` for forks; we fail loud instead.
+				if (requested.some((r) => r.fork) && (params.model || params.thinking)) return refuseCall({ kind: "forkOverrides" });
+
+				if (requested.some((r) => r.fork) && !sessionFile) return refuseCall({ kind: "forkNotPersisted" });
+
+				const unknown = requested.filter((r) => !r.fork && !agents.some((a) => a.name === r.agent));
+				if (unknown.length > 0) return refuseCall({ kind: "unknownAgents", names: unknown.map((u) => u.agent), catalog: describeAgents(ctx.cwd) });
+
+				if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) return refuseCall({ kind: "worktreeNeedsGit" });
+
+				prepared = requested.map((request) => {
+					const taskId = generateTaskId();
+					return {
+						request,
+						agentDef: request.fork ? undefined : agents.find((a) => a.name === request.agent),
+						record: {
+							name: request.name,
+							agent: request.agent,
+							taskId,
+							sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+							cwd: workCwd(ctx),
+							model: request.model,
+							thinking: request.thinking,
+							depth: 0,
+							...(request.description ? { description: request.description } : {}),
+						},
+					};
+				});
+
+				/**
+				 * Model resolution happens here, in the parent, against the real
+				 * registry — never in the child, whose `--model` fuzzy-matches across
+				 * every configured provider. The child is spawned with a concrete
+				 * `provider/id`; anything surprising (a fallback, a provider crossing)
+				 * is said out loud rather than happening silently.
+				 */
+				const available = usableModels(ctx);
+				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
+				for (const p of prepared) {
+					// A fork inherits the parent transcript, so it must continue on THIS
+					// conversation's exact model — never a configured default or the
+					// automatic same-provider pick, which would move the inherited context
+					// onto a different (often weaker) model. Leaving model undefined makes
+					// the forked session restore its own model. (Per-call `model` on a fork
+					// is already rejected above.)
+					if (p.request.fork) continue;
+					// No per-call or agent-frontmatter override → the automatic default,
+					// which is stable for the session, so reuse the cached resolution
+					// instead of re-ranking the catalog per spawn. An override varies per
+					// call and always resolves fresh.
+					const resolution =
+						p.request.model || p.agentDef?.model
+							? resolveSubagentModel({
+									requested: p.request.model,
+									agentModel: p.agentDef?.model,
+									configuredDefault: configuredDefault,
+									sessionModel: ctx.model,
+									available,
+									requireImageInput: supportsImageInput(ctx.model),
+								})
+							: resolveAutoDefault(ctx.model, available, configuredDefault);
+					if (resolution.unresolved) {
+						// The main model chose this string; the menu lets it retry.
+						const fallback = resolveSubagentModel({
+							configuredDefault: configuredDefault,
+							sessionModel: ctx.model,
+							available,
+							requireImageInput: supportsImageInput(ctx.model),
+						});
+						return refuseCall({
+							kind: "unknownModel",
+							model: resolution.unresolved,
+							...(resolution.unresolvedReason ? { reason: resolution.unresolvedReason } : {}),
+							menu: subagentModelsReminder({
+								available,
+								sessionModel: ctx.model,
+								defaultModel: fallback.model,
+								defaultSource: fallback.source,
+								requireImageInput: supportsImageInput(ctx.model),
+							}),
+						});
+					}
+					const gate = expensiveModelGate(resolution, ctx.model, params.allow_expensive);
+					if (gate) {
+						const fallback = resolveSubagentModel({
+							configuredDefault: configuredDefault,
+							sessionModel: ctx.model,
+							available,
+							requireImageInput: supportsImageInput(ctx.model),
+						});
+						return refuseCall({
+							kind: "expensiveModel",
+							gate,
+							menu: subagentModelsReminder({
+								available,
+								sessionModel: ctx.model,
+								defaultModel: fallback.model,
+								defaultSource: fallback.source,
+								requireImageInput: supportsImageInput(ctx.model),
+							}),
+						});
+					}
+					for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+					for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
+					const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
+					p.request.model = resolved;
+					p.request.fallbackModel = spawnFallbackModel(resolved, resolution.source, ctx.model);
+					p.record.model = resolved;
+				}
+
+				for (const p of prepared) registry.add(p.record);
+				landed = true;
+			} finally {
+				if (!landed) for (const request of requested) registry.release(request.name);
+			}
+			const records = prepared.map((p) => p.record);
+
+			// One-shot modes (`-p` / `--mode json`) exit when the turn settles, so
+			// a background run would be orphaned with its report undelivered — run
+			// blocking there and return the report in the tool result instead.
+			if (!sessionOutlivesTurn(ctx.mode)) {
+				// Stream progress through onUpdate (tool_execution_update) like the
+				// old foreground path — a headless JSON/RPC consumer has no panel,
+				// so this is its only signal between dispatch and result.
+				let progress = { toolCalls: 0, text: "", usage: emptyUsage() };
+				const report = () => {
+					const stats = formatStats(progress.toolCalls, progress.usage);
+					const line = `${progress.text ? "✓" : "⏳"} ${prepared[0].request.name} (${stats})${progress.text ? "" : " running…"}`;
+					onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
+				};
+				report();
+				mainCallFor.set(prepared[0].record.taskId, toolCallId);
+				const result = await executeRun(prepared[0], ctx, signal, sessionFile ?? undefined, undefined, (toolCalls, text, usage) => {
+					progress = { toolCalls, text, usage };
+					report();
+				});
+				// Auto mode reviews what the child actually did once it returns; the
+				// permission gate attaches the review to this tool_result.
+				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
+					toolCallId,
+					actions: result.actions ?? [],
+				} satisfies SubagentActionsPayload);
+				const stats = formatStats(result.toolCalls, result.usage);
+				const worktreeNote = result.worktreePath ? `\n\n${keptWorktreeNote(result.worktreePath, result.worktreeBranch)}` : "";
+				// The report arrives inline with no frame, no task id and no note, so a
+				// model told to "retrieve the result with task_output" chased an id that
+				// was never registered (WEAK-MODEL-REVIEW-2026-09-06 M3). Say it up
+				// front, in bash's and monitor's shared wording.
+				prepared[0].record.inline = true;
+				const inlineNote = subagentResultText().inlineReport({ name: prepared[0].record.name, taskId: prepared[0].record.taskId, note: oneShotNote("agent") });
+				// The background path reports renames and model fallbacks in its own
+				// result; a one-shot run must say the same things or the model reads
+				// the report believing it named the run and the model.
+				const notes = [...renamed, ...modelNotes];
+				return {
+					content: [
+						{
+							type: "text",
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${bounded(result.output, `${prepared[0].record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}\n\n(${stats})`,
+						},
+					],
+					details: { results: [result], agentRuns: records },
+					isError: result.failed ?? false,
+				};
+			}
+
+			// Every run is a background resident (Claude Code parity): the call
+			// returns as soon as the child is launched, the report arrives as a
+			// steered system notification, and the child stays resident so
+			// SendMessage can reach it live (steer mid-turn, prompt when idle).
+			const lines: string[] = [...renamed, ...modelNotes];
+			const runtime = await runtimeOrError(ctx);
+			if (typeof runtime === "string") {
+				// Nothing launched: forget the runs so list_agents and SendMessage never offer them.
+				for (const p of prepared) registry.remove(p.record.taskId);
+				return refuseCall({ kind: "couldNotStart", problem: runtime });
+			}
+			for (const p of prepared) {
+				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
+				if (launched) spawnedThisLoop.add(p.record.taskId);
+				lines.push(line);
+			}
+			return {
+				content: [
+					{
+						type: "text",
+						text: subagentResultText().launched({ lines }),
+					},
+				],
+				details: { agentRuns: records, background: true },
+			};
+		},
+	});
+	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName() }) }));
+	followDescriptionForm(pi, setAgentForm);
+
+	const SendMessageParams = Type.Object({
+		to: Type.String({ description: words.sendMessageParams.to }),
+		message: Type.String({ description: words.sendMessageParams.message }),
+		summary: Type.Optional(Type.String({ description: words.sendMessageParams.summary })),
+	});
+
+	/**
+	 * SendMessage's body, typed on the plain extension context: the agent view
+	 * also sends from an input handler, which has no tool context (pi 0.99's
+	 * `ExtensionToolContext` adds nested tool calls this never makes).
+	 */
+	const sendMessage = async (toolCallId: string, params: Static<typeof SendMessageParams>, signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AgentToolResult<unknown>> => {
+		if (params.to === "main") {
+			// The main conversation's SendMessage only addresses spawned agents; the
+			// "main" recipient exists only on a subagent's own injected SendMessage.
+			return {
+				content: [{ type: "text", text: subagentResultText().refused({ kind: "mainIsNotRecipient" }) }],
+				details: {},
+				isError: true,
+			};
+		}
+
+		const record = registry.resolve(params.to);
+		if (!record) {
+			// Recorded runs only: a name reserved by a spawn that then failed validation is not addressable.
+			const known = registry.list().map((run) => run.name);
+			return {
+				content: [
+					{
+						type: "text",
+						text: subagentResultText().refused({ kind: "noRun", to: params.to, known }),
+					},
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		// Resident background agent: reach its in-process session live.
+		const resident = residents.get(record.taskId);
+		if (resident && !resident.handle.exited()) {
+			// This call now starts (or joins) the agent's turn.
+			mainCallFor.set(record.taskId, toolCallId);
+			if (resident.handle.busy()) {
+				let delivery: "started" | "steered";
+				try {
+					delivery = await resident.handle.send(params.message);
+				} catch (error) {
+					return {
+						content: [{ type: "text", text: subagentResultText().refused({ kind: "deliveryFailed", name: record.name, osMessage: (error as Error).message }) }],
+						details: {},
+						isError: true,
+					};
+				}
+				if (delivery === "steered") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: subagentResultText().steered({ name: record.name }),
+							},
+						],
+						details: { agentRuns: [record], steered: true },
+					};
+				}
+				// The turn had just ended (settle window): the message rides the next
+				// turn, whose reply nobody has claimed yet — announce it as an update.
+				spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
+				return {
+					content: [
+						{
+							type: "text",
+							text: subagentResultText().nextTurn({ name: record.name }),
+						},
+					],
+					details: { agentRuns: [record] },
+				};
+			}
+
+			const taskId = generateTaskId();
+			let finish!: () => void;
+			const finished = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			// This task is ONE turn of the resident agent. Its output must be that
+			// turn's reply — the same text the reply notification carries — not the
+			// resident's whole multi-turn transcript, or task_output and the
+			// notification disagree (superset), which weak models conflate.
+			let replyOutput = "";
+			const task: BackgroundTask = {
+				id: taskId,
+				kind: "subagent",
+				ownUI: true, // rendered live by the subagents panel's agent strip
+				description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
+				status: "running",
+				startedAt: Date.now(),
+				output: () => replyOutput || resident.handle.snapshot().text,
+				stop: () => stopAgent(record.taskId, resident.handle),
+				resident: () => !resident.handle.exited(),
+				finished,
+			};
+			resident.turnHandlers.push((outcome, review, stopped) => {
+				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+				task.finishedAt = Date.now();
+				replyOutput = outcome.output;
+				finish();
+				// `<task-id>` is this message's task (what task_output resolves); `from=`
+				// stays the agent's id, the address a further SendMessage uses. The
+				// tracker's tokens and tool uses span the resident's life, so the
+				// duration does too.
+				notifyHandBack({
+					from: record.taskId,
+					taskId,
+					name: record.name,
+					toolUseId: toolCallId,
+					outputFile: outputLogPath(record),
+					outcome,
+					stopped,
+					startedAt: resident.startedAt,
+					report: bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP),
+					review,
+				});
+			});
+			pi.events.emit(TASK_REGISTER_CHANNEL, task);
+			void resident.handle.send(params.message);
+			// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
+			// the reply arrives as a notification, so forbid predicting it and arm
+			// the agent_end backstop (keyed by the agent's persistent id).
+			spawnedThisLoop.add(record.taskId);
+			return {
+				content: [
+					{
+						type: "text",
+						text: subagentResultText().sentToResident({ name: record.name, taskId }),
+					},
+				],
+				details: { agentRuns: [record], taskId },
+			};
+		}
+
+		if (runningIds.has(record.taskId)) {
+			return {
+				content: [
+					{ type: "text", text: subagentResultText().refused({ kind: "stillRunning", name: record.name }) },
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		const sessionFile = registry.sessionFileFor(record);
+		// A fork has no agent definition: its identity is the parent's prompt at
+		// spawn time, persisted beside its session. Without it a resume would run
+		// on pi's stock prompt and default tools — refuse instead (review S6).
+		const forkPrompt = record.agent === FORK_AGENT ? readForkPrompt(record) : undefined;
+		if (record.agent === FORK_AGENT && forkPrompt === undefined) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: subagentResultText().refused({ kind: "forkNotResumable", name: record.name }),
+					},
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		if (!sessionFile) {
+			return {
+				content: [
+					{ type: "text", text: subagentResultText().refused({ kind: "noSession", name: record.name }) },
+				],
+				details: {},
+				isError: true,
+			};
+		}
+
+		// A worktree run whose agent left no changes had its worktree removed at
+		// exit, but the record (persisted in the tool result) still points there.
+		// Resume in the parent cwd instead of a deleted directory, say so in the
+		// reply, and fix the record so later messages don't repeat the note (M2).
+		let relocationNote = "";
+		if (!existsSync(record.cwd)) {
+			const cwd = workCwd(ctx);
+			relocationNote = `${subagentResultText().relocated({ name: record.name, cwd: record.cwd, worktreeRemoved: Boolean(record.worktree), ranIn: cwd })}\n\n`;
+			record.cwd = cwd;
+			record.worktree = undefined;
+		}
+
+		// Before the run is marked running (L8, as in executeRun).
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			return { content: [{ type: "text", text: subagentResultText().refused({ kind: "couldNotResume", name: record.name, problem: runtime }) }], details: {}, isError: true };
+		}
+
+		const taskId = generateTaskId();
+		let finish!: () => void;
+		const finished = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+
+		runningIds.add(record.taskId);
+		// Re-enter the panel: the finished run's entry flips back to running (or
+		// registers fresh after a session resume) and streams this turn live.
+		const live = trackLiveRun(record, {
+			agent: record.agent,
+			name: record.name,
+			task: params.message,
+			model: record.model,
+			thinking: record.thinking,
+		});
+		// One-shot modes (`-p`, `--mode json`) exit when the turn settles, so the
+		// resumed turn runs blocking there and the reply is the tool result, as a
+		// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
+		const oneShot = !sessionOutlivesTurn(ctx.mode);
+		mainCallFor.set(record.taskId, toolCallId);
+		const handle = runtime.run({
+			name: record.name,
+			agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
+			task: params.message,
+			cwd: record.cwd,
+			sessionFile,
+			parentSystemPrompt: forkPrompt,
+			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
+			signal: oneShot ? signal : undefined,
+			model: record.model,
+			// Resume degrades to the session model if the recorded model has become
+			// unavailable since the original run, rather than failing the resume
+			// outright (the note surfaces the swap). Undefined for a fork (record.model
+			// unset — it inherits) or when the record already is the session model.
+			fallbackModel:
+				record.model && ctx.model && record.model !== modelSpec(ctx.model) ? modelSpec(ctx.model) : undefined,
+			thinking: record.thinking,
+			onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
+			sink: live.sink,
+			onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
+			extraTools: spawnToolsFor(record),
+			mainToolCallId: () => mainCallOf(record.taskId),
+		});
+		liveHandles.set(record.taskId, handle);
+
+		if (oneShot) {
+			const outcome = await handle.result;
+			runningIds.delete(record.taskId);
+			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
+			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+			return {
+				content: [
+					{
+						type: "text",
+						text:
+							`${subagentResultText().inlineReply({ name: record.name, note: oneShotNote("agentTurn") })}\n\n` +
+							`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
+					},
+				],
+				details: { agentRuns: [record] },
+				isError: outcome.failed ?? false,
+			};
+		}
+
+		let settledOutput: string | undefined;
+		const task: BackgroundTask = {
+			id: taskId,
+			kind: "subagent",
+			ownUI: true, // rendered live by the subagents panel's agent strip
+			description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
+			status: "running",
+			startedAt: Date.now(),
+			output: () => settledOutput ?? handle.snapshot().text,
+			stop: () => stopAgent(record.taskId, handle),
+			finished,
+		};
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+
+		void handle.result.then(async (outcome) => {
+			runningIds.delete(record.taskId);
+			// Read before the review: a stop or resume during it must not change this turn's outcome.
+			const stopped = stoppedTaskIds.has(record.taskId);
+			live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+			// Auto mode reviews this turn's actions before the reply goes out, as it
+			// does for a resident's turn; a resumed turn once skipped it
+			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
+			// review, so task_output never returns the reply ahead of its verdict.
+			const review = await awaitHandBackReview(pi.events, record, outcome.actions, undefined, mainCallOf(record.taskId));
+			// The outcome includes SubagentHandback and startup/abort errors;
+			// the live snapshot only contains assistant text, not the final report.
+			settledOutput = `${relocationNote}${outcome.output}`;
+			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+			task.finishedAt = Date.now();
+			finish();
+			notifyHandBack({
+				from: record.taskId,
+				taskId,
+				name: record.name,
+				toolUseId: toolCallId,
+				outcome,
+				stopped,
+				startedAt: task.startedAt,
+				report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
+				review,
+			});
+		});
+
+		spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
+		return {
+			content: [
+				{
+					type: "text",
+					text: subagentResultText().sent({ name: record.name, taskId }),
+				},
+			],
+			details: { agentRuns: [record], taskId },
+		};
+	};
+
+	const sendMessageTool = defineTool({
+		name: "SendMessage",
+		label: "Send Message",
+		...toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
+			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
+		}),
+		description: words.sendMessageDescription,
+		parameters: SendMessageParams,
+		execute: (toolCallId, params, signal, _onUpdate, ctx) => sendMessage(toolCallId, params, signal, ctx),
+	});
+	pi.registerTool(sendMessageTool);
+
+	/**
+	 * What the user submits while viewing an agent goes to that agent, as in
+	 * Claude Code (findings §40): Claude Code's mid-turn wrapper, steered into a
+	 * running turn or starting one on an idle resident, whose reply notifies
+	 * under the agent's own task id. A released or finished agent resumes
+	 * through SendMessage's path. Slash commands, skills and `!` shell lines
+	 * keep their main-conversation meaning.
+	 */
+	const deliverFromView = async (ctx: ExtensionContext, taskId: string, text: string) => {
+		const record = registry.resolve(taskId);
+		const fail = (reason: string) => ctx.ui.notify(`Could not send the message to ${record?.name ?? "the agent"}: ${reason}`, "error");
+		if (!record) return fail("the agent is gone.");
+		const wrapped = userMessageForAgent(text);
+		const resident = residents.get(record.taskId);
+		if (resident && !resident.handle.exited()) {
+			liveRuns.block(record.taskId, { kind: "user", text });
+			try {
+				await resident.handle.send(wrapped);
+			} catch (error) {
+				fail((error as Error).message);
+			}
+			return;
+		}
+		const result = await sendMessage(`view-${Date.now()}`, { to: record.taskId, message: wrapped }, undefined, ctx);
+		if (result.isError) fail(result.content.map((block) => (block.type === "text" ? block.text : "")).join(" "));
+	};
+	pi.on("input", (event, ctx) => {
+		const taskId = view ? panel.viewedTaskId() : undefined;
+		if (!taskId || event.source !== "interactive") return undefined;
+		const text = event.text.trim();
+		if (!text || text.startsWith("/") || text.startsWith("!")) return undefined;
+		void deliverFromView(ctx, taskId, event.text).catch((error: unknown) => {
+			ctx.ui.notify(`Could not send the message: ${error instanceof Error ? error.message : String(error)}`, "error");
+		});
+		return { action: "handled" as const };
+	});
+
+	/** A run's model as Claude Code names it in `/tasks` (`Sonnet 5`), else its spec. */
+	const modelLabel = (ctx: ExtensionContext, spec: string | undefined): string | undefined => {
+		if (!spec) return undefined;
+		try {
+			return findConfigured(ctx.modelRegistry.getAvailable(), spec)?.name ?? spec;
+		} catch {
+			return spec; // no registry (a torn-down session)
+		}
+	};
+
+	/**
+	 * `/tasks`: Claude Code's Background dialog (findings §40): running shells,
+	 * running agents, and the finished agents the user viewed. Enter views an
+	 * agent or shows a shell's details in the dialog, x stops the selected
+	 * running task, Esc closes. Enter on the shells chip below the editor opens
+	 * it too.
+	 */
+	const openTasksDialog = async (ctx: ExtensionContext) => {
+		if (!canShowCustomUi(ctx)) {
+			if (ctx.mode !== "rpc") return;
+			const lines = [
+				...shellRows(shellTasks.list(), Date.now()).map((task) => `- ${task.id} [shell, ${task.status}] ${task.command ?? task.description}`),
+				...liveRuns.list().filter((run) => run.depth === 0).map((run) => `- ${run.taskId} [${run.name}, ${run.status}] ${run.label}`),
+			];
+			ctx.ui.notify([
+				"The interactive task viewer requires TUI mode; showing a task snapshot instead.",
+				...(lines.length ? lines : ["No background tasks in this session."]),
+				"Use task_output to inspect a task and task_stop to stop it.",
+			].join("\n"), "info");
+			return;
+		}
+		const build = () => {
+			const runs = liveRuns.list().filter((run) => run.depth === 0);
+			// The shells the chip counts, so Enter on a chip whose shell just finished finds it.
+			const shells = shellRows(shellTasks.list(), Date.now()).map((task) => ({
+				kind: "shell" as const,
+				id: task.id,
+				text: task.command ?? task.description,
+				running: task.status === "running",
+				status: task.status,
+			}));
+			const agents = [
+				...runs.filter((run) => run.status === "running"),
+				...runs.filter((run) => run.status !== "running" && run.viewed),
+			].map((run) => ({ kind: "agent" as const, taskId: run.taskId, text: run.label, model: modelLabel(ctx, run.model), running: run.status === "running" }));
+			return { shells, agents };
+		};
+		let selected = 0;
+		// Rebuilt when a run or shell changes, not per frame or keystroke.
+		let snapshot = build();
+		// The rows on screen: keys act on what the user sees, even when a change
+		// has rebuilt the snapshot and its render is still pending.
+		let shown = tasksItems(snapshot);
+		// The list, or one shell's details inside the same dialog.
+		let dialogView: TasksView = { mode: "list" };
+		const shellById = (id: string) => shellTasks.list().find((task) => task.id === id);
+		const stopShell = (task: { stop(): void } | undefined) => {
+			try {
+				task?.stop();
+			} catch {
+				// A dead process's stop() throwing must not break the dialog.
+			}
+		};
+		const chosen = await panelUi(pi.events, ctx.ui).custom<string | null>((tui, theme, _keybindings, done) => {
+			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+			const refresh = () => {
+				snapshot = build();
+				tui.requestRender();
+			};
+			const unsubscribe = liveRuns.subscribe(refresh);
+			const unsubscribeShells = shellTasks.subscribe(refresh);
+			// A running shell's details follow its runtime and output once a second,
+			// and the list drops a finished shell once its linger window ends, as
+			// the chip does (a rebuild only when that row set changes).
+			const ticker = setInterval(() => {
+				if (dialogView.mode === "shell") {
+					if (shellById(dialogView.id)?.status === "running") tui.requestRender();
+				} else if (snapshot.shells.some((shell) => !shell.running) && shellRows(shellTasks.list(), Date.now()).length !== snapshot.shells.length) {
+					refresh();
+				}
+			}, 1000);
+			ticker.unref?.();
+			const finish = (value: string | null) => {
+				clearInterval(ticker);
+				unsubscribe();
+				unsubscribeShells();
+				done(value);
+			};
+			return {
+				render: (width: number) => {
+					const task = dialogView.mode === "shell" ? shellById(dialogView.id) : undefined;
+					dialogView = settleTasksView(dialogView, task !== undefined);
+					if (dialogView.mode === "shell" && task) {
+						return ["", ...renderShellDetail(task, width - 2, Date.now(), paint).map((line) => `  ${line}`), ""].map((line) => truncateLine(line, width));
+					}
+					shown = tasksItems(snapshot);
+					selected = Math.max(0, Math.min(selected, shown.length - 1));
+					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
+				},
+				handleInput: (data: string) => {
+					if (isKeyRelease(data)) return;
+					const id = keyId(data);
+					if (dialogView.mode === "shell") {
+						const task = shellById(dialogView.id);
+						const action = shellDetailKey(id, keyText(data), task?.status === "running");
+						if (action === "close") return finish(null);
+						if (action === "back") dialogView = { mode: "list" };
+						else if (action === "stop") stopShell(task);
+						tui.requestRender();
+						return;
+					}
+					const items = shown;
+					if (id === "escape") return finish(null);
+					if (id === "up" || id === "down") {
+						selected = moveTasksSelection(selected, id, items.length);
+						tui.requestRender();
+						return;
+					}
+					const item = items[selected];
+					if (id === "enter" && item?.kind === "agent") return finish(item.taskId);
+					if (id === "enter" && item?.kind === "shell") {
+						dialogView = { mode: "shell", id: item.id };
+						tui.requestRender();
+						return;
+					}
+					if (keyText(data)?.toLowerCase() === "x" && item?.running) {
+						if (item.kind === "agent") void stopAgent(item.taskId);
+						else stopShell(shellById(item.id));
+						tui.requestRender();
+					}
+				},
+				invalidate: () => {},
+			};
+		});
+		if (chosen) openView(ctx, chosen);
+	};
+	registerLocalCommand(pi, "tasks", {
+		description: "List background tasks: shells, running agents, and the agents you viewed",
+		handler: async (_args, ctx) => openTasksDialog(ctx as ExtensionContext),
+	});
+	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
+
+	// Same precedence as SendMessage's own dispatch (a live resident is reachable
+	// even while a blocking run of the same name is in flight): resident-live
+	// first, then running, then a finished run resumable from its session.
+	const agentStatus = (record: AgentRunRecord): RunStatus => {
+		const resident = residents.get(record.taskId);
+		if (resident && !resident.handle.exited()) return "resident";
+		if (runningIds.has(record.taskId)) return "running";
+		return record.inline ? "finishedInline" : "finished";
+	};
+
+	pi.registerTool({
+		name: "list_agents",
+		label: "List Agents",
+		...toolRenderers("List Agents"),
+		description: words.listAgentsDescription,
+		parameters: Type.Object({}),
+		async execute() {
+			const runs = registry.list();
+			if (runs.length === 0) {
+				return {
+					content: [{ type: "text", text: subagentResultText().noAgents }],
+					details: { agents: [] as unknown[] },
+				};
+			}
+			const agents = runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r) }));
+			const rows = agents.map((a) => subagentResultText().agentRow(a));
+			return {
+				content: [{ type: "text", text: subagentResultText().agentList({ rows }) }],
+				details: { agents },
+			};
+		},
+	});
+	// Eager, as Claude Code's ListAgents is: not emitted on the deferral channel.
+
+	registerLocalCommand(pi, "agents", {
+		description: "Open the live subagent panel, or list available agents",
+		handler: async (args, ctx) => {
+			// With live children, focus the strip on the newest and open its view
+			// (Claude Code's agent panel); otherwise there is nothing running, so
+			// list the catalog the way the tool's action:"list" does.
+			if (ctx.hasUI && ctx.mode === "tui" && panel.rowCount() > 1) {
+				panel.setFocus(1); // row 0 is `main`; 1 is the newest live child
+				const run = panel.selectedRun();
+				if (run) {
+					openView(ctx, run.taskId);
+					return;
+				}
+			}
+			if (ctx.mode === "rpc" && registry.list().length) {
+				ctx.ui.notify([
+					"The live subagent panel requires TUI mode; showing spawned agents instead.",
+					...registry.list().map((run) => subagentResultText().agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
+					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
+				].join("\n"), "info");
+				return;
+			}
+			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
+		},
+	});
+
+	const showSubagentModelStatus = (ctx: ExtensionContext) => {
+		const configured = loadSubagentDefault(os.homedir());
+		const applicable = applicableSubagentDefault(configured, ctx.model);
+		const available = usableModels(ctx);
+		const resolution = resolveSubagentModel({
+			configuredDefault: applicable,
+			sessionModel: ctx.model,
+			available,
+			requireImageInput: supportsImageInput(ctx.model),
+		});
+		ctx.ui.notify(
+			[
+				configured
+					? configured.source === "env"
+						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
+							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}`)
+						: `subagentModel: ${configured.spec} (from the subagentModel setting)`
+					: "subagentModel: (not set)",
+				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
+				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
+				...(resolution.source === "default" && resolution.model
+					? chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) }).map((warning) => `! ${warning.text} ${warning.fix}`)
+					: []),
+				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
+			].join("\n"),
+			"info",
+		);
+	};
+
+	/**
+	 * Persist a chosen subagent default. `inherit` is literal (session model,
+	 * no auth needed); any other spec is validated against the registry and its
+	 * auth checked before saving — a default with no credentials would fail
+	 * every subagent spawn. The value is saved as the literal spec, so an alias
+	 * like `sonnet` keeps per-session alias semantics (see model-select.ts).
+	 */
+	const applySubagentModelChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
+		if (spec === "inherit") {
+			try {
+				persistSubagentModel("inherit", os.homedir());
+			} catch (error) {
+				ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+				return;
+			}
+			emitModelStatus(ctx);
+			ctx.ui.notify(`Subagent default set to the session model ("inherit", saved to ${SETTINGS_DISPLAY}).`, "info");
+			return;
+		}
+
+		const available = usableModels(ctx);
+		const resolution = resolveSubagentModel({
+			requested: spec,
+			sessionModel: ctx.model,
+			available,
+			requireImageInput: supportsImageInput(ctx.model),
+		});
+		if (resolution.unresolved) {
+			const fallback = resolveSubagentModel({
+				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
+				sessionModel: ctx.model,
+				available,
+				requireImageInput: supportsImageInput(ctx.model),
+			});
+			ctx.ui.notify(
+				`${resolution.unresolvedReason ?? `No available model matches "${spec}".`}\n\n` +
+					subagentModelsReminder({
+						available,
+						sessionModel: ctx.model,
+						defaultModel: fallback.model,
+						defaultSource: fallback.source,
+						requireImageInput: supportsImageInput(ctx.model),
+					}),
+				"error",
+			);
+			return;
+		}
+		const resolved = resolution.model;
+		if (resolved) {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolved);
+			if (!auth.ok) {
+				ctx.ui.notify(`Cannot use ${resolved.provider}/${resolved.id}: ${auth.error}. Not saved.`, "error");
+				return;
+			}
+		}
+		try {
+			// Stamp the session's containment identity (provider for direct vendors,
+			// provider:route:vendor on gateways) so a later session on a different
+			// provider/vendor can treat this cross-provider choice as stale (a
+			// deliberate choice made here stays honored; see resolveSubagentModel).
+			persistSubagentModel(spec, os.homedir(), ctx.model ? modelIdentity(ctx.model).containment : undefined);
+		} catch (error) {
+			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+			return;
+		}
+		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ${SETTINGS_DISPLAY}).`, "info");
+		// What the choice costs, shown now even if an earlier choice already
+		// raised the same line; marked noticed so the status refresh is quiet.
+		if (resolved) {
+			for (const warning of chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolved, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) })) {
+				const message = `${warning.text} ${warning.fix}`;
+				noticedModels.add(message);
+				ctx.ui.notify(message, "warning");
+			}
+		}
+		emitModelStatus(ctx);
+	};
+
+	registerLocalCommand(pi, "subagent", {
+		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
+		argumentHint: "[provider/model-id|inherit|status|clear]",
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", "status", "clear"].map((value) => ({ value, label: value }))),
+		handler: async (args, ctx) => {
+			const typed = args.trim();
+			if (typed === "clear") {
+				try {
+					persistSubagentModel(undefined, os.homedir());
+				} catch (error) {
+					ctx.ui.notify("Could not update settings: " + (error as Error).message, "error");
+					return;
+				}
+				emitModelStatus(ctx);
+				ctx.ui.notify(
+					`subagentModel cleared — the default is ${knobNames(SUBAGENT_MODEL_KNOB).join(" or ")} or managed settings when applicable, else ${brand.name}'s automatic same-provider profile.`,
+					"info",
+				);
+				return;
+			}
+			if (typed === "inherit") {
+				await applySubagentModelChoice("inherit", ctx);
+				return;
+			}
+			if (typed === "status") {
+				showSubagentModelStatus(ctx);
+				return;
+			}
+			if (typed) {
+				await applySubagentModelChoice(typed, ctx);
+				return;
+			}
+
+			// The picker needs focus and a terminal; elsewhere show status.
+			if (!ctx.hasUI || ctx.mode !== "tui") {
+				showSubagentModelStatus(ctx);
+				return;
+			}
+			const available = usableModels(ctx);
+			if (available.length === 0) {
+				ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
+				return;
+			}
+			const configured = loadSubagentDefault(os.homedir());
+			const current = configured && configured.spec.includes("/") ? configured.spec : undefined;
+			const entries = toPickerEntries(available);
+
+			const chosen = await panelUi(pi.events, ctx.ui).custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+				modelPickerComponent(
+					{
+						entries,
+						current,
+						title: "Select the default subagent model",
+						subtitle: "Default for subagent/workflow runs unless overridden",
+					},
+					tui,
+					theme,
+					done,
+				),
+			);
+
+			if (chosen) await applySubagentModelChoice(pickerSpec(chosen), ctx);
+		},
+	});
+}
+
+export default feature("subagents", subagentsExtension);

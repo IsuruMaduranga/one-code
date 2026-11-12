@@ -23,7 +23,7 @@ for AI coding agents. It points back here for detail.
 
 The code is the source of truth, and most of the "why" sits in comments next
 to it. Module headers explain contracts (for example, the reminder queue in
-`extensions/lib/reminders.ts` or the deferred-tool registry in
-`extensions/lib/deferred.ts`), and the comment above a tricky line usually
+`extensions/lib/request/reminders.ts` or the deferred-tool registry in
+`extensions/lib/request/deferred.ts`), and the comment above a tricky line usually
 says what broke before it was written that way. When these pages and a
 comment disagree, trust the comment and tell us about the page.

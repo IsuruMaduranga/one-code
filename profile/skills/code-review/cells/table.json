@@ -1,0 +1,19 @@
+{
+	"tables": {
+		"default": {
+			"low": "low-1-pass-min-files-4",
+			"medium": "medium-3x5-verify",
+			"high": "high-3x5-recall-verify",
+			"xhigh": "xhigh-5x5-verify-sweep",
+			"max": "max-5x5-verify-sweep"
+		},
+		"frontier": {
+			"low": "low-1-pass-max4",
+			"medium": "minimal-prompt",
+			"high": "high-8-inline",
+			"xhigh": "xhigh-10-inline-sweep",
+			"max": "max-5x5-verify-sweep"
+		}
+	},
+	"after": "arguments-and-flags"
+}

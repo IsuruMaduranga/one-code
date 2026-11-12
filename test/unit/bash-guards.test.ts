@@ -1,24 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { bashGuardReason } from "../../extensions/bash/guards.ts";
+import { parseCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
+import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
+
+/**
+ * Which shell calls the guards block, and what each block reports. The
+ * words themselves: bash-guards-wording.test.ts.
+ */
+const blocked = (block: ShellBlock) => shellResultText().blocked(block);
+/** The bash tool's sleep command and until-loop, as it passes them. */
+const sleepBlock = (shown: string, rest?: string): ShellBlock => ({ kind: "sleep", shown, ...(rest ? { rest } : {}), sleepName: "sleep", untilExample: "until <check>; do sleep 2; done" });
 
 const fg = (command: string) => bashGuardReason(command, { background: false });
 const bg = (command: string) => bashGuardReason(command, { background: true });
 
 describe("wait guard", () => {
 	it("blocks a leading sleep of 2s or more", () => {
-		expect(fg("sleep 25")).toContain("Blocked: standalone `sleep 25`");
+		expect(fg("sleep 25")).toBe(blocked(sleepBlock("sleep 25")));
 		expect(fg("sleep 2")).toBeDefined();
 		expect(fg("sleep 5m")).toBeDefined();
 	});
 
 	it("echoes the chained commands the sleep leads into", () => {
 		const reason = fg("sleep 25 && tmux has-session -t cc2-net; tail -c 600 /tmp/out") ?? "";
-		expect(reason).toContain("`sleep 25` followed by: tmux has-session -t cc2-net; tail -c 600 /tmp/out");
+		expect(reason).toBe(blocked(sleepBlock("sleep 25", "tmux has-session -t cc2-net; tail -c 600 /tmp/out")));
 	});
 
 	it("does not leak the split operator into the echo", () => {
-		expect(fg("sleep 30 && echo done")).toContain("followed by: echo done");
+		expect(fg("sleep 30 && echo done")).toBe(blocked(sleepBlock("sleep 30", "echo done")));
 	});
 
 	it("lets a provably short sleep through as pacing", () => {
@@ -29,19 +39,12 @@ describe("wait guard", () => {
 	});
 
 	it("blocks a chain of short sleeps and summed multi-arg sleeps", () => {
-		expect(fg("sleep 1 && sleep 1 && sleep 1")).toContain("Blocked");
+		expect(fg("sleep 1 && sleep 1 && sleep 1")).toBe(blocked(sleepBlock("sleep 1 && sleep 1 && sleep 1")));
 		expect(fg("sleep 1 600")).toBeDefined();
 	});
 
 	it("blocks a sleep whose duration cannot be verified", () => {
 		expect(fg('sleep "$DELAY"')).toBeDefined();
-	});
-
-	it("names the alternatives and the anti-workaround clause", () => {
-		const reason = fg("sleep 30") ?? "";
-		expect(reason).toContain("run_in_background: true");
-		expect(reason).toContain("until <check>; do sleep 2; done");
-		expect(reason).toContain("Do not chain shorter sleeps");
 	});
 
 	it("leaves a sleep inside a larger command alone", () => {
@@ -69,15 +72,11 @@ describe("wait guard", () => {
 
 describe("poll-loop guard", () => {
 	it("blocks foreground while/until/for loops that sleep", () => {
-		expect(fg("while true; do sleep 2; done")).toContain("polling loop");
+		expect(fg("while true; do sleep 2; done")).toBe(blocked({ kind: "pollingLoop", command: "while true; do sleep 2; done" }));
 		// Wherever the loop sits in the line (PR #12 review).
-		expect(fg("echo start; while true; do sleep 5; done")).toContain("polling loop");
+		expect(fg("echo start; while true; do sleep 5; done")).toBe(blocked({ kind: "pollingLoop", command: "echo start; while true; do sleep 5; done" }));
 		expect(fg("until curl -sf localhost/health; do sleep 2; done")).toBeDefined();
 		expect(fg("for i in 1 2 3; do check; sleep 5; done")).toBeDefined();
-	});
-
-	it("steers to the monitor tool", () => {
-		expect(fg("while true; do sleep 2; done")).toContain("monitor");
 	});
 
 	it("leaves loops without a sleep alone", () => {
@@ -96,13 +95,13 @@ describe("poll-loop guard", () => {
 
 describe("orphan guard", () => {
 	it("blocks nohup and setsid", () => {
-		expect(fg("nohup ./server --port 8080")).toContain("run_in_background: true");
+		expect(fg("nohup ./server --port 8080")).toBe(blocked({ kind: "detach", via: "`nohup`" }));
 		expect(fg("cd app && nohup npm start")).toBeDefined();
 		expect(fg("setsid ./daemon")).toBeDefined();
 	});
 
 	it("blocks a top-level trailing &", () => {
-		expect(fg("./server --port 8080 &")).toContain("run_in_background: true");
+		expect(fg("./server --port 8080 &")).toBe(blocked({ kind: "detach", via: "`&`" }));
 		expect(fg("python -m http.server & echo started")).toBeDefined();
 	});
 
@@ -157,7 +156,7 @@ describe("parseCommand background", () => {
 
 describe("interactive guard", () => {
 	it("blocks interactive editors, foreground and background", () => {
-		expect(fg("vim notes.txt")).toContain("no TTY");
+		expect(fg("vim notes.txt")).toBe(blocked({ kind: "editor", command: "vim" }));
 		expect(fg("git log | vi -")).toBeDefined();
 		expect(bg("nvim config.lua")).toBeDefined();
 		expect(fg("(vim)")).toBeDefined();
@@ -173,14 +172,14 @@ describe("interactive guard", () => {
 		expect(fg("emacs --batch -l script.el")).toBeUndefined();
 	});
 
-	it("blocks watch and steers to monitor", () => {
-		expect(fg("watch -n 5 kubectl get pods")).toContain("monitor");
+	it("blocks watch", () => {
+		expect(fg("watch -n 5 kubectl get pods")).toBe(blocked({ kind: "watch" }));
 	});
 
 	it("blocks interactive git forms", () => {
-		expect(fg("git rebase -i HEAD~3")).toContain("GIT_SEQUENCE_EDITOR");
+		expect(fg("git rebase -i HEAD~3")).toBe(blocked({ kind: "rebaseInteractive", shell: "bash" }));
 		expect(fg("git rebase --interactive main")).toBeDefined();
-		expect(fg("git add -p")).toContain("stage nothing");
+		expect(fg("git add -p")).toBe(blocked({ kind: "addInteractive" }));
 		expect(fg("git add -i")).toBeDefined();
 		expect(fg("git -C sub add --patch file.ts")).toBeDefined();
 	});
@@ -193,17 +192,12 @@ describe("interactive guard", () => {
 	});
 });
 
-describe("heredoc handling (T14) and monitor deferral hints (T13)", () => {
+describe("heredoc handling (T14)", () => {
 	it("judges the command before a heredoc/here-string and ignores the body", () => {
-		expect(bashGuardReason('sleep 600 <<< ""', { background: false })).toMatch(/Blocked/);
-		expect(bashGuardReason("vim notes.txt <<EOF\nx\nEOF", { background: false })).toMatch(/interactive editor/);
+		expect(bashGuardReason('sleep 600 <<< ""', { background: false })).toBe(blocked(sleepBlock('sleep 600 <<< ""')));
+		expect(bashGuardReason("vim notes.txt <<EOF\nx\nEOF", { background: false })).toBe(blocked({ kind: "editor", command: "vim" }));
 		expect(bashGuardReason("cat <<EOF\nsleep 600\nvim x\nEOF", { background: false })).toBeUndefined();
 		expect(bashGuardReason("<<EOF\nsleep 5\nEOF", { background: false })).toBeUndefined();
-	});
-
-	it("tells the model monitor is deferred and how to load it", () => {
-		expect(bashGuardReason("sleep 30", { background: false })).toContain("tool_search select:monitor");
-		expect(bashGuardReason("while true; do sleep 5; done", { background: false })).toContain("tool_search select:monitor");
 	});
 });
 

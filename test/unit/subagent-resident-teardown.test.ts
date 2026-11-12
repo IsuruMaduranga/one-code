@@ -7,10 +7,10 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as defaults from "../../extensions/subagents/default-model.ts";
-import subagentsExtension from "../../extensions/subagents/index.ts";
-import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
-import { emptyUsage } from "../../extensions/subagents/usage.ts";
+import * as defaults from "../../extensions/lib/models/subagent-default.ts";
+import subagentsExtension from "../../extensions/agents/subagents/index.ts";
+import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let agentDir: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { costOf, recordUsage, USAGE_CHANNEL, USAGE_ENTRY_TYPE, usageEntryCost, type UsageRecord } from "../../extensions/lib/usage-bus.ts";
+import { costOf, recordUsage, USAGE_CHANNEL, USAGE_ENTRY_TYPE, usageEntryCost, type UsageRecord } from "../../extensions/lib/notify/usage-bus.ts";
 
 describe("costOf", () => {
 	it("reads cost.total from a usage-like object", () => {

@@ -1,5 +1,5 @@
 /**
- * lib/shell-tool.ts: the default `timeout` both shell descriptions promise
+ * lib/shell-run/shell-tool.ts: the default `timeout` both shell descriptions promise
  * (Claude Code's 120000 ms). pi's executor applies none, so a foreground
  * command without `timeout` ran until Esc, and a one-shot `run_in_background`
  * (which blocks the run) hung it forever. A detached background shell keeps
@@ -8,20 +8,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 
-const blocking = vi.hoisted(() => ({ calls: [] as Array<{ timeoutSeconds?: number }>, timedOut: false }));
-vi.mock("../../extensions/bash/background.ts", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../extensions/bash/background.ts")>();
+const blocking = vi.hoisted(() => ({ calls: [] as Array<{ id: string; timeoutSeconds?: number }>, timedOut: false }));
+vi.mock("../../extensions/lib/shell-run/bash-background.ts", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../extensions/lib/shell-run/bash-background.ts")>();
 	return {
 		...actual,
-		runBackgroundBashBlocking: async (options: { timeoutSeconds?: number }) => {
+		runBackgroundBashBlocking: async (options: { id: string; timeoutSeconds?: number }) => {
 			blocking.calls.push(options);
 			return { exitCode: null, signal: "SIGTERM", stopped: false, timedOut: blocking.timedOut, output: "listening on :3000\n" };
 		},
 	};
 });
 
-import { DEFAULT_TIMEOUT_MS, registerShellTool } from "../../extensions/lib/shell-tool.ts";
+import { DEFAULT_TIMEOUT_MS, registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
+import { oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
+
+/** The profile's report of a one-shot background run the default or the model's timeout stopped. */
+const timedOutReport = (p: { id: string; description: string; seconds: number; explicit: boolean }) =>
+	shellResultText().ranToEnd({
+		label: "Bash",
+		id: p.id,
+		description: p.description,
+		end: { kind: "timedOut", seconds: p.seconds },
+		note: oneShotNote("command"),
+		deadline: { timeoutMs: p.seconds * 1000, explicit: p.explicit, maxTimeoutMs: 600_000 },
+		output: "listening on :3000\n",
+	});
 
 function mount() {
 	const fake = createFakePi();
@@ -67,11 +81,7 @@ describe("shell tools: the default timeout (A6-M3, A3-M3)", () => {
 			content: Array<{ text: string }>;
 		};
 		expect(blocking.calls[0].timeoutSeconds).toBe(120);
-		const text = result.content[0].text;
-		expect(text).toContain("failed (timed out after 120s)");
-		expect(text).toContain("It was stopped at the default 120000 ms timeout (no `timeout` was given)");
-		expect(text).toContain("a one-shot session cannot keep a background command running after the run ends");
-		expect(text).toContain("listening on :3000");
+		expect(result.content[0].text).toBe(timedOutReport({ id: blocking.calls[0].id, description: "npm run dev", seconds: 120, explicit: false }));
 	});
 
 	it("names the model's own timeout when that is what stopped a one-shot run, and adds nothing when it finished", async () => {
@@ -81,11 +91,21 @@ describe("shell tools: the default timeout (A6-M3, A3-M3)", () => {
 		const stopped = (await tool.execute("c1", { command: "sleep 99", run_in_background: true, timeout: 3_000 }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
 		};
-		expect(stopped.content[0].text).toContain("It was stopped at its 3000 ms timeout:");
+		expect(stopped.content[0].text).toBe(timedOutReport({ id: blocking.calls[0].id, description: "sleep 99", seconds: 3, explicit: true }));
 		blocking.timedOut = false;
 		const finished = (await tool.execute("c2", { command: "true", run_in_background: true }, undefined, undefined, ctx)) as {
 			content: Array<{ text: string }>;
 		};
-		expect(finished.content[0].text).not.toContain("It was stopped at");
+		// A run that finished carries no deadline for the profile to explain.
+		expect(finished.content[0].text).toBe(
+			shellResultText().ranToEnd({
+				label: "Bash",
+				id: blocking.calls[1].id,
+				description: "true",
+				end: { kind: "signal", signal: "SIGTERM" },
+				note: oneShotNote("command"),
+				output: "listening on :3000\n",
+			}),
+		);
 	});
 });

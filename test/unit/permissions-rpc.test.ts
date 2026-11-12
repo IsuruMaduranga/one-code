@@ -1,12 +1,19 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
+
+// The repository-trust prompt needs a repository settings file, which only a
+// profile with a source provider lists; the helper lists one on any profile.
+useRepositorySettings();
+
 
 /** pi's RPC dialogs only dismiss on abort when the extension supplies a signal. */
 function rpcDialog<T>(options: { signal?: AbortSignal } | undefined, cancelled: T): Promise<T> {
@@ -26,7 +33,7 @@ describe("RPC permission prompt cancellation", () => {
 		root = mkdtempSync(join(tmpdir(), "rpc-permissions-"));
 		stubHome(join(root, "home"));
 		vi.spyOn(os, "homedir").mockReturnValue(join(root, "home"));
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 	});
 	afterEach(() => {
@@ -38,14 +45,14 @@ describe("RPC permission prompt cancellation", () => {
 	for (const kind of ["repository trust", "outside read"] as const) {
 		for (const racing of [false, true]) it(`aborting the ${kind} prompt ${racing ? "while an approval arrives" : "while waiting"} never grants access`, async () => {
 			const cwd = join(root, "project");
-			mkdirSync(join(cwd, ".claude"), { recursive: true });
+			mkdirSync(cwd, { recursive: true });
 			// Sonnet 4.6 is workhorse in this catalog, so the gate shows Claude Code's prompt.
 			pinCatalog([
 				{ id: "anthropic/claude-sonnet-4-6", released: "2026-02-17", price: [3, 15] },
 				{ id: "anthropic/claude-opus-4-6", released: "2026-02-04", price: [5, 25] },
 				{ id: "anthropic/claude-opus-4-7", released: "2026-04-14", price: [5, 25] },
 			]);
-			if (kind === "repository trust") writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Write"] } }));
+			if (kind === "repository trust") writeRepositorySettings(cwd, join(root, "home"), { permissions: { allow: ["Write"] } });
 			const fake = createFakePi();
 			permissionsExtension(fake.pi as never);
 			const abort = new AbortController();

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
-import { RUNAWAY_PADDING_LIMIT, trailingPadding } from "../../extensions/lib/tool-call-corruption.ts";
-import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
+import { RUNAWAY_PADDING_LIMIT, trailingPadding } from "../../extensions/request/tool-call-corruption/tool-call-corruption.ts";
+import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 describe("trailingPadding", () => {

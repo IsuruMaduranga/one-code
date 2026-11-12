@@ -5,9 +5,9 @@
  */
 import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { toPosixPath } from "../../extensions/lib/paths.ts";
-import { decide } from "../../extensions/permissions/matcher.ts";
-import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
+import { toPosixPath } from "../../extensions/lib/profile/paths.ts";
+import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { sessionGrant } from "../../extensions/safety/permissions/session-grant.ts";
 
 const CWD = "/home/user/project";
 const HOME = "/home/user";
@@ -83,10 +83,9 @@ describe("sessionGrant", () => {
 	});
 
 	it("offers no grant where a rule could not or must not apply", () => {
-		// Protected paths and the safety floor are judged before allow rules.
+		// Protected paths are judged before allow rules.
 		expect(sessionGrant({ ...base, toolName: "write", subject: ".git/hooks/pre-commit", cause: "protected-path" })).toBeUndefined();
-		expect(sessionGrant({ ...base, toolName: "write", subject: "a.ts", floor: true })).toBeUndefined();
-		// Auto mode never applies session allows — its prompts are resume/floor prompts.
+		// Auto mode never applies session allows — its only prompt is the resume prompt.
 		expect(sessionGrant({ ...base, toolName: "write", subject: "a.ts", mode: "auto" })).toBeUndefined();
 		// A command tool with nothing to approve.
 		expect(sessionGrant({ ...base, toolName: "bash", subject: "" })).toBeUndefined();

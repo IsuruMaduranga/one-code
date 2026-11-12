@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { connect, close, type Connection } from "../../extensions/mcp/client.ts";
-import mcpExtension from "../../extensions/mcp/index.ts";
+import { connect, close, type Connection } from "../../extensions/tools/mcp/client.ts";
+import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({ home: "", servers: [] as Array<{ kind: "http"; name: string; url: string; source: string }> }));
@@ -13,8 +13,8 @@ vi.mock("node:os", async (importOriginal) => {
 	const actualDefault = (actual as unknown as { default?: Record<string, unknown> }).default;
 	return { ...actual, homedir: () => state.home, default: { ...actualDefault, homedir: () => state.home } };
 });
-vi.mock("../../extensions/mcp/config.ts", async (importOriginal) => ({
-	...await importOriginal<typeof import("../../extensions/mcp/config.ts")>(),
+vi.mock("../../extensions/tools/mcp/config.ts", async (importOriginal) => ({
+	...await importOriginal<typeof import("../../extensions/tools/mcp/config.ts")>(),
 	loadServers: () => state.servers,
 }));
 
@@ -147,9 +147,9 @@ describe("MCP discovery with real HTTP transport", () => {
 		connection.onToolsChanged = changed;
 		await vi.waitFor(() => expect(notifications).toBeDefined());
 		notifications!.write(`data: ${JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" })}\n\n`);
-		await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.any(Error)));
+		await vi.waitFor(() => expect(changed).toHaveBeenCalledWith(expect.objectContaining({ kind: "error" })));
 		expect(connection.tools.map((tool) => tool.name)).toEqual(["first_tool"]);
-		expect(connection.warnings).toContainEqual(expect.stringContaining("refreshing tools failed"));
+		expect(connection.warnings).toContainEqual(expect.objectContaining({ kind: "listFailed", list: "tools", refresh: true }));
 	});
 
 	it("does not publish an in-flight refresh after the connection closes", async () => {
@@ -214,7 +214,7 @@ describe("MCP discovery with real HTTP transport", () => {
 		});
 		connection = await connect(server);
 		expect(connection.tools).toEqual([]);
-		expect(connection.warnings).toContainEqual(expect.stringContaining("repeated a pagination cursor"));
+		expect(connection.warnings).toContainEqual({ kind: "listFailed", list: "tools", reason: { kind: "repeatedCursor" } });
 		expect(requests.filter((request) => request.method === "tools/list")).toHaveLength(2);
 	});
 

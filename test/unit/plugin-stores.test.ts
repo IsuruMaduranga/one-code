@@ -2,14 +2,15 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/atomic-write.ts";
-import { readEnabledPlugins } from "../../extensions/lib/claude-settings.ts";
-import { readFavorites, toggleFavorite } from "../../extensions/lib/favorites.ts";
-import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
-import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
-import { estimateSkillTokens, scanSkills } from "../../extensions/lib/skill-scan.ts";
-import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/usage-tracker.ts";
+import { readJsonFile, writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { readFavorites, toggleFavorite } from "../../extensions/tools/plugins/favorites.ts";
+import { readOverrides, setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
+import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
+import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
+import { estimateSkillTokens, scanSkills } from "../../extensions/lib/plugins/skill-scan.ts";
+import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/plugins/usage-tracker.ts";
+import { skillScanDirs, writeSkill } from "./helpers/skill-dirs.ts";
 
 let root: string;
 
@@ -20,7 +21,8 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("plugin root", () => {
 	it("derives from the agent dir", () => {
-		expect(pluginRoot("/home/u/.onecode/agent")).toBe(join("/home/u/.onecode/agent", "plugins"));
+		const agentDir = `/home/u/${brand.stateDir}/agent`;
+		expect(pluginRoot(agentDir)).toBe(join(agentDir, "plugins"));
 	});
 });
 
@@ -36,19 +38,6 @@ describe("atomic-write", () => {
 		expect(readJsonFile(join(root, "missing.json"))).toBeUndefined();
 		writeFileSync(join(root, "bad.json"), "{ nope");
 		expect(readJsonFile(join(root, "bad.json"))).toBeUndefined();
-	});
-});
-
-describe("claude-settings readEnabledPlugins", () => {
-	it("merges user → project → local, later wins; malformed files are ignored", () => {
-		const home = join(root, "home");
-		const cwd = join(root, "proj");
-		mkdirSync(join(home, ".claude"), { recursive: true });
-		mkdirSync(join(cwd, ".claude"), { recursive: true });
-		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "a@m": true, "b@m": true } }));
-		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "b@m": false, "c@m": "yes" } }));
-		writeFileSync(join(cwd, ".claude", "settings.local.json"), "{ broken");
-		expect(readEnabledPlugins(cwd, home)).toEqual({ "a@m": true, "b@m": false });
 	});
 });
 
@@ -97,22 +86,14 @@ describe("favorites", () => {
 
 describe("skill scan", () => {
 	it("loads a name once and a linked file once, as pi does", () => {
-		const cwd = join(root, "proj");
-		const home = join(root, "home");
-		const agentDir = join(root, "agent");
-		const bundled = join(root, "bundled-skills");
-		const make = (base: string, name: string) => {
-			mkdirSync(join(base, name), { recursive: true });
-			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\ndescription: d\n---\nbody`);
-		};
-		make(join(home, ".agents", "skills"), "simplify");
-		make(bundled, "simplify");
-		make(bundled, "loop");
+		const { cwd, home, agentDir, bundled } = skillScanDirs(root);
+		writeSkill(join(home, ".agents", "skills"), "simplify");
+		writeSkill(bundled, "simplify");
+		writeSkill(bundled, "loop");
 		// No declared name: the folder names it, so only the real path ties the link to it.
-		mkdirSync(join(home, ".claude", "skills", "shared"), { recursive: true });
-		writeFileSync(join(home, ".claude", "skills", "shared", "SKILL.md"), "---\ndescription: d\n---\nbody");
+		writeSkill(join(agentDir, "skills"), "shared", "description: d");
 		mkdirSync(join(cwd, ".agents", "skills"), { recursive: true });
-		symlinkSync(join(home, ".claude", "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
+		symlinkSync(join(agentDir, "skills", "shared"), join(cwd, ".agents", "skills", "linked"), "junction");
 		const skills = scanSkills(cwd, home, agentDir, [], bundled);
 		expect(skills.map((s) => s.name)).toEqual(["loop", "shared", "simplify"]);
 		// The user's simplify wins over the bundled one, as pi's first-wins load does.
@@ -120,34 +101,26 @@ describe("skill scan", () => {
 	});
 
 	it("scans project/user/agent dirs and merges plugin skills", () => {
-		const cwd = join(root, "proj");
-		const home = join(root, "home");
-		const agentDir = join(root, "agent");
-		const bundled = join(root, "bundled-skills");
+		const { cwd, home, agentDir, bundled } = skillScanDirs(root);
 		for (const [base, name] of [
-			[join(cwd, ".claude", "skills"), "proj-skill"],
 			[join(cwd, ".agents", "skills"), "proj-agents-skill"],
-			[join(home, ".claude", "skills"), "user-skill"],
 			[join(home, ".agents", "skills"), "user-agents-skill"],
 			[join(agentDir, "skills"), "agent-skill"],
 			[bundled, "bundled-skill"],
 		] as const) {
-			mkdirSync(join(base, name), { recursive: true });
-			writeFileSync(join(base, name, "SKILL.md"), `---\nname: ${name}\n---\nbody text here`);
+			writeSkill(base, name, `name: ${name}`, "body text here");
 		}
 		const skills = scanSkills(cwd, home, agentDir, [{ name: "demo:helper", plugin: "demo", path: "/p/SKILL.md" }], bundled);
 		expect(skills.map((s) => `${s.scope}:${s.name}`).sort()).toEqual([
 			"plugin:demo:helper",
 			"project:bundled-skill",
 			"project:proj-agents-skill",
-			"project:proj-skill",
 			"user:agent-skill",
 			"user:user-agents-skill",
-			"user:user-skill",
 		]);
 		// Without the bundled root (the /plugins tab's call) the catalog is not scanned.
 		expect(scanSkills(cwd, home, agentDir, []).some((s) => s.name === "bundled-skill")).toBe(false);
-		expect(estimateSkillTokens(skills.find((s) => s.name === "proj-skill")!.path)).toBeGreaterThan(0);
+		expect(estimateSkillTokens(skills.find((s) => s.name === "proj-agents-skill")!.path)).toBeGreaterThan(0);
 		expect(estimateSkillTokens("/nope/SKILL.md")).toBe(0);
 	});
 });
@@ -157,18 +130,18 @@ describe("write-boundary invariant", () => {
 		// The isolation contract: ~/.claude is read-only. Statically scan every
 		// module of this feature that performs writes for a ".claude" literal.
 		const writeModules = [
-			"extensions/lib/atomic-write.ts",
-			"extensions/lib/plugin-overrides.ts",
-			"extensions/lib/skill-overrides.ts",
-			"extensions/lib/usage-tracker.ts",
-			"extensions/lib/favorites.ts",
-			"extensions/plugins/marketplace/registry.ts",
-			"extensions/plugins/marketplace/git.ts",
-			"extensions/plugins/marketplace/sync.ts",
-			"extensions/plugins/install/paths.ts",
-			"extensions/plugins/install/registry.ts",
-			"extensions/plugins/install/install.ts",
-			"extensions/plugins/counts.ts",
+			"extensions/lib/core/atomic-write.ts",
+			"extensions/lib/plugins/plugin-overrides.ts",
+			"extensions/lib/plugins/skill-overrides.ts",
+			"extensions/lib/plugins/usage-tracker.ts",
+			"extensions/tools/plugins/favorites.ts",
+			"extensions/tools/plugins/marketplace/registry.ts",
+			"extensions/tools/plugins/marketplace/git.ts",
+			"extensions/tools/plugins/marketplace/sync.ts",
+			"extensions/tools/plugins/install/paths.ts",
+			"extensions/tools/plugins/install/registry.ts",
+			"extensions/tools/plugins/install/install.ts",
+			"extensions/tools/plugins/counts.ts",
 		];
 		const stripComments = (source: string) =>
 			source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -179,9 +152,9 @@ describe("write-boundary invariant", () => {
 			expect(/\.claude(?!-plugin)/.test(source), `${module} must not reference .claude in code`).toBe(false);
 		}
 		// And the one module that DOES read .claude settings must not write at all.
-		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/claude-settings.ts"), "utf-8");
+		const settings = readFileSync(join(__dirname, "..", "..", "extensions/lib/profile/settings-files.ts"), "utf-8");
 		for (const writer of ["writeFileSync", "writeJsonAtomic", "renameSync", "appendFileSync"]) {
-			expect(settings.includes(writer), `claude-settings.ts must stay read-only (${writer})`).toBe(false);
+			expect(settings.includes(writer), `settings-files.ts must stay read-only (${writer})`).toBe(false);
 		}
 	});
 });

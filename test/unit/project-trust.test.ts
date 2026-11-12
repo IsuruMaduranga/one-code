@@ -8,7 +8,7 @@ import {
 	persistProjectAllowApproval,
 	projectAllowApproved,
 	readStoredProjectAllowApproval,
-} from "../../extensions/permissions/project-trust.ts";
+} from "../../extensions/lib/consent/project-trust.ts";
 
 describe("project allow-rule consent", () => {
 	it("hashes the rule list order-insensitively", () => {

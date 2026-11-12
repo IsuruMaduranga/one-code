@@ -7,9 +7,9 @@ import {
 	splitCell,
 	truncateLine,
 	wrapPlainText,
-} from "../../extensions/lib/tui-render.ts";
-import { graphemeWidth, sliceColumns, tailColumns, visibleWidth } from "../../extensions/lib/text-width.ts";
-import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
+} from "../../extensions/lib/ui/tui-render.ts";
+import { graphemeWidth, sliceColumns, tailColumns, visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { resolvePiTuiEntry } from "../../extensions/lib/ui/prose.ts";
 
 // pi-tui's own column measure — the authority a rendered line is validated
 // against in the live TUI (it crashes on a line wider than the terminal). Every

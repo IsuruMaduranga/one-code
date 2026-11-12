@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { withoutUnusable } from "../../extensions/lib/model-unusable.ts";
+import { withoutUnusable } from "../../extensions/lib/models/model-unusable.ts";
 
 const model = (provider: string, id: string) => ({ provider, id, name: id }) as any;
 

@@ -9,8 +9,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentSession, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
-import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/child-extensions.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
+import { CHILD_EXTENSION_PATHS } from "../../extensions/lib/agents/child-extensions.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-child-shell-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -36,21 +37,21 @@ type Schema = { properties?: Record<string, { description?: string }> };
 
 describe("shell tools in a child session", () => {
 	it("loads both shell tools from their silent child entry files, after skill", () => {
-		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).slice(-2).join("/"));
-		for (const entry of ["bash/child.ts", "powershell/child.ts"]) {
+		const names = CHILD_EXTENSION_PATHS.map((path) => path.split(/[\\/]/).slice(-3).join("/"));
+		for (const entry of ["tools/bash/child.ts", "tools/powershell/child.ts"]) {
 			const path = CHILD_EXTENSION_PATHS.find((p) => p.replaceAll("\\", "/").endsWith(entry));
 			expect(path && existsSync(path)).toBe(true);
 		}
-		expect(names.indexOf("bash/child.ts")).toBeGreaterThan(names.indexOf("skill/index.ts"));
+		expect(names.indexOf("tools/bash/child.ts")).toBeGreaterThan(names.indexOf("tools/skill/index.ts"));
 	});
 
-	it("registers One Code's bash, with Claude Code's millisecond timeout and run_in_background", async () => {
+	it("registers the harness's bash, with the profile's timeout parameter and run_in_background", async () => {
 		const session = await openChild();
 		try {
 			const bash = session.getAllTools().find((tool) => tool.name === "bash");
 			const schema = bash?.parameters as Schema | undefined;
 			expect(Object.keys(schema?.properties ?? {})).toEqual(["command", "timeout", "description", "run_in_background"]);
-			expect(schema?.properties?.timeout?.description).toMatch(/millisecond/i);
+			expect(schema?.properties?.timeout?.description).toBe(requireText("shell").bashParams.timeout);
 			expect(session.getAllTools().some((tool) => tool.name === "powershell")).toBe(true);
 		} finally {
 			session.dispose();

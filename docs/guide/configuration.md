@@ -64,7 +64,7 @@ session is your own pi, not the app.
 | `permissions/project-allow-approvals.json` | Which projects' allow rules you trusted. |
 | `mcp-auth/<server>-<hash>.json` | OAuth tokens for MCP servers, one file per server name, URL and headers, owner-readable only. |
 | `cache/model-catalog/` | The daily copy of the models.dev, OpenRouter and Hugging Face catalogs behind the model tiers. |
-| `hooks/hooks-decisions.jsonl` | A hook decision log, written only while `CC_HOOKS_DEBUG` is set. |
+| `hooks/hooks-decisions.jsonl` | A hook decision log, written only while `ONECODE_HOOKS_DEBUG` is set. |
 
 The bundled app also keeps a timestamp of its last update check at
 `agent/last-update-check`.

@@ -11,14 +11,16 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { conflictingPathArguments } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
-import permissionsExtension from "../../extensions/permissions/index.ts";
-import { powershellInjectionSyntax } from "../../extensions/permissions/powershell-rules.ts";
+import { conflictingPathArguments } from "../../extensions/lib/shell/paths.ts";
+import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
+import permissionsExtension from "../../extensions/safety/permissions/index.ts";
+import { powershellInjectionSyntax } from "../../extensions/lib/shell/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
 let root: string;
 let cwd: string;
@@ -44,15 +46,15 @@ const verdict = (command: string) => analyze(command).verdict;
 
 describe("H1: one target per file-tool call", () => {
 	it("names the conflict when path fields disagree, and only then", () => {
-		expect(conflictingPathArguments({ path: "/outside.txt", file_path: "ordinary.txt" })).toMatch(/`path` and `file_path`/);
+		expect(conflictingPathArguments({ path: "/outside.txt", file_path: "ordinary.txt" })).toEqual(["path", "file_path"]);
 		expect(conflictingPathArguments({ path: "a.txt", file_path: "a.txt" })).toBeUndefined();
 		expect(conflictingPathArguments({ path: "a.txt" })).toBeUndefined();
-		expect(conflictingPathArguments({ file_path: "a.txt", notebook_path: "b.ipynb" })).toMatch(/`file_path` and `notebook_path`/);
+		expect(conflictingPathArguments({ file_path: "a.txt", notebook_path: "b.ipynb" })).toEqual(["file_path", "notebook_path"]);
 	});
 
 	it("blocks a write whose file_path is in-project and whose path is not, in the real auto-mode gate", async () => {
 		stubHome(home);
-		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
+		vi.stubEnv(envName("STATE_DIR"), join(root, "state"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		const fake = createFakePi();
 		permissionsExtension(fake.pi as never);
@@ -69,7 +71,7 @@ describe("H1: one target per file-tool call", () => {
 
 		const conflicting = await call({ path: join(root, "outside.txt"), file_path: "ordinary.txt", content: "x" });
 		expect(conflicting?.block).toBe(true);
-		expect(conflicting?.reason).toMatch(/`path` and `file_path`/);
+		expect(conflicting?.reason).toBe(permissionText().refused({ kind: "conflictingPaths", fields: ["path", "file_path"] }));
 		// The ordinary in-project write still takes the fast path.
 		expect(await call({ path: "ordinary.txt", content: "x" })).toBeUndefined();
 	});

@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { classify, createClassifierState } from "../../extensions/auto-mode/classifier.ts";
-import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
-import { buildPayload, type ClassifyRequest } from "../../extensions/auto-mode/prompt.ts";
+import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
+import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
+import { buildPayload, type ClassifyRequest } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
+import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
 const completeMock = vi.mocked(completeSimple);
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
@@ -54,12 +55,14 @@ describe("classifier provider context overflow", () => {
 		"The input token count (280000) exceeds the maximum number of tokens allowed (272000)",
 	])("returns a distinct no-verdict result without retrying for %s", async (error) => {
 		completeMock.mockResolvedValue(errorReply(error));
+		const words = autoModeResultText;
+		const blockSpy = vi.spyOn(words, "classifierBlock");
 		const state = deps();
 		const verdict = await classify(base, state);
 		expect(verdict).toMatchObject({ decision: "block", noVerdict: true, transcriptTooLong: true });
-		expect(verdict.reason).toContain("Classifier transcript exceeded context window");
-		expect(verdict.reason).toContain("Compact the session (/compact) and continue.");
-		expect(verdict.reason).not.toContain("choose a classifier");
+		expect(blockSpy.mock.calls).toEqual([[{ kind: "transcriptTooLong", model: `${main.provider}/${main.id}` }]]);
+		expect(verdict.reason).toBe(blockSpy.mock.results[0].value);
+		blockSpy.mockRestore();
 		expect(completeMock).toHaveBeenCalledTimes(1);
 		expect(state.state.rejected.size).toBe(0);
 	});

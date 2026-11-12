@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLspTrustGate } from "../../extensions/lsp/trust.ts";
+import { createLspTrustGate } from "../../extensions/tools/lsp/trust.ts";
 
 describe("createLspTrustGate: a shared trust dialog", () => {
 	it("lets a caller still live ask again when the one that opened the dialog aborts", async () => {

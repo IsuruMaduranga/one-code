@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { agentMessage, frameForDelivery, handBackPointer, taskNotification } from "../../extensions/lib/notifications.ts";
+import { agentMessage, frameForDelivery, handBackPointer, taskNotification } from "../../extensions/lib/notify/notifications.ts";
 import {
 	bulletColor,
 	callLine,
-	ccToolRenderers,
+	toolRenderers,
 	formatFireTime,
 	scheduledTaskComponent,
 	collapseLines,
@@ -29,7 +29,11 @@ import {
 	type ThemeLike,
 	stripHarnessText,
 	stripReminderBlocks,
-} from "../../extensions/lib/tui-render.ts";
+} from "../../extensions/lib/ui/tui-render.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+
+/** `text` without whitespace: compares text a renderer may have wrapped. */
+const squash = (text: string) => text.replace(/\s+/g, "");
 
 /** Theme stub that tags text with the color name so assertions can see it. */
 const theme: ThemeLike = {
@@ -138,8 +142,8 @@ describe("spinnerBulletColor (running-call pulse)", () => {
 	});
 });
 
-describe("ccToolRenderers", () => {
-	const renderers = ccToolRenderers<{ query?: string }>("Tool Search");
+describe("toolRenderers", () => {
+	const renderers = toolRenderers<{ query?: string }>("Tool Search");
 	const context = { args: { query: "select:a" }, isPartial: false, isError: false };
 
 	it("renders the call line via renderCall", () => {
@@ -160,7 +164,7 @@ describe("ccToolRenderers", () => {
 	});
 
 	it("a throwing custom title falls back to the generic summary", () => {
-		const custom = ccToolRenderers<{ query?: string }>("X", {
+		const custom = toolRenderers<{ query?: string }>("X", {
 			title: () => {
 				throw new Error("bad");
 			},
@@ -169,7 +173,7 @@ describe("ccToolRenderers", () => {
 	});
 
 	it("appends a painted link after the sanitized first line, never on an error", () => {
-		const linked = ccToolRenderers<unknown, { path?: string }>("Artifact", {
+		const linked = toolRenderers<unknown, { path?: string }>("Artifact", {
 			result: () => "Published",
 			link: (result, isError) => (isError ? undefined : `<link:${result.details?.path}>`),
 		});
@@ -183,7 +187,7 @@ describe("ccToolRenderers", () => {
 
 	it("puts a link that does not fit in as plain text, so truncation never leaves it open", () => {
 		const osc = "\x1b]8;;file:///a/view.html\x1b\\~/a/view.html\x1b]8;;\x1b\\";
-		const linked = ccToolRenderers<unknown, unknown>("Artifact", { result: () => "Published", link: () => osc });
+		const linked = toolRenderers<unknown, unknown>("Artifact", { result: () => "Published", link: () => osc });
 		const result = { content: [{ type: "text", text: "x" }] };
 		const wide = linked.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(120);
 		expect(wide[0]).toContain(osc);
@@ -280,13 +284,15 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 		const lines = notificationComponent(theme, wire, true).render(400);
 		expect(lines[0]).toContain("› Message from a94a90cbdda8038c4");
 		expect(lines[0]).not.toContain("@");
-		expect(lines[1]).toContain("<muted>  [Subagent hand-back] The text below");
+		const words = notificationWords().agentMessage;
+		expect(lines[1].startsWith(`<muted>  ${words.handBackPreamble.split("\n")[0].slice(0, 40)}`)).toBe(true);
 		// The long preamble wraps at this width; the report lines keep their own two-space indent under the body indent.
 		expect(lines.some((l) => l.includes("<muted>    ALTITUDE review — 3 findings."))).toBe(true);
 		expect(lines.at(-1)).toContain("<muted>    1. first");
-		expect(lines.join("\n")).not.toContain("permission laundering");
-		expect(lines.join("\n")).not.toContain("SubagentHandback");
-		expect(lines.join("\n")).not.toContain("SYSTEM NOTIFICATION");
+		// The guard, the pointer and the delivery preamble stay hidden (compared without the wrap's whitespace).
+		const shown = squash(lines.join(""));
+		const notifications = notificationWords();
+		for (const hidden of [words.guard, handBackPointer("a94a90cbdda8038c4", false), notifications.preamble.alone]) expect(shown).not.toContain(squash(hidden));
 	});
 
 	it("a coalesced message collapses to one line per frame, each with its own hint", () => {
@@ -340,10 +346,13 @@ describe("notificationComponent wraps long body lines instead of cutting them", 
 		// A plain theme: the tagging stub's `<muted>` markers would count as columns.
 		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 		const report = agentMessage({ from: "a1", body: "r", handBack: true });
-		const lines = notificationComponent(plain, report, true).render(60);
-		expect(lines.length).toBeGreaterThan(4);
-		expect(lines.every((l) => l.length <= 60)).toBe(true);
-		expect(lines.join("")).toContain("The report follows:");
+		const lines = notificationComponent(plain, report, true).render(30);
+		// The header, the preamble over at least two lines, the report.
+		expect(lines.length).toBeGreaterThan(3);
+		expect(lines.every((l) => l.length <= 30)).toBe(true);
+		expect(lines[2].startsWith(" ")).toBe(false);
+		// Every character of the preamble is kept, only the line breaks differ.
+		expect(squash(lines.slice(1, -1).join(""))).toBe(squash(notificationWords().agentMessage.handBackPreamble));
 		expect(lines.some((l) => l.endsWith("…"))).toBe(false);
 		expect(lines.at(-1)).toBe("    r");
 	});
@@ -434,12 +443,12 @@ describe("a call the user rejected", () => {
 	const opts = { expanded: true, isPartial: false };
 
 	it("shows Claude Code's short line, never the model-facing text", async () => {
-		const { ccToolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
-		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const edit = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, rejectedAs: "update" });
-		const task = ccToolRenderers("Task Output");
+		const task = toolRenderers("Task Output");
 		const ctx = (args: unknown) => ({ args, isError: true, cwd: "/w", state: {} });
 
 		for (const text of [userDenialText(), userDenialText("try npm ci")]) {
@@ -452,8 +461,8 @@ describe("a call the user rejected", () => {
 	});
 
 	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
-		const { userDenialText } = await import("../../extensions/lib/user-denial.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers("Bash", base);
 		expect(bash.renderResult(rejection("exit 1"), opts, plainTheme, { args: {}, isError: true, state: {} }).render(120)).toEqual(["  ⎿  BASE"]);
@@ -465,7 +474,7 @@ describe("pi's render context under the wrapper", () => {
 	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 
 	it("hides pi 1.1.0's shell duration and pins the base renderers' padding", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const seen: Array<Record<string, unknown>> = [];
 		const component = { render: () => ["BASE"], invalidate() {} };
 		const base = {
@@ -485,13 +494,13 @@ describe("pi's render context under the wrapper", () => {
 
 describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	it("indents under the elbow and strips leading blank lines", async () => {
-		const { elbowIndent } = await import("../../extensions/lib/tui-render.ts");
+		const { elbowIndent } = await import("../../extensions/lib/ui/tui-render.ts");
 		expect(elbowIndent(["", "a", "b"])).toEqual(["  ⎿  a", "     b"]);
 		expect(elbowIndent([])).toEqual([]);
 	});
 
 	it("replaces the base call line and keeps the base result, indented", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			renderCall: () => ({ render: () => ["$ ls -la"], invalidate() {} }),
 			renderResult: () => ({ render: () => ["file-a", "file-b"], invalidate() {} }),
@@ -509,7 +518,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("keepBaseCall keeps the body (diff preview) and swaps only the header", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			// Base call components are padded Boxes: blank line(s) before the header.
 			renderCall: () => ({ render: () => ["", "edit src/x.ts", "-old line", "+new line"], invalidate() {} }),
@@ -525,7 +534,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("stores inner components on state, not lastComponent (base renderers cast it)", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const seen: unknown[] = [];
 		const inner = { render: () => ["out"], invalidate() {} };
 		const base = {
@@ -543,7 +552,7 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 	});
 
 	it("a throwing base result renderer falls back to plain text, never the JSON dump", async () => {
-		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/tui-render.ts");
+		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const base = {
 			renderResult: () => {
 				throw new Error("boom");

@@ -1,5 +1,5 @@
 /**
- * lib/agent-loader.ts openChildSession — the two lifecycle facts every
+ * lib/agents/agent-loader.ts openChildSession — the two lifecycle facts every
  * in-process child (subagent, workflow agent) depends on
  * (LIFECYCLE-REVIEW-2026-09-06 H2, H3):
  *
@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type InlineExtension, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
-import { openChildSession } from "../../extensions/lib/agent-loader.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
 
 const agentDir = mkdtempSync(join(tmpdir(), "oc-child-session-agent-"));
 afterAll(() => rmSync(agentDir, { recursive: true, force: true }));

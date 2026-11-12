@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseCommand } from "../../extensions/auto-mode/shell-parse.ts";
-import { bashParserUnavailable } from "../../extensions/lib/bash-parser.ts";
-import { bashMatchForms, bashSubcommands, findBashAllowRule, parseRules } from "../../extensions/permissions/matcher.ts";
+import { parseCommand } from "../../extensions/lib/shell/shell-parse.ts";
+import { bashParserUnavailable } from "../../extensions/lib/shell/bash-parser.ts";
+import { bashMatchForms, bashSubcommands, findBashAllowRule, parseRules } from "../../extensions/lib/rules/matcher.ts";
 
 const words = (command: string) => parseCommand(command).segments.map((segment) => segment.tokens.map((token) => token.value));
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { describeChanges, FileTracker, RACY_STAMP_MS, UNREAD_REASON } from "../../extensions/file-tracker/tracker.ts";
-import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/context-management/index.ts";
+import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/safety/file-tracker/tracker.ts";
+import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/request/context-management/index.ts";
 
 describe("FileTracker.status", () => {
 	it("reports absent for a file that does not exist", () => {
@@ -65,16 +65,6 @@ describe("FileTracker.status", () => {
 
 // The change scan runs after every tool call; the stamp is what lets it skip
 // the full read for every tracked file whose mtime and size have not moved.
-describe("UNREAD_REASON", () => {
-	it("tells the model a cut-off shell output does not count as a read", () => {
-		const text = UNREAD_REASON("/p/a.ts", "edit");
-		expect(text).toContain("a plain `cat`");
-		expect(text).toContain("output cut off at the size limit");
-		// A committed version printed by git is not the file on disk.
-		expect(text).toContain("git show HEAD:<file>");
-	});
-});
-
 describe("FileTracker disk stamps", () => {
 	const stamp = { mtimeMs: 1000, size: 5 };
 
@@ -130,22 +120,22 @@ describe("describeChanges", () => {
 		const after = "one\ntwo\nCHANGED\nfour\nfive";
 		const excerpt = describeChanges(before, after, { context: 1 });
 		expect(excerpt?.firstChangedLine).toBe(3);
-		expect(excerpt?.text).toContain("3\tCHANGED");
-		expect(excerpt?.text).toContain("2\ttwo");
-		expect(excerpt?.text).not.toContain("5\tfive");
+		expect(excerpt?.numbered).toContain("3\tCHANGED");
+		expect(excerpt?.numbered).toContain("2\ttwo");
+		expect(excerpt?.numbered).not.toContain("5\tfive");
 	});
 
 	it("handles an appended block", () => {
 		const excerpt = describeChanges("a\n", "a\nb\nc\n", { context: 0 });
-		expect(excerpt?.text).toContain("2\tb");
-		expect(excerpt?.text).toContain("3\tc");
+		expect(excerpt?.numbered).toContain("2\tb");
+		expect(excerpt?.numbered).toContain("3\tc");
 	});
 
 	it("caps very large changes and says how many lines were dropped", () => {
 		const after = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
 		const excerpt = describeChanges("original", after, { context: 0, maxLines: 5 });
-		expect(excerpt?.text.split("\n").filter((l) => /^\d+\t/.test(l))).toHaveLength(5);
-		expect(excerpt?.text).toContain("more changed lines");
+		expect(excerpt?.numbered.split("\n")).toHaveLength(5);
+		expect(excerpt?.moreLines).toBe(95);
 	});
 });
 

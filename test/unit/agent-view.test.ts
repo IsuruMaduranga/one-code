@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { agentViewTarget, applyBorderBadge, fitBadge, unwrapUserMessage, userMessageForAgent } from "../../extensions/lib/agent-view.ts";
-import { visibleWidth } from "../../extensions/lib/text-width.ts";
-import { moveTasksSelection, renderTasksDialog, tasksItems } from "../../extensions/subagents/tasks-dialog.ts";
+import { agentViewTarget, applyBorderBadge, fitBadge, unwrapUserMessage, userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { moveTasksSelection, renderTasksDialog, tasksItems } from "../../extensions/agents/subagents/tasks-dialog.ts";
+import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 const paint = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
 
@@ -23,11 +24,9 @@ describe("agentViewTarget", () => {
 });
 
 describe("userMessageForAgent", () => {
-	it("is Claude Code's mid-turn wrapper, and unwraps back to the typed text", () => {
+	it("is the profile's mid-turn wrapper, and unwraps back to the typed text", () => {
 		const wrapped = userMessageForAgent("now give it a one-line title only");
-		expect(wrapped).toBe(
-			"The user sent a new message while you were working:\nnow give it a one-line title only\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.",
-		);
+		expect(wrapped).toBe(notificationWords().userMessageMidTurn({ text: "now give it a one-line title only" }));
 		expect(unwrapUserMessage(wrapped)).toBe("now give it a one-line title only");
 		expect(unwrapUserMessage("Continue with the review")).toBeUndefined();
 	});

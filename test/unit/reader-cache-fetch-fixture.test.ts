@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { htmlToMarkdown } from "../../extensions/web-fetch/extract.ts";
+import { htmlToMarkdown } from "../../extensions/tools/web-fetch/extract.ts";
 import readerCacheFetchFixture, {
 	READER_PROBE_LONG_URL,
 	READER_PROBE_SHORT_URL,

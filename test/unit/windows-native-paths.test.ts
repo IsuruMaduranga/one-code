@@ -13,23 +13,24 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { forwardSlashes, oneCodeStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
-import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
-import { whichOnPath } from "../../extensions/lib/which.ts";
-import { commandLaunch } from "../../extensions/lib/command-launch.ts";
-import { decide, isInsideDir, matchesPathPattern } from "../../extensions/permissions/matcher.ts";
-import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
+import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { forwardSlashes, productStateDir, tildify, toPosixPath } from "../../extensions/lib/profile/paths.ts";
+import { sessionScratchpadDir } from "../../extensions/lib/core/scratchpad.ts";
+import { whichOnPath } from "../../extensions/lib/shell-run/which.ts";
+import { commandLaunch } from "../../extensions/lib/shell-run/command-launch.ts";
+import { decide, isInsideDir, matchesPathPattern } from "../../extensions/lib/rules/matcher.ts";
+import { sessionGrant } from "../../extensions/safety/permissions/session-grant.ts";
 
 const win32 = process.platform === "win32";
 const home = homedir();
 const cwd = process.cwd();
 
 describe.skipIf(!win32)("Windows: home, state dir and display paths", () => {
-	it("homedir() is USERPROFILE (HOME is unset for a Node process there) and ~/.onecode sits under it", () => {
+	it("homedir() is USERPROFILE (HOME is unset for a Node process there) and the product's state folder sits under it", () => {
 		expect(process.env.USERPROFILE, "USERPROFILE").toBeTruthy();
 		expect(home).toBe(process.env.USERPROFILE);
-		expect(oneCodeStateDir({})).toBe(join(process.env.USERPROFILE as string, ".onecode"));
+		expect(productStateDir({})).toBe(join(process.env.USERPROFILE as string, brand.stateDir));
 	});
 
 	it("tildify shows a profile path as ~/… whatever its spelling, and leaves others alone", () => {
@@ -133,7 +134,7 @@ describe.skipIf(!win32)("Windows: a .cmd shim on PATH (npm's shape for an LSP se
 	writeFileSync(join(dir, "probe-tool.cmd"), "@echo off\r\necho probe-ok %*\r\n");
 	const env = { ...process.env, PATH: `${dir};${process.env.PATH ?? ""}` };
 
-	/** Spawn and collect stdout with the spawn outcome, the way lsp/client.ts starts a server. */
+	/** Spawn and collect stdout with the spawn outcome, the way tools/lsp/client.ts starts a server. */
 	const run = (command: string, args: string[], extra: { windowsVerbatimArguments?: boolean } = {}) =>
 		new Promise<{ outcome: string; stdout: string; code: number | null }>((done) => {
 			let stdout = "";

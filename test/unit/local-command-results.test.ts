@@ -1,19 +1,20 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import effortExtension from "../../extensions/effort/index.ts";
-import skillExtension from "../../extensions/skill/index.ts";
-import workflowExtension from "../../extensions/workflow/index.ts";
-import memoryExtension from "../../extensions/memory/index.ts";
-import { editorHint } from "../../extensions/memory/open-external.ts";
+import effortExtension from "../../extensions/ui/effort/index.ts";
+import skillExtension from "../../extensions/tools/skill/index.ts";
+import workflowExtension from "../../extensions/agents/workflow/index.ts";
+import memoryExtension from "../../extensions/context/memory/index.ts";
+import { editorHint } from "../../extensions/context/memory/open-external.ts";
 
-vi.mock("../../extensions/memory/open-external.ts", async (importOriginal) => ({
-	...await importOriginal<typeof import("../../extensions/memory/open-external.ts")>(),
+vi.mock("../../extensions/context/memory/open-external.ts", async (importOriginal) => ({
+	...await importOriginal<typeof import("../../extensions/context/memory/open-external.ts")>(),
 	openPath: vi.fn(async () => ({ ok: true })),
 }));
-import { localCommandBlocks } from "../../extensions/lib/local-command.ts";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
+import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -25,7 +26,6 @@ beforeEach(() => {
 	mkdirSync(cwd);
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
-	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 });
 afterEach(() => {
 	vi.restoreAllMocks();
@@ -86,8 +86,10 @@ describe("Claude Code 2.1.296 local-command results", () => {
 		});
 		await fake.commands.get("skills")!.handler("", ctx);
 		const strip = (line: string) => line.replace(/\x1b\[[0-9;]*m/g, "");
-		const simplify = lines.map(strip).find((line) => /\bsimplify\b/.test(line));
-		expect(simplify).toContain("· bundled ·");
+		// A skill the profile in force ships in its catalog.
+		const name = readdirSync(BUNDLED_SKILLS_DIR, { withFileTypes: true }).find((entry) => entry.isDirectory())!.name;
+		const row = lines.map(strip).find((line) => new RegExp(`(^|[^\\w-])${name}([^\\w-]|$)`).test(line));
+		expect(row).toContain("· bundled ·");
 		expect(lines.map(strip).some((line) => line.includes("· project ·"))).toBe(false);
 	});
 

@@ -1,7 +1,8 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { baseMark, lastMessageMark, withPreviousMark } from "../../extensions/lib/previous-mark.ts";
-import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/ledger/plan.ts";
-import cacheMarksExtension from "../../extensions/cache-marks/index.ts";
+import { baseMark, lastMessageMark, withPreviousMark } from "../../extensions/request/cache-marks/previous-mark.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../extensions/lib/request/ledger/plan.ts";
+import cacheMarksExtension from "../../extensions/request/cache-marks/index.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
 const mark = { type: "ephemeral", ttl: "1h" };
@@ -60,7 +61,7 @@ describe("baseMark", () => {
 
 describe("cache-marks wiring", () => {
 	// On, whatever the environment running the tests says.
-	beforeEach(() => vi.stubEnv("CC_CACHE_MARKS", ""));
+	beforeEach(() => vi.stubEnv(envName("CACHE_MARKS"), ""));
 	afterEach(() => vi.unstubAllEnvs());
 	const anthropic = { model: { provider: "anthropic", api: "anthropic-messages" } };
 	/** The ledger's plan for a request that extends a base whose list was `list`. */

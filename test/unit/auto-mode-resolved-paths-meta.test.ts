@@ -1,6 +1,6 @@
 /**
  * The `{"meta":{"resolvedPaths":…}}` transcript line
- * (auto-mode/resolved-paths-meta.ts): an in-project name that a symlink takes
+ * (safety/permissions/auto-mode/resolved-paths-meta.ts): an in-project name that a symlink takes
  * outside the working directory is reported with where it lands, for bash,
  * PowerShell and the file tools; everything else gets no line.
  */
@@ -8,8 +8,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { actionResolvedPaths, bashPathCandidates, RESOLVED_PATHS_NOTE, resolvedPathFacts } from "../../extensions/auto-mode/resolved-paths-meta.ts";
-import { renderTranscript } from "../../extensions/auto-mode/transcript.ts";
+import { classifierText } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
+import { actionResolvedPaths, bashPathCandidates, resolvedPathFacts } from "../../extensions/safety/permissions/auto-mode/resolved-paths-meta.ts";
+import { renderTranscript } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { HAVE_POWERSHELL, POWERSHELL_TEST_TIMEOUT, psParse } from "./helpers/powershell-parse.ts";
 
 // The real spelling (macOS tmpdir is under a symlinked /var): the line reports the filesystem's own case.
@@ -89,7 +90,7 @@ describe("the rendered line", () => {
 		]);
 		expect(text.split("\n")).toEqual([
 			"<transcript>",
-			JSON.stringify({ meta: { resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }], note: RESOLVED_PATHS_NOTE } }),
+			JSON.stringify({ meta: { resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }], note: classifierText().resolvedPathsNote } }),
 			'{"PowerShell":"Set-Content \' leading.txt\' x"}',
 			"</transcript>",
 		]);

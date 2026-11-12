@@ -3,13 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { collectDoctorCliReport, runDoctorCli } from "../../extensions/doctor/cli.ts";
+import { collectDoctorCliReport, runDoctorCli } from "../../extensions/commands/doctor/cli.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { piRoot, repoRoot } from "./helpers/pi-install.ts";
 
 let home: string;
 
 beforeEach(() => {
-	home = mkdtempSync(join(tmpdir(), "onecode-doctor-cli-"));
+	home = mkdtempSync(join(tmpdir(), "doctor-cli-"));
 });
 afterEach(() => rmSync(home, { recursive: true, force: true }));
 
@@ -35,7 +36,7 @@ describe("onecode doctor (headless)", () => {
 		expect(report.ready).toBe(false);
 		expect(report.findings.some((f) => f.level === "error" && f.text.includes("No model provider is configured"))).toBe(true);
 		const text = report.sections.flatMap((s) => s.lines.map((l) => l.text));
-		expect(text.some((t) => t.startsWith("Running: the bundled onecode app 0.2.1 · pi 0.85.1"))).toBe(true);
+		expect(text.some((t) => t.startsWith(`Running: the bundled ${brand.bin} app 0.2.1 · pi 0.85.1`))).toBe(true);
 		expect(text.some((t) => t.includes("known providers"))).toBe(true);
 	});
 
@@ -45,33 +46,33 @@ describe("onecode doctor (headless)", () => {
 		const code = await runDoctorCli(options(), (text) => chunks.push(text));
 		const out = chunks.join("");
 		expect(code).toBe(1);
-		expect(out.startsWith("One Code doctor\n")).toBe(true);
-		expect(out).toContain("For a full setup checkup that can also fix issues, run /doctor inside an onecode session.");
+		expect(out.startsWith(`${brand.name} doctor\n`)).toBe(true);
+		expect(out).toContain(`For a full setup checkup that can also fix issues, run /doctor inside ${brand.bin}.`);
 		expect(out).toContain("/doctor report shows this report alone");
 		expect(out.split("\n").every((line) => line.length <= 100)).toBe(true);
 	});
 });
 
-describe("app/bin.mjs doctor routing (pin against the installed pi)", () => {
+describe("the app launcher (lib/app/create-app.mjs) doctor routing (pin against the installed pi)", () => {
 	it("can reach jiti from pi's own dependency tree, the way bin.mjs resolves it", () => {
 		const piRequire = createRequire(join(piRoot, "dist", "index.js"));
 		expect(piRequire.resolve("jiti")).toMatch(/jiti[\\/]lib[\\/]jiti\.cjs$/);
 	});
 
 	it("routes `onecode doctor` before pi is imported", () => {
-		const source = readFileSync(join(repoRoot, "app", "bin.mjs"), "utf8");
+		const source = readFileSync(join(repoRoot, "extensions", "lib", "app", "create-app.mjs"), "utf8");
 		const doctorAt = source.indexOf('argv[0] === "doctor"');
-		const piImportAt = source.indexOf('await import("@earendil-works/pi-coding-agent")');
+		const piImportAt = source.indexOf('await import(resolve("@earendil-works/pi-coding-agent"))');
 		expect(doctorAt).toBeGreaterThan(0);
 		expect(piImportAt).toBeGreaterThan(doctorAt);
-		expect(source).toContain('join(corePath, "extensions", "doctor", "cli.ts")');
+		expect(source).toContain('join(corePath, "extensions", "commands", "doctor", "cli.ts")');
 	});
 
 	it("publishes the install method before the doctor fast path exits", () => {
 		// The doctor's update lookup reads ONECODE_INSTALL_METHOD (Homebrew waits a
 		// day for a release); set after `process.exit()` in the doctor branch it
 		// would never be seen by `onecode doctor`.
-		const source = readFileSync(join(repoRoot, "app", "bin.mjs"), "utf8");
+		const source = readFileSync(join(repoRoot, "extensions", "lib", "app", "create-app.mjs"), "utf8");
 		const methodAt = source.indexOf("applyLauncherEnv(process.env, { home: homedir(), appVersion, installMethod })");
 		const doctorRunAt = source.indexOf("if (runDoctor) {");
 		expect(methodAt).toBeGreaterThan(0);

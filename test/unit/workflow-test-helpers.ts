@@ -3,8 +3,8 @@ import {
 	createScriptGlobals,
 	type RunAdmissionOptions,
 	type ScriptGlobalsOptions,
-} from "../../extensions/workflow/globals.ts";
-import type { AgentCallFn, JournalEntry, RunProgressEvent } from "../../extensions/workflow/types.ts";
+} from "../../extensions/agents/workflow/globals.ts";
+import type { AgentCallFn, JournalEntry, RunProgressEvent } from "../../extensions/agents/workflow/types.ts";
 
 export type GlobalsOverrides = Partial<ScriptGlobalsOptions> & Partial<RunAdmissionOptions>;
 

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { managedSettingsPaths } from "../../extensions/lib/claude-settings.ts";
+import { managedSettingsPaths } from "../../extensions/lib/profile/settings-files.ts";
 
 describe("managedSettingsPaths", () => {
 	// Claude Code reads managed settings and managed instructions from one root
-	// per platform (lib/paths.ts claudeManagedDir); on Windows that is
+	// per platform (lib/profile/paths.ts claudeManagedDir); on Windows that is
 	// C:\Program Files\ClaudeCode, not C:\ProgramData\ClaudeCode.
 	it("reads managed settings from the same root as the managed instructions", () => {
 		expect(managedSettingsPaths("darwin")).toEqual(["/Library/Application Support/ClaudeCode/managed-settings.json"]);

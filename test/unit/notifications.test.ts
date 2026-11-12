@@ -13,8 +13,8 @@ import {
 	sessionOutlivesTurn,
 	shellSummary,
 	taskNotification,
-} from "../../extensions/lib/notifications.ts";
-import { announcePromptOptions, PROMPT_OPTIONS_CHANNEL } from "../../extensions/lib/prompt-options.ts";
+} from "../../extensions/lib/notify/notifications.ts";
+import { announcePromptOptions, PROMPT_OPTIONS_CHANNEL } from "../../extensions/lib/ui/prompt-options.ts";
 
 /** A kind=shell notification for a finished background command. */
 const shellDone = (id: string, tail?: string) =>
@@ -619,7 +619,7 @@ describe("mergeNotificationTexts / notificationBody", () => {
 
 	it("reduces a task notification to its summary and unescaped body for display", () => {
 		const text = taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: shellSummary("run <tests>", "completed", 0), result: "a < b && c" });
-		expect(notificationBody(text)).toBe('Background command "run <tests>" completed (exit code 0)\na < b && c');
+		expect(notificationBody(text)).toBe(`${shellSummary("run <tests>", "completed", 0)}\na < b && c`);
 		const batch = taskNotification({ kind: "monitor", taskId: "m1", summary: 'Monitor event: "log"', result: "l1\nl2" });
 		expect(notificationBody(batch)).toBe('Monitor event: "log"\nl1\nl2');
 		expect(notificationBody("plain text\n")).toBe("plain text");

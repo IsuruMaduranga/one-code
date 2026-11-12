@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	type DiscoverRoots,
 	discoverPlugins,
 	entryAppliesToCwd,
 	findPluginCommands,
@@ -12,11 +11,12 @@ import {
 	loadInstalledPlugins,
 	pluginResources,
 	splitPluginKey,
-} from "../../extensions/lib/plugins.ts";
-import { setOverride } from "../../extensions/lib/plugin-overrides.ts";
-import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
-import { shellQuote } from "../../extensions/lib/shell-quote.ts";
-import { splitShellPlaceholders, substituteArguments } from "../../extensions/plugins/template.ts";
+} from "../../extensions/lib/plugins/plugins.ts";
+import { setOverride } from "../../extensions/lib/plugins/plugin-overrides.ts";
+import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/plugins/skill-overrides.ts";
+import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
+import { splitShellPlaceholders, substituteArguments } from "../../extensions/tools/plugins/template.ts";
+import { usePluginRoots, writePlugin, writeRegistry as writeRootRegistry } from "./helpers/plugin-roots.ts";
 
 describe("entryAppliesToCwd (review L6)", () => {
 	it("user scope and no-projectPath entries apply everywhere; project/local scope is confined", () => {
@@ -60,10 +60,7 @@ describe("plugin discovery", () => {
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-	const writeRegistry = (plugins: Record<string, unknown[]>) => {
-		mkdirSync(join(claudeDir, "plugins"), { recursive: true });
-		writeFileSync(join(claudeDir, "plugins", "installed_plugins.json"), JSON.stringify({ version: 2, plugins }));
-	};
+	const writeRegistry = (plugins: Record<string, unknown[]>) => writeRootRegistry(join(claudeDir, "plugins"), plugins);
 
 	it("reads the registry and the plugin manifest", () => {
 		writeRegistry({ "demo@market": [{ scope: "user", installPath, version: "1.0.0" }] });
@@ -176,77 +173,13 @@ describe("plugin discovery", () => {
 });
 
 describe("discoverPlugins two-root merge", () => {
-	let root: string;
-	let roots: DiscoverRoots & { claudePluginsDir: string };
-
-	const writePlugin = (base: string, name: string, extra?: { skill?: string }) => {
-		const installPath = join(base, "cache", "market", name, "1.0.0");
-		mkdirSync(join(installPath, ".claude-plugin"), { recursive: true });
-		writeFileSync(join(installPath, ".claude-plugin", "plugin.json"), JSON.stringify({ name }));
-		if (extra?.skill) {
-			mkdirSync(join(installPath, "skills", extra.skill), { recursive: true });
-			writeFileSync(join(installPath, "skills", extra.skill, "SKILL.md"), "---\nname: s\n---\nbody");
-		}
-		return installPath;
-	};
-
-	const writeRegistry = (base: string, plugins: Record<string, unknown[]>) => {
-		mkdirSync(base, { recursive: true });
-		writeFileSync(join(base, "installed_plugins.json"), JSON.stringify({ version: 2, plugins }));
-	};
-
-	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "cc-plugins-merge-"));
-		roots = {
-			claudePluginsDir: join(root, ".claude", "plugins"),
-			oneCodeRoot: join(root, "one-code", "plugins"),
-			cwd: join(root, "project"),
-			home: root,
-		};
-		mkdirSync(roots.cwd, { recursive: true });
-		invalidatePluginsCache();
-	});
-	afterEach(() => {
-		invalidatePluginsCache();
-		rmSync(root, { recursive: true, force: true });
-	});
-
-	it("claude-origin: enabledPlugins from settings, default true when absent", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha");
-		const b = writePlugin(roots.claudePluginsDir, "beta");
-		writeRegistry(roots.claudePluginsDir, {
-			"alpha@market": [{ scope: "user", installPath: a }],
-			"beta@market": [{ scope: "user", installPath: b }],
-		});
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "beta@market": false } }));
-
-		const discovered = discoverPlugins(roots);
-		expect(discovered.plugins.find((p) => p.id === "alpha@market")).toMatchObject({
-			originRoot: "claude",
-			enabled: true,
-			overridden: false,
-		});
-		expect(discovered.plugins.find((p) => p.id === "beta@market")?.enabled).toBe(false);
-		expect(discovered.enabledPlugins.map((p) => p.id)).toEqual(["alpha@market"]);
-	});
-
-	it("project/local settings win over user settings per key", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha");
-		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": false } }));
-		mkdirSync(join(roots.cwd, ".claude"), { recursive: true });
-		writeFileSync(join(roots.cwd, ".claude", "settings.local.json"), JSON.stringify({ enabledPlugins: { "alpha@market": true } }));
-
-		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true);
-	});
+	const roots = usePluginRoots();
 
 	it("overrides.json wins over Claude Code settings and marks the plugin overridden", () => {
 		const a = writePlugin(roots.claudePluginsDir, "alpha");
-		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": true } }));
+		writeRootRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
+		mkdirSync(join(roots.home, ".claude"), { recursive: true });
+		writeFileSync(join(roots.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": true } }));
 		setOverride(roots.oneCodeRoot, "alpha@market", false);
 		invalidatePluginsCache();
 
@@ -255,29 +188,27 @@ describe("discoverPlugins two-root merge", () => {
 
 	it("one-code origin: entry-level enabled respected, dataRoot points at our root", () => {
 		const a = writePlugin(roots.oneCodeRoot, "ours");
-		writeRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
+		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const plugin = discoverPlugins(roots).plugins[0];
-		expect(plugin).toMatchObject({ originRoot: "one-code", enabled: false, rawEnabled: false });
+		expect(plugin).toMatchObject({ originRoot: "product", enabled: false, rawEnabled: false });
 		expect(plugin?.dataRoot).toBe(join(roots.oneCodeRoot, "data"));
 	});
 
 	it("same id in both roots: the one-code copy wins", () => {
 		const claude = writePlugin(roots.claudePluginsDir, "dup");
 		const ours = writePlugin(roots.oneCodeRoot, "dup");
-		writeRegistry(roots.claudePluginsDir, { "dup@market": [{ scope: "user", installPath: claude }] });
-		writeRegistry(roots.oneCodeRoot, { "dup@market": [{ scope: "user", installPath: ours }] });
+		writeRootRegistry(roots.claudePluginsDir, { "dup@market": [{ scope: "user", installPath: claude }] });
+		writeRootRegistry(roots.oneCodeRoot, { "dup@market": [{ scope: "user", installPath: ours }] });
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);
-		expect(discovered.plugins[0]).toMatchObject({ originRoot: "one-code", path: ours });
+		expect(discovered.plugins[0]).toMatchObject({ originRoot: "product", path: ours });
 	});
 
 	it("disabled plugins contribute no resources but still appear in plugins/byPlugin", () => {
-		const a = writePlugin(roots.claudePluginsDir, "alpha", { skill: "helper" });
-		writeRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
-		mkdirSync(join(root, ".claude"), { recursive: true });
-		writeFileSync(join(root, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": false } }));
+		const a = writePlugin(roots.oneCodeRoot, "alpha", { skill: "helper" });
+		writeRootRegistry(roots.oneCodeRoot, { "alpha@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);
@@ -287,7 +218,7 @@ describe("discoverPlugins two-root merge", () => {
 
 	it("skill overrides drop individual plugin skills from the wired set", () => {
 		const a = writePlugin(roots.oneCodeRoot, "ours", { skill: "helper" });
-		writeRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a }] });
+		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a }] });
 		setSkillOverride(roots.oneCodeRoot, skillOverrideKey("plugin", "ours:helper"), false);
 		invalidatePluginsCache();
 
@@ -296,10 +227,10 @@ describe("discoverPlugins two-root merge", () => {
 
 	it("caches per roots; invalidatePluginsCache forces a re-read", () => {
 		const a = writePlugin(roots.oneCodeRoot, "ours");
-		writeRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: true }] });
+		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: true }] });
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true);
 
-		writeRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
+		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true); // cached
 		invalidatePluginsCache();
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(false);

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { appendDecision, decisionEntry } from "../../extensions/auto-mode/decision-log.ts";
+import { appendDecision, decisionEntry } from "../../extensions/safety/permissions/auto-mode/decision-log.ts";
 
 let dir: string;
 

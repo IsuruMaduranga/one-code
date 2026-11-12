@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ruleMatches } from "../../extensions/lib/claude-rules.ts";
+import { ruleMatches } from "../../extensions/lib/context/claude-rules.ts";
 
 // Setup imports path helpers too; reload them with the same native Windows semantics.
 vi.hoisted(() => vi.resetModules());

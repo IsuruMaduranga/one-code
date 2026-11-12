@@ -273,7 +273,7 @@ for (let i = 0; i < usages.length; i++) {
 	}
 }
 
-/** The first line of the deferred-tool addendum (lib/tool-additions.ts ADDENDUM_HEAD). */
+/** The first line of the deferred-tool addendum (request/tool-search/tool-additions.ts ADDENDUM_HEAD). */
 const ADDENDUM_START = "Additional deferred tools became available via tool_search";
 
 if (lateTool !== undefined) {

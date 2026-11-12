@@ -1,8 +1,20 @@
-import { beforeEach } from "vitest";
-import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/model-catalog-data.ts";
-import { setModelTierOverridesForTest } from "../extensions/lib/model-tier.ts";
-import { bashParserReady } from "../extensions/lib/bash-parser.ts";
-import { resetConfigModeForTest } from "../extensions/lib/config-mode.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeEach } from "vitest";
+import { envName } from "../extensions/lib/profile/brand.mjs";
+import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/models/model-catalog-data.ts";
+import { setModelTierOverridesForTest } from "../extensions/lib/models/model-tier.ts";
+import { bashParserReady } from "../extensions/lib/shell/bash-parser.ts";
+import { shareShippedProfileForTest } from "../extensions/lib/profile/profile.ts";
+import { profile } from "../profile/index.ts";
+
+// The shipped profile through the test run's own module graph (lib/profile/profile.ts
+// loads it on demand under jiti, where vitest's import is not the one used).
+shareShippedProfileForTest(profile);
+// What the profile in force needs besides this (One Code's source provider and
+// config mode) is in its own profile/test/setup.ts, which vitest.config.ts adds
+// when the profile has one.
 
 // Hermetic by default: an empty model catalog (see vitest.config.ts), so every
 // model takes the no-catalog rules unless a test pins sources with
@@ -15,20 +27,23 @@ beforeEach(() => setCatalogSourcesForTest(emptyCatalogSources()));
 setModelTierOverridesForTest({});
 beforeEach(() => setModelTierOverridesForTest({}));
 
-// Claude-compatible mode regardless of the machine's ~/.onecode/settings.json;
-// a test of independent mode pins it with resetConfigModeForTest("independent").
-resetConfigModeForTest("claude-compatible");
-beforeEach(() => resetConfigModeForTest("claude-compatible"));
-
 // ~/.claude paths follow each test's own home, whatever the shell says: CLAUDE_CONFIG_DIR inherited
 // from the environment (a probe harness, a user's own setup) moved every
 // ~/.claude path and failed 71 tests. A test that wants it stubs it.
 delete process.env.CLAUDE_CONFIG_DIR;
 
+// The product's state folder is a fresh one per test file, whatever the shell
+// says: a test that forgot to point it elsewhere wrote into the user's real
+// one (and one hung retrying ids already taken there). `stubHome` moves it with
+// the home folder; a test that wants it elsewhere stubs it.
+const stateDir = mkdtempSync(join(tmpdir(), "state-"));
+process.env[envName("STATE_DIR")] = stateDir;
+afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
+
 // Likewise the live permission mode One Code publishes to child processes:
-// run from a One Code shell, the suite inherited CC_PERMISSION_MODE=auto and
+// run from a One Code shell, the suite inherited *_PERMISSION_MODE=auto and
 // 16 permission-gate and workflow tests failed. A test that wants it stubs it.
-delete process.env.CC_PERMISSION_MODE;
+delete process.env[envName("PERMISSION_MODE")];
 
 // The bash grammar loads asynchronously; every shell parse after this is
 // synchronous, as it is once a session's hooks have awaited it.

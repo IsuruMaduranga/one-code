@@ -1,8 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/mcp/config.ts";
+import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/tools/mcp/config.ts";
 import {
 	capDescription,
 	DESCRIPTION_CAP,
@@ -13,9 +12,11 @@ import {
 	parseNamespacedToolName,
 	pluginServerName,
 	validateImageData,
-} from "../../extensions/mcp/schema.ts";
-import { createTailBuffer } from "../../extensions/mcp/client.ts";
+} from "../../extensions/tools/mcp/schema.ts";
+import { createTailBuffer, mcpInstructionsReminder } from "../../extensions/tools/mcp/client.ts";
+import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
+import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
@@ -66,84 +67,35 @@ describe("loadServers", () => {
 	let project: string;
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "cc-mcp-"));
-		home = join(root, "home");
-		project = join(root, "project");
-		mkdirSync(home, { recursive: true });
-		mkdirSync(join(project, ".claude"), { recursive: true });
-		// Mark the project root so the .mcp.json walk stops here.
-		mkdirSync(join(project, ".git"), { recursive: true });
+		({ root, home, project } = makeMcpConfigDirs());
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-	const write = (path: string, servers: Record<string, unknown>) =>
-		writeFileSync(path, JSON.stringify({ mcpServers: servers }));
-
-	it("merges user and project configs, project winning by name", () => {
-		write(join(home, ".claude.json"), { a: { command: "user-a" }, shared: { command: "user-shared" } });
-		write(join(project, ".mcp.json"), { b: { command: "proj-b" }, shared: { command: "proj-shared" } });
-		const servers = loadServers(project, home, {});
-		expect(servers.map((s) => s.name)).toEqual(["a", "b", "shared"]);
-		expect(servers.find((s) => s.name === "shared")).toMatchObject({ command: "proj-shared" });
-	});
-
-	it("lets settings.local.json override the project config", () => {
-		write(join(project, ".mcp.json"), { x: { command: "shared" } });
-		write(join(project, ".claude", "settings.local.json"), { x: { command: "personal" } });
-		expect(loadServers(project, home, {})[0]).toMatchObject({ command: "personal" });
-	});
-
 	describe("pi's own mcp.json files", () => {
-		const piConfigs = () => ({ user: join(home, ".pi", "agent", "mcp.json"), project: join(project, ".pi", "mcp.json") });
-		const writePi = (path: string, servers: Record<string, unknown>) => {
-			mkdirSync(join(path, ".."), { recursive: true });
-			write(path, servers);
-		};
+		const piConfigs = () => piMcpConfigs(home, project);
 
 		it("reads both in pi's format: ~/ and a relative cwd resolved, enabled: false skipped, project over user", () => {
 			const { user, project: projectFile } = piConfigs();
-			writePi(user, { tools: { command: "~/bin/tools", args: ["~/data"], cwd: "work" }, off: { command: "x", enabled: false }, shared: { url: "https://user.example/mcp" } });
-			writePi(projectFile, { shared: { url: "https://project.example/mcp" } });
+			write(user, { tools: { command: "~/bin/tools", args: ["~/data"], cwd: "work" }, off: { command: "x", enabled: false }, shared: { url: "https://user.example/mcp" } });
+			write(projectFile, { shared: { url: "https://project.example/mcp" } });
 			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs() });
 			expect(servers.map((s) => s.name)).toEqual(["shared", "tools"]);
 			expect(servers.find((s) => s.name === "tools")).toMatchObject({ command: join(home, "bin", "tools"), args: [join(home, "data")], cwd: join(project, "work"), source: user, piOrigin: "user" });
 			expect(servers.find((s) => s.name === "shared")).toMatchObject({ url: "https://project.example/mcp", source: projectFile, piOrigin: "project" });
 		});
 
-		it("lets a Claude Code file win a name, with a note", () => {
+		it("skips a server with a !command value, with a note", () => {
 			const { user } = piConfigs();
-			writePi(user, { shared: { command: "from-pi" } });
-			write(join(project, ".mcp.json"), { shared: { command: "from-claude" } });
+			write(user, { gh: { url: "https://api.example/mcp", headers: { Authorization: "!echo Bearer $(gh auth token)" } } });
 			const notes: string[] = [];
 			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
-			expect(servers).toEqual([expect.objectContaining({ name: "shared", command: "from-claude" })]);
-			expect(servers[0]).not.toHaveProperty("piOrigin");
-			expect(notes).toEqual([`MCP server "shared" in ${user} is overridden by the one in ${join(project, ".mcp.json")}.`]);
-		});
-
-		it("overrides an identical server without a note", () => {
-			writePi(piConfigs().user, { shared: { command: "same", args: ["-y"] } });
-			write(join(project, ".mcp.json"), { shared: { command: "same", args: ["-y"] } });
-			const notes: string[] = [];
-			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
-			expect(servers).toEqual([expect.objectContaining({ name: "shared", source: join(project, ".mcp.json") })]);
-			expect(notes).toEqual([]);
-		});
-
-		it("skips a server with a !command value, with a note, and ignores cwd and enabled outside pi's files", () => {
-			const { user } = piConfigs();
-			writePi(user, { gh: { url: "https://api.example/mcp", headers: { Authorization: "!echo Bearer $(gh auth token)" } } });
-			write(join(project, ".mcp.json"), { plain: { command: "x", cwd: "elsewhere", enabled: false } });
-			const notes: string[] = [];
-			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
-			expect(servers).toEqual([expect.objectContaining({ name: "plain", command: "x" })]);
-			expect(servers[0]).not.toHaveProperty("cwd");
+			expect(servers).toEqual([]);
 			expect(notes).toEqual([`MCP server "gh" in ${user} is skipped: a \`!command\` value in env or headers is not supported.`]);
 		});
 
 		it("reads servers other extensions registered, below every file, with the extension as the source", () => {
 			const { user } = piConfigs();
-			writePi(user, { shared: { command: "from-pi" } });
+			write(user, { shared: { command: "from-pi" } });
 			const registered = [
 				{ name: "jira", config: { url: "https://mcp.example.com/jira" }, extensionPath: "/ext/jira.ts" },
 				{ name: "shared", config: { command: "from-extension" }, extensionPath: "/ext/other.ts" },
@@ -160,28 +112,11 @@ describe("loadServers", () => {
 		});
 
 		it("reads neither file unless asked", () => {
-			writePi(piConfigs().user, { tools: { command: "x" } });
+			write(piConfigs().user, { tools: { command: "x" } });
 			expect(loadServers(project, home, {})).toEqual([]);
 		});
 	});
 
-	it("lets a disabled entry remove an inherited server", () => {
-		write(join(home, ".claude.json"), { gone: { command: "user" } });
-		write(join(project, ".mcp.json"), { gone: { command: "user", disabled: true } });
-		expect(loadServers(project, home, {})).toEqual([]);
-	});
-
-	it("finds .mcp.json in an ancestor directory", () => {
-		const nested = join(project, "packages", "app");
-		mkdirSync(nested, { recursive: true });
-		write(join(project, ".mcp.json"), { root: { command: "from-root" } });
-		expect(loadServers(nested, home, {}).map((s) => s.name)).toEqual(["root"]);
-	});
-
-	it("tolerates missing and malformed files", () => {
-		writeFileSync(join(project, ".mcp.json"), "{ not json");
-		expect(loadServers(project, home, {})).toEqual([]);
-	});
 });
 
 describe("tool naming", () => {
@@ -257,14 +192,13 @@ describe("describeContent", () => {
 		const junk = Buffer.from("this is not an image at all").toString("base64");
 		const result = describeContent([{ type: "image", data: junk, mimeType: "image/png" }], "stub");
 		expect(result.images).toEqual([]);
-		expect(result.text).toContain("could not be decoded");
-		expect(result.text).toContain("stub");
+		expect(result.text).toBe(mcpResultText.content.imageUndecodable({ server: "stub", problem: { kind: "unrecognised", claimed: "image/png" }, bytes: 27 }));
 	});
 
 	it("renders embedded resources and unknown block types", () => {
 		expect(describeContent([{ type: "resource", resource: { text: "body" } }]).text).toBe("body");
-		expect(describeContent([{ type: "resource", resource: { uri: "file://x" } }]).text).toContain("file://x");
-		expect(describeContent([{ type: "audio" }]).text).toBe("[audio content]");
+		expect(describeContent([{ type: "resource", resource: { uri: "file://x" } }]).text).toBe(mcpResultText.content.resource("file://x"));
+		expect(describeContent([{ type: "audio" }]).text).toBe(mcpResultText.content.other("audio"));
 	});
 
 	it("handles missing content", () => {
@@ -295,7 +229,7 @@ describe("validateImageData", () => {
 		// A flipped byte inside a PNG chunk fails its checksum.
 		const flipped = Buffer.from(bytes(TINY_PNG));
 		flipped[45] ^= 0xff;
-		expect(validateImageData(flipped.toString("base64"), "x")).toMatchObject({ ok: false, reason: expect.stringContaining("checksum") });
+		expect(validateImageData(flipped.toString("base64"), "x")).toMatchObject({ ok: false, problem: { kind: "png", defect: "checksum" } });
 		// The signature-only fixtures the sniff alone used to accept.
 		expect(validateImageData(b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "x").ok).toBe(false);
 		expect(validateImageData(b64([0xff, 0xd8, 0xff, 0x00]), "x").ok).toBe(false);
@@ -306,7 +240,7 @@ describe("validateImageData", () => {
 		const withGarbage = Buffer.concat([Buffer.from(TINY_PNG, "base64").subarray(0, 8), Buffer.from("garbage")]).toString("base64");
 		const result = describeContent([{ type: "image", data: withGarbage, mimeType: "image/png" }], "stub");
 		expect(result.images).toEqual([]);
-		expect(result.text).toContain("could not be decoded");
+		expect(result.text).toBe(mcpResultText.content.imageUndecodable({ server: "stub", problem: { kind: "png", defect: "noEnd" }, bytes: 15 }));
 	});
 	it("rejects unrecognised and empty data", () => {
 		expect(validateImageData(Buffer.from("nope").toString("base64"), "image/png").ok).toBe(false);
@@ -326,9 +260,7 @@ describe("capDescription (review L2)", () => {
 		expect(capDescription("short")).toBe("short");
 		expect(capDescription(undefined)).toBeUndefined();
 		const big = "z".repeat(DESCRIPTION_CAP + 500);
-		const capped = capDescription(big)!;
-		expect(capped.length).toBeLessThan(big.length);
-		expect(capped).toContain("[truncated,");
+		expect(capDescription(big)).toBe(mcpResultText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
 	});
 
 	it("caps a parameter description inside a converted schema", () => {
@@ -336,8 +268,7 @@ describe("capDescription (review L2)", () => {
 		const schema = jsonSchemaToTypeBox({ type: "object", properties: { q: { type: "string", description: big } } }) as {
 			properties: { q: { description: string } };
 		};
-		expect(schema.properties.q.description.length).toBeLessThan(big.length);
-		expect(schema.properties.q.description).toContain("[truncated,");
+		expect(schema.properties.q.description).toBe(mcpResultText.tool.descriptionCut({ head: big.slice(0, DESCRIPTION_CAP), chars: big.length }));
 	});
 });
 
@@ -352,9 +283,8 @@ describe("describeResourceContents", () => {
 
 	it("summarises a binary blob instead of dumping base64", () => {
 		const out = describeResourceContents([{ uri: "x://img", mimeType: "image/png", blob: "A".repeat(4096) }]);
-		expect(out).toContain("binary resource");
-		expect(out).toContain("image/png");
-		expect(out).not.toContain("AAAA");
+		// 4096 base64 characters are 3 KB.
+		expect(out).toBe(mcpResultText.content.binaryResource({ uri: "x://img", mimeType: "image/png", kb: 3 }));
 	});
 
 	it("handles missing or empty contents", () => {
@@ -393,22 +323,18 @@ describe("missing environment variables", () => {
 
 describe("mcpInstructionsReminder", () => {
 	it("formats per-server sections and skips servers without instructions", async () => {
-		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
 		const text = mcpInstructionsReminder([
 			{ server: { name: "deepwiki" }, instructions: "Ask questions about repos." },
 			{ server: { name: "silent" } },
 		]);
-		expect(text).toContain("# MCP Server Instructions");
-		expect(text).toContain("## deepwiki\nAsk questions about repos.");
-		expect(text).not.toContain("silent");
+		expect(text).toBe(mcpResultText.instructions([{ name: "deepwiki", text: "Ask questions about repos." }]));
 	});
 
 	it("returns undefined when no server has instructions, truncates long ones", async () => {
-		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
 		expect(mcpInstructionsReminder([{ server: { name: "s" } }])).toBeUndefined();
 		const long = mcpInstructionsReminder([{ server: { name: "s" }, instructions: "x".repeat(5000) }]);
-		expect(long).toContain("… [truncated]");
-		expect(long!.length).toBeLessThan(4000);
+		// Instructions are cut at 3,000 characters and the kept head handed to the profile's cut label.
+		expect(long).toBe(mcpResultText.instructions([{ name: "s", text: mcpResultText.instructionsCut("x".repeat(3000)) }]));
 	});
 });
 

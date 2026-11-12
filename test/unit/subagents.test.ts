@@ -2,7 +2,11 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/subagents/agents.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { projectConfigDir, userConfigDir } from "../../extensions/lib/profile/sources.ts";
+import { agentDirs, agentSourcesStamp, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/lib/agents/agent-catalog.ts";
+import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+
 
 describe("parseAgentFile", () => {
 	it("reads name, description, tools and model from frontmatter", () => {
@@ -97,15 +101,16 @@ You review code.`,
 
 describe("agentDirs", () => {
 	it("orders bundled, then user, then project", () => {
+		// The user and project folders are the profile's config dirs (`.claude` with One Code's provider).
 		expect(agentDirs("/proj", "/home/u", "/pkg/agents")).toEqual([
 			"/pkg/agents",
-			join("/home/u", ".claude", "agents"),
-			join("/proj", ".claude", "agents"),
+			join(userConfigDir("/home/u"), "agents"),
+			join(projectConfigDir("/proj"), "agents"),
 		]);
 	});
 
 	it("omits the bundled directory when not supplied", () => {
-		expect(agentDirs("/proj", "/home/u")).toEqual([join("/home/u", ".claude", "agents"), join("/proj", ".claude", "agents")]);
+		expect(agentDirs("/proj", "/home/u")).toEqual([join(userConfigDir("/home/u"), "agents"), join(projectConfigDir("/proj"), "agents")]);
 	});
 });
 
@@ -231,59 +236,48 @@ describe("child tool allowlist (CC agent files)", () => {
 });
 
 describe("forkTaskMessage", () => {
-	it("frames the task with do-only-this and not-the-inherited-topic instructions", async () => {
-		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
-		const framed = forkTaskMessage("report exactly: DONE");
-		expect(framed).toContain("forked subagent");
-		expect(framed).toContain("inherited context");
-		expect(framed).toContain("Do ONLY the task below");
-		expect(framed).toContain("cannot see the parent's background tasks");
-		expect(framed).not.toContain("worktree");
-		expect(framed.endsWith("Task:\nreport exactly: DONE")).toBe(true);
+	// The framing's wording is One Code's, checked in profile/test/subagents.test.ts.
+	it("hands the profile the task, with no isolation for a fork in the parent's checkout", async () => {
+		const { forkTaskMessage } = await import("../../extensions/agents/subagents/outcome.ts");
+		expect(forkTaskMessage("report exactly: DONE")).toBe(requireText("subagents").forkTask({ task: "report exactly: DONE", isolation: undefined }));
 	});
 
-	it("tells a worktree-isolated fork that its paths moved, and where to write instead", async () => {
-		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
-		const framed = forkTaskMessage("fix the bug", { worktreePath: "/tmp/cc-wt-x/tree", parentCwd: "/Users/me/repo" });
-		expect(framed).toContain("your working directory is now /tmp/cc-wt-x/tree");
-		expect(framed).toContain("Every path under /Users/me/repo in the inherited context refers to the shared checkout");
-		expect(framed).toContain("must NOT modify");
-		expect(framed.endsWith("Task:\nfix the bug")).toBe(true);
+	it("hands it the worktree and the parent's checkout for a worktree-isolated fork", async () => {
+		const { forkTaskMessage } = await import("../../extensions/agents/subagents/outcome.ts");
+		const isolation = { worktreePath: "/tmp/cc-wt-x/tree", parentCwd: "/Users/me/repo" };
+		expect(forkTaskMessage("fix the bug", isolation)).toBe(requireText("subagents").forkTask({ task: "fix the bug", isolation }));
 	});
 });
 
 describe("finishOutcome", () => {
 	it("surfaces a provider error instead of 'produced no output'", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const outcome = finishOutcome("", "OpenAI API error (401): CreditsError", 0, emptyUsage(), []);
 		expect(outcome.failed).toBe(true);
-		expect(outcome.output).toContain("provider error");
-		expect(outcome.output).toContain("CreditsError");
-		expect(outcome.output).toContain("not a task failure");
+		expect(outcome.output).toBe(subagentResultText().failure({ kind: "providerError", error: "OpenAI API error (401): CreditsError", output: "" }));
 	});
 
 	it("appends the error when partial text exists, and stays clean without one", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
 		const partial = finishOutcome("halfway report", "rate limited", 2, emptyUsage(), []);
 		expect(partial.failed).toBe(true);
-		expect(partial.output).toContain("halfway report");
-		expect(partial.output).toContain("rate limited");
+		expect(partial.output).toBe(subagentResultText().failure({ kind: "providerError", error: "rate limited", output: "halfway report" }));
 		const ok = finishOutcome("all done", undefined, 2, emptyUsage(), []);
 		expect(ok.failed).toBeUndefined();
 		expect(ok.output).toBe("all done");
 		const empty = finishOutcome("", undefined, 2, emptyUsage(), []);
 		expect(empty.failed).toBeUndefined();
-		expect(empty.output).toBe("(Subagent completed but returned no output.)");
+		expect(empty.output).toBe(subagentResultText().noOutput);
 	});
 
 	it("an abort reason wins over partial text and over a provider error (M3)", async () => {
-		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
-		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
-		const cut = finishOutcome("halfway", undefined, 1, emptyUsage(), [], "terminated before the turn finished");
-		expect(cut).toMatchObject({ failed: true, output: "halfway\n\n[terminated before the turn finished]" });
-		const both = finishOutcome("", "rate limited", 0, emptyUsage(), [], "terminated before the turn finished");
-		expect(both.output).toBe("Subagent terminated before the turn finished.");
+		const { finishOutcome } = await import("../../extensions/agents/subagents/session-turns.ts");
+		const { emptyUsage } = await import("../../extensions/lib/agents/usage.ts");
+		const cut = finishOutcome("halfway", undefined, 1, emptyUsage(), [], "stopped");
+		expect(cut).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "stopped", output: "halfway" }) });
+		const both = finishOutcome("", "rate limited", 0, emptyUsage(), [], "stopped");
+		expect(both.output).toBe(subagentResultText().failure({ kind: "aborted", why: "stopped", output: "" }));
 	});
 });

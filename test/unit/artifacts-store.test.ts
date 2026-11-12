@@ -4,30 +4,31 @@ import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DOWNLOAD_GLOBAL, renderDownloadPayload, renderGallery } from "../../extensions/artifacts/gallery.ts";
+import { DOWNLOAD_GLOBAL, renderDownloadPayload, renderGallery } from "../../extensions/tools/artifacts/gallery.ts";
 import {
 	type ArtifactMeta,
+	ArtifactNotFoundError,
 	deleteArtifact,
 	exportArtifact,
 	fileUrl,
 	galleryPath,
 	getArtifact,
 	listArtifacts,
-	listLine,
 	MAX_ARTIFACT_BYTES,
 	pagePath,
 	pageTitle,
 	publishArtifact,
 	publishProblem,
 	resolveArtifactRef,
+	shownArtifact,
 	slugify,
 	versionPath,
 	LockBusyError,
 	viewerPath,
 	withLock,
-} from "../../extensions/artifacts/store.ts";
-import { renderViewer } from "../../extensions/artifacts/viewer.ts";
-import { noDisplayReason, openerPlan } from "../../extensions/lib/open-browser.ts";
+} from "../../extensions/tools/artifacts/store.ts";
+import { renderViewer } from "../../extensions/tools/artifacts/viewer.ts";
+import { noDisplayReason, openerPlan } from "../../extensions/lib/ui/open-browser.ts";
 
 let base: string;
 let root: string;
@@ -243,7 +244,7 @@ describe("publishArtifact", () => {
 	});
 
 	it("refuses an id that names no artifact, with the fix", () => {
-		expect(() => publish("x.html", page("X"), { id: "missing-123" })).toThrow(/action "list"/);
+		expect(() => publish("x.html", page("X"), { id: "missing-123" })).toThrow(ArtifactNotFoundError);
 	});
 
 	it("keeps two same-titled pages from different files apart", () => {
@@ -261,10 +262,11 @@ describe("publishProblem", () => {
 	});
 
 	it("names the fix for each refused page", () => {
-		expect(publishProblem(root, join(base, "p.md"), 100)).toMatch(/not an \.html file/);
-		expect(publishProblem(root, join(root, "x-1", "index.html"), 100)).toMatch(/inside the artifact store/);
-		expect(publishProblem(root, join(base, "p.html"), 0)).toMatch(/empty/);
-		expect(publishProblem(root, join(base, "p.html"), MAX_ARTIFACT_BYTES + 1)).toMatch(/at most 16 MB/);
+		expect(publishProblem(root, join(base, "p.md"), 100)?.kind).toBe("notHtml");
+		expect(publishProblem(root, join(root, "x-1", "index.html"), 100)?.kind).toBe("insideStore");
+		expect(publishProblem(root, join(base, "p.html"), 0)?.kind).toBe("empty");
+		const tooLarge = publishProblem(root, join(base, "p.html"), MAX_ARTIFACT_BYTES + 1)!;
+		expect(tooLarge).toEqual({ kind: "tooLarge", path: join(base, "p.html"), bytes: MAX_ARTIFACT_BYTES + 1, maxBytes: MAX_ARTIFACT_BYTES });
 	});
 });
 
@@ -296,14 +298,19 @@ describe("listing, resolving and deleting", () => {
 		const { meta } = publish("a.html", page("Cased"));
 		const shouted = join(base, "STORE", meta.id.toUpperCase(), "INDEX.HTML");
 		expect(resolveArtifactRef(root, shouted)).toBe(meta.id);
-		expect(publishProblem(root, shouted, 10)).toMatch(/inside the artifact store/);
+		expect(publishProblem(root, shouted, 10)?.kind).toBe("insideStore");
 	});
 
 	it("lists one artifact as its id, title, version, project and viewer link", () => {
 		const { meta } = publish("a.html", page("Listed"), { project: join(base, "repo") });
-		const line = listLine(root, meta, base);
-		expect(line).toContain(`- ${meta.id}: "Listed" (v1, updated 2026-09-27 10:00 UTC) [~/repo]`);
-		expect(line).toContain(fileUrl(viewerPath(root, meta.id)));
+		expect(shownArtifact(root, meta, base)).toEqual({
+			id: meta.id,
+			title: "Listed",
+			version: 1,
+			updated: "2026-09-27 10:00",
+			project: "~/repo",
+			url: fileUrl(viewerPath(root, meta.id)),
+		});
 	});
 
 	it("exports to Downloads without overwriting, or to home when there is no Downloads", () => {
@@ -414,8 +421,8 @@ describe("open-browser", () => {
 
 	it("reports no display over SSH or on a Linux box without X or Wayland", () => {
 		expect(noDisplayReason("darwin", {})).toBeUndefined();
-		expect(noDisplayReason("darwin", { SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" })).toMatch(/SSH/);
-		expect(noDisplayReason("linux", {})).toMatch(/no graphical display/);
+		expect(noDisplayReason("darwin", { SSH_CONNECTION: "1.2.3.4 5 6.7.8.9 22" })).toBe("ssh");
+		expect(noDisplayReason("linux", {})).toBe("noDisplay");
 		expect(noDisplayReason("linux", { DISPLAY: ":0" })).toBeUndefined();
 		expect(noDisplayReason("linux", { WAYLAND_DISPLAY: "wayland-0" })).toBeUndefined();
 		expect(noDisplayReason("win32", {})).toBeUndefined();

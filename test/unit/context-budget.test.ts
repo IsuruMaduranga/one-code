@@ -1,23 +1,28 @@
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	DEFAULT_TURN_TOKEN_BUDGET,
+	tokensLeftIn,
 	totalTokensBlock,
 	TurnBudget,
 	turnTokenBudget,
-} from "../../extensions/context-budget/budget.ts";
-import contextBudgetExtension from "../../extensions/context-budget/index.ts";
-import systemReminderExtension from "../../extensions/system-reminder/index.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+} from "../../extensions/lib/context/budget.ts";
+import contextBudgetExtension from "../../extensions/context/context-budget/index.ts";
+import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
+/** The budget line for `left` tokens, as the base frames the profile's words. */
+const budget = (left: number) => totalTokensBlock(left);
+
 describe("turnTokenBudget", () => {
-	it("is Claude Code's 15,000,000 unless CC_TOTAL_TOKENS_BUDGET names a positive number", () => {
+	it("is Claude Code's 15,000,000 unless the TOTAL_TOKENS_BUDGET knob names a positive number", () => {
 		expect(turnTokenBudget({})).toBe(DEFAULT_TURN_TOKEN_BUDGET);
 		expect(DEFAULT_TURN_TOKEN_BUDGET).toBe(15_000_000);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "2000000" })).toBe(2_000_000);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "0" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: "lots" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
-		expect(turnTokenBudget({ CC_TOTAL_TOKENS_BUDGET: " " })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "2000000" })).toBe(2_000_000);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "0" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: "lots" })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
+		expect(turnTokenBudget({ [envName("TOTAL_TOKENS_BUDGET")]: " " })).toBe(DEFAULT_TURN_TOKEN_BUDGET);
 	});
 });
 
@@ -71,8 +76,11 @@ describe("TurnBudget", () => {
 });
 
 describe("totalTokensBlock", () => {
-	it("is Claude Code's bare block, byte for byte", () => {
+	it("is Claude Code's bare block, byte for byte, and reads back", () => {
 		expect(totalTokensBlock(14_832_967)).toBe("<total_tokens>14832967 tokens left</total_tokens>");
+		expect(tokensLeftIn(totalTokensBlock(14_832_967))).toBe(14_832_967);
+		expect(tokensLeftIn("<total_tokens>many tokens left</total_tokens>")).toBeUndefined();
+		expect(tokensLeftIn(`${totalTokensBlock(5)}\n`)).toBeUndefined();
 	});
 });
 
@@ -95,13 +103,13 @@ describe("context-budget wiring", () => {
 		await fake.fireOne("session_start", {}, createFakeCtx());
 		expect(reminders).toEqual([
 			{
-				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				text: budget(15_000_000),
 				key: "total-tokens-first",
 				placement: "first-prepend",
 				order: 46,
 			},
 			{
-				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				text: budget(15_000_000),
 				key: "total-tokens",
 				placement: "sticky-append",
 				raw: true,
@@ -127,10 +135,10 @@ describe("context-budget wiring", () => {
 
 		const texts = reminders.map((r) => r.text);
 		expect(texts).toEqual([
-			"<total_tokens>14997500 tokens left</total_tokens>",
-			"<total_tokens>14996800 tokens left</total_tokens>",
-			"<total_tokens>14996000 tokens left</total_tokens>",
-			"<total_tokens>14999900 tokens left</total_tokens>",
+			budget(14_997_500),
+			budget(14_996_800),
+			budget(14_996_000),
+			budget(14_999_900),
 		]);
 		for (const r of reminders) expect(r).toMatchObject({ placement: "last-append", raw: true });
 	});
@@ -147,12 +155,12 @@ describe("context-budget wiring", () => {
 		await fake.fireOne("tool_result", {}, createFakeCtx(usage(12_000)));
 
 		expect(reminders.map((r) => r.text)).toEqual([
-			"<total_tokens>14960000 tokens left</total_tokens>",
-			"<total_tokens>14960000 tokens left</total_tokens>",
+			budget(14_960_000),
+			budget(14_960_000),
 			// The first size after the compaction is the new baseline.
-			"<total_tokens>14960000 tokens left</total_tokens>",
-			"<total_tokens>14958500 tokens left</total_tokens>",
-			"<total_tokens>14956000 tokens left</total_tokens>",
+			budget(14_960_000),
+			budget(14_958_500),
+			budget(14_956_000),
 		]);
 	});
 
@@ -171,16 +179,8 @@ describe("context-budget wiring", () => {
 		// The next request places each on its own result (system-reminder renders the pending entries).
 		const results = ["call-a", "call-b"].map((toolCallId) => ({ role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text: `ran ${toolCallId}` }], timestamp: 1 }));
 		const [rendered] = await fake.fire<{ messages: Array<{ content: Array<{ text: string }> }> }>("context", { messages: [{ role: "user", content: "go", timestamp: 0 }, ...results] }, session());
-		expect(rendered.messages[1].content.map((c) => c.text)).toEqual(["ran call-a", "<total_tokens>14999900 tokens left</total_tokens>"]);
-		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", "<total_tokens>14999800 tokens left</total_tokens>"]);
+		expect(rendered.messages[1].content.map((c) => c.text)).toEqual(["ran call-a", budget(14_999_900)]);
+		expect(rendered.messages[2].content.map((c) => c.text)).toEqual(["ran call-b", budget(14_999_800)]);
 	});
 
-	it("is off entirely under CC_TOTAL_TOKENS=0", async () => {
-		vi.stubEnv("CC_TOTAL_TOKENS", "0");
-		const { fake, reminders } = collect();
-		await fake.fireOne("session_start", {}, createFakeCtx());
-		await fake.fireOne("agent_start", {}, createFakeCtx(usage(10)));
-		await fake.fireOne("tool_result", {}, createFakeCtx(usage(20)));
-		expect(reminders).toEqual([]);
-	});
 });

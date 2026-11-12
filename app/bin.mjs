@@ -1,398 +1,52 @@
 #!/usr/bin/env node
 /**
- * onecode — the bundled One Code app.
- *
- * A thin launcher around the pinned pi harness in this package's dependency
- * tree. It does four things before handing argv to pi's `main()`:
- *
- * 1. Isolates all state under ~/.onecode (PI_CODING_AGENT_DIR, set
- *    unconditionally; ONECODE_AGENT_DIR relocates it), so an existing `pi`
- *    install on the same machine is never touched, and spawned commands get
- *    the user's own environment back (extensions/lib/app-launch.mjs).
- * 2. Registers the one-code-extension package (from our own node_modules)
- *    in the isolated settings, so pi's package manager loads the extensions,
- *    themes, and bundled agents exactly as a `pi install` would, and turns
- *    off pi's built-in tool search and MCP, which ours replace.
- * 3. Rewrites the few plain-stdout lines where pi prints its own command
- *    name (the resume hint, --help usage) — under isolation `pi --session
- *    <id>` would not just be mis-branded but broken, since stock pi cannot
- *    see ~/.onecode sessions.
- * 4. Suppresses pi's own update check and installs One Code's instead
- *    (update-check.mjs), with an install-method-aware upgrade hint, and
- *    marks pi's changelog seen so a pin bump shows no pi release notes.
- *
- * Two subcommands never reach pi: `onecode --version` (the app's version) and
- * `onecode doctor` (the setup report, extensions/doctor/cli.ts).
+ * The bundled app's command. It checks the Node version, finds the extension
+ * package named by this package's `productExtension` field, and hands over to
+ * its `createApp` (extensions/lib/app/create-app.mjs), which takes every name from
+ * the profile's brand. A product's app is this same file: only package.json
+ * differs, stamped from the brand (scripts/apply-brand.mjs).
  *
  * Deliberately plain JS with no imports beyond node builtins until the Node
  * version is checked: pi crashes on Node < 22.19 at import time (bundled
  * undici), so the friendly error must come first.
  */
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-// --- 0. Node version gate (before any pi import) -------------------------
+const appDir = dirname(fileURLToPath(import.meta.url));
+const app = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8"));
+const command = Object.keys(app.bin ?? {})[0] ?? "the app";
+
+// --- Node version gate (before any pi import) ----------------------------
 const [major, minor] = process.versions.node.split(".").map(Number);
 if (major < 22 || (major === 22 && minor < 19)) {
 	process.stderr.write(
-		`onecode requires Node >= 22.19 (you are running ${process.versions.node}).\n` +
+		`${command} requires Node >= 22.19 (you are running ${process.versions.node}).\n` +
 			`Older Node crashes inside pi's bundled HTTP client at startup.\n` +
 			`Install a newer Node (https://nodejs.org) and try again.\n`,
 	);
 	process.exit(1);
 }
 
+// The launcher lives in the extension package; an install that lacks it (a
+// missing or older extension copy) gets the fix, not a module-not-found trace.
 const require = createRequire(import.meta.url);
-const appDir = dirname(fileURLToPath(import.meta.url));
-const appVersion = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8")).version;
-
-// --- 1. Isolated state ----------------------------------------------------
-// The environment rules live in the extension package (app-launch.mjs), next to
-// the spawn helper that undoes them for child processes.
-const corePath = dirname(require.resolve("one-code-extension/package.json"));
-const { applyLauncherEnv, installMethodFor } = await import(
-	pathToFileURL(join(corePath, "extensions", "lib", "app-launch.mjs")).href
-);
-const { withReplacedBuiltinsOff } = await import(pathToFileURL(join(corePath, "extensions", "lib", "replaced-builtins.mjs")).href);
-const { withCompactionKeepBackfilled } = await import(pathToFileURL(join(corePath, "extensions", "lib", "compaction-keep.mjs")).href);
-// The bundled pi, located without importing it. pi's exports map blocks
-// "<pkg>/package.json" and carries only an `import` condition (no CJS
-// require.resolve); resolve the ESM entry (<pkg>/dist/index.js) and walk up.
-// pi itself starts without its package.json (VERSION "0.0.0"), so an
-// unreadable one leaves piVersion undefined instead of failing the launch.
-const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
-let piVersion;
+let corePath;
+let createAppPath;
 try {
-	piVersion = JSON.parse(readFileSync(join(dirname(dirname(piEntry)), "package.json"), "utf8")).version;
-} catch {
-	// --version prints "unknown"; the doctor takes an unknown version.
+	// The package root comes from its own package.json, never from counting
+	// folders up from the launcher, which moves when the folders do.
+	corePath = dirname(require.resolve(`${app.productExtension}/package.json`));
+	createAppPath = join(corePath, "extensions", "lib", "app", "create-app.mjs");
+} catch {}
+if (!createAppPath || !existsSync(createAppPath)) {
+	process.stderr.write(
+		`${command} ${app.version} cannot start: ${createAppPath ? `the installed ${app.productExtension} package is from an older release` : `the ${app.productExtension} package is not installed`}.\n` +
+			`Reinstall the app: npm install -g ${app.name}\n`,
+	);
+	process.exit(1);
 }
-
-// Where the bin lives says how it was installed. Published before any fast
-// path (the doctor CLI exits early): the doctor's update lookup and the update
-// notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
-// release counts as available only a day after its npm publish.
-let binRealPath;
-try {
-	binRealPath = realpathSync(process.argv[1] ?? "");
-} catch {
-	// Unresolvable argv[1] (unusual embedding): installMethodFor reads it as npm.
-}
-const installMethod = installMethodFor(binRealPath);
-const agentDir = applyLauncherEnv(process.env, { home: homedir(), appVersion, installMethod });
-
-// --- fast path: --version reports the app, not the harness ----------------
-const argv = process.argv.slice(2);
-if (argv[0] === "--version" || argv[0] === "-v") {
-	process.stdout.write(`${appVersion} (pi ${piVersion ?? "unknown"})\n`);
-	process.exit(0);
-}
-
-// --- fast path: `onecode doctor` prints the setup report without a session --
-// Claude Code's `claude doctor`. It must work on the machine it exists for —
-// one with no provider yet — so it never goes through pi's session bootstrap:
-// the extension's report module is loaded through pi's own TypeScript loader
-// (jiti, a pi dependency) and reads pi's auth/model files directly. The
-// extension package is registered first (step 2 below) so the report sees the
-// same settings a session would.
-const runDoctor = argv[0] === "doctor";
-
-// --- 2. Register the extension package in the isolated settings -----------
-// pi resolves local-path package sources in place (no copying), so pointing
-// the isolated settings at our node_modules copy loads extensions in manifest
-// order plus themes and bundled agents — and app upgrades propagate because
-// the path tracks node_modules content. The entry is re-ensured every launch:
-// npm may relocate node_modules (different Node/prefix), and a stale path
-// from a previous install must be replaced, not accumulated.
-const settingsPath = join(agentDir, "settings.json");
-try {
-	mkdirSync(agentDir, { recursive: true });
-	let settings;
-	let firstRun = false;
-	if (existsSync(settingsPath)) {
-		settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-		if (typeof settings !== "object" || settings === null || Array.isArray(settings)) {
-			throw new Error(`${settingsPath} is not a JSON object`);
-		}
-	} else {
-		firstRun = true;
-		// Seeding settings also skips pi's first-time setup, which would offer
-		// pi's stock themes; One Code's own theme is the branded first-run.
-		// Fullscreen (alt-screen) is the One Code look — the TUI owns the
-		// screen and exits clean. Seeded only here, so users who switch back
-		// to regular mode keep their choice.
-		settings = { theme: "onecode", quietStartup: true, tuiMode: "fullscreen" };
-	}
-	// pi 0.85.0 made the clean fullscreen exit reachable from settings
-	// (stopInteractiveTui skips the transcript repaint and stops with
-	// preserveScreen unless fullscreenExitOutput is "transcript"), which is
-	// the Claude Code exit One Code used to get by patching that method.
-	// Backfill the key once for sessions seeded before 0.85.0; an explicit
-	// value, "transcript" included, is the user's and is never rewritten.
-	const backfillExitOutput = settings.fullscreenExitOutput === undefined;
-	if (backfillExitOutput) settings.fullscreenExitOutput = "resume-hint";
-	const packages = Array.isArray(settings.packages) ? settings.packages : [];
-	const sourceOf = (entry) => (typeof entry === "string" ? entry : entry?.source);
-	// "Ours" = any path ending in /node_modules/one-code-extension (stale npm
-	// roots included). User-added packages are left untouched.
-	const isOurs = (entry) => {
-		const source = sourceOf(entry);
-		return typeof source === "string" && /[/\\]node_modules[/\\]one-code-extension$/.test(source);
-	};
-	const kept = packages.filter((entry) => !isOurs(entry) && sourceOf(entry) !== corePath);
-	const next = [...kept, corePath];
-	// pi's built-in tool search and MCP give way to ours, with a warning at
-	// every start that advises removing One Code; turned off here instead,
-	// unless the user has an entry of their own for one
-	// (extensions/lib/replaced-builtins.mjs).
-	const builtins = withReplacedBuiltinsOff(settings.extensions);
-	if (builtins.changed) settings.extensions = builtins.extensions;
-	// One Code keeps only the last reply after a compaction, so pi's keep
-	// window only stops /compact on a short session: 0 unless the user set a
-	// value (extensions/lib/compaction-keep.mjs).
-	const keep = withCompactionKeepBackfilled(settings);
-	if (keep.changed) settings = keep.settings;
-	// pi prints its release notes ("What's New", under pi's version) at the
-	// first start after lastChangelogVersion lags pi, so every pin bump would
-	// show them to One Code's users: marked seen at every launch, /changelog
-	// still has them. pi's install ping keys off the same check (findings §5).
-	// Left to pi when its version is unknown here or PI_PACKAGE_DIR makes pi
-	// read it from another package.json: a mismatch would rewrite it each start.
-	const changelogLags = piVersion !== undefined && !process.env.PI_PACKAGE_DIR && settings.lastChangelogVersion !== piVersion;
-	if (changelogLags) settings.lastChangelogVersion = piVersion;
-	const changed =
-		firstRun ||
-		backfillExitOutput ||
-		builtins.changed ||
-		keep.changed ||
-		changelogLags ||
-		packages.length !== next.length ||
-		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
-	if (changed) {
-		settings.packages = next;
-		// Write-then-rename: a crash mid-write must not leave a truncated
-		// settings.json that the next launch reports as unregistered extensions
-		// (review L4). Rename is atomic within the same directory. Same pattern as
-		// the extensions' lib/atomic-write.ts, inlined to keep bin.mjs import-free.
-		const tempPath = `${settingsPath}.${process.pid}.tmp`;
-		writeFileSync(tempPath, JSON.stringify(settings, null, "\t") + "\n");
-		renameSync(tempPath, settingsPath);
-	}
-} catch (error) {
-	// Fail loud but keep launching: a broken settings file is the user's to
-	// fix, and pi will surface its own diagnostics for it too.
-	process.stderr.write(`onecode: could not register extensions in ${settingsPath}: ${error?.message ?? error}\n`);
-}
-
-if (runDoctor) {
-	process.exitCode = await runDoctorCli();
-	process.exit();
-}
-
-/**
- * Load `extensions/doctor/cli.ts` with pi's own jiti and run it. pi's loader
- * aliases `@earendil-works/pi-ai` onto its compat entry for extension code;
- * mirrored here so the module resolves the same way it does inside a session.
- * Any failure prints a plain error and exits 2 — a diagnostic that crashes
- * with a stack trace is worse than none.
- */
-async function runDoctorCli() {
-	try {
-		const piRequire = createRequire(piEntry);
-		const jitiModule = await import(pathToFileURL(piRequire.resolve("jiti")).href);
-		const createJiti = jitiModule.createJiti ?? jitiModule.default;
-		const alias = {};
-		try {
-			// Mirror pi's own extension loader (dist/core/extensions/loader.js
-			// getAliases): the bare specifier AND /compat resolve to the compat
-			// entry, while /oauth and /providers/all resolve to their own real
-			// files. jiti applies aliases by PREFIX, so with only the bare key an
-			// import of `@earendil-works/pi-ai/compat` is rewritten to the dead
-			// `<compat.js>/compat` — which crashed `onecode doctor`, whose graph
-			// reaches pi-web-search's `/compat` import (dependencies.ts). The
-			// explicit subpath keys give jiti an exact match that wins over the
-			// bare prefix, so a doctor run resolves pi-ai exactly as a session does.
-			const compatEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/compat"));
-			alias["@earendil-works/pi-ai"] = compatEntry;
-			alias["@earendil-works/pi-ai/compat"] = compatEntry;
-			for (const sub of ["oauth", "providers/all"]) {
-				try {
-					alias[`@earendil-works/pi-ai/${sub}`] = fileURLToPath(import.meta.resolve(`@earendil-works/pi-ai/${sub}`));
-				} catch {
-					// Subpath absent in this pi-ai build; skip it.
-				}
-			}
-		} catch {
-			// No compat entry (older pi-ai): plain resolution of the root entry serves.
-		}
-		const jiti = createJiti(import.meta.url, { moduleCache: false, interopDefault: true, alias });
-		const { runDoctorCli: run } = await jiti.import(join(corePath, "extensions", "doctor", "cli.ts"));
-		return await run({
-			agentDir,
-			cwd: process.cwd(),
-			home: homedir(),
-			env: process.env,
-			version: appVersion,
-			install: "app",
-			piVersion,
-			columns: process.stdout.columns,
-		});
-	} catch (error) {
-		process.stderr.write(`onecode doctor: could not run the diagnostics: ${error?.stack ?? error}\n`);
-		return 2;
-	}
-}
-
-// --- 3. Surgical stdout rebranding ----------------------------------------
-// Only plain-text lines pi prints OUTSIDE the TUI are touched (the resume
-// hint after the TUI stops, and --help/usage output). Never rewrite inside
-// arbitrary chunks: TUI escape streams must pass through byte-identical. And
-// only in the interactive TUI or for --help: `-p`/`--print`/`--mode json|rpc`
-// output is parsed by other programs (or is a model's answer) and must never
-// be altered, so those modes leave stdout untouched.
-const rewriteHelp = argv.includes("--help") || argv.includes("-h");
-const machineOutput = argv.includes("-p") || argv.includes("--print") || argv.includes("--mode");
-if (rewriteHelp || !machineOutput) {
-	const originalWrite = process.stdout.write.bind(process.stdout);
-	process.stdout.write = (chunk, ...rest) => {
-		if (typeof chunk === "string") {
-			// The label may carry ANSI styling (chalk.dim), so match the command
-			// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
-			if (chunk.includes("To resume this session:")) {
-				chunk = chunk.replaceAll(" pi --session ", " onecode --session ");
-			}
-			if (rewriteHelp) {
-				// Standalone word "pi" only: preceded by start/whitespace/quote, and
-				// NOT followed by a word char, "." or "-". The negative lookahead means
-				// any trailing punctuation (`,`, `]`, `:`, …) is rewritten without
-				// another patch, while "pi.dev" and "pi-coding-agent" survive (review L4a).
-				chunk = chunk.replace(/(^|[\s"'`])pi(?![\w.\-])/gm, "$1onecode");
-			}
-		}
-		return originalWrite(chunk, ...rest);
-	};
-}
-
-// --- 4. Launch pi with One Code's update check ----------------------------
-const { AssistantMessageComponent, InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
-
-// The two prototype patches below reach into pi internals that a pin bump can
-// rename. A patch that does not take falls back to stock behaviour silently for
-// users; with ONECODE_DEBUG=1 it says so, and test/unit/app-bin-patches.test.ts
-// asserts the patched members exist in the pinned build.
-const patchMissed = (what) => {
-	if (process.env.ONECODE_DEBUG) process.stderr.write(`onecode: pi internals changed, ${what} not patched (stock behaviour)\n`);
-};
-
-// Clean exit in regular (main-screen) mode. One Code wants the Claude Code
-// exit: restore the terminal, print only the resume hint. pi 0.85.0 delivers
-// that for FULLSCREEN by itself — stopInteractiveTui skips the transcript
-// repaint and stops with preserveScreen unless fullscreenExitOutput is
-// "transcript" — so the seeded "resume-hint" setting above covers that mode
-// and this patch no longer touches it. Regular mode is still stock pi's
-// park-the-cursor-below-the-lines exit, which leaves banner, editor and
-// footer on screen, so that half stays here. Overriding this one method keeps
-// the mid-session /settings renderer switch untouched. Exact-pinned pi makes
-// the private internals (renderer, ui, and the main-screen render
-// bookkeeping) stable; re-verify on every pin bump. Upstream proposal queued
-// for the regular-mode half.
-try {
-	const original = InteractiveMode.prototype.stopInteractiveTui;
-	if (typeof original !== "function") patchMissed("InteractiveMode.prototype.stopInteractiveTui");
-	if (typeof original === "function") {
-		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreservingRegular(fullscreenExitOutput) {
-			try {
-				const renderer = this.renderer;
-				// Regular (main-screen) mode: erase the on-screen part of the
-				// working area, then stop without the stock cursor-park. Only
-				// the viewport can be erased — lines already scrolled into
-				// scrollback stay (clearing scrollback would take ESC[3J,
-				// which also destroys the user's own shell history).
-				if (renderer?.mode === "regular") {
-					// (renderer fields verified by app-bin-patches.test.ts against the pinned pi)
-					if (
-						Array.isArray(renderer.previousLines) &&
-						renderer.previousLines.length > 0 &&
-						Number.isInteger(renderer.hardwareCursorRow) &&
-						Number.isInteger(renderer.previousViewportTop)
-					) {
-						let buffer = "";
-						if (renderer.previousKittyImageIds && typeof renderer.deleteKittyImages === "function") {
-							buffer += renderer.deleteKittyImages(renderer.previousKittyImageIds);
-						}
-						const rowsUp = Math.max(0, renderer.hardwareCursorRow - renderer.previousViewportTop);
-						if (rowsUp > 0) buffer += `\x1b[${rowsUp}A`;
-						buffer += "\r\x1b[0J";
-						renderer.terminal.write(buffer);
-						this.ui.stop({ preserveScreen: true });
-						return;
-					}
-					patchMissed("renderer shape for the clean-exit path");
-				}
-			} catch {
-				// Any surprise in pi's internals: fall through to stock behavior.
-			}
-			// Fullscreen lands here by design: pi 0.85.0 does the clean exit
-			// itself, driven by the fullscreenExitOutput it passes through.
-			return original.call(this, fullscreenExitOutput);
-		};
-	}
-} catch {
-	// InteractiveMode not patchable (unexpected pi build): stock exit behavior.
-}
-
-// Suppress pi's red "Operation aborted" line on a user interrupt. The
-// interrupted extension shows Claude Code's dim "Interrupted · What should One
-// Code do instead?" note in its place, so pi's own abort line is a duplicate.
-// pi's AssistantMessageComponent.updateContent (assistant-message.js) appends
-// that line whenever the message stopReason is "aborted" and it carries no tool
-// calls (aborted tool calls surface the error on the tool component instead, so
-// those are left alone). We run the original with the stopReason briefly coerced
-// to "stop" — the only branch that reads it for an aborted, tool-call-free
-// message — then restore it, so nothing downstream (the interrupted extension's
-// agent_end check, session persistence) ever sees a changed message. This is an
-// app-only patch: users on stock pi (`pi install one-code-extension`) still get
-// pi's line. Exact-pinned pi keeps this stable; re-verify on every pin bump.
-try {
-	const original = AssistantMessageComponent.prototype.updateContent;
-	if (typeof original !== "function") patchMissed("AssistantMessageComponent.prototype.updateContent");
-	if (typeof original === "function") {
-		AssistantMessageComponent.prototype.updateContent = function updateContentWithoutAbortLine(message, ...rest) {
-			const hasToolCalls = Array.isArray(message?.content) && message.content.some((c) => c?.type === "toolCall");
-			if (message?.stopReason === "aborted" && !hasToolCalls) {
-				const realStopReason = message.stopReason;
-				message.stopReason = "stop";
-				try {
-					return original.call(this, message, ...rest);
-				} finally {
-					message.stopReason = realStopReason;
-				}
-			}
-			return original.call(this, message, ...rest);
-		};
-	}
-} catch {
-	// AssistantMessageComponent not patchable (unexpected pi build): stock behavior.
-}
-// The update notice and the release facts (formula name, upgrade commands,
-// Homebrew's release-age rule) live in the extension package so the doctor
-// quotes the same ones; the app only decides the install method.
-const { createUpdateCheck, UPGRADE_COMMANDS, minReleaseAgeFor } = await import(
-	pathToFileURL(join(corePath, "extensions", "lib", "update-check.mjs")).href
-);
-await main(argv, {
-	extensionFactories: [
-		{
-			name: "one-code-update-check",
-			factory: createUpdateCheck({
-				currentVersion: appVersion,
-				stampPath: join(agentDir, "last-update-check"),
-				upgradeHint: UPGRADE_COMMANDS[installMethod],
-				minReleaseAgeMs: minReleaseAgeFor(),
-			}),
-		},
-	],
-});
+const { createApp } = await import(pathToFileURL(createAppPath).href);
+await createApp({ appVersion: app.version, corePath, argv: process.argv, resolve: (specifier) => import.meta.resolve(specifier) });
