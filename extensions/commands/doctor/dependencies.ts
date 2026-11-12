@@ -180,9 +180,11 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 	const rg = which("rg") ?? (bundledRg && existsSync(bundledRg) ? bundledRg : undefined);
 	checks.push({ name: "rg", found: !!rg, path: rg, need: "optional", reason: "faster code search when the model shells out to ripgrep", hint: installHint("ripgrep", platform) });
 
+	// Language servers matter only to a session that has the language-server tool.
+	const servers = featureEnabled("lsp") ? Object.entries(SERVERS) : [];
 	const languages = projectLanguages(cwd);
 	const seenCommands = new Set<string>();
-	for (const [languageId, config] of Object.entries(SERVERS)) {
+	for (const [languageId, config] of servers) {
 		if (seenCommands.has(config.command)) continue;
 		seenCommands.add(config.command);
 		const found = which(config.command);
@@ -204,8 +206,7 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			});
 		}
 		if (needed && found && config.command === "typescript-language-server") {
-			// The feature's own check: only a session that has the language-server tool runs into it.
-			const preflight = featureEnabled("lsp") ? typescriptPreflight(cwd) : undefined;
+			const preflight = typescriptPreflight(cwd);
 			if (preflight) findings.push({ level: "warn", text: lspResultText.failure(preflight) });
 		}
 	}
