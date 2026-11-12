@@ -4,10 +4,7 @@
  * and in what order: mcp-announce.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { mcpChangeNotices as changeNotices, type McpDelta } from "../../extensions/tools/mcp/announce.ts";
-import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
-
-const mcpChangeNotices = (d: McpDelta) => changeNotices(d, mcpResultText);
+import { mcpChangeNotices } from "../../extensions/tools/mcp/announce.ts";
 
 describe("the MCP change notices", () => {
 	it("renders one notice per kind of change, instructions in Claude Code's frame", () => {

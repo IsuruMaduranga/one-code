@@ -24,11 +24,10 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/tools/mcp/announce.ts";
 import type { McpFailure } from "../../extensions/tools/mcp/text.ts";
-import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
-	return renderRequest(events, { facts: mcpFacts(told, mcpResultText) }).map((block) => block.text);
+	return renderRequest(events, { facts: mcpFacts(told) }).map((block) => block.text);
 }
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "../../test/unit/helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";

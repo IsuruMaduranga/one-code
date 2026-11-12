@@ -12,7 +12,7 @@
  */
 
 import { mcpFailuresReminder, shownFailure, shownInstructions } from "./client.ts";
-import type { McpResultText } from "./text.ts";
+import { mcpResultText } from "./text.ts";
 import type { BlockFact, ToldFact } from "../../lib/request/ledger/records.ts";
 import { toldBlockFact } from "../../lib/request/reminders.ts";
 import { countNoun } from "../../lib/ui/tui-render.ts";
@@ -45,13 +45,13 @@ const NONE = toldBlockFact("", "").hash;
  * wire. A changing tail beyond either cap is not a model-visible capability
  * change and must not become a false notice.
  */
-const instructedFact = (name: string, instructions: string, text: McpResultText): BlockFact => toldBlockFact(INSTRUCTED + name, shownInstructions(instructions, text));
+const instructedFact = (name: string, instructions: string): BlockFact => toldBlockFact(INSTRUCTED + name, shownInstructions(instructions));
 const failedFact = (name: string, error: string): BlockFact => toldBlockFact(FAILED + name, shownFailure(error));
 
 /** What message 1's two MCP blocks rendered from `snapshot` tell. */
-export function mcpFacts(snapshot: McpSnapshot, text: McpResultText): ToldFact[] {
+export function mcpFacts(snapshot: McpSnapshot): ToldFact[] {
 	return [
-		...snapshot.connected.flatMap((c) => (c.instructions ? [instructedFact(c.name, c.instructions, text)] : [])),
+		...snapshot.connected.flatMap((c) => (c.instructions ? [instructedFact(c.name, c.instructions)] : [])),
 		...snapshot.failed.map((f) => failedFact(f.name, f.error)),
 	];
 }
@@ -65,7 +65,6 @@ export function mcpFacts(snapshot: McpSnapshot, text: McpResultText): ToldFact[]
 export function mcpDelta(
 	told: ReadonlyMap<string, string>,
 	snapshot: McpSnapshot,
-	text: McpResultText,
 	settling = false,
 	connecting: ReadonlySet<string> = new Set(),
 ): McpDelta {
@@ -75,8 +74,8 @@ export function mcpDelta(
 	const failedNames = new Set(failed.map((f) => f.name));
 	const toldNames = (prefix: string) => [...told].filter(([key, hash]) => key.startsWith(prefix) && hash !== NONE).map(([key]) => key.slice(prefix.length));
 	const newInstructions = snapshot.connected
-		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions, text).hash)
-		.map((c) => ({ name: c.name, instructions: shownInstructions(c.instructions as string, text) }));
+		.filter((c) => c.instructions && told.get(INSTRUCTED + c.name) !== instructedFact(c.name, c.instructions).hash)
+		.map((c) => ({ name: c.name, instructions: shownInstructions(c.instructions as string) }));
 	const newFailures = failed
 		.filter((f) => told.get(FAILED + f.name) !== failedFact(f.name, f.error).hash)
 		.map((f) => ({ name: f.name, error: shownFailure(f.error) }));
@@ -100,12 +99,12 @@ export function mcpDelta(
  * The notices for a delta, in the order they go on the tail. Empty when
  * nothing changed.
  */
-export function mcpChangeNotices(delta: McpDelta, text: McpResultText): string[] {
+export function mcpChangeNotices(delta: McpDelta): string[] {
 	const notices: string[] = [];
-	if (delta.recovered.length > 0) notices.push(text.notices.recovered(delta.recovered));
-	if (delta.newInstructions.length > 0) notices.push(text.notices.connected(delta.newInstructions.map((s) => ({ name: s.name, text: s.instructions }))));
-	if (delta.newFailures.length > 0) notices.push(mcpFailuresReminder(delta.newFailures, text));
-	if (delta.dropped.length > 0) notices.push(text.notices.dropped(delta.dropped));
+	if (delta.recovered.length > 0) notices.push(mcpResultText.notices.recovered(delta.recovered));
+	if (delta.newInstructions.length > 0) notices.push(mcpResultText.notices.connected(delta.newInstructions.map((s) => ({ name: s.name, text: s.instructions }))));
+	if (delta.newFailures.length > 0) notices.push(mcpFailuresReminder(delta.newFailures));
+	if (delta.dropped.length > 0) notices.push(mcpResultText.notices.dropped(delta.dropped));
 	return notices;
 }
 

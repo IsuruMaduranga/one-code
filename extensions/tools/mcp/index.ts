@@ -168,8 +168,8 @@ function mcpExtension(pi: ExtensionAPI) {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
 				...toolRenderers(`${connection.server.name}: ${tool.name}`),
-				description: capDescription(tool.description, mcpResultText.tool.descriptionCut) ?? mcpResultText.tool.description({ server: connection.server.name, tool: tool.name }),
-				parameters: jsonSchemaToTypeBox(tool.inputSchema, mcpResultText.tool.descriptionCut),
+				description: capDescription(tool.description) ?? mcpResultText.tool.description({ server: connection.server.name, tool: tool.name }),
+				parameters: jsonSchemaToTypeBox(tool.inputSchema),
 				async execute(toolCallId, params, signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
 					if (!live) {
@@ -189,7 +189,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					}
 					try {
 						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>, signal);
-						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, mcpResultText.content, connection.server.name);
+						const { text: contentText, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
 						const structuredText = result.structuredContent !== undefined ? JSON.stringify(result.structuredContent, null, 2) : "";
 						const body = [contentText, structuredText].filter(Boolean).join("\n");
 						const content = [
@@ -331,20 +331,20 @@ function mcpExtension(pi: ExtensionAPI) {
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-failures",
-				text: mcpFailuresReminder(snapshot.failed, mcpResultText),
+				text: mcpFailuresReminder(snapshot.failed),
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp + 1,
-				facts: mcpFacts({ connected: [], failed: snapshot.failed }, mcpResultText),
+				facts: mcpFacts({ connected: [], failed: snapshot.failed }),
 			});
 		}
-		const instructions = mcpInstructionsReminder(live, mcpResultText);
+		const instructions = mcpInstructionsReminder(live);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				key: "mcp-instructions",
 				text: instructions,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.mcp,
-				facts: mcpFacts({ connected: snapshot.connected, failed: [] }, mcpResultText),
+				facts: mcpFacts({ connected: snapshot.connected, failed: [] }),
 			});
 		} else {
 			// No server has instructions anymore (e.g. the last one was disabled or
@@ -358,8 +358,8 @@ function mcpExtension(pi: ExtensionAPI) {
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
-		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), mcpResultText, !connectSettled, connectingNames);
-		const notices = mcpChangeNotices(delta, mcpResultText);
+		const delta = mcpDelta(request.toldBlocks, liveSnapshot(), !connectSettled, connectingNames);
+		const notices = mcpChangeNotices(delta);
 		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});
 
@@ -514,7 +514,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				if (!connection) return unknownServerError(params.server, text);
 				try {
 					const result = await readResource(connection, params.uri, signal);
-					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined, mcpResultText.content) || JSON.stringify({ contents: result.contents ?? [] });
+					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined) || JSON.stringify({ contents: result.contents ?? [] });
 					return {
 						content: [
 							{

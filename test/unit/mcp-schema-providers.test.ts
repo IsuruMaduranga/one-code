@@ -6,12 +6,7 @@ import { stream as streamCompletions } from "@earendil-works/pi-ai/api/openai-co
 import { getJsonSchemaToolParameters, makeStrictJsonSchema, resolveJsonSchemaStrictSampling } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { convertResponsesTools } from "@earendil-works/pi-ai/api/openai-responses-shared";
 import { convertTools as convertGoogleTools } from "@earendil-works/pi-ai/api/google-shared";
-import { jsonSchemaToTypeBox as convertSchema } from "../../extensions/tools/mcp/schema.ts";
-import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
-
-
-/** The profile's description-cut label, as the extension passes it. */
-const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpResultText.tool.descriptionCut);
+import { jsonSchemaToTypeBox } from "../../extensions/tools/mcp/schema.ts";
 
 function convertedMcpParameters() {
 	return jsonSchemaToTypeBox({

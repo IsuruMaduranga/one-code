@@ -309,7 +309,7 @@ function lspExtension(pi: ExtensionAPI) {
 		if (tally === lastPublishTally) return undefined;
 		lastPublishTally = tally;
 		const delta = computeDelta(mergedDiagnostics(), tracker);
-		const block = formatNewDiagnostics(delta, cwd, lspResultText.newDiagnostics);
+		const block = formatNewDiagnostics(delta, cwd);
 		if (!block) return undefined;
 		markDelivered(delta, tracker);
 		return block;
@@ -428,7 +428,7 @@ function lspExtension(pi: ExtensionAPI) {
 			const filtered = filterDiagnostics(all, (params.severity ?? "all") as SeverityFilter);
 			const relPath = relative(ctx.cwd, path) || path;
 			return {
-				content: [{ type: "text", text: formatDiagnostics(relPath, filtered, lspResultText.diagnostics) }],
+				content: [{ type: "text", text: formatDiagnostics(relPath, filtered) }],
 				details: { count: filtered.length, languageId: target.languageId },
 			};
 		},

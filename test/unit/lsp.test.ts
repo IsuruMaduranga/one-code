@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	filterDiagnostics,
-	formatDiagnostics as formatWith,
+	formatDiagnostics,
 	type LspDiagnostic,
 	severityName,
 	shownDiagnostic,
@@ -23,10 +23,6 @@ import {
 } from "../../extensions/tools/lsp/servers.ts";
 import { diag } from "./helpers/lsp-diagnostics.ts";
 import { lspResultText } from "../../extensions/tools/lsp/text.ts";
-
-
-/** The tool's result with the profile's words, as the extension passes them. */
-const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspResultText.diagnostics, limit);
 
 describe("protocol framing", () => {
 	it("round-trips a message", () => {

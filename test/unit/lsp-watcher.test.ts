@@ -7,7 +7,7 @@ import {
 	computeDelta,
 	DeliveredTracker,
 	fingerprintDiagnostic,
-	formatNewDiagnostics as formatWith,
+	formatNewDiagnostics,
 	markDelivered,
 	MAX_CHARS,
 } from "../../extensions/tools/lsp/watcher.ts";
@@ -24,10 +24,6 @@ const diag = (message: string, severity?: number, line = 0, character = 0, extra
 // A file URI for `/project/<name>` as this platform spells it (`D:\project\…` on Windows).
 const PROJECT = resolve("/project");
 const uri = (name: string) => pathToFileURL(join(PROJECT, name)).href;
-
-
-/** The block with the base's words, as the extension passes them (the wording: lsp-wording.test.ts). */
-const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("fingerprintDiagnostic", () => {
 	it("is stable for identical content and differs when any field changes", () => {

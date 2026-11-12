@@ -9,10 +9,7 @@
 
 import { crc32 } from "node:zlib";
 import { type TSchema, Type } from "typebox";
-import type { ImageProblem, McpResultText } from "./text.ts";
-
-/** The profile's label for a description past the cap (text.ts `tool.descriptionCut`). */
-export type DescriptionCut = McpResultText["tool"]["descriptionCut"];
+import { type ImageProblem, mcpResultText } from "./text.ts";
 
 /**
  * Claude Code's namespacing: `mcp__<server>__<tool>`. Hyphens are KEPT (CC's
@@ -56,23 +53,23 @@ interface JsonSchema {
  * A server's tool and parameter descriptions ride every request as
  * deferred-definition bytes with no bound; a malicious or careless server can
  * make each one arbitrarily large. Cap them at registration with a labelled
- * marker (review L2), worded by the profile. 4 KB is far more than any real
+ * marker (review L2). 4 KB is far more than any real
  * description needs.
  */
 export const DESCRIPTION_CAP = 4096;
-export function capDescription(text: string | undefined, cut: DescriptionCut): string | undefined {
+export function capDescription(text: string | undefined): string | undefined {
 	if (typeof text !== "string") return undefined;
-	return text.length > DESCRIPTION_CAP ? cut({ head: text.slice(0, DESCRIPTION_CAP), chars: text.length }) : text;
+	return text.length > DESCRIPTION_CAP ? mcpResultText.tool.descriptionCut({ head: text.slice(0, DESCRIPTION_CAP), chars: text.length }) : text;
 }
 
 /** TypeBox options carrying a (capped) description, or none. */
-function descriptionOptions(schema: JsonSchema, cut: DescriptionCut): Record<string, unknown> {
-	const capped = capDescription(schema.description, cut);
+function descriptionOptions(schema: JsonSchema): Record<string, unknown> {
+	const capped = capDescription(schema.description);
 	return capped ? { description: capped } : {};
 }
 
-function convertLeaf(schema: JsonSchema, cut: DescriptionCut): TSchema | undefined {
-	const options = descriptionOptions(schema, cut);
+function convertLeaf(schema: JsonSchema): TSchema | undefined {
+	const options = descriptionOptions(schema);
 
 	switch (schema.type) {
 		case "string":
@@ -86,7 +83,7 @@ function convertLeaf(schema: JsonSchema, cut: DescriptionCut): TSchema | undefin
 		case "null":
 			return Type.Null(options);
 		case "array":
-			return Type.Array(schema.items ? jsonSchemaToTypeBox(schema.items, cut) : Type.Unknown(), options);
+			return Type.Array(schema.items ? jsonSchemaToTypeBox(schema.items) : Type.Unknown(), options);
 		default:
 			return undefined;
 	}
@@ -96,12 +93,12 @@ function convertLeaf(schema: JsonSchema, cut: DescriptionCut): TSchema | undefin
  * Converts a JSON Schema to a TypeBox schema. Enums become literal unions;
  * unrecognised constructs become `Unknown`, which validates anything, so an
  * unusual server schema degrades to passing arguments through rather than
- * rejecting every call. Descriptions past the cap are cut with `cut`'s label.
+ * rejecting every call. Descriptions past the cap are cut with a label (`capDescription`).
  */
-export function jsonSchemaToTypeBox(schema: JsonSchema | undefined, cut: DescriptionCut): TSchema {
+export function jsonSchemaToTypeBox(schema: JsonSchema | undefined): TSchema {
 	if (!schema || typeof schema !== "object") return Type.Unknown();
 
-	const options = descriptionOptions(schema, cut);
+	const options = descriptionOptions(schema);
 
 	if (Array.isArray(schema.enum) && schema.enum.length > 0) {
 		const literals = schema.enum
@@ -114,11 +111,11 @@ export function jsonSchemaToTypeBox(schema: JsonSchema | undefined, cut: Descrip
 	}
 
 	if (Array.isArray(schema.type) && schema.type.length > 0) {
-		if (schema.type.length === 1) return jsonSchemaToTypeBox({ ...schema, type: schema.type[0] }, cut);
+		if (schema.type.length === 1) return jsonSchemaToTypeBox({ ...schema, type: schema.type[0] });
 		// TypeBox emits anyOf, which pi's provider converters understand. Keep
 		// the description on the union, not on each of its generated branches.
 		return Type.Union(
-			schema.type.map((type) => jsonSchemaToTypeBox({ ...schema, type, description: undefined }, cut)),
+			schema.type.map((type) => jsonSchemaToTypeBox({ ...schema, type, description: undefined })),
 			options,
 		);
 	}
@@ -127,19 +124,19 @@ export function jsonSchemaToTypeBox(schema: JsonSchema | undefined, cut: Descrip
 		const required = new Set(Array.isArray(schema.required) ? schema.required : []);
 		const properties: Record<string, TSchema> = {};
 		for (const [key, value] of Object.entries(schema.properties ?? {})) {
-			const converted = jsonSchemaToTypeBox(value, cut);
+			const converted = jsonSchemaToTypeBox(value);
 			properties[key] = required.has(key) ? converted : Type.Optional(converted);
 		}
 		// additionalProperties stays open: servers commonly accept more than they declare.
 		return Type.Object(properties, { ...options, additionalProperties: true });
 	}
 
-	const leaf = convertLeaf(schema, cut);
+	const leaf = convertLeaf(schema);
 	if (leaf) return leaf;
 
 	const variants = schema.anyOf ?? schema.oneOf;
 	if (Array.isArray(variants) && variants.length > 0) {
-		const converted = variants.map((variant) => jsonSchemaToTypeBox(variant, cut));
+		const converted = variants.map((variant) => jsonSchemaToTypeBox(variant));
 		return converted.length === 1 ? converted[0] : Type.Union(converted, options);
 	}
 
@@ -168,14 +165,14 @@ export interface McpResourceContents {
 	blob?: string;
 }
 
-export function describeResourceContents(contents: McpResourceContents[] | undefined, text: McpResultText["content"]): string {
+export function describeResourceContents(contents: McpResourceContents[] | undefined): string {
 	const parts: string[] = [];
 	for (const entry of contents ?? []) {
 		if (typeof entry.text === "string") {
 			parts.push(entry.text);
 		} else if (typeof entry.blob === "string") {
 			const size = Math.round((entry.blob.length * 3) / 4 / 1024);
-			parts.push(text.binaryResource({ uri: entry.uri, mimeType: entry.mimeType, kb: size }));
+			parts.push(mcpResultText.content.binaryResource({ uri: entry.uri, mimeType: entry.mimeType, kb: size }));
 		}
 	}
 	return parts.join("\n").trim();
@@ -319,7 +316,6 @@ function sniffImageMime(buf: Buffer): string | undefined {
 
 export function describeContent(
 	blocks: McpContentBlock[] | undefined,
-	text: McpResultText["content"],
 	serverName?: string,
 ): {
 	text: string;
@@ -334,11 +330,11 @@ export function describeContent(
 		} else if (block.type === "image" && block.data) {
 			const checked = validateImageData(block.data, block.mimeType);
 			if (checked.ok) images.push({ data: block.data, mimeType: checked.mimeType });
-			else texts.push(text.imageUndecodable({ server: serverName, problem: checked.problem, bytes: checked.bytes }));
+			else texts.push(mcpResultText.content.imageUndecodable({ server: serverName, problem: checked.problem, bytes: checked.bytes }));
 		} else if (block.type === "resource" && block.resource) {
-			texts.push(block.resource.text ?? text.resource(block.resource.uri));
+			texts.push(block.resource.text ?? mcpResultText.content.resource(block.resource.uri));
 		} else {
-			texts.push(text.other(block.type));
+			texts.push(mcpResultText.content.other(block.type));
 		}
 	}
 

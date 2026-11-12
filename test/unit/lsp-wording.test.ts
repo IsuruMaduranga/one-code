@@ -6,16 +6,11 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { formatDiagnostics as formatWith, type LspDiagnostic, shownDiagnostic } from "../../extensions/tools/lsp/format.ts";
+import { formatDiagnostics, type LspDiagnostic, shownDiagnostic } from "../../extensions/tools/lsp/format.ts";
 import { describeStartFailure } from "../../extensions/tools/lsp/install-hints.ts";
-import { formatNewDiagnostics as formatNewWith, MAX_CHARS } from "../../extensions/tools/lsp/watcher.ts";
+import { formatNewDiagnostics, MAX_CHARS } from "../../extensions/tools/lsp/watcher.ts";
 import { diag, PROJECT, uri } from "./helpers/lsp-diagnostics.ts";
 import { lspResultText } from "../../extensions/tools/lsp/text.ts";
-
-/** The tool's result with the base's words, as the extension passes them. */
-const formatDiagnostics = (path: string, list: LspDiagnostic[], limit?: number) => formatWith(path, list, lspResultText.diagnostics, limit);
-/** The new-diagnostics block with the base's words, as the extension passes them. */
-const formatNewDiagnostics = (delta: Map<string, LspDiagnostic[]>, cwd: string) => formatNewWith(delta, cwd, lspResultText.newDiagnostics);
 
 describe("start-failure messages", () => {
 	const enoent = (command: string) => ({ kind: "spawnFailed" as const, command, osMessage: `spawn ${command} ENOENT` });

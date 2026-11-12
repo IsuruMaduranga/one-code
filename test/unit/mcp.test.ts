@@ -3,28 +3,20 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/tools/mcp/config.ts";
 import {
-	capDescription as capWith,
+	capDescription,
 	DESCRIPTION_CAP,
-	describeContent as describeWith,
-	describeResourceContents as describeResourceWith,
-	jsonSchemaToTypeBox as convertSchema,
+	describeContent,
+	describeResourceContents,
+	jsonSchemaToTypeBox,
 	namespacedToolName,
 	parseNamespacedToolName,
 	pluginServerName,
 	validateImageData,
 } from "../../extensions/tools/mcp/schema.ts";
-import { createTailBuffer, mcpInstructionsReminder as instructionsWith } from "../../extensions/tools/mcp/client.ts";
+import { createTailBuffer, mcpInstructionsReminder } from "../../extensions/tools/mcp/client.ts";
 import { makeMcpConfigDirs, piMcpConfigs, writeMcpServers as write } from "./helpers/mcp-config.ts";
 import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
 import { mcpResultText } from "../../extensions/tools/mcp/text.ts";
-
-
-/** The pure functions with the profile's text, as the extension passes it. */
-const capDescription = (text: string | undefined) => capWith(text, mcpResultText.tool.descriptionCut);
-const jsonSchemaToTypeBox = (schema: Parameters<typeof convertSchema>[0]) => convertSchema(schema, mcpResultText.tool.descriptionCut);
-const describeContent = (blocks: Parameters<typeof describeWith>[0], server?: string) => describeWith(blocks, mcpResultText.content, server);
-const describeResourceContents = (contents: Parameters<typeof describeResourceWith>[0]) => describeResourceWith(contents, mcpResultText.content);
-const mcpInstructionsReminder = (connections: Parameters<typeof instructionsWith>[0]) => instructionsWith(connections, mcpResultText);
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
