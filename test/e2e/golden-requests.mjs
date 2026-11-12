@@ -16,7 +16,8 @@
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
  *       (ONECODE_TOOLS_OFF): each run must finish and send a request, the
- *       turned-off tools must be missing from it, and no text may name one
+ *       turned-off tools and a turned-off feature's own tools
+ *       (TOOL_FEATURES) must be missing from it, and no text may name one
  *       (lib/profile/live-tools.ts); a guard feature (hooks,
  *       the edit guard) turned off from the environment must stop pi at
  *       startup instead; with --dir, each run's requests are written there
@@ -40,7 +41,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
-import { FEATURE_IDS, FEATURES, isGuardFeature } from "../../extensions/lib/profile/features.ts";
+import { FEATURE_IDS, FEATURES, isGuardFeature, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import { projectSlug } from "../../extensions/lib/context/memory.ts";
 import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-builtins.mjs";
 
@@ -554,6 +555,8 @@ async function sweep() {
 	const optional = FEATURE_IDS.filter((id) => !FEATURES[id].required);
 	const runs = optional.map((id) => ({
 		label: `${id} off`,
+		// The feature's own tools must leave the request, pi's built-in under an overridden name included.
+		toolsOff: Object.keys(TOOL_FEATURES).filter((name) => TOOL_FEATURES[name] === id),
 		// Only a profile may turn a guard feature off: from the environment it must fail closed.
 		mustFail: isGuardFeature(id) ? "it guards tool calls" : undefined,
 		config: { name: `sweep-${id}`, model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_FEATURES_OFF: id } },

@@ -105,7 +105,10 @@ export interface ToolSwitch {
 	/**
 	 * false: the tool is never registered, never active, and a call to it is
 	 * denied, so the name is gone for good; to replace a base tool with its
-	 * own, a product turns off the feature that registers it instead. The
+	 * own, a product turns off the feature that registers it instead. `bash`
+	 * is the exception: its feature overrides pi's built-in, so turning the
+	 * feature off removes the name too, and a product's own shell tool takes
+	 * another name. The
 	 * harness's plumbing (`PINNED_TOOLS` in lib/profile/profile.ts) can't be
 	 * turned off or deferred.
 	 */

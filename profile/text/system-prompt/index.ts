@@ -32,6 +32,8 @@ const BUNDLES: Record<PromptTier, PromptBundle> = {
 
 /** Per tool, the passages of the prompt that name it, cut when it is off. */
 const PROMPT_PASSAGES: ToolPassages = {
+	// Before edit: its passages are matched as written, with edit still named.
+	bash: [" - Prefer dedicated tools over bash when one fits (read, edit, write) — reserve bash for shell-only operations.\n", ["; to run something, call the bash tool", ""]],
 	skill: [`\n${TYPED_SKILL_BULLET}`, "\n - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising."],
 	Agent: [DELEGATING_WORK, DELEGATE_STRICT, `\n${FORK_BULLET}`],
 	edit: [["(read, edit, write)", "(read, write)"], ["call the edit or write tool", "call the write tool"], [" edit to change them (not sed/awk),", ""], ["the edit/write tools", "the write tool"]],

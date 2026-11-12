@@ -28,7 +28,7 @@ import { activeProfile, failClosed, featureEnabled, isToolDisabled } from "./pro
 
 /** `pi` as the profile lets an extension register tools: see the header. */
 export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
-	if (activeProfile().tools.size === 0) return pi;
+	if (activeProfile().disabledTools.size === 0) return pi;
 	return new Proxy(pi, {
 		get(target, key) {
 			if (key === "registerTool") {

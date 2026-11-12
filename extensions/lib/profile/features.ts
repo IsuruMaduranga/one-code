@@ -116,8 +116,10 @@ export function isGuardFeature(id: string): boolean {
  * The feature that registers each optional tool, so text that names another
  * tool can leave it out when that feature is off (`toolLive` in
  * lib/profile/profile.ts). pi's built-in tools (read, edit, write, …) belong to no
- * feature; only a tool switch turns them off. The golden sweep fails when a
- * request names a tool that is off (test/e2e/golden-requests.mjs --sweep).
+ * feature; only a tool switch turns them off. `bash` is the one built-in a
+ * feature overrides, and it leaves the session with that feature
+ * (`resolveProfile`). The golden sweep fails when a request names or declares
+ * a tool that is off (test/e2e/golden-requests.mjs --sweep).
  */
 export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
 	artifact: "artifacts",

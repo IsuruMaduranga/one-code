@@ -23,5 +23,6 @@ const NOTE_PASSAGES: ToolPassages = {
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const permissionsText = (live: LiveTools): PermissionsText => ({
-	autoModeNote: ({ firm }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
+	// The note is about working through bash: a session without it gets none.
+	autoModeNote: ({ firm }) => (live.has("bash") ? withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES) : ""),
 });

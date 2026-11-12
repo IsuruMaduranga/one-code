@@ -24,13 +24,13 @@ export function mentions(text: string, tool: string, english: EnglishPhrases): s
 
 /**
  * Every text of `texts(live)` that names a tool the session lacks, with each
- * optional feature's tools off in turn, and edit. The shell features are left
- * out: with bash off the shell texts already name the shell the session has.
+ * optional feature's tools off in turn, and edit. powershell is left out: a
+ * text names it only from the session's own tool list.
  */
 export function toolLeaks(texts: (live: LiveTools) => NamedText[], english: EnglishPhrases): string[] {
 	const leaks: string[] = [];
 	const cases: { feature: string; off: string[] }[] = [...new Set<string>(Object.values(TOOL_FEATURES))]
-		.filter((feature) => feature !== "bash" && feature !== "powershell")
+		.filter((feature) => feature !== "powershell")
 		.map((feature) => ({ feature, off: Object.keys(TOOL_FEATURES).filter((tool) => TOOL_FEATURES[tool] === feature) }));
 	cases.push({ feature: "edit", off: ["edit"] });
 	for (const { feature, off } of cases) {

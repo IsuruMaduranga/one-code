@@ -162,7 +162,7 @@ const REFUSAL_PASSAGES: ToolPassages = {
 
 /** The profile's part of what the permission gate says. */
 export interface PermissionsText {
-	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
+	/** The note for a session that opens in auto mode, empty for none; `firm` for models that need the firmer wording. */
 	autoModeNote(p: { firm: boolean }): string;
 	/**
 	 * What the model reads when the gate refuses a secret file

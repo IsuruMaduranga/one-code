@@ -41,7 +41,7 @@ const FIX_INPUT: FixPromptInput = {
 /** Every text of One Code's that names another tool. */
 function texts(live: LiveTools): NamedText[] {
 	const t = profile.text({ live });
-	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, workflow, artifacts, toolSearch, permissions: autoMode } = t as Required<typeof t>;
+	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, workflow, artifacts, toolSearch, permissions: autoMode, background } = t as Required<typeof t>;
 	const out: NamedText[] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	for (const tier of PROMPT_TIERS) {
@@ -64,6 +64,8 @@ function texts(live: LiveTools): NamedText[] {
 	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })));
 	push("artifact", "artifacts", artifacts.description);
 	push("tool_search", "tool-search", toolSearch.description);
+	push("monitor", "background", background.monitor.description);
+	push("task_output", "background", background.tasks.outputDescription);
 	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.autoModeNote({ firm }));
 
 	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }));
@@ -81,6 +83,12 @@ describe("text naming another tool", () => {
 		const off = profile.text({ live: { has: (tool) => tool !== "ask_user_question" } });
 		expect(off.doctor?.fixPrompt(FIX_INPUT)).not.toContain("ask_user_question");
 		expect(profile.text({ live: { has: () => true } }).doctor?.fixPrompt(FIX_INPUT)).toContain("with the `ask_user_question` tool");
+	});
+
+	it("gives a session without bash no auto-mode note, which is about working through bash", () => {
+		const off = profile.text({ live: { has: (tool) => tool !== "bash" } });
+		for (const firm of [true, false]) expect(off.permissions?.autoModeNote({ firm })).toBe("");
+		expect(off.background?.tasks.outputDescription).toContain("(monitor or background subagent)");
 	});
 
 	it("is unchanged when every tool is on", () => {

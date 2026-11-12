@@ -17,7 +17,7 @@ import { askUserText } from "./text/ask-user/index.ts";
 import { permissionsText } from "./text/permissions/index.ts";
 import { classifier } from "./text/auto-mode/classifier.ts";
 import { autoModeSetup } from "./text/auto-mode/setup.ts";
-import { background } from "./text/background/index.ts";
+import { backgroundText } from "./text/background/index.ts";
 import { btw } from "./text/btw/index.ts";
 import { compaction } from "./text/compaction/index.ts";
 import { context } from "./text/context/index.ts";
@@ -68,7 +68,7 @@ export const profile: Profile = {
 		skill,
 		mcp,
 		lsp,
-		background,
+		background: backgroundText(live),
 		artifacts: artifactsText(live),
 		toolStyle: toolStyleText(live),
 		compaction,

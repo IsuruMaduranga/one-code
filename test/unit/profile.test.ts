@@ -63,6 +63,16 @@ describe("resolveProfile", () => {
 		expect(() => resolveProfile(empty, { [envName("FEATURES_OFF")]: "plugins" }, "/p")).toThrow(/cannot turn off "plugins"/);
 	});
 
+	it("takes pi's built-in bash out of the session when the bash feature is off", () => {
+		for (const resolved of [resolveProfile({ ...empty, features: { bash: false } }, {}, "/p"), resolveProfile(empty, { [envName("FEATURES_OFF")]: "bash" }, "/p")]) {
+			expect(resolved.disabledTools.has("bash")).toBe(true);
+			expect(resolved.live.has("bash")).toBe(false);
+		}
+		// A feature whose tool pi does not ship needs no entry: its factory never registers the tool.
+		expect([...resolveProfile({ ...empty, features: { powershell: false, mcp: false } }, {}, "/p").disabledTools]).toEqual([]);
+		expect(resolveProfile(empty, {}, "/p").disabledTools.has("bash")).toBe(false);
+	});
+
 	it("refuses a switch that misses a base tool by spelling, and passes a product's own tool", () => {
 		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "Bash,WebFetch" }, "/p")).toThrow(/_TOOLS_OFF: no tool is named "Bash": the switch for "bash" is spelled "bash"; \w+_TOOLS_OFF: no tool is named "WebFetch".*"web_fetch"/);
 		expect(() => resolveProfile({ ...empty, tools: { Write: { enabled: false } } }, {}, "/p")).toThrow(/no tool is named "Write"/);

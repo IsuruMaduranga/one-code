@@ -43,7 +43,7 @@ export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
  */
 export const PINNED_TOOLS: ReadonlySet<string> = new Set(["tool_search", "SendMessage", "SubagentHandback", "structured_output"]);
 
-/** pi's built-in tools, which belong to no feature (lib/profile/features.ts TOOL_FEATURES). */
+/** pi's built-in tools. Only `bash` has a feature (lib/profile/features.ts TOOL_FEATURES), which overrides it. */
 const BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 /** Every tool the base or pi registers under a fixed name. */
@@ -169,7 +169,7 @@ function missingTextProblems(text: ProfileText, features: ReadonlySet<FeatureId>
 export interface ResolvedProfile {
 	features: ReadonlySet<FeatureId>;
 	tools: ReadonlyMap<string, ToolSwitch>;
-	/** The tools the profile turns off (`enabled: false`). */
+	/** The tools the profile turns off: `enabled: false`, or a pi built-in whose overriding feature is off. */
 	disabledTools: ReadonlySet<string>;
 	/** Which tools the session can have: the switch is not off and the feature registering it (TOOL_FEATURES) is on. */
 	live: LiveTools;
@@ -253,6 +253,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
+	// A feature that overrides one of pi's built-ins (bash) takes the built-in
+	// with it when it is off: skipping the override alone would leave pi's own
+	// tool in the session, without the feature's guards.
+	for (const name of BUILTIN_TOOLS) {
+		const feature = TOOL_FEATURES[name];
+		if (feature !== undefined && !features.has(feature)) disabledTools.add(name);
+	}
 	const live: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
@@ -372,7 +379,11 @@ export function secretFileNames(): ReadonlySet<string> {
 	return activeProfile().secretFiles;
 }
 
-/** The profile turned this tool off: never registered, never active, denied if called. */
+/**
+ * The profile turned this tool off, by its switch or by turning off the
+ * feature that overrides a pi built-in: never registered, never active,
+ * denied if called.
+ */
 export function isToolDisabled(name: string): boolean {
 	return activeProfile().disabledTools.has(name);
 }
