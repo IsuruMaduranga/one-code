@@ -298,7 +298,7 @@ const framing = memoOn((words: NotificationWords): { delivery: RegExp; frame: Re
 	const frame = new RegExp(
 		[
 			"<task-notification>\\n([\\s\\S]*?)\\n</task-notification>",
-			`${escapeRegExp(commonPrefix(message.opener, message.openerMidTurn))}[^\\n]*\\n<agent-message from="([^"]*)">\\n([\\s\\S]*?)\\n</agent-message>\\n\\n${escapeRegExp(message.guard)}[^\\n]*`,
+			`(?:${escapeRegExp(message.openerMidTurn)}|${escapeRegExp(message.opener)})\\n<agent-message from="([^"]*)">\\n([\\s\\S]*?)\\n</agent-message>\\n\\n${escapeRegExp(message.guard)}[^\\n]*`,
 		].join("|"),
 		"g",
 	);

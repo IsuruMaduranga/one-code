@@ -32,7 +32,7 @@ export interface NotificationsText {
 	agentMessage: {
 		/** Opens a message delivered while the session is idle (and every hand-back): "Another Claude session sent a message:". */
 		opener: string;
-		/** Opens a message that lands while the session is mid-turn; it starts as `opener` does up to where they differ. */
+		/** Opens a message that lands while the session is mid-turn. */
 		openerMidTurn: string;
 		/** Closes every agent message: the sender is an agent, not the user. */
 		guard: string;
