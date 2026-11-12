@@ -16,7 +16,7 @@ import type { GitSnapshot } from "./git-status.ts";
 export type InstructionSource = "global" | "managed" | "project" | "local" | "memory" | "product" | "productGlobal" | "agents" | "agentsGlobal";
 
 /** What changed in the workspace since the context block was told. */
-export type ContextChange = "git" | "memory" | "instructions";
+export type ContextChange = "git" | "memory" | "instructions" | "product";
 
 /** How far a MEMORY.md index is over its limits (sizes already formatted). */
 export type MemoryIndexSize =
@@ -51,6 +51,7 @@ const DESCRIPTORS: Record<Exclude<InstructionSource, "product" | "productGlobal"
 const CHANGES: Record<Exclude<ContextChange, "instructions">, string> = {
 	git: "git status changed",
 	memory: "the memory index changed",
+	product: `${brand.productFile} instructions changed`,
 };
 
 const MEMORY_SIZE = (size: MemoryIndexSize): string =>

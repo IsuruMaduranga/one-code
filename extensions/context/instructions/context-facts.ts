@@ -5,7 +5,7 @@
  * first request of a resumed process compares them with the live files and git
  * status, and says what changed once. The historical blocks stay as sent.
  */
-import { buildClaudeMdBlock } from "./instructions.ts";
+import { buildClaudeMdBlock, buildOneCodeBlock } from "./instructions.ts";
 import { type ContextFile, instructionTargets } from "../../lib/context/instructions.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
@@ -17,6 +17,8 @@ import { contextWords } from "../../lib/context/context-words.ts";
 export const FACT_KEYS = {
 	instructions: "context-facts:instructions",
 	memory: "context-facts:memory",
+	/** The product's own instruction files (their block rides after the instructions block). */
+	product: "context-facts:product",
 	git: "context-facts:git",
 	date: "context-facts:date",
 	/** On when the epoch's blocks were taken at a compaction, not at the session's start. */
@@ -30,18 +32,20 @@ const fingerprint = contentHash;
 export interface ContextFingerprints {
 	instructions: string;
 	memory: string;
+	product: string;
 }
 
-export function contextFingerprints(input: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null }): ContextFingerprints {
+export function contextFingerprints(input: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null; oneCodeFiles?: ContextFile[] }): ContextFingerprints {
 	return {
 		instructions: fingerprint(buildClaudeMdBlock({ contextFiles: input.contextFiles })),
 		memory: fingerprint(buildClaudeMdBlock({ contextFiles: [], memoryIndex: input.memoryIndex })),
+		product: fingerprint(buildOneCodeBlock(input.oneCodeFiles ?? [])),
 	};
 }
 
 export const gitFingerprint = (gitStatus: string | null): string => fingerprint(gitStatus);
 
-/** The live workspace's fingerprints for the resumed-session check: the instructions, the memory index and, when a git snapshot is taken, the git status. */
+/** The live workspace's fingerprints for the resumed-session check: the instruction files, the product's own, the memory index and, when a git snapshot is taken, the git status. */
 export type LiveFingerprints = ContextFingerprints & { git?: string };
 
 export function liveFingerprints(files: Parameters<typeof contextFingerprints>[0], gitStatus: string | null, withGit: boolean): LiveFingerprints {
@@ -49,11 +53,12 @@ export function liveFingerprints(files: Parameters<typeof contextFingerprints>[0
 }
 export const dateFingerprint = (date: string): string => fingerprint(date);
 
-/** The facts the instructions block tells. */
+/** The facts the instructions block tells, the product block's with them (the two are rendered together). */
 export function instructionFacts(prints: ContextFingerprints): ToldFact[] {
 	return [
 		{ kind: "block", key: FACT_KEYS.instructions, hash: prints.instructions },
 		{ kind: "block", key: FACT_KEYS.memory, hash: prints.memory },
+		{ kind: "block", key: FACT_KEYS.product, hash: prints.product },
 	];
 }
 
@@ -95,6 +100,7 @@ export function resumeFactsNotice(
 	compare(FACT_KEYS.git, live.git, "git");
 	compare(FACT_KEYS.memory, live.memory, "memory");
 	compare(FACT_KEYS.instructions, live.instructions, "instructions");
+	compare(FACT_KEYS.product, live.product, "product");
 	if (changed.length === 0) return undefined;
 	return {
 		text: contextWords().changedSinceSnapshot({ changes: changed, atCompaction, file: instructionTargets().project }),

@@ -13,10 +13,11 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { contextWords } from "../../extensions/lib/context/context-words.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 
 /** The profile's notice for what changed since the saved context snapshot. */
-const changedNotice = (changes: Array<"git" | "memory" | "instructions">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction, file: instructionTargets().project });
+const changedNotice = (changes: Array<"git" | "memory" | "instructions" | "product">, atCompaction = false) => contextWords().changedSinceSnapshot({ changes, atCompaction, file: instructionTargets().project });
 
 describe("context fact comparisons", () => {
 	const files: Parameters<typeof contextFingerprints>[0] = { contextFiles: [{ path: "/CLAUDE.md", content: "rules", descriptor: "rules" }] as never, memoryIndex: { path: "/MEMORY.md", content: "memory" } };
@@ -34,6 +35,15 @@ describe("context fact comparisons", () => {
 	it("tells the live fingerprints with the notice, so it is said once", () => {
 		const notice = resumeFactsNotice(told.blocks, false, live({}, "new git"));
 		expect(notice?.facts).toEqual([{ kind: "block", key: FACT_KEYS.git, hash: gitFingerprint("new git") }]);
+	});
+
+	it("reports a change to the product's own instruction file, and stays silent for a session that never told it", () => {
+		const product = [{ path: "/PRODUCT.md", content: "mine", descriptor: "product" }] as never;
+		const edited = live({ oneCodeFiles: product });
+		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toBe(contextWords().changedSinceSnapshot({ changes: ["product"], atCompaction: false, file: instructionTargets().project }));
+		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toContain(`${brand.productFile} instructions changed`);
+		const before = new Map([...told.blocks].filter(([key]) => key !== FACT_KEYS.product));
+		expect(resumeFactsNotice(before, false, edited)).toBeUndefined();
 	});
 
 	it("says nothing about facts the epoch never told (blocks that predate the facts)", () => {
