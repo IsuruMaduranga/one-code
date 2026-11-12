@@ -2,12 +2,12 @@
  * One Code's compaction wording (profile/text/compaction/): Claude Code's
  * instruction byte for byte, the trigger notice around it, the
  * compact-instructions context, the note that scopes the summary to the
- * discarded part when a tail is kept, a tool result cleared to fit the
- * compaction request, and the continuation preamble. The golden snapshot
- * pins the manual and overflow requests and the stored summary.
+ * discarded part when a tail is kept, and the continuation preamble. The
+ * golden snapshot pins the manual and overflow requests and the stored
+ * summary. The base's cleared-result note is checked in
+ * test/unit/compaction-text-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
-import { compactionResultText } from "../../extensions/context/compaction/text.ts";
 import { buildCompactionInstruction, COMPACTION_INSTRUCTION, continuationSummary, keptTailNote } from "../text/compaction/index.ts";
 
 describe("One Code's compaction text", () => {
@@ -16,14 +16,6 @@ describe("One Code's compaction text", () => {
 		expect(keptTailNote({ count: 2, landmark: { kind: "calls", tool: "read", hint: "src/x.ts" } })).toContain("beginning with the assistant message that calls read (src/x.ts), stay");
 		expect(keptTailNote({ count: 2, landmark: { kind: "calls", tool: "todo" } })).toContain("beginning with the assistant message that calls todo, stay");
 		expect(keptTailNote({ count: 3 })).toContain("the final 3 messages, stay in context verbatim");
-	});
-
-	it("says how much of a cleared result was left out, images included", () => {
-		expect(compactionResultText.clearedResult({ omittedChars: 120, images: 0 })).toBe(
-			"[Tool result cleared to fit the compaction request: 120 more characters omitted. The full result is in the session transcript.]",
-		);
-		expect(compactionResultText.clearedResult({ omittedChars: 5, images: 2 })).toContain("5 more characters and 2 images omitted");
-		expect(compactionResultText.clearedResult({ omittedChars: 5, images: 1 })).toContain("5 more characters and 1 image omitted");
 	});
 });
 
@@ -43,17 +35,6 @@ describe("buildCompactionInstruction with a kept tail", () => {
 
 	it("uses the singular for one kept message", () => {
 		expect(keptTailNote({ count: 1 })).toContain("the final 1 message, stay");
-	});
-});
-
-describe("cleared result wording", () => {
-	it("counts what was omitted and points at the session transcript", () => {
-		const { clearedResult } = compactionResultText;
-		const text = clearedResult({ omittedChars: 77_952, images: 0 });
-		expect(text).toContain("77952 more characters omitted");
-		expect(text).toContain("session transcript");
-		expect(text).toContain("cleared to fit the compaction request");
-		expect(clearedResult({ omittedChars: 0, images: 1 })).toContain("and 1 image omitted");
 	});
 });
 

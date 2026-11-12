@@ -1,30 +1,12 @@
 /**
  * One Code's plan-mode wording (profile/text/plan-mode/): the plan-mode block
  * (Claude Code's plan-mode instructions with One Code's tool and agent
- * names), and the results the golden session cannot reach: no user to
- * approve, and a plan too large to re-attach. The golden snapshot pins the
- * bytes of every other text. The base's plan-mode.test.ts checks the plan
- * file's name and the approval dialog.
+ * names). The golden snapshot pins the bytes of every other text. The
+ * base's results the golden session cannot reach are checked in
+ * test/unit/plan-mode-text-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
 import { buildPlanModeReminder } from "../text/plan-mode/reminder.ts";
-import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
-
-
-describe("One Code's plan-mode text", () => {
-	it("keeps a session with no user in plan mode and says so", () => {
-		expect(planModeResultText().noApprover("/p/plan.md")).toBe(
-			"Plan approval needs an interactive session, and this one has no user to approve it. The session stays in plan mode; the plan is recorded at /p/plan.md for the user to review. Do not try to implement it here.",
-		);
-	});
-
-	it("names a plan too large to re-attach instead of inlining it", () => {
-		expect(planModeResultText().reattached({ planFile: "/p/plan.md", chars: 50_000 })).toBe(
-			"A plan file exists from plan mode at: /p/plan.md\n\nIt is too large to include here (50,000 characters); read it before continuing.\n\nIf this plan is relevant to the current work and not already complete, continue working on it.",
-		);
-		expect(planModeResultText().reattached({ planFile: "/p/plan.md", content: "# Plan", chars: 6 })).toContain("Plan contents:\n\n# Plan\n\n");
-	});
-});
 
 describe("buildPlanModeReminder", () => {
 	const path = "/home/u/.onecode/plans/brisk-otter-map.md";
