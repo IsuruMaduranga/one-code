@@ -127,11 +127,6 @@ export interface InstructionTargets {
 	project: string;
 	/** The user's global file. */
 	user: string;
-	/**
-	 * How the project files whose imports need the user's consent are named
-	 * in that dialog: "CLAUDE.md or .claude/rules".
-	 */
-	importers: string;
 }
 
 /**

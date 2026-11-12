@@ -90,7 +90,7 @@ export const sources: SourceProvider = {
 		if (!claudeSourcesOn()) return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
 		return {
 			instructions: claudeCodeInstructionView(home),
-			instructionTargets: { project: "CLAUDE.md", user: join(homeClaudeDir, "CLAUDE.md"), importers: `CLAUDE.md or ${PROJECT_DIR}/rules` },
+			instructionTargets: { project: "CLAUDE.md", user: join(homeClaudeDir, "CLAUDE.md") },
 			configDirs: { user: homeClaudeDir, project: PROJECT_DIR },
 			settings: (base, { cwd }) => claudeCodeSettings(base, cwd, home),
 			// Each of Claude Code's two skill folders loads before its `.agents` twin.

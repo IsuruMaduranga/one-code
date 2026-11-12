@@ -71,7 +71,7 @@ describe("external instruction include approval", () => {
 		write(join(root, "shared.md"), "APPROVED EXTERNAL INSTRUCTION\n");
 		const { select, texts } = await start(EXTERNAL_INCLUDES_YES);
 		expect(select).toHaveBeenCalledTimes(1);
-		expect(select.mock.calls[0][0]).toBe(externalIncludesDialog([join(root, "shared.md")], home, "CLAUDE.md", "CLAUDE.md or .claude/rules"));
+		expect(select.mock.calls[0][0]).toBe(externalIncludesDialog([{ path: join(root, "shared.md"), importer: "CLAUDE.md" }], home, "CLAUDE.md"));
 		expect(select.mock.calls[0][1]).toEqual([EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES]);
 		expect(texts.at(-1)).toContain("APPROVED EXTERNAL INSTRUCTION");
 		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: true, warningShown: true });
@@ -285,7 +285,7 @@ describe("external instruction include approval", () => {
 describe("startup probe and approved readers", () => {
 	it.each(["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", ".claude/CLAUDE.md", ".claude/AGENTS.md", ".claude/rules/always.md"])("detects and admits external imports from %s only with consent", (name) => {
 		const outside = fixture(name);
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 		expect(JSON.stringify(discoverContextFiles(opts()))).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("APPROVED EXTERNAL INSTRUCTION");
 	});
@@ -293,7 +293,7 @@ describe("startup probe and approved readers", () => {
 	it.each(["@../shared\\ notes.md", "@../shared\\ notes.md#instructions"])("loads a detected external import after approval: %s", (ref) => {
 		const outside = write(join(root, "shared notes.md"), "VALID EXTERNAL IMPORT");
 		write(join(cwd, "CLAUDE.md"), ref);
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("VALID EXTERNAL IMPORT");
 	});
 
@@ -310,7 +310,7 @@ describe("startup probe and approved readers", () => {
 		expect(oneCode(true)).toContain("ONECODE EXTERNAL SECRET");
 		expect(oneCode(true)).toContain("ONECODE HOME SECRET");
 		// ONECODE.md is the base's: its imports are asked about through every provider.
-		const asked = () => openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state });
+		const asked = () => openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state }).map((found) => found.path);
 		expect(asked()).toEqual([outside, personal]);
 		// The user's own global ONECODE.md is not project-controlled: its imports load and never ask.
 		write(join(state, "ONECODE.md"), `@${write(join(root, "global-import.md"), "GLOBAL ONECODE IMPORT")}`);
@@ -350,7 +350,7 @@ describe("startup probe and approved readers", () => {
 		write(join(cwd, "docs", "x.md"), "INSIDE PUNCTUATED IMPORT\n");
 		write(join(cwd, "CLAUDE.md"), "See @docs/x.md.\nAlso @../shared.md, please.\n");
 		expect(JSON.stringify(discoverContextFiles(opts()))).toContain("INSIDE PUNCTUATED IMPORT");
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 		const approved = JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }));
 		expect(approved).toContain("INSIDE PUNCTUATED IMPORT");
 		expect(approved).toContain("APPROVED EXTERNAL INSTRUCTION");
@@ -360,13 +360,13 @@ describe("startup probe and approved readers", () => {
 		const outside = write(join(root, "outside", "secret.md"), "LINKED DOT CLAUDE SECRET");
 		mkdirSync(join(cwd, ".claude"));
 		symlinkSync(outside, join(cwd, ".claude", "CLAUDE.md"));
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 		expect(JSON.stringify(discoverContextFiles(opts()))).not.toContain("LINKED DOT CLAUDE SECRET");
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("LINKED DOT CLAUDE SECRET");
 		// A link that stays inside the project is the project's own file.
 		rmSync(join(cwd, ".claude", "CLAUDE.md"));
 		symlinkSync(write(join(cwd, "docs", "rules.md"), "LINKED INSIDE RULES"), join(cwd, ".claude", "CLAUDE.md"));
-		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
 		expect(JSON.stringify(discoverContextFiles(opts()))).toContain("LINKED INSIDE RULES");
 	});
 
@@ -382,7 +382,7 @@ describe("startup probe and approved readers", () => {
 		symlinkSync(outside, join(cwd, "alias.md"));
 		write(join(cwd, "CLAUDE.md"), "@inside.md @alias.md @~/personal.md");
 		write(join(cwd, "inside.md"), "@../shared.md");
-		expect(externalInstructionIncludes(opts())).toEqual([outside, global]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside, global]);
 	});
 
 	it("does not prompt for global user imports, missing/empty/oversized/non-text targets, or code examples", () => {
@@ -392,13 +392,13 @@ describe("startup probe and approved readers", () => {
 		write(join(root, "image.png"), "not a text instruction");
 		write(join(root, "code.md"), "Do not import this example");
 		write(join(cwd, "CLAUDE.md"), "@../missing.md @../empty.md @../huge.md @../image.png\n`@../code.md`\n```\n@../code.md\n```\n");
-		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
 	});
 
 	it("approval never admits an external target the reference parser rejects", () => {
 		write(join(root, "image.png"), "NOT A TEXT INSTRUCTION");
 		write(join(cwd, "CLAUDE.md"), "@../image.png");
-		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).not.toContain("NOT A TEXT INSTRUCTION");
 		write(join(cwd, "nested", "CLAUDE.md"), "@../../image.png");
 		expect(JSON.stringify(nestedInstructionFiles({ ...opts(), filePath: join(cwd, "nested", "file.ts"), includeExternal: true }))).not.toContain("NOT A TEXT INSTRUCTION");
@@ -409,7 +409,7 @@ describe("startup probe and approved readers", () => {
 		write(join(cwd, ".claude/rules/conditional.md"), `---\npaths: '*.ts'\n---\n${ref(outside)}`);
 		// The imported file needs the same condition, otherwise it is an unconditional startup record (CC).
 		write(outside, "---\npaths: '*.ts'\n---\nAPPROVED EXTERNAL INSTRUCTION");
-		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
 		const nested = { ...opts(), filePath: join(cwd, "file.ts") };
 		expect(JSON.stringify(nestedInstructionFiles(nested))).not.toContain("APPROVED EXTERNAL INSTRUCTION");
 		expect(JSON.stringify(nestedInstructionFiles({ ...nested, includeExternal: true }))).toContain("APPROVED EXTERNAL INSTRUCTION");
@@ -419,14 +419,14 @@ describe("startup probe and approved readers", () => {
 		const outside = write(join(root, "outside", "linked.md"), "External rule");
 		mkdirSync(join(cwd, ".claude", "rules"), { recursive: true });
 		symlinkSync(dirname(outside), join(cwd, ".claude", "rules", "linked"));
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 		expect(JSON.stringify(discoverContextFiles(opts()))).not.toContain("External rule");
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("External rule");
 		rmSync(join(cwd, ".claude"), { recursive: true });
 		symlinkSync(outside, join(cwd, "CLAUDE.md"));
-		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
 		write(join(root, "managed", "CLAUDE.md"), ref(outside));
-		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
 	});
 
 	it("retains independent-mode exclusions even after approval", () => {
@@ -507,15 +507,15 @@ describe("durable approval and dialog fidelity", () => {
 	});
 
 	it("uses the exact dialog copy and the eight/six-path preview cap", () => {
-		const paths = Array.from({ length: 9 }, (_, i) => join(home, `rule-${i}.md`));
-		const text = externalIncludesDialog(paths, home, "CLAUDE.md", "CLAUDE.md or .claude/rules");
+		const paths = Array.from({ length: 9 }, (_, i) => ({ path: join(home, `rule-${i}.md`), importer: i % 2 ? ".claude/rules" : "CLAUDE.md" }));
+		const text = externalIncludesDialog(paths, home, "CLAUDE.md");
 		expect(text).toBe([
 			"Allow external CLAUDE.md file imports?",
 			"This project's CLAUDE.md or .claude/rules imports files outside the current working directory. Never allow this for third-party repositories.",
 			"External imports:\n" + Array.from({ length: 6 }, (_, i) => `  ~/rule-${i}.md`).join("\n") + "\n  … +3 imports not shown.\n  Yes covers those too, plus any this project adds later.",
 			"Important: Only use One Code with files you trust. Accessing untrusted files may pose security risks.",
 		].join("\n\n"));
-		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md", "CLAUDE.md or .claude/rules")).toContain("~/rule-7.md");
-		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md", "CLAUDE.md or .claude/rules")).not.toContain("not shown");
+		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md")).toContain("~/rule-7.md");
+		expect(externalIncludesDialog(paths.slice(0, 8), home, "CLAUDE.md")).not.toContain("not shown");
 	});
 });

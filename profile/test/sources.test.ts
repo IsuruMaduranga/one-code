@@ -133,13 +133,13 @@ describe("the settings ladder", () => {
 
 describe("the instruction files a user writes", () => {
 	it("are CLAUDE.md with One Code's provider on", () => {
-		expect(instructionTargets(home)).toEqual({ project: "CLAUDE.md", user: join(home, ".claude", "CLAUDE.md"), importers: "CLAUDE.md or .claude/rules" });
+		expect(instructionTargets(home)).toEqual({ project: "CLAUDE.md", user: join(home, ".claude", "CLAUDE.md") });
 		expect(instructionFileNames(home)).toEqual(["CLAUDE.md"]);
 	});
 
 	it("are AGENTS.md and the global ONECODE.md in independent mode", () => {
 		resetConfigModeForTest("independent");
-		expect(instructionTargets(home)).toEqual({ project: "AGENTS.md", user: join(home, ".onecode", "ONECODE.md"), importers: "AGENTS.md or ONECODE.md" });
+		expect(instructionTargets(home)).toEqual({ project: "AGENTS.md", user: join(home, ".onecode", "ONECODE.md") });
 		expect(instructionFileNames(home)).toEqual(["AGENTS.md", "ONECODE.md"]);
 	});
 
@@ -167,7 +167,7 @@ describe("independent mode's reads", () => {
 		writeFileSync(join(home, "shared", "rules.md"), "SHARED RULE\n");
 		writeFileSync(join(project, "AGENTS.md"), "@../shared/rules.md\n");
 		const instructions = openInstructions(home, undefined);
-		expect(instructions.externalIncludes({ cwd: project })).toEqual([realpathSync(join(home, "shared", "rules.md"))]);
+		expect(instructions.externalIncludes({ cwd: project })).toEqual([{ path: realpathSync(join(home, "shared", "rules.md")), importer: "AGENTS.md" }]);
 		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: false }).contextFiles)).not.toContain("SHARED RULE");
 		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: true }).contextFiles)).toContain("SHARED RULE");
 	});

@@ -342,8 +342,8 @@ export interface InstructionView {
 	files(base: BaseList<ContextFile>, opts: { cwd: string; includeExternal: boolean }): ContextFile[];
 	/** The files a read of `filePath` attaches, below `cwd` down to the file's directory. */
 	nested(base: () => NestedFile[], opts: { filePath: string; cwd: string; includeExternal: boolean }): NestedFile[];
-	/** Imports outside `cwd` the user is asked to approve, from the base's two scans. */
-	externalIncludes(base: ExternalIncludes, opts: { cwd: string }): string[];
+	/** Imports outside `cwd` the user is asked to approve, from the base's two scans; one entry per path. */
+	externalIncludes(base: ExternalIncludes, opts: { cwd: string }): ExternalInclude[];
 	/** The classifier's files, ahead of the product files: it may see more than the agent, never less. */
 	classifier(base: BaseList<ContextFile>, opts: { cwd: string }): ClassifierFile[];
 }
@@ -352,7 +352,7 @@ const BASE_VIEW: InstructionView = {
 	paths: (base) => base,
 	files: (base) => base.read(),
 	nested: (base) => base(),
-	externalIncludes: (base) => [...new Set([...base.agents, ...base.product])],
+	externalIncludes: (base) => uniqueIncludes([...base.agents, ...base.product]),
 	classifier: (base) => base.read(),
 };
 
@@ -449,16 +449,28 @@ function projectExternalIncludes(opts: { cwd: string; home: string; homeOneCodeD
 		if (!list || content === null) continue;
 		for (const imported of expandWithImports(content, dirname(path), { home: opts.home, read: anywhere }).imported) {
 			const key = tryRealpath(imported) ?? imported;
-			if (!isPathAtOrUnder(key, cwd) && !list.includes(key)) list.push(key);
+			if (!isPathAtOrUnder(key, cwd) && !list.some((found) => found.path === key)) list.push({ path: key, importer: basename(path) });
 		}
 	}
 	return found;
 }
 
+/** A file imported from outside the cwd, and the project file whose imports reach it, as the consent dialog names that file. */
+export interface ExternalInclude {
+	path: string;
+	importer: string;
+}
+
 /** Imports outside the cwd from the project's AGENTS.md files and from its product files. */
 export interface ExternalIncludes {
-	agents: string[];
-	product: string[];
+	agents: ExternalInclude[];
+	product: ExternalInclude[];
+}
+
+/** One entry per imported path: the first importer found is the one named. */
+export function uniqueIncludes(found: readonly ExternalInclude[]): ExternalInclude[] {
+	const seen = new Set<string>();
+	return found.filter(({ path }) => !seen.has(path) && seen.add(path));
 }
 
 /** The base's nested files for a read: each AGENTS.md and product file between `cwd` and the file, inside the project. */
@@ -496,8 +508,8 @@ export interface Instructions {
 	paths(opts: { cwd: string; homeOneCodeDir?: string }): ContextFilePath[];
 	/** The files a read of `filePath` attaches. */
 	nested(opts: { filePath: string; cwd: string; includeExternal: boolean }): NestedFile[];
-	/** Imports outside `cwd` that need the user's approval. */
-	externalIncludes(opts: { cwd: string; homeOneCodeDir?: string }): string[];
+	/** Imports outside `cwd` that need the user's approval, each with the project file that reaches it. */
+	externalIncludes(opts: { cwd: string; homeOneCodeDir?: string }): ExternalInclude[];
 	/** The classifier's files, the product files last. */
 	classifier(opts: { cwd: string; homeOneCodeDir?: string }): ClassifierFile[];
 }
@@ -563,8 +575,7 @@ export function openInstructions(home: string, agentDir: string | undefined): In
 export function instructionTargets(home: string = os.homedir(), stateDir: string = productStateDir(process.env, home)): InstructionTargets {
 	const provided = openSources(home).instructionTargets;
 	if (provided) return provided;
-	// Both of the base's project files can import (`BASE_VIEW.externalIncludes` scans the two).
-	return { project: "AGENTS.md", user: firstProductFile(stateDir) ?? join(stateDir, brand.productFile), importers: `AGENTS.md or ${brand.productFile}` };
+	return { project: "AGENTS.md", user: firstProductFile(stateDir) ?? join(stateDir, brand.productFile) };
 }
 
 /** The names of the instruction files a user writes: `CLAUDE.md`, or `AGENTS.md` and the product file's. */

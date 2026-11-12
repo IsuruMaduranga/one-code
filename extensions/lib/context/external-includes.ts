@@ -5,6 +5,7 @@
  * `instructionTargets()`: AGENTS.md, or the source provider's names).
  */
 import { brand } from "../profile/brand.mjs";
+import type { ExternalInclude } from "./instructions.ts";
 import { readJsonFile } from "../core/atomic-write.ts";
 import { productProjectRoot, productProjectSettingsPathFor, readSettingsForWrite, writeSettings } from "../profile/product-settings.ts";
 import { comparablePath, tildify } from "../profile/paths.ts";
@@ -65,8 +66,20 @@ export function persistExternalIncludesApproval(cwd: string, home: string, appro
 	});
 }
 
-/** The dialog text; pi's plain select carries the body in its multiline title, including over RPC. */
-export function externalIncludesDialog(paths: string[], home: string, file: string, importers: string): string {
+// pi's plain select carries the body in its multiline title, including over RPC.
+/** "A", "A or B", "A, B or C". */
+function oneOf(names: readonly string[]): string {
+	return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`;
+}
+
+/**
+ * The dialog text; `found` are the imports and the project files that reach
+ * them, which the body names so the user can inspect them (`file`, the
+ * project instruction file, when there are none).
+ */
+export function externalIncludesDialog(found: readonly ExternalInclude[], home: string, file: string): string {
+	const paths = found.map(({ path }) => path);
+	const importers = oneOf([...new Set(found.map(({ importer }) => importer))]) || file;
 	const shown = paths.length <= 8 ? paths : paths.slice(0, 6);
 	const hidden = paths.length - shown.length;
 	const preview = shown.map((path) => `  ${escapeControlText(tildify(path, home))}`);

@@ -29,7 +29,7 @@ import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./instructions.ts";
-import { collectImportedPaths, instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
+import { collectImportedPaths, type ExternalInclude, instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
 import { tildify, tryRealpath } from "../../lib/profile/paths.ts";
@@ -212,7 +212,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 
 	/** The project instruction file's name, as the dialog and /config show it. */
 	const instructionFile = () => instructionTargets().project;
-	const externalPaths = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd });
+	const externalFound = (cwd: string) => openInstructions(os.homedir(), getAgentDir()).externalIncludes({ cwd });
 	const saveApproval = (ctx: ExtensionContext, approved: boolean) => {
 		includeExternal = approved;
 		try { persistExternalIncludesApproval(ctx.cwd, os.homedir(), approved); }
@@ -311,12 +311,12 @@ function instructionsExtension(pi: ExtensionAPI) {
 		files = current;
 		emitInstructions(current);
 	};
-	const askApproval = async (ctx: ExtensionContext, paths: string[], afterStartup = false) => {
+	const askApproval = async (ctx: ExtensionContext, found: ExternalInclude[], afterStartup = false) => {
 		const gen = sessionGeneration;
 		const signal = approvalAbort.signal;
 		// No is first and focused, as in Claude Code. Escape is also a remembered no;
 		// a shutdown/superseded session is not an answer at all.
-		const choice = await consentDialog(pi.events, () => ctx.ui.select(externalIncludesDialog(paths, os.homedir(), instructionFile(), instructionTargets().importers), [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES], { signal }), afterStartup);
+		const choice = await consentDialog(pi.events, () => ctx.ui.select(externalIncludesDialog(found, os.homedir(), instructionFile()), [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES], { signal }), afterStartup);
 		if (signal.aborted || gen !== sessionGeneration) return;
 		saveApproval(ctx, choice === EXTERNAL_INCLUDES_YES);
 		refreshInstructions(ctx.cwd);
@@ -334,8 +334,8 @@ function instructionsExtension(pi: ExtensionAPI) {
 			startupConsentReady(pi.events);
 			await approvalPending;
 			if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
-			const paths = externalPaths(ctx.cwd);
-			if (!paths.length) {
+			const found = externalFound(ctx.cwd);
+			if (!found.length) {
 				const text = externalIncludesNone(instructionFile());
 				ctx.ui.notify(text, "info");
 				return text;
@@ -346,7 +346,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 			if (includeExternal) {
 				saveApproval(ctx, false);
 				refreshInstructions(ctx.cwd);
-			} else await askApproval(ctx, paths);
+			} else await askApproval(ctx, found);
 			// As in Claude Code, this changes future loads, never retracts text or
 			// rewrites the frozen first-message block after a request was sent.
 			return `${externalIncludesSetting(instructionFile())}: ${includeExternal ? "true" : "false"}`;
@@ -376,12 +376,12 @@ function instructionsExtension(pi: ExtensionAPI) {
 		const approval = readExternalIncludesApproval(ctx.cwd, os.homedir());
 		includeExternal = approval.approved;
 		if ((event.reason ?? "startup") === "startup" && ctx.hasUI && !approval.approved && !approval.warningShown) {
-			const paths = externalPaths(ctx.cwd);
-			if (paths.length) {
+			const found = externalFound(ctx.cwd);
+			if (found.length) {
 				// RPC installs its input reader only AFTER session_start returns.
 				// Queue after hooks/MCP consent; gate the first turn, not startup.
 				// A dialog that fails is no answer: nothing is approved or remembered, and the turn goes on.
-				approvalPending = askApproval(ctx, paths, true).catch(() => {});
+				approvalPending = askApproval(ctx, found, true).catch(() => {});
 			}
 		}
 		// The instructions block carries the instruction files lib/context/instructions.ts

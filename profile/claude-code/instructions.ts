@@ -19,7 +19,7 @@
 
 import { basename, dirname, join } from "node:path";
 import { type InstructionFiles, readInstructionFiles } from "./settings.ts";
-import { AGENTS_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, AGENTS_SOURCES, GLOBAL_DESCRIPTOR, GLOBAL_SOURCES, LOCAL_DESCRIPTOR, MANAGED_DESCRIPTOR, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, PROJECT_DESCRIPTOR, absoluteFrom, ancestorDirs, basePaths, claudeManagedDir, claudeUserDir, discoverRules, expandWithImports, firstProductFile, importReaders, isPathAtOrUnder, isPresentFile, nestedDirs, readExternalIncludesApproval, readFileIfPresent, readRuleInstructions, tryRealpath, type ClassifierFile, type ContextFile, type ContextFilePath, type InstructionSource, type InstructionView, type NestedFile, type RuleFile, type RuleOptions } from "../../extensions/sdk/source-provider.ts";
+import { AGENTS_DESCRIPTOR, AGENTS_GLOBAL_DESCRIPTOR, AGENTS_SOURCES, GLOBAL_DESCRIPTOR, GLOBAL_SOURCES, LOCAL_DESCRIPTOR, MANAGED_DESCRIPTOR, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, PROJECT_DESCRIPTOR, absoluteFrom, ancestorDirs, basePaths, claudeManagedDir, claudeUserDir, discoverRules, expandWithImports, firstProductFile, importReaders, isPathAtOrUnder, isPresentFile, nestedDirs, readExternalIncludesApproval, readFileIfPresent, readRuleInstructions, tryRealpath, uniqueIncludes, type ClassifierFile, type ContextFile, type ContextFilePath, type ExternalInclude, type InstructionSource, type InstructionView, type NestedFile, type RuleFile, type RuleOptions } from "../../extensions/sdk/source-provider.ts";
 
 
 /**
@@ -329,14 +329,14 @@ function approvedExternalInstructions(path: string, opts: { cwd: string; home: s
  * over-depth targets never become records, so they cannot cause a question.
  * This scan is UI-only; its contents must never enter the reminder queue.
  */
-export function externalInstructionIncludes(opts: DiscoveryOptions & { home: string }): string[] {
-	const outside: string[] = [];
+export function externalInstructionIncludes(opts: DiscoveryOptions & { home: string }): ExternalInclude[] {
+	const outside: ExternalInclude[] = [];
 	const seen = new Set<string>();
 	const cwd = tryRealpath(opts.cwd) ?? opts.cwd;
-	const add = (file: RuleFile) => {
+	const add = (file: RuleFile, importer: string) => {
 		if ((!file.parent && !file.linkedFrom) || isPathAtOrUnder(file.key, cwd) || seen.has(file.key)) return;
 		seen.add(file.key);
-		outside.push(file.key);
+		outside.push({ path: file.key, importer });
 	};
 	const entries = discoverInstructionEntries(opts, (rulesDir, scope, descriptor) => {
 		if (scope === "User") return [];
@@ -345,11 +345,11 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 	});
 	for (const { path, descriptor, ruleFile } of entries) {
 		if (GLOBAL_SOURCES.has(descriptor) || descriptor === PRODUCT_DESCRIPTOR) continue;
-		if (ruleFile) { add(ruleFile); continue; }
+		if (ruleFile) { add(ruleFile, ".claude/rules"); continue; }
 		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
 		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", includeExternal: true,
 			...(dotClaude ? { ownerDir: dirname(dirname(path)) } : {}),
-		})) add(file);
+		})) add(file, basename(path));
 	}
 	return outside;
 }
@@ -395,11 +395,7 @@ export function claudeCodeInstructionView(home: string): InstructionView {
 		files: (base, { cwd, includeExternal }) => discoverContextFiles({ cwd, homeClaudeDir, rule: currentRule(), home, includeExternal, base: base.paths }),
 		nested: (_base, { filePath, cwd, includeExternal }) => nestedInstructionFiles({ filePath, cwd, rule: currentRule(), home, homeClaudeDir, includeExternal }),
 		// Its own scan covers AGENTS.md under the rule; the base's product-file scan is added.
-		externalIncludes: (base, { cwd }) => {
-			const outside = externalInstructionIncludes({ cwd, homeClaudeDir, rule: currentRule(), home });
-			const seen = new Set(outside);
-			return [...outside, ...base.product.filter((path) => !seen.has(path))];
-		},
+		externalIncludes: (base, { cwd }) => uniqueIncludes([...externalInstructionIncludes({ cwd, homeClaudeDir, rule: currentRule(), home }), ...base.product]),
 		classifier: (base, { cwd }) => classifierInstructionFiles({ cwd, home, homeClaudeDir, base: base.paths }),
 	};
 }
