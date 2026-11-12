@@ -7,7 +7,7 @@ const model = (provider: string, id: string, input?: number) =>
 
 describe("autoModeSystemNote", () => {
 	it("gives Fable the firmer wording and every other model Opus's", () => {
-		const { systemNote } = requireText("autoMode");
+		const { autoModeNote: systemNote } = requireText("permissions");
 		const fable = autoModeSystemNote(model("anthropic", "claude-fable-5-1"))!;
 		const opus = autoModeSystemNote(model("anthropic", "claude-opus-5-5"))!;
 		expect(fable).toBe(systemNote({ firm: true }));

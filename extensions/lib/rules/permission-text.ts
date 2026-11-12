@@ -90,7 +90,7 @@ const classifierNoVerdict = (reason: string) =>
 	"reading files, searching code, and other read-only operations do not require the classifier. " +
 	"If this action is essential, tell the user what you were about to do so they can re-run interactively or set another classifier model.";
 
-function refused(refusal: PermissionRefusal, own: OwnWords): string {
+function refused(refusal: PermissionRefusal, secretFileRefusal: string | undefined): string {
 	switch (refusal.kind) {
 		case "nonInteractive":
 			return "Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
@@ -99,7 +99,7 @@ function refused(refusal: PermissionRefusal, own: OwnWords): string {
 		case "toolOff":
 			return "That tool is not available in this harness, so the call was blocked. Continue with the tools you have.";
 		case "secretFile":
-			return own.secretFile ?? "That file holds secrets the user manages, so it cannot be read, written or named in a command here. Continue without its contents; if you need to know whether a value is set, ask the user.";
+			return secretFileRefusal ?? "That file holds secrets the user manages, so it cannot be read, written or named in a command here. Continue without its contents; if you need to know whether a value is set, ask the user.";
 		case "dontAsk":
 			return "Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 		case "protectedPath":
@@ -159,16 +159,27 @@ const REFUSAL_PASSAGES: ToolPassages = {
 	edit: [["edit/write are limited to the plan file", "write is limited to the plan file"]],
 };
 
-/** The profile's own wording, where it has one. */
-interface OwnWords {
-	/** The refusal for a secret file (the text group `autoMode.secretFileRefusal`). */
-	secretFile?: string;
+/** The profile's part of what the permission gate says. */
+export interface PermissionsText {
+	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
+	autoModeNote(p: { firm: boolean }): string;
+	/**
+	 * What the model reads when the gate refuses a secret file
+	 * (`Profile.secretFiles`), in place of the base's sentence, so it can name
+	 * the product's own tool for the job ("…use config_status to see whether a
+	 * value is set"). Never empty: leave it out for the base's wording.
+	 */
+	secretFileRefusal?: string;
 }
 
-/** The words, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
-export const permissionWords = (live: LiveTools, own: OwnWords = {}) => ({
+/**
+ * The words, for the tools this session can have (`live`): text naming a
+ * tool that is off leaves it out. `secretFileRefusal` is the profile's
+ * wording of that refusal, when it has one.
+ */
+export const permissionWords = (live: LiveTools, secretFileRefusal?: string) => ({
 	/** Why the gate refused a call. */
-	refused: (refusal: PermissionRefusal): string => withoutOff(refused(refusal, own), live, REFUSAL_PASSAGES),
+	refused: (refusal: PermissionRefusal): string => withoutOff(refused(refusal, secretFileRefusal), live, REFUSAL_PASSAGES),
 	/** A switch of the permission mode; `planFile` when the mode is plan and its file is known. */
 	modeChanged: ({ mode, planFile }: { mode: string; planFile?: string }): string => {
 		const plan =
@@ -189,7 +200,7 @@ export const permissionWords = (live: LiveTools, own: OwnWords = {}) => ({
 });
 
 /** The words for this session's tools (the profile in force), built once per live set. */
-export const permissionText = forLive((live) => permissionWords(live, { secretFile: requireText("autoMode").secretFileRefusal }));
+export const permissionText = forLive((live) => permissionWords(live, requireText("permissions").secretFileRefusal));
 
-/** Why the gate refused a call, for the modules that run without the extension's own context (the in-process child gate, the parent bridge). */
+/** Why the gate refused a call, in this session's words. */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

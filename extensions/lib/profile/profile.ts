@@ -232,10 +232,10 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		},
 	};
 	const text = profile.text({ live });
-	const missing = missingTextProblems(text, features);
+	const textProblems = missingTextProblems(text, features);
 	// An empty refusal would reach the model as an error with no reason.
-	if (text.autoMode?.secretFileRefusal?.trim() === "") missing.push(`its text "autoMode.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
-	if (missing.length > 0) throw new Error(`Invalid profile: ${missing.join("; ")}.`);
+	if (text.permissions.secretFileRefusal?.trim() === "") textProblems.push(`its text "permissions.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
+	if (textProblems.length > 0) throw new Error(`Invalid profile: ${textProblems.join("; ")}.`);
 	return {
 		features,
 		tools,

@@ -1,6 +1,7 @@
 /**
  * Auto mode's words for the session model. The profile supplies the note a
- * session opening in auto mode gets (`AutoModeText`); the retry note after
+ * session opening in auto mode gets (`PermissionsText.autoModeNote`,
+ * lib/rules/permission-text.ts); the retry note after
  * the user grants denied calls and why a call was blocked (the classifier's
  * reasons and the safety floor's) are here (`autoModeResultText`). The
  * permission gate frames a block for the model. The classifier's own prompt (`ClassifierText`, the ruleset and
@@ -43,19 +44,6 @@ export interface FloorTarget {
 	kind: "catalog" | "pattern" | "control";
 	/** The path or pattern as the call spells it. */
 	token: string;
-}
-
-/** The profile's part of what the permission gate says: the note a session opening in auto mode gets, and its own secret-file refusal. */
-export interface AutoModeText {
-	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
-	systemNote(p: { firm: boolean }): string;
-	/**
-	 * What the model reads when the gate refuses a secret file
-	 * (`Profile.secretFiles`), in place of the base's sentence, so it can name
-	 * the product's own tool for the job ("…use config_status to see whether a
-	 * value is set"). Never empty: leave it out for the base's wording.
-	 */
-	secretFileRefusal?: string;
 }
 
 function classifierBlock(block: ClassifierBlock): string {

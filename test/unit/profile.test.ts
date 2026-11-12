@@ -2,10 +2,11 @@
  * The profile in force (lib/profile/profile.ts), the feature() wrapper's view of pi
  * (lib/profile/feature.ts), and the permission gate's use of the tool switches.
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { sourceFiles } from "./helpers/import-graph.ts";
 import { childExtensionPaths } from "../../extensions/lib/agents/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest, TEXT_GROUP_READERS } from "../../extensions/lib/profile/profile.ts";
@@ -88,9 +89,12 @@ describe("resolveProfile", () => {
 	});
 
 	it("refuses an empty secret-file refusal", () => {
-		const refusing = (secretFileRefusal: string): Profile["text"] => (env) => ({ ...shippedProfile.text(env), autoMode: { ...shippedProfile.text(env).autoMode, secretFileRefusal } });
-		expect(() => resolveProfile({ ...empty, text: refusing(" ") }, {}, "/p")).toThrow(/"autoMode.secretFileRefusal" must not be empty/);
-		expect(resolveProfile({ ...empty, text: refusing("Ask the user.") }, {}, "/p").text.autoMode.secretFileRefusal).toBe("Ask the user.");
+		const refusing = (secretFileRefusal: string): Profile["text"] => (env) => {
+			const text = shippedProfile.text(env);
+			return { ...text, permissions: { ...text.permissions, secretFileRefusal } };
+		};
+		expect(() => resolveProfile({ ...empty, text: refusing(" ") }, {}, "/p")).toThrow(/"permissions.secretFileRefusal" must not be empty/);
+		expect(resolveProfile({ ...empty, text: refusing("Ask the user.") }, {}, "/p").text.permissions.secretFileRefusal).toBe("Ask the user.");
 	});
 
 	it("names a reader for every optional text group, and only features", () => {
@@ -104,23 +108,17 @@ describe("resolveProfile", () => {
 	it("lists every feature that reads an optional text group as one of its readers", () => {
 		// `lib/` belongs to no one feature, so its reads of an optional group are frozen here: each one's
 		// callers are the table's hand-written readers. A new one needs a row here and its callers in the table.
-		const LIB_READS: Record<string, string> = {
-			"lib/agents/agent-catalog.ts": "subagents",
-			"lib/agents/subagent-handback.ts": "handback",
-			"lib/models/subagent-model.ts": "subagentModels",
-		};
+		const LIB_READS = ["lib/agents/agent-catalog.ts: subagents", "lib/agents/subagent-handback.ts: handback", "lib/models/subagent-model.ts: subagentModels"];
 		const root = join(import.meta.dirname, "..", "..", "extensions");
 		const sites: string[] = [];
-		const libReads: Record<string, string> = {};
-		for (const found of readdirSync(root, { recursive: true, encoding: "utf8" })) {
-			if (!found.endsWith(".ts")) continue;
-			const entry = found.replaceAll("\\", "/");
+		const libReads: string[] = [];
+		for (const entry of sourceFiles(root, root)) {
 			const [area, folder] = entry.split("/");
 			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/requireText\("(\w+)"\)/g)) {
 				const readers: readonly string[] | undefined = (TEXT_GROUP_READERS as Record<string, readonly string[]>)[group];
 				if (readers === undefined) continue; // a required group
 				if (area === "lib") {
-					libReads[entry] = group;
+					libReads.push(`${entry}: ${group}`);
 					continue;
 				}
 				if (!isFeatureId(folder)) continue;
@@ -129,7 +127,7 @@ describe("resolveProfile", () => {
 			}
 		}
 		expect(sites.length).toBeGreaterThan(20);
-		expect(libReads).toEqual(LIB_READS);
+		expect([...new Set(libReads)]).toEqual(LIB_READS);
 	});
 
 	it("refuses turning off or deferring tool_search", () => {

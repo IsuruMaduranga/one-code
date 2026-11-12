@@ -13,9 +13,11 @@
  */
 export type { ArtifactsText } from "../tools/artifacts/text.ts";
 export type { AskUserText } from "../tools/ask-user/text.ts";
-export type { AutoModeSetupText, AutoModeText, ClassifierRuleset, ClassifierText } from "../safety/permissions/auto-mode/text.ts";
+export type { AutoModeSetupText, ClassifierRuleset, ClassifierText } from "../safety/permissions/auto-mode/text.ts";
+export type { PermissionsText } from "../lib/rules/permission-text.ts";
 export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../tools/background/loop-sentinels.ts";
-export type { BackgroundText, CronText, LoopFile, LoopText, LoopTick, MonitorText, TaskToolsText, WakeupText } from "../tools/background/text.ts";
+export type { CronText } from "../lib/agents/cron-text.ts";
+export type { BackgroundText, LoopFile, LoopText, LoopTick, MonitorText, TaskToolsText, WakeupText } from "../tools/background/text.ts";
 export type { BtwText } from "../agents/btw/text.ts";
 export type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../context/compaction/text.ts";
 export type { DoctorText, FixPromptInput } from "../commands/doctor/text.ts";

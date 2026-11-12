@@ -16,7 +16,7 @@ const permissions = permissionWords(ALL_LIVE);
 describe("the permission-gate text", () => {
 	it("words a secret file's refusal itself, or as the profile does", () => {
 		expect(permissions.refused({ kind: "secretFile" })).toMatch(/^That file holds secrets the user manages/);
-		expect(permissionWords(ALL_LIVE, { secretFile: "Use config_status." }).refused({ kind: "secretFile" })).toBe("Use config_status.");
+		expect(permissionWords(ALL_LIVE, "Use config_status.").refused({ kind: "secretFile" })).toBe("Use config_status.");
 	});
 
 	it("words each refusal a fixture cannot provoke", () => {

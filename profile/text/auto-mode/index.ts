@@ -1,9 +1,10 @@
 /**
- * One Code's auto-mode note for the session model (the profile's
- * `text.autoMode`): Claude Code's auto-mode note with One Code's tool names.
+ * One Code's part of the permission gate's words (the profile's
+ * `text.permissions`): Claude Code's auto-mode note with One Code's tool
+ * names. The secret-file refusal is left to the base.
  */
 
-import type { AutoModeText, LiveTools } from "../../../extensions/sdk/profile.ts";
+import type { LiveTools, PermissionsText } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const OPUS_NOTE =
@@ -21,6 +22,6 @@ const NOTE_PASSAGES: ToolPassages = {
 };
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
-export const autoModeText = (live: LiveTools): AutoModeText => ({
-	systemNote: ({ firm }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
+export const permissionsText = (live: LiveTools): PermissionsText => ({
+	autoModeNote: ({ firm }) => withoutOff(firm ? FABLE_NOTE : OPUS_NOTE, live, NOTE_PASSAGES),
 });

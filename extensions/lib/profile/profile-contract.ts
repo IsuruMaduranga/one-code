@@ -15,7 +15,8 @@ import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
-import type { AutoModeSetupText, AutoModeText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
+import type { AutoModeSetupText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
+import type { PermissionsText } from "../rules/permission-text.ts";
 import type { BackgroundText } from "../../tools/background/text.ts";
 import type { BtwText } from "../../agents/btw/text.ts";
 import type { CompactionText } from "../../context/compaction/text.ts";
@@ -77,8 +78,8 @@ export interface ProfileText {
 	toolStyle?: ToolStyleText;
 	compaction?: CompactionText;
 	workflow?: WorkflowText;
-	/** Read by the permission gate, which always runs: a profile must supply it. */
-	autoMode: AutoModeText;
+	/** The profile's part of what the permission gate says, in every mode; the gate always runs, so a profile must supply it. */
+	permissions: PermissionsText;
 	/** The auto-mode classifier's prompt (One Code's: Claude Code's ruleset, generated): the permission gate always runs, so a profile must supply it. */
 	classifier: ClassifierText;
 	/** The `/auto-mode setup` drafting call, part of the permission gate: a profile must supply it. */
@@ -161,7 +162,7 @@ export interface Profile {
 	/**
 	 * Bare file names that hold secrets (BI's `Config.toml`). In every mode the
 	 * gate refuses a file tool on one and a shell command that names one
-	 * (the text group `autoMode.secretFileRefusal` words it). The product's
+	 * (the text's `permissions.secretFileRefusal` words it). The product's
 	 * extension registers the values themselves for redaction
 	 * (`setSecretValues`, `extensions/sdk/extension.ts`).
 	 */

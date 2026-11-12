@@ -20,5 +20,5 @@ import { requireText } from "../../../lib/profile/profile.ts";
 /** The note for a session opening in auto mode on `model`, or undefined on a cheap or tiny model. */
 export function autoModeSystemNote(model: Model<Api>): string | undefined {
 	if (!usesClaudeCodeFastPaths(model)) return undefined;
-	return requireText("autoMode").systemNote({ firm: claudeFamily(model.id) === "fable" });
+	return requireText("permissions").autoModeNote({ firm: claudeFamily(model.id) === "fable" });
 }

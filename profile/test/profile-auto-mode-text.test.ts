@@ -9,16 +9,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { autoModeText } from "../text/auto-mode/index.ts";
+import { permissionsText } from "../text/auto-mode/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
 
-const autoMode = autoModeText(ALL_LIVE);
+const autoMode = permissionsText(ALL_LIVE);
 
 describe("One Code's auto-mode text", () => {
 	it("gives the firmer note only when asked", () => {
-		expect(autoMode.systemNote({ firm: true })).toContain("Fall back to a dedicated tool only when bash genuinely cannot do the job.");
-		expect(autoMode.systemNote({ firm: false })).toContain("The choice is yours");
+		expect(autoMode.autoModeNote({ firm: true })).toContain("Fall back to a dedicated tool only when bash genuinely cannot do the job.");
+		expect(autoMode.autoModeNote({ firm: false })).toContain("The choice is yours");
 	});
 
 	it("words the retry note for one call and for several", () => {
@@ -47,7 +47,7 @@ describe("One Code's auto-mode text", () => {
 
 describe("auto mode system note wording", () => {
 	it("gives the firm and the plain wording, naming One Code's tools", () => {
-		const { systemNote } = requireText("autoMode");
+		const { autoModeNote: systemNote } = requireText("permissions");
 		const firm = systemNote({ firm: true });
 		const plain = systemNote({ firm: false });
 		expect(firm.startsWith("While auto mode is active:\n\nDo your work through the bash tool wherever it can accomplish the job")).toBe(true);
