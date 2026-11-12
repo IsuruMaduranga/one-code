@@ -5,7 +5,7 @@
  * first request of a resumed process compares them with the live files and git
  * status, and says what changed once. The historical blocks stay as sent.
  */
-import { buildClaudeMdBlock, buildOneCodeBlock } from "./instructions.ts";
+import { buildClaudeMdBlock } from "./instructions.ts";
 import { type ContextFile, instructionTargets } from "../../lib/context/instructions.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { contentHash } from "../../lib/request/ledger/wire.ts";
@@ -25,7 +25,7 @@ export const FACT_KEYS = {
 	compaction: "context-facts:compaction",
 } as const;
 
-/** A told block's hash (`toldBlockFact`): for a string or null it is the sha256 of its JSON. */
+/** A told block's hash (`toldBlockFact`): the sha256 of the value's JSON. */
 const fingerprint = contentHash;
 
 /** Fingerprints of only what the model was shown, not unshown file tails or filesystem mtimes. */
@@ -39,7 +39,8 @@ export function contextFingerprints(input: { contextFiles: ContextFile[]; memory
 	return {
 		instructions: fingerprint(buildClaudeMdBlock({ contextFiles: input.contextFiles })),
 		memory: fingerprint(buildClaudeMdBlock({ contextFiles: [], memoryIndex: input.memoryIndex })),
-		product: fingerprint(buildOneCodeBlock(input.oneCodeFiles ?? [])),
+		// The files alone: the block's preamble names the instruction file above it, which a change of sources renames.
+		product: fingerprint((input.oneCodeFiles ?? []).map((file) => [file.path, file.content])),
 	};
 }
 
