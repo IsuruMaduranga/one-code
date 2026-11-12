@@ -102,21 +102,34 @@ describe("resolveProfile", () => {
 
 	// A reader the table misses passes the load check and then stops the process in the middle of a session (requireText).
 	it("lists every feature that reads an optional text group as one of its readers", () => {
+		// `lib/` belongs to no one feature, so its reads of an optional group are frozen here: each one's
+		// callers are the table's hand-written readers. A new one needs a row here and its callers in the table.
+		const LIB_READS: Record<string, string> = {
+			"lib/agents/agent-catalog.ts": "subagents",
+			"lib/agents/subagent-handback.ts": "handback",
+			"lib/models/subagent-model.ts": "subagentModels",
+		};
 		const root = join(import.meta.dirname, "..", "..", "extensions");
 		const sites: string[] = [];
-		for (const entry of readdirSync(root, { recursive: true, encoding: "utf8" })) {
-			if (!entry.endsWith(".ts")) continue;
-			const [area, folder] = entry.replaceAll("\\", "/").split("/");
-			// `lib/` belongs to no one feature: its readers are the table's hand-written entries.
-			if (area === "lib" || !isFeatureId(folder)) continue;
+		const libReads: Record<string, string> = {};
+		for (const found of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+			if (!found.endsWith(".ts")) continue;
+			const entry = found.replaceAll("\\", "/");
+			const [area, folder] = entry.split("/");
 			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/requireText\("(\w+)"\)/g)) {
 				const readers: readonly string[] | undefined = (TEXT_GROUP_READERS as Record<string, readonly string[]>)[group];
 				if (readers === undefined) continue; // a required group
+				if (area === "lib") {
+					libReads[entry] = group;
+					continue;
+				}
+				if (!isFeatureId(folder)) continue;
 				sites.push(entry);
 				expect(readers, `${entry} reads "${group}"`).toContain(folder);
 			}
 		}
 		expect(sites.length).toBeGreaterThan(20);
+		expect(libReads).toEqual(LIB_READS);
 	});
 
 	it("refuses turning off or deferring tool_search", () => {
