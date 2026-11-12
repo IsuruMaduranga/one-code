@@ -15,8 +15,4 @@ describe("externalIncludesDialog", () => {
 		const three = externalIncludesDialog([at("a.md", "A.md"), at("b.md", "B.md"), at("c.md", "rules")], home, "A.md");
 		expect(three).toContain("This project's A.md, B.md or rules imports files outside");
 	});
-
-	it("names the project instruction file when it has no import to show", () => {
-		expect(externalIncludesDialog([], home, "AGENTS.md")).toContain("This project's AGENTS.md imports files outside");
-	});
 });

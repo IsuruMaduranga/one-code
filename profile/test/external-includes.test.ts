@@ -419,14 +419,15 @@ describe("startup probe and approved readers", () => {
 		const outside = write(join(root, "outside", "linked.md"), "External rule");
 		mkdirSync(join(cwd, ".claude", "rules"), { recursive: true });
 		symlinkSync(dirname(outside), join(cwd, ".claude", "rules", "linked"));
-		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
+		expect(externalInstructionIncludes(opts())).toEqual([{ path: outside, importer: ".claude/rules" }]);
 		expect(JSON.stringify(discoverContextFiles(opts()))).not.toContain("External rule");
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("External rule");
 		rmSync(join(cwd, ".claude"), { recursive: true });
 		symlinkSync(outside, join(cwd, "CLAUDE.md"));
 		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([]);
-		write(join(root, "managed", "CLAUDE.md"), ref(outside));
-		expect(externalInstructionIncludes(opts()).map((found) => found.path)).toEqual([outside]);
+		// A managed file is named by its path: it is not one of the project's files.
+		const managed = write(join(root, "managed", "CLAUDE.md"), ref(outside));
+		expect(externalInstructionIncludes(opts())).toEqual([{ path: outside, importer: managed }]);
 	});
 
 	it("retains independent-mode exclusions even after approval", () => {

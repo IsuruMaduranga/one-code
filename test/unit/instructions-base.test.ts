@@ -80,7 +80,7 @@ describe("the base's instruction files without a provider", () => {
 		const outside = write(join(root, "outside.md"), "OUTSIDE\n");
 		write(join(cwd, "CLAUDE.md"), "@../../outside.md\n");
 		expect(openInstructions(home, undefined).classifier({ cwd, homeOneCodeDir: state }).map((file) => file.path)).toEqual([agents, product]);
-		expect(openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state })).toEqual([{ path: outside, importer: brand.productFile }]);
+		expect(openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state })).toEqual([{ path: realpathSync.native(outside), importer: brand.productFile }]);
 	});
 
 	it("gives every reader nothing while the agent's instruction files are off", () => {

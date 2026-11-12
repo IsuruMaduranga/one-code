@@ -345,11 +345,13 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 	});
 	for (const { path, descriptor, ruleFile } of entries) {
 		if (GLOBAL_SOURCES.has(descriptor) || descriptor === PRODUCT_DESCRIPTOR) continue;
-		if (ruleFile) { add(ruleFile, ".claude/rules"); continue; }
+		// A managed file is not the project's: it is named by its path, so the user looks in the right place.
+		const managed = descriptor === MANAGED_DESCRIPTOR;
+		if (ruleFile) { add(ruleFile, managed ? dirname(ruleFile.path) : ".claude/rules"); continue; }
 		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
-		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", includeExternal: true,
+		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: managed ? "Managed" : "Project", includeExternal: true,
 			...(dotClaude ? { ownerDir: dirname(dirname(path)) } : {}),
-		})) add(file, basename(path));
+		})) add(file, managed ? path : basename(path));
 	}
 	return outside;
 }

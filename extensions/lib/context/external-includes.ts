@@ -73,13 +73,13 @@ function oneOf(names: readonly string[]): string {
 }
 
 /**
- * The dialog text; `found` are the imports and the project files that reach
- * them, which the body names so the user can inspect them (`file`, the
- * project instruction file, when there are none).
+ * The dialog text; `found` are the imports (at least one) and the files that
+ * reach them, which the body names so the user can inspect them; `file` is
+ * the project instruction file, for the title.
  */
 export function externalIncludesDialog(found: readonly ExternalInclude[], home: string, file: string): string {
 	const paths = found.map(({ path }) => path);
-	const importers = oneOf([...new Set(found.map(({ importer }) => importer))]) || file;
+	const importers = oneOf([...new Set(found.map(({ importer }) => importer))]);
 	const shown = paths.length <= 8 ? paths : paths.slice(0, 6);
 	const hidden = paths.length - shown.length;
 	const preview = shown.map((path) => `  ${escapeControlText(tildify(path, home))}`);

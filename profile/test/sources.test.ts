@@ -167,7 +167,7 @@ describe("independent mode's reads", () => {
 		writeFileSync(join(home, "shared", "rules.md"), "SHARED RULE\n");
 		writeFileSync(join(project, "AGENTS.md"), "@../shared/rules.md\n");
 		const instructions = openInstructions(home, undefined);
-		expect(instructions.externalIncludes({ cwd: project })).toEqual([{ path: realpathSync(join(home, "shared", "rules.md")), importer: "AGENTS.md" }]);
+		expect(instructions.externalIncludes({ cwd: project })).toEqual([{ path: realpathSync.native(join(home, "shared", "rules.md")), importer: "AGENTS.md" }]);
 		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: false }).contextFiles)).not.toContain("SHARED RULE");
 		expect(JSON.stringify(instructions.sections({ cwd: project, includeExternal: true }).contextFiles)).toContain("SHARED RULE");
 	});
