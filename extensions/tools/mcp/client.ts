@@ -397,12 +397,12 @@ export async function finishInteractiveAuth(transport: HttpTransport, code: stri
 const INSTRUCTIONS_CAP = 3000;
 
 /**
- * The reminder carrying servers' own usage instructions, framed by the
- * profile (One Code's is Claude Code's shape, findings §14). Servers without
+ * The reminder carrying servers' own usage instructions, framed by text.ts
+ * (`mcpResultText.instructions`). Servers without
  * instructions are skipped; returns undefined when none have any.
  *
  * Instructions ride message 1 (the cached prefix). Past the cap they are
- * cut with the profile's label rather than persisted to a file: the
+ * cut with a label rather than persisted to a file: the
  * label keeps it out of the "never a bare slice" rule, and a persisted path
  * would change per session and bust the cached prefix on every resume. This is
  * the deliberate documented exception to the persist rule (review L2); the cap
@@ -416,7 +416,7 @@ export function mcpInstructionsReminder(
 	return mcpResultText.instructions(withInstructions.map((c) => ({ name: c.server.name, text: shownInstructions(c.instructions!) })));
 }
 
-/** A server's instructions as the reminder shows them: cut at the cap, with the profile's label. */
+/** A server's instructions as the reminder shows them: cut at the cap, with a label. */
 export function shownInstructions(instructions: string): string {
 	return instructions.length > INSTRUCTIONS_CAP ? mcpResultText.instructionsCut(instructions.slice(0, INSTRUCTIONS_CAP)) : instructions;
 }

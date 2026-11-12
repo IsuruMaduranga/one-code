@@ -9,11 +9,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
-import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
-import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { ALL_LIVE } from "./helpers/live.ts";
+import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 
-const subagentModels = subagentModelWords(ALL_LIVE, requireText("subagentModels"));
+const subagentModels = subagentModelWordsInForce();
 
 describe("the subagent result text", () => {
 	it("closes each catalog row with Claude Code's tools clause", () => {

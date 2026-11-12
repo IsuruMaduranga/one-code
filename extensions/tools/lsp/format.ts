@@ -1,6 +1,6 @@
 /**
- * Diagnostic shaping for the model (pure); the profile's `lsp` group words
- * the lines (text.ts).
+ * Diagnostic shaping for the model (pure); text.ts words the lines
+ * (`lspResultText`).
  */
 
 import { lspResultText, type ShownDiagnostic } from "./text.ts";

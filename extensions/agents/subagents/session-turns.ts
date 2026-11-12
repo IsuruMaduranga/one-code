@@ -14,9 +14,8 @@
 import { recordAction, type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import type { HandbackSlot } from "../../lib/agents/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
-import type { RunFailure } from "../../lib/agents/subagent-text.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "../../lib/agents/usage.ts";
-import { subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { type RunFailure, subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /** Why a turn was cut short: stopped, or the wall-clock cap. */
 export type AbortReason = Extract<RunFailure, { kind: "aborted" }>["why"];

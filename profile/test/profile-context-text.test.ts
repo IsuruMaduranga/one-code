@@ -1,14 +1,13 @@
 /**
  * One Code's first-message context wording (profile/text/context/) where the
- * golden snapshot cannot reach it: the date and its change, the notice that
- * the workspace moved on since the snapshot, a git status refreshed at a
+ * golden snapshot cannot reach it: the date and its change, a git status refreshed at a
  * compaction or cut at its cap, and the notes for an instruction file left
  * out for size. The golden snapshot pins the blocks every session sends. The
  * token budget block's words (profile/text/context-budget/) are checked here
  * too.
  */
 import { describe, expect, it } from "vitest";
-import { compactionGitStatus, resumeFactsNotice } from "../../extensions/context/instructions/context-facts.ts";
+import { compactionGitStatus } from "../../extensions/context/instructions/context-facts.ts";
 import { clipGitStatus, formatGitStatus } from "../../extensions/lib/context/git-status.ts";
 import { contextText } from "../../extensions/lib/context/context-text.ts";
 import { context as contextPart } from "../text/context/index.ts";
@@ -28,14 +27,6 @@ describe("One Code's context text", () => {
 		expect(status).toContain("This is the git status at the start of the conversation.");
 		expect(compactionGitStatus(status)).toContain("This is the git status at the latest compaction. Note that this status is a snapshot in time");
 		expect(clipGitStatus("x".repeat(2500), "powershell")).toMatch(/\n\.\.\. \(truncated because it exceeds 2k characters\. If you need more information, run "git status" using powershell\)$/);
-	});
-
-	it("names what changed since the saved snapshot", () => {
-		const notice = resumeFactsNotice(new Map([["git", "a"]]), true, { git: "b" } as never);
-		if (notice) expect(notice.text).toMatch(/^Since the saved context snapshot, git status changed\. The earlier context block reflects the latest compaction/);
-		expect(context.changedSinceSnapshot({ changes: ["memory", "instructions"], atCompaction: false, file: "CLAUDE.md" })).toContain(
-			"the memory index changed; CLAUDE.md-family instructions changed. The earlier context block reflects the session's start",
-		);
 	});
 
 	it("says a skipped instruction file is not loaded, with its imports", () => {
@@ -64,17 +55,3 @@ describe("git snapshot wording", () => {
 		expect(words.email({ email: "a@b.com" })).toContain("# userEmail");
 	});
 });
-
-describe("context change notice wording", () => {
-	it("names each changed category and what the earlier block reflects", () => {
-		const { changedSinceSnapshot } = contextWords();
-		expect(changedSinceSnapshot({ changes: ["memory"], atCompaction: false, file: "CLAUDE.md" })).toBe(
-			"Since the saved context snapshot, the memory index changed. The earlier context block reflects the session's start, not the current workspace. Read the current files or run git status if needed.",
-		);
-		expect(changedSinceSnapshot({ changes: ["git", "memory", "instructions"], atCompaction: false, file: "CLAUDE.md" })).toContain(
-			"git status changed; the memory index changed; CLAUDE.md-family instructions changed",
-		);
-		expect(changedSinceSnapshot({ changes: ["git"], atCompaction: true, file: "CLAUDE.md" })).toContain("reflects the latest compaction");
-	});
-});
-

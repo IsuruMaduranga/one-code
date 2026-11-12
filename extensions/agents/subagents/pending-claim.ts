@@ -1,5 +1,4 @@
-import type { PendingRun } from "../../lib/agents/subagent-text.ts";
-import { subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { type PendingRun, subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /**
  * The backstop for a fabricated agent result.
@@ -19,13 +18,11 @@ import { subagentResultText } from "../../lib/agents/subagent-text.ts";
  * fabrication survived into the final answer ("The agent confirmed the same
  * result").
  *
- * The profile words it (text.ts), deliberately CONDITIONAL. The trigger fires on correct behaviour
+ * The words (lib/agents/subagent-text.ts) are deliberately CONDITIONAL. The trigger fires on correct behaviour
  * too — a model that said only "I'm waiting for the agent" ends its turn the
  * same way — so the text must not accuse. Measured precision on the six-run
  * battery: 4 fires, 3 of them real fabrications.
  */
-
-export type { PendingRun } from "../../lib/agents/subagent-text.ts";
 
 /**
  * The background agents still working when a compaction summarized the calls

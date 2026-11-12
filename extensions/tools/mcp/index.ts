@@ -75,14 +75,13 @@ import { consentDialog, startupConsentReady } from "../../lib/consent/consent-di
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { failureOf } from "./failure.ts";
-import type { McpText } from "./text.ts";
 import { mcpResultText, mcpResourcesResultText } from "./text.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
 
 /** Shared "server name not found" tool result for the resource read/list-dir tools. */
-function unknownServerError(name: string, text: McpText) {
+function unknownServerError(name: string) {
 	return {
 		content: [{ type: "text" as const, text: mcpResourcesResultText.unknownServer({ name }) }],
 		details: {} as { server?: string; uri?: string },
@@ -511,7 +510,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			}),
 			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
-				if (!connection) return unknownServerError(params.server, text);
+				if (!connection) return unknownServerError(params.server);
 				try {
 					const result = await readResource(connection, params.uri, signal);
 					const body = describeResourceContents(result.contents as McpResourceContents[] | undefined) || JSON.stringify({ contents: result.contents ?? [] });
@@ -545,7 +544,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			}),
 			async execute(toolCallId, params, signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
-				if (!connection) return unknownServerError(params.server, text);
+				if (!connection) return unknownServerError(params.server);
 				try {
 					const result = await readResourceDir(connection, params.uri, signal);
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
