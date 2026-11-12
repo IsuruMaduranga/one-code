@@ -14,7 +14,7 @@
 import { recordAction, type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import type { HandbackSlot } from "../../lib/agents/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
-import type { RunFailure } from "./text.ts";
+import type { RunFailure } from "../../lib/agents/subagent-text.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "../../lib/agents/usage.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 

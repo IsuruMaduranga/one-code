@@ -81,7 +81,8 @@ import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegist
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
-import type { AgentTools, LaunchLine, RunStatus, SubagentRefusal, SubagentsText } from "./text.ts";
+import type { AgentTools, LaunchLine, RunStatus, SubagentRefusal } from "../../lib/agents/subagent-text.ts";
+import type { SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";

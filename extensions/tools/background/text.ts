@@ -12,23 +12,6 @@
 import { cronWords } from "../../lib/agents/cron-text.ts";
 import { memoOn } from "../../lib/core/text-spans.ts";
 
-/** Why cron_create scheduled nothing. */
-export type CronCreateFailure =
-	| { kind: "invalid"; cron: string }
-	/** Parses, but names no date in the next year. */
-	| { kind: "neverMatches"; cron: string }
-	| { kind: "tooMany"; max: number };
-
-/** A scheduled job as the texts show it. */
-export interface ShownJob {
-	id: string;
-	/** The base's reading of its cron expression, or the expression itself. */
-	cadence: string;
-	recurring: boolean;
-	/** Its prompt, already clipped for a list line. */
-	prompt: string;
-}
-
 /** The cron tools, the main session's and a subagent's proxies alike (lib/agents/agent-cron.ts). */
 export interface CronText {
 	createDescription(p: { maxAgeDays: number }): string;

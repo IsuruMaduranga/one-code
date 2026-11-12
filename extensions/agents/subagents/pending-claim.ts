@@ -1,4 +1,4 @@
-import type { PendingRun } from "./text.ts";
+import type { PendingRun } from "../../lib/agents/subagent-text.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /**
@@ -25,7 +25,7 @@ import { subagentResultText } from "../../lib/agents/subagent-text.ts";
  * battery: 4 fires, 3 of them real fabrications.
  */
 
-export type { PendingRun } from "./text.ts";
+export type { PendingRun } from "../../lib/agents/subagent-text.ts";
 
 /**
  * The background agents still working when a compaction summarized the calls

@@ -6,11 +6,90 @@
  * usage), so they live here. The tools' own words and the delegation policy
  * are the profile's (`SubagentsText`, agents/subagents/text.ts).
  */
-import type { AgentTools, LaunchLine, PendingRun, RunFailure, RunStatus, RuntimeProblem, SubagentRefusal } from "../../agents/subagents/text.ts";
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
 import { forLive } from "../profile/live-words.ts";
 import { checkoutProgram } from "../rules/worktree-guard-text.ts";
 import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
+
+/** What an agent may use, as its catalog row says. */
+export type AgentTools =
+	/** Empty when every tool the agent lists is off. */
+	| { kind: "listed"; tools: string[] }
+	| { kind: "allExcept"; tools: string[] }
+	/** `builtIn`: a built-in or bundled agent (Claude Code writes `*` for those). */
+	| { kind: "all"; builtIn: boolean };
+
+/** A run the model started that has not reported yet. */
+export interface PendingRun {
+	name: string;
+	taskId: string;
+}
+
+/** Why an Agent call (main or nested) or a SendMessage call was refused. */
+export type SubagentRefusal =
+	/** A nested call arrived before the host session was ready. */
+	| { kind: "hostNotReady" }
+	/** A nested call asked for a fork. */
+	| { kind: "nestedFork" }
+	/** A nested call passed options only the main conversation's Agent tool has. */
+	| { kind: "nestedOptions"; options: string[] }
+	/** A nested call named no agent (`name` absent) or an unknown one; `catalog` is the rows. */
+	| { kind: "nestedUnknownAgent"; name?: string; catalog: string[] }
+	| { kind: "unknownAgents"; names: string[]; catalog: string[] }
+	/** No task given; `aliasNote` is the profile's note on the parameter's alias (`SubagentsText.taskAliasNote`). */
+	| { kind: "taskRequired"; aliasNote: string }
+	/** A fork with a `model` or `thinking` override. */
+	| { kind: "forkOverrides" }
+	/** A fork in a session with no session file. */
+	| { kind: "forkNotPersisted" }
+	| { kind: "worktreeNeedsGit" }
+	/** `reason` is the resolver's own, when it has one; `menu` the models note (lib/models/subagent-model-text.ts). */
+	| { kind: "unknownModel"; model: string; reason?: string; menu: string }
+	/** `gate` is the expensive-model gate's sentence. */
+	| { kind: "expensiveModel"; gate: string; menu: string }
+	/** The parent's gate refused a nested delegation; `reason` is the gate's. */
+	| { kind: "nestedDenied"; reason: string }
+	/** No parent bridge to judge a nested delegation. */
+	| { kind: "nestedNoBridge" }
+	| { kind: "nestedCheckFailed"; osMessage: string }
+	/** The runtime could not start (`problem` worded by `runtimeProblem`). */
+	| { kind: "couldNotStart"; problem: string }
+	/** SendMessage from the main conversation to "main". */
+	| { kind: "mainIsNotRecipient" }
+	/** SendMessage to a name or id no run has; `known` lists the runs. */
+	| { kind: "noRun"; to: string; known: string[] }
+	| { kind: "deliveryFailed"; name: string; osMessage: string }
+	| { kind: "stillRunning"; name: string }
+	/** A fork whose system prompt was not persisted. */
+	| { kind: "forkNotResumable"; name: string }
+	| { kind: "noSession"; name: string }
+	| { kind: "couldNotResume"; name: string; problem: string }
+	/** A subagent's SendMessage to someone other than "main"; `got` is the value as JSON. */
+	| { kind: "onlyMain"; got: string }
+	/** A subagent's SendMessage with no message. */
+	| { kind: "messageRequired" };
+
+/** Why the subagent runtime is not there. */
+export type RuntimeProblem = { kind: "sessionEnded" } | { kind: "failed"; osMessage: string };
+
+/** How a run ended short; `output` is what the agent wrote before it did. */
+export type RunFailure =
+	| { kind: "worktree"; osMessage: string }
+	| { kind: "failed"; osMessage: string }
+	| { kind: "turnNotStarted"; osMessage: string }
+	/** The run was stopped (`stopped`) or hit the wall-clock cap (`wallClock`). */
+	| { kind: "aborted"; why: "stopped" | "wallClock"; output: string }
+	| { kind: "providerError"; error: string; output: string };
+
+/** How a background launch went, one line per run in the Agent result. */
+export type LaunchLine =
+	| { kind: "running"; name: string; taskId: string; logPath?: string }
+	| { kind: "worktreeFailed"; name: string; osMessage: string }
+	| { kind: "startFailed"; name: string; osMessage: string }
+	| { kind: "sessionEnded"; name: string };
+
+/** A spawned run's status in list_agents (and the /agents fallback). */
+export type RunStatus = "resident" | "running" | "finishedInline" | "finished";
 
 /** The group's results, refusals and notes, which the base words (`subagentResultText`). */
 export interface SubagentsResultText {

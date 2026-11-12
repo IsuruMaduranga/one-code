@@ -4,7 +4,24 @@
  * tools' own words (descriptions and parameters) are the profile's
  * (`CronText`, tools/background/text.ts).
  */
-import type { CronCreateFailure, CronText, ShownJob } from "../../tools/background/text.ts";
+import type { CronText } from "../../tools/background/text.ts";
+
+/** Why cron_create scheduled nothing. */
+export type CronCreateFailure =
+	| { kind: "invalid"; cron: string }
+	/** Parses, but names no date in the next year. */
+	| { kind: "neverMatches"; cron: string }
+	| { kind: "tooMany"; max: number };
+
+/** A scheduled job as the texts show it. */
+export interface ShownJob {
+	id: string;
+	/** The base's reading of its cron expression, or the expression itself. */
+	cadence: string;
+	recurring: boolean;
+	/** Its prompt, already clipped for a list line. */
+	prompt: string;
+}
 
 /** The group's results, refusals and notes, which the base words (`cronResultText`). */
 export interface CronResultText {
