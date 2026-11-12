@@ -88,8 +88,9 @@ describe("resolveProfile", () => {
 	});
 
 	it("refuses an empty secret-file refusal", () => {
-		expect(() => resolveProfile({ ...empty, secretFileRefusal: " " }, {}, "/p")).toThrow(/"secretFileRefusal" must not be empty/);
-		expect(resolveProfile({ ...empty, secretFileRefusal: "Ask the user." }, {}, "/p").secretFileRefusal).toBe("Ask the user.");
+		const refusing = (secretFileRefusal: string): Profile["text"] => (env) => ({ ...shippedProfile.text(env), autoMode: { ...shippedProfile.text(env).autoMode, secretFileRefusal } });
+		expect(() => resolveProfile({ ...empty, text: refusing(" ") }, {}, "/p")).toThrow(/"autoMode.secretFileRefusal" must not be empty/);
+		expect(resolveProfile({ ...empty, text: refusing("Ask the user.") }, {}, "/p").text.autoMode.secretFileRefusal).toBe("Ask the user.");
 	});
 
 	it("names a reader for every optional text group, and only features", () => {

@@ -310,6 +310,7 @@ export const workflow: NonNullable<ProfileText["workflow"]> = {
 
 export const autoMode: NonNullable<ProfileText["autoMode"]> = {
 	systemNote: (p) => mark("autoMode.systemNote", p),
+	secretFileRefusal: "[autoMode.secretFileRefusal]",
 };
 
 export const classifier: NonNullable<ProfileText["classifier"]> = {

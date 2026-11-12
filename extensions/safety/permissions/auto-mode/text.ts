@@ -45,10 +45,17 @@ export interface FloorTarget {
 	token: string;
 }
 
-/** The profile's part: the note a session opening in auto mode gets. */
+/** The profile's part of what the permission gate says: the note a session opening in auto mode gets, and its own secret-file refusal. */
 export interface AutoModeText {
 	/** The note for a session that opens in auto mode; `firm` for models that need the firmer wording. */
 	systemNote(p: { firm: boolean }): string;
+	/**
+	 * What the model reads when the gate refuses a secret file
+	 * (`Profile.secretFiles`), in place of the base's sentence, so it can name
+	 * the product's own tool for the job ("…use config_status to see whether a
+	 * value is set"). Never empty: leave it out for the base's wording.
+	 */
+	secretFileRefusal?: string;
 }
 
 function classifierBlock(block: ClassifierBlock): string {

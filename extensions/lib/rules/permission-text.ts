@@ -11,7 +11,7 @@
 
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
 import { forLive } from "../profile/live-words.ts";
-import { activeProfile } from "../profile/profile.ts";
+import { requireText } from "../profile/profile.ts";
 
 /** Why the gate refused a call. */
 export type PermissionRefusal =
@@ -161,7 +161,7 @@ const REFUSAL_PASSAGES: ToolPassages = {
 
 /** The profile's own wording, where it has one. */
 interface OwnWords {
-	/** The refusal for a secret file (`Profile.secretFileRefusal`). */
+	/** The refusal for a secret file (the text group `autoMode.secretFileRefusal`). */
 	secretFile?: string;
 }
 
@@ -189,7 +189,7 @@ export const permissionWords = (live: LiveTools, own: OwnWords = {}) => ({
 });
 
 /** The words for this session's tools (the profile in force), built once per live set. */
-export const permissionText = forLive((live) => permissionWords(live, { secretFile: activeProfile().secretFileRefusal }));
+export const permissionText = forLive((live) => permissionWords(live, { secretFile: requireText("autoMode").secretFileRefusal }));
 
 /** Why the gate refused a call, for the modules that run without the extension's own context (the in-process child gate, the parent bridge). */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

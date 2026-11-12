@@ -161,17 +161,11 @@ export interface Profile {
 	/**
 	 * Bare file names that hold secrets (BI's `Config.toml`). In every mode the
 	 * gate refuses a file tool on one and a shell command that names one
-	 * (`secretFileRefusal` words it). The product's
+	 * (the text group `autoMode.secretFileRefusal` words it). The product's
 	 * extension registers the values themselves for redaction
 	 * (`setSecretValues`, `extensions/sdk/extension.ts`).
 	 */
 	secretFiles?: readonly string[];
-	/**
-	 * What the model reads when the gate refuses a secret file, in place of
-	 * the base's sentence, so it can name the product's own tool for the job
-	 * ("…use config_status to see whether a value is set").
-	 */
-	secretFileRefusal?: string;
 	/**
 	 * Read-only subcommands of the product's own command-line tools, with the
 	 * options each may carry (`lib/shell/product-read-only.ts`):
