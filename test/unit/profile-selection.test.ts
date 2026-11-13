@@ -40,6 +40,17 @@ describe("the profile a launch names", () => {
 		expect(selectedProfileName(product, argv("--", "--bi"), {})).toBeUndefined();
 	});
 
+	it("names the empty profile when --profile has no name, so the launch stops instead of running the default", () => {
+		expect(selectedProfileName(product, argv("--profile"), {})).toBe("");
+		expect(selectedProfileName(product, argv("--profile", "-p", "hi"), {})).toBe("");
+		expect(selectedProfileName(product, argv("--profile="), {})).toBe("");
+		// The flag after it is still pi's to read.
+		expect(withoutProfileFlags(["--profile", "-p", "hi"], product)).toEqual(["-p", "hi"]);
+		const resolved = resolveBrand(data, { name: "", profileRoot: "/p", sharedStateDir: "/s", read: () => ({}) });
+		expect(resolved.selection).toEqual({ userProfile: "" });
+		expect(loadUserProfile("", "/s/profiles").problems).toEqual(["--profile needs a name: the profile's folder name, or one of the product's profiles"]);
+	});
+
 	it("never takes a flag that only starts like an id, or a prompt that mentions one", () => {
 		expect(selectedProfileName(product, argv("--bisect", "-p", "use --bi here"), {})).toBeUndefined();
 	});

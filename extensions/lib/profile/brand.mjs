@@ -94,7 +94,9 @@ export const PROFILE_BRAND_FIELDS = ["name", "stateDir", "productFile", "theme",
  * The launch's choice of profile in `args` (the arguments after the command),
  * and the arguments without it: `--profile <name>`, `--profile=<name>`, or
  * `--<id>` for a product profile's id in any case (`--BI`). The first one
- * names the profile; arguments after a bare `--` are not read.
+ * names the profile; arguments after a bare `--` are not read. `--profile`
+ * with no name after it names the empty profile, which no folder can be, so
+ * the launch stops and says so (lib/profile/user-profile.ts).
  */
 function splitProfileFlags(args, product) {
 	const ids = new Set((product.profiles ?? []).map((id) => id.toLowerCase()));
@@ -107,11 +109,11 @@ function splitProfileFlags(args, product) {
 			break;
 		}
 		let found;
-		if (arg === "--profile") found = args[++i] ?? "";
+		if (arg === "--profile") found = args[i + 1] === undefined || args[i + 1].startsWith("-") ? "" : args[++i];
 		else if (arg.startsWith("--profile=")) found = arg.slice("--profile=".length);
 		else if (arg.startsWith("--") && ids.has(arg.slice(2).toLowerCase())) found = arg.slice(2);
 		if (found === undefined) rest.push(arg);
-		else name ??= found || undefined;
+		else name ??= found;
 	}
 	return { name, rest };
 }

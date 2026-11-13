@@ -90,6 +90,7 @@ function textFile(path: string, problems: string[]): string | undefined {
  */
 export function loadUserProfile(name: string, dir: string, productProfiles: readonly string[] = []): { profile?: UserProfile; problems: string[] } {
 	const problems: string[] = [];
+	if (name === "") return { problems: ["--profile needs a name: the profile's folder name, or one of the product's profiles"] };
 	if (!PROFILE_NAME.test(name)) return { problems: [`"${name}" is not a profile name (letters, digits, ".", "_", "-")`] };
 	if (!existsSync(dir) || !statSync(dir).isDirectory()) {
 		const known = productProfiles.length > 0 ? ` (the product's own profiles: ${productProfiles.join(", ")})` : "";
