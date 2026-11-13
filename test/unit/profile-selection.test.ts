@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import data from "../../profile/brand.json" with { type: "json" };
 import { productBrand, resolveBrand, selectedProfileName, withoutProfileFlags } from "../../extensions/lib/profile/brand.mjs";
 import { profiledPi } from "../../extensions/lib/profile/feature.ts";
-import { activeProfile, profileKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { activeProfile, profileKey, profileSummary, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { loadUserProfile, type UserProfile, wordedByUser } from "../../extensions/lib/profile/user-profile.ts";
 import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
@@ -199,6 +199,12 @@ describe("the profile resolved with a user's own over it", () => {
 		expect(() => resolveProfile(empty, {}, "/p", "/p", user({ toolWording: new Map([["Bash", { append: "x" }]]) }))).toThrow(/the profile "lean".*spelled "bash"/);
 	});
 
+	it("refuses wording for one of pi's own tools while no extension registers it again", () => {
+		const worded = user({ toolWording: new Map([["read", { append: "x" }]]) });
+		expect(() => resolveProfile({ ...empty, features: { "tool-style": false } }, {}, "/p", "/p", worded)).toThrow(/words "read", whose description can change only while the "tool-style" feature is on/);
+		expect(resolveProfile(empty, {}, "/p", "/p", worded).user).toBe(worded);
+	});
+
 	it("registers a tool with the user's wording, and leaves the others as they are", () => {
 		setActiveProfileForTest({ ...activeProfile(), user: user({ toolWording: new Map([["demo", { append: "Mine." }]]) }) });
 		const fake = createFakePi();
@@ -208,6 +214,9 @@ describe("the profile resolved with a user's own over it", () => {
 		pi.registerTool(other as never);
 		expect(fake.tools.get("demo")?.description).toBe("Demo.\n\nMine.");
 		expect(fake.tools.get("other")?.description).toBe("Other.");
+		// /doctor says which wording reached no tool.
+		setActiveProfileForTest({ ...activeProfile(), user: user({ toolWording: new Map([["demo", { append: "Mine." }], ["raed", { append: "x" }]]) }) });
+		expect(profileSummary("/home/u")).toContain("no tool named raed is registered, so that wording is unused");
 	});
 
 	it("puts the user's text after the system prompt, or in its place", async () => {

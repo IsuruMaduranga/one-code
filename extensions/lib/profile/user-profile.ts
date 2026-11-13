@@ -25,7 +25,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { PROFILE_NAME } from "./brand.mjs";
+import { productProfileId, PROFILE_NAME, userProfileFile } from "./brand.mjs";
+import { dirname } from "node:path";
 
 /** A user's wording for one tool: its description replaced, added to, or both. */
 export interface ToolWording {
@@ -94,7 +95,8 @@ export function loadUserProfile(name: string, dir: string, productProfiles: read
 		const known = productProfiles.length > 0 ? ` (the product's own profiles: ${productProfiles.join(", ")})` : "";
 		return { problems: [`no profile is named "${name}": create the folder ${dir} with a profile.json, system-prompt.md, append-system-prompt.md or tools/<tool>.md in it${known}`] };
 	}
-	const file = join(dir, "profile.json");
+	// The same file and the same id rule the brand reads the profile's `base` by (lib/profile/brand.mjs).
+	const file = userProfileFile(dirname(dir), name);
 	let data: Record<string, unknown> = {};
 	if (existsSync(file)) {
 		try {
@@ -109,7 +111,7 @@ export function loadUserProfile(name: string, dir: string, productProfiles: read
 	if (data.description !== undefined && typeof data.description !== "string") problems.push(`${file}: "description" must be text`);
 	let base: string | undefined;
 	if (data.base !== undefined) {
-		const match = typeof data.base === "string" ? productProfiles.find((id) => id.toLowerCase() === (data.base as string).toLowerCase()) : undefined;
+		const match = typeof data.base === "string" ? productProfileId(productProfiles, data.base) : undefined;
 		if (match === undefined) problems.push(`${file}: "base" must name one of the product's profiles (${productProfiles.join(", ") || "this product has only its default one, so leave it out"})`);
 		else base = match;
 	}

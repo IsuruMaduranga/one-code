@@ -152,6 +152,10 @@ declare module "*/brand.mjs" {
 	export const PROFILE_NAME: RegExp;
 	export const PROFILE_BRAND_FIELDS: readonly string[];
 	export function selectedProfileName(product: Pick<Brand, "envPrefix" | "profiles">, argv?: readonly string[], env?: Record<string, string | undefined>): string | undefined;
+	/** The product profile `name` means, as the brand's list spells it; ids compare without case. */
+	export function productProfileId(ids: readonly string[], name: string): string | undefined;
+	/** A user's profile's switches file, in the folder that holds the users' profiles. */
+	export function userProfileFile(profilesDir: string, name: string): string;
 	/** `args` without the launch's choice of profile (`--profile <name>`, `--<id>`). */
 	export function withoutProfileFlags(args: readonly string[], product: Pick<Brand, "profiles">): string[];
 	export function resolveBrand(data: unknown, options: { name: string | undefined; profileRoot: string; sharedStateDir: string; read?: (path: string) => unknown }): ResolvedBrand;

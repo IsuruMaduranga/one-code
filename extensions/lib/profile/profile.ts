@@ -297,6 +297,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (feature !== undefined && !features.has(feature)) disabledTools.add(name);
 	}
 	const toolProblems = toolSetProblems(features, disabledTools);
+	// pi's own tools take a description only where an extension registers them again (tools/tool-style);
+	// wording that could reach no tool is refused, not dropped.
+	if (user && !features.has("tool-style")) {
+		for (const name of user.toolWording.keys()) {
+			if (BUILTIN_TOOLS.includes(name) && TOOL_FEATURES[name] === undefined) toolProblems.push(`the profile "${user.name}" words "${name}", whose description can change only while the "tool-style" feature is on: turn the feature on, or delete tools/${name}.md and tools/${name}.append.md`);
+		}
+	}
 	if (toolProblems.length > 0) throw new Error(`Invalid profile: ${toolProblems.join("; ")}.`);
 	const live: LiveTools = {
 		has: (name) => {
@@ -353,10 +360,18 @@ export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undef
 	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
 }
 
+/** The tools registered so far with the user's wording, for the process (lib/profile/feature.ts fills it). */
+export function wordedTools(): Set<string> {
+	return processState("profile:worded-tools", () => new Set<string>());
+}
+
 /** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder (shown from `home`) and what it changes. Undefined on the default profile alone. */
 export function profileSummary(home: string): string | undefined {
 	const user = activeProfile().user;
-	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}`] : [])];
+	// A worded tool no extension has registered by now: a misspelled name, or a server that is not connected.
+	const unused = user ? [...user.toolWording.keys()].filter((name) => !wordedTools().has(name)) : [];
+	const note = unused.length > 0 ? `; no tool named ${unused.join(", ")} is registered, so that wording is unused` : "";
+	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}${note}`] : [])];
 	return parts.length > 0 ? parts.join(", with your own profile ") : undefined;
 }
 

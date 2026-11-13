@@ -129,6 +129,16 @@ export function withoutProfileFlags(args, product) {
 	return splitProfileFlags(args, product).rest;
 }
 
+/** The product profile `name` means, as the brand's list spells it: ids compare without case. Undefined when it is none of them. */
+export function productProfileId(ids, name) {
+	return ids.find((id) => id.toLowerCase() === name.toLowerCase());
+}
+
+/** A user's profile's switches file, in the folder that holds the users' profiles. */
+export function userProfileFile(profilesDir, name) {
+	return join(profilesDir, name, "profile.json");
+}
+
 function readJson(path) {
 	return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -148,15 +158,15 @@ export function resolveBrand(data, options) {
 
 /** `resolveBrand` for a brand already checked and copied. */
 function resolveChecked(product, { name, profileRoot, sharedStateDir, read = readJson }) {
-	const byId = new Map((product.profiles ?? []).map((id) => [id.toLowerCase(), id]));
-	let productProfile = name === undefined ? undefined : byId.get(name.toLowerCase());
+	const ids = product.profiles ?? [];
+	let productProfile = name === undefined ? undefined : productProfileId(ids, name);
 	let userProfile;
 	if (name !== undefined && productProfile === undefined) {
 		userProfile = name;
 		if (PROFILE_NAME.test(name)) {
 			try {
-				const base = read(join(sharedStateDir, "profiles", name, "profile.json")).base;
-				if (typeof base === "string") productProfile = byId.get(base.toLowerCase());
+				const base = read(userProfileFile(join(sharedStateDir, "profiles"), name)).base;
+				if (typeof base === "string") productProfile = productProfileId(ids, base);
 			} catch {}
 		}
 	}
@@ -210,12 +220,25 @@ function stateDirOf(named, env, home) {
 	return env[`${named.envPrefix}_STATE_DIR`] || join(home, named.stateDir);
 }
 
-const checked = checkBrand(structuredClone(data));
-const resolved = resolveChecked(checked, {
-	name: selectedProfileName(checked),
-	profileRoot: PROFILE_ROOT,
-	sharedStateDir: stateDirOf(checked, process.env, homedir()),
-});
+/**
+ * The launch's brand, resolved once per process: pi gives every extension its
+ * own copy of this module, and each copy would read the chosen profile's
+ * files again. The slot is named by the product, which the JSON import fixes.
+ */
+function resolvedOnce() {
+	const slot = Symbol.for(`${data.idPrefix}:resolved-brand`);
+	if (globalThis[slot] === undefined) {
+		const checked = checkBrand(structuredClone(data));
+		globalThis[slot] = resolveChecked(checked, {
+			name: selectedProfileName(checked),
+			profileRoot: PROFILE_ROOT,
+			sharedStateDir: stateDirOf(checked, process.env, homedir()),
+		});
+	}
+	return globalThis[slot];
+}
+
+const resolved = resolvedOnce();
 
 export const brand = deepFreeze(resolved.brand);
 

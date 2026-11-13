@@ -58,6 +58,10 @@ export function approvalStorePath(): string {
  * so it is consent-gated. A plugin's `.mcp.json` (also named `.mcp.json`) is
  * excluded: installing the plugin was the consent. pi's user file
  * (`<agentDir>/mcp.json`) is the user's own, like `~/.claude.json`.
+ * The rule is the settings ladder's (lib/profile/settings-files.ts
+ * `withRepoFiles`): a checked-in file, and another tool's per-project file.
+ * Only a source view's files carry a scope here, so a `local` one is always
+ * another tool's.
  */
 export function isProjectScopedServer(server: McpServer, pluginConfigPaths: ReadonlySet<string>): boolean {
 	if (pluginConfigPaths.has(server.source)) return false;

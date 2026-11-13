@@ -25,7 +25,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { FeatureId } from "./features.ts";
-import { activeProfile, failClosed, featureEnabled, isToolDisabled } from "./profile.ts";
+import { activeProfile, failClosed, featureEnabled, isToolDisabled, wordedTools } from "./profile.ts";
 import { wordedByUser } from "./user-profile.ts";
 
 /** `pi` as the profile lets an extension register tools: see the header. */
@@ -38,6 +38,7 @@ export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
 				return (tool: Parameters<ExtensionAPI["registerTool"]>[0]) => {
 					if (isToolDisabled(tool.name)) return;
 					const description = wordedByUser(user, tool.name, tool.description);
+					if (user?.toolWording.has(tool.name)) wordedTools().add(tool.name);
 					target.registerTool(description === tool.description ? tool : { ...tool, description });
 				};
 			}
