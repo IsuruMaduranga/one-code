@@ -119,7 +119,7 @@ function compactionKeepLines(env: DoctorEnvironment, lines: ReportLine[], findin
 	const view = env.compactionKeep;
 	if (!view) return;
 	if (view.value === 0) {
-		lines.push({ text: `pi's compaction keep window: 0 (${brand.name} keeps the last reply, as Claude Code does)`, level: "dim" });
+		lines.push({ text: `pi's compaction keep window: 0 (${brand.name} keeps the last reply)`, level: "dim" });
 		return;
 	}
 	const where = view.source === "default" ? "pi's default" : `set in the ${view.source} settings${view.model ? ` for ${view.model}` : ""}`;

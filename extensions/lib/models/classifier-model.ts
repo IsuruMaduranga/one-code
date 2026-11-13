@@ -126,7 +126,7 @@ export function classifierCandidates({ available, sessionModel, configured, conf
 			level: "info",
 			text:
 				`autoMode.classifierModel ${spec(resolved)} is a different provider than this session (${spec(sessionModel)}): ` +
-				"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used.",
+				"it reads your messages and instruction files, so those go to that provider. It was set for this session, so it is used.",
 		});
 	}
 	for (const warning of chosenModelWarnings({ available, sessionModel, chosen: resolved, role: "classifier", suggestNewer })) {

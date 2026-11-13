@@ -19,6 +19,7 @@
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
 import { featureEnabled } from "../../lib/profile/profile.ts";
+import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -129,7 +130,7 @@ import { findProjectRoot } from "../../lib/context/git.ts";
 import { productProjectSettingsPath, productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { protectedFiles } from "../../lib/profile/sources.ts";
+import { protectedFiles, sourceName, userConfigDir } from "../../lib/profile/sources.ts";
 import { relativeDisplayPath, tildify, tryRealpath } from "../../lib/profile/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../../lib/ui/panel-focus.ts";
@@ -312,7 +313,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 	pi.registerFlag("dangerously-skip-permissions", {
-		description: "Skip all permission prompts (Claude Code compatible)",
+		description: "Skip all permission prompts",
 		type: "boolean",
 	});
 
@@ -1162,7 +1163,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				ctx,
 				"info",
 				fastPaths
-					? `${name}: permissions now follow Claude Code's fast paths.`
+					? `${name}: permissions now follow the standard fast paths.`
 					: `${name}: permissions now use ${brand.name}'s stricter checks, so more calls prompt or go to the auto-mode classifier.`,
 			);
 		}
@@ -2372,7 +2373,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		]);
 		if (!history) return;
 
-		ctx.ui.notify("Gathering environment facts (git, gh, CLAUDE.md)…", "info");
+		ctx.ui.notify("Gathering environment facts (git, gh, instruction files)…", "info");
 		const facts = await gatherFacts({
 			cwd: ctx.cwd,
 			home: os.homedir(),
@@ -2438,7 +2439,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (claudeSide.length > 0) {
 			ctx.ui.notify(
-				`These live in your Claude Code settings (~/.claude) and stay in force even after any ${brand.name} copy is removed. ${brand.name} never edits Claude Code's files — remove them there yourself if you want them gated:\n` +
+				`These live in your ${sourceName() ?? "other tool's"} settings (${tildify(userConfigDir(os.homedir()), os.homedir())}) and stay in force even after any ${brand.name} copy is removed. ${brand.name} never edits ${sourceName() ?? "another tool"}'s files — remove them there yourself if you want them gated:\n` +
 					claudeSide.map((entry) => `  · ${entry.rule}`).join("\n"),
 				"warning",
 			);
@@ -2602,7 +2603,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					which === "config"
 						? `read from: ${autoModeSettingsPaths(os.homedir()).join(", ")}\n(project settings are deliberately not read — a repo could otherwise grant itself permissions)`
 						: 'built-in environment; add "$defaults" to autoMode.environment in settings to keep it while adding your own',
-					"The built-in ruleset is Claude Code's fixed classifier ruleset (not shown); customize via the environment and the append-only hard_deny/soft_deny/allow extras.",
+					`The built-in ruleset is ${rulesetOwner() ?? "a"} fixed classifier ruleset (not shown); customize via the environment and the append-only hard_deny/soft_deny/allow extras.`,
 					section("environment", shown.environment),
 					...ruleSections,
 					...(which === "config" && "classifyAllShell" in shown

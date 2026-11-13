@@ -10,6 +10,7 @@ import { ruleset } from "./ruleset.ts";
 
 export const classifier: ClassifierText = {
 	...ruleset,
+	rulesetOwner: "Claude Code's",
 	// The single deliberate divergence from Claude Code's stage-2 payload: when
 	// the model clears a SOFT block by crediting the user's own intent, it must
 	// quote the user verbatim so the harness can verify the quote against the

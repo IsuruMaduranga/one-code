@@ -20,6 +20,8 @@ import { sourceProvider } from "./profile.ts";
 
 /** One session's view of the provider's sources. */
 export interface SourceView {
+	/** The tool whose files this view adds, as a user knows it ("Claude Code"). Absent: the view reads no other tool's files. */
+	name?: string;
 	/** Whether the base may read `path` at all: an instruction file, an import. Absent: every path. */
 	allowPath?(path: string): boolean;
 	/** The product's instruction files, reshaping the base's lists (lib/context/instructions.ts). Absent: the base's lists. */
@@ -209,6 +211,11 @@ export function sourcesOff(): boolean {
 /** The active profile's view for `home`, or the base's own (an empty view) when it has no provider. */
 export function openSources(home: string): SourceView {
 	return sourceProvider()?.open({ home }) ?? {};
+}
+
+/** The other tool whose files the session reads, by name, or undefined when it reads none (no provider, or one switched off). */
+export function sourceName(home: string = os.homedir()): string | undefined {
+	return openSources(home).name;
 }
 
 /** The config folders for `home`: the provider's, else the product's own state dir and `.onecode`. */

@@ -72,7 +72,7 @@ export const KEEP_NO = "No, leave the setting";
 /** The startup question on the user's own pi. */
 export function keepWindowPrompt(settingsPath) {
 	return [
-		`${brand.name} compacts like Claude Code: it keeps only the last reply after the summary.`,
+		`${brand.name} keeps only the last reply after a compaction's summary.`,
 		`pi's compaction.keepRecentTokens (${PI_DEFAULT_KEEP_RECENT_TOKENS} by default) no longer changes what is kept; it only makes /compact refuse a session shorter than that.`,
 		`Set it to 0 in ${settingsPath}? It takes effect from the next start.`,
 	].join("\n");

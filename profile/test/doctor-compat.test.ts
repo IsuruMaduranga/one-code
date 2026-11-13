@@ -80,6 +80,9 @@ describe("collectCompat: settings files", () => {
 		expect(texts.some((t) => t.includes("has an autoMode block"))).toBe(true);
 		const section = importedConfigSection(compat, home);
 		expect(section.lines.some((l) => l.text.startsWith("Claude Code user settings ~/.claude/settings.json: permissions"))).toBe(true);
+		// The provider's name words what the section says about its files.
+		expect(section.subtitle).toBe("what One Code reads from your Claude Code and One Code files");
+		expect(section.lines.some((l) => /^Plugins: \d+\/\d+ Claude Code-installed enabled \(read-only; toggle in \/plugins\), \d+\/\d+ installed by One Code$/.test(l.text))).toBe(true);
 		expect(section.lines.some((l) => l.text === "not used by One Code: env (1 variable — One Code does not export settings env blocks), model, statusLine")).toBe(true);
 	});
 

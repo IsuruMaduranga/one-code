@@ -89,3 +89,8 @@ export function instructionsFraming(instructions: string | undefined): string {
 	const { prefix, suffix } = classifierText().instructionsFraming;
 	return prefix + instructions + suffix;
 }
+
+/** Whose ruleset the built-in rules are, as a possessive, when the profile says (`ClassifierText.rulesetOwner`). */
+export function rulesetOwner(): string | undefined {
+	return requireText("classifier").rulesetOwner;
+}

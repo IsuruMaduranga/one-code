@@ -423,7 +423,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			withheldNames.set(
 				server.name,
 				reason === "disabled-by-settings"
-					? "disabled by disabledMcpjsonServers in Claude Code settings"
+					? `disabled by disabledMcpjsonServers in ${openSources(os.homedir()).name ?? "the"} settings`
 					: reason === "declined"
 						? "not approved this session (project .mcp.json)"
 						: "not approved (project .mcp.json; approve in an interactive session)",
