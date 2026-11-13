@@ -54,7 +54,8 @@ export function checkBrand(value) {
 	// A folder inside the package, forward-slashed: it is joined to the package root and listed in package.json `files`.
 	if (value.guideDir !== undefined && (typeof value.guideDir !== "string" || !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(value.guideDir) || value.guideDir.split("/").some((part) => part === "." || part === "..") || `${value.guideDir}/`.startsWith("profile/test/"))) problems.push(`"guideDir" must be a folder path inside the package ("docs/guide"), outside profile/test, when set`);
 	if (typeof value.envPrefix === "string" && !/^[A-Z][A-Z0-9_]*$/.test(value.envPrefix)) problems.push(`"envPrefix" must be upper-case letters, digits and underscores`);
-	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9-]*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case letters, digits and hyphens`);
+	// Words joined by single hyphens: the prefix is also turned into an identifier (tools/artifacts/gallery.ts), which a doubled or trailing hyphen would break.
+	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case words of letters and digits joined by single hyphens`);
 	// Path checks compare case-folded paths on macOS and Windows (lib/profile/paths.ts comparablePath) against patterns built from this name.
 	// The leading dot is required: the name is a protected path segment at any depth (lib/rules/protected-paths.ts), and a plain word such as "agent" would guard every folder of that name.
 	if (typeof value.stateDir === "string" && !STATE_DIR_NAME.test(value.stateDir)) problems.push(`"stateDir" must be one lower-case folder name starting with "." (letters, digits, ".", "_", "-")`);
