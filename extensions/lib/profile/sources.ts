@@ -106,7 +106,9 @@ export interface SettingsFile {
 	/**
 	 * The file sits in the repository's checkout, so the repository controls
 	 * it: its allow rules wait for the repository-trust consent, and it may
-	 * not select the modes a repository may not grant itself.
+	 * not select the modes a repository may not grant itself. The base sets
+	 * it for a `project` file and for another tool's `local` file whatever a
+	 * provider says (lib/profile/settings-files.ts `withRepoFiles`).
 	 */
 	repo?: boolean;
 	/**

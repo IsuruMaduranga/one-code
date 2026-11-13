@@ -27,10 +27,13 @@ function walk(dir: string): string[] {
 	});
 }
 
+/** The base's own scripts name the product through the brand too. */
+const SCRIPTS = join(ROOT, "..", "scripts");
+
 function offenders(pattern: RegExp): string[] {
-	return walk(ROOT)
+	return [...walk(ROOT), ...walk(SCRIPTS)]
 		.filter((path) => pattern.test(withoutComments(readFileSync(path, "utf8"), path)))
-		.map((path) => relative(ROOT, path).split("\\").join("/"));
+		.map((path) => relative(join(ROOT, ".."), path).split("\\").join("/").replace(/^extensions\//, ""));
 }
 
 describe("the base names the product only through its brand", () => {

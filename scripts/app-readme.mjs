@@ -2,12 +2,15 @@
 // absolute: npm renders app/README.md as the @one-ai/one-code package page,
 // where `docs/guide/…`, `demo/…` and `LICENSE` would resolve under app/ and
 // 404. Run `npm run sync:app-readme` after editing README.md;
-// test/unit/app-readme-sync.test.ts fails while the two are out of step.
+// profile/test/app-readme-sync.test.ts fails while the two are out of step.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const REPO = "IsuruMaduranga/one-code";
+import { brand } from "../extensions/lib/profile/brand.mjs";
+
+// The repository the brand's homepage names: `owner/name`.
+const REPO = new URL(brand.homepage).pathname.replace(/^\/|\/$/g, "");
 const BLOB = `https://github.com/${REPO}/blob/master/`;
 const RAW = `https://raw.githubusercontent.com/${REPO}/master/`;
 

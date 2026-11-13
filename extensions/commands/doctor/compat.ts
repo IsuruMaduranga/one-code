@@ -26,6 +26,7 @@ import { SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { readKnob } from "../../lib/profile/knobs.ts";
 import { SUBAGENT_MODEL_KNOB } from "../../lib/models/subagent-default.ts";
+import { GIT_BASH_PATH_KNOB } from "../../lib/shell-run/shell-spawn.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadPluginHooks } from "../../safety/hooks/plugin-hooks.ts";
@@ -100,12 +101,15 @@ export interface CompatReport {
 const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
 /** One Code's workflow keys, read from its user and project files (lib/profile/product-settings.ts). */
 const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
-const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY, ...MCP_POLICY_KEYS]);
+// The MCP approval keys and `env` are read from the primary file alone, and the MCP tightening list from the
+// family's local file too: `knownKeys` adds them by role, so no row here lists them.
+const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY]);
 const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
-	"borrowed-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", AUTO_MEMORY, ...MCP_POLICY_KEYS]),
+	"borrowed-user": new Set(["permissions", "hooks", "enabledPlugins", "autoMode", AUTO_MEMORY]),
 	"borrowed-project": CLAUDE_PROJECT_KEYS,
 	"borrowed-local": CLAUDE_PROJECT_KEYS,
-	"borrowed-managed": new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins", AUTO_MEMORY]),
+	// Not `enabledPlugins` (lib/profile/settings-files.ts readEnabledPlugins skips the managed file) and not `env`.
+	"borrowed-managed": new Set(["permissions", "hooks", "autoMode", AUTO_MEMORY]),
 	"product-user": new Set([
 		"subagentModel",
 		"subagentModelSetFor",
@@ -157,6 +161,11 @@ function knownKeys(file: SettingsFile, family: readonly SettingsFile[]): Readonl
 	if (family.includes(file) && file.scope === "local") keys.add("disabledMcpjsonServers");
 	return keys;
 }
+/** The keys the report counts as read from `file` of the ladder `files`: held to the loaders by profile/test/doctor-settings-keys.test.ts. */
+export function keysReadFrom(file: SettingsFile, files: readonly SettingsFile[]): ReadonlySet<string> {
+	return knownKeys(file, primaryFamily(files));
+}
+
 /** Never worth reporting as "ignored". */
 const SILENT_KEYS = new Set(["$schema"]);
 
@@ -279,10 +288,15 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 		const env = file.env as Json;
 		const keys = Object.keys(env);
 		if (known.has("env")) {
-			const knob = readKnob(SUBAGENT_MODEL_KNOB, env);
-			const used = knob?.value.trim() ? knob.name : undefined;
-			if (used) report.used.push(`env.${used} = "${knob?.value}"`);
-			const rest = keys.filter((k) => k !== used);
+			// The two knobs the base reads from the block: the subagent model, and Git Bash's path (lib/shell-run/shell-spawn.ts).
+			const used: string[] = [];
+			for (const name of [SUBAGENT_MODEL_KNOB, GIT_BASH_PATH_KNOB]) {
+				const knob = readKnob(name, env);
+				if (!knob?.value.trim()) continue;
+				used.push(knob.name);
+				report.used.push(`env.${knob.name} = "${knob.value}"`);
+			}
+			const rest = keys.filter((k) => !used.includes(k));
 			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — ${brand.name} does not export settings env blocks)`);
 		} else if (keys.length) {
 			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);

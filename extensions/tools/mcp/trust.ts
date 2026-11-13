@@ -61,13 +61,16 @@ export function approvalStorePath(): string {
  */
 export function isProjectScopedServer(server: McpServer, pluginConfigPaths: ReadonlySet<string>): boolean {
 	if (pluginConfigPaths.has(server.source)) return false;
+	// By the file's declared scope, and by the two names a checkout has always shipped them under:
+	// a provider that calls such a file the user's own does not lift the gate.
+	if (server.scope === "project" || server.scope === "local" || server.piOrigin === "project") return true;
 	const base = basename(server.source);
-	return base === ".mcp.json" || base === "settings.local.json" || server.piOrigin === "project";
+	return base === ".mcp.json" || base === "settings.local.json";
 }
 
 /** A server from a project `.mcp.json`: the only kind Claude Code's own answers approve. */
 function definedInMcpjson(server: McpServer): boolean {
-	return basename(server.source) === ".mcp.json";
+	return server.scope === "project" || basename(server.source) === ".mcp.json";
 }
 
 /** The project file a consent-gated server comes from, as the dialog names it. */
@@ -84,7 +87,7 @@ function configLabels(servers: McpServer[]): string {
 
 /** A server defined in a local settings file (`.claude/settings.local.json`) rather than a `.mcp.json`. */
 function definedInLocalSettings(server: McpServer): boolean {
-	return basename(server.source) === "settings.local.json";
+	return server.scope === "local" || basename(server.source) === "settings.local.json";
 }
 
 /** The directory the `.mcp.json` lives in — approvals are per config file, not per cwd. */
