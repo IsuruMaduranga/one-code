@@ -1,4 +1,5 @@
 import { feature } from "../../lib/profile/feature.ts";
+import { SESSION_DIR_VAR } from "../../lib/app/app-launch.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 /**
  * doctor extension — `/doctor`, One Code's setup checkup.
@@ -201,7 +202,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			reportText: renderDoctorText(report, 100),
 			install: installKind(),
 			productVersion: productVersion(),
-			sessionsDir: join(getAgentDir(), "sessions"),
+			sessionsDir: process.env[SESSION_DIR_VAR] || join(getAgentDir(), "sessions"),
 			sessionDir: ctx.sessionManager.getSessionDir(),
 			productSettingsPath: productSettingsPath(home),
 			productProjectSettingsPath: productProjectSettingsPath(ctx.cwd, home),

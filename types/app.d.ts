@@ -36,6 +36,11 @@ declare module "*/app-launch.mjs" {
 	export const INSTALL_METHOD_VAR: string;
 	export const VERSION_VAR: string;
 	export const LAUNCHER_VARS: readonly string[];
+	/** pi's variable for where session transcripts are kept. */
+	export const SESSION_DIR_VAR: string;
+	/** Whether the profile in force keeps its own transcripts (a product profile with its own state folder). */
+	export const OWN_SESSIONS: boolean;
+	export function profileSessionDir(env?: Record<string, string | undefined>, home?: string): string;
 	export function appAgentDir(env?: Record<string, string | undefined>, home?: string): string;
 	export function installMethodFor(binRealPath: string | undefined): "brew" | "npm";
 	export function applyLauncherEnv(

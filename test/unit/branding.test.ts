@@ -193,3 +193,12 @@ describe("startup hints and the thinking label follow pi's keybindings", () => {
 		expect(boundKey(() => { throw new Error("no keybindings"); }, "app.tools.expand", "ctrl+o")).toBe("ctrl+o");
 	});
 });
+
+describe("the banner under a user's own profile", () => {
+	it("names the profile beside the version, and says nothing without one", () => {
+		const plain = (_color: string, text: string) => text;
+		const input = { version: "1.2.3", cwd: "/p", mode: "default" };
+		expect(bannerLines({ ...input, profile: "lean" } as never, plain).join("\n")).toContain("v1.2.3 · profile lean");
+		expect(bannerLines(input as never, plain).join("\n")).not.toContain("profile ");
+	});
+});
