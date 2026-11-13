@@ -135,7 +135,7 @@ describe("workflow agent() sessions", () => {
 	it("fails loud when the agent file's allowlist matches no tool", async () => {
 		const { first, error } = await toolsOf({ agentType: "b4-broken" });
 		expect(first).toBeUndefined();
-		expect(error).toBe(subagentResultText().unusableTools({ name: "b4-broken", tools: ["nonsense"], hint: requireText("subagents").toolNamesHint }));
+		expect(error).toBe(subagentResultText().unusableTools({ name: "b4-broken", tools: ["nonsense"] }));
 	});
 
 	it("loads the curated child extensions and the parent's MCP tools, as a subagent does (M6)", async () => {

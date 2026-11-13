@@ -25,8 +25,9 @@ function texts(live: LiveTools): NamedText[] {
 	// The base's words take the profile's part where a sentence names another product.
 	const t = profile.text({ live });
 	const subagentModels = subagentModelWords(live, t.subagentModels!);
-	const permissions = permissionWords(live);
+	const permissions = permissionWords(live, t.permissions);
 	const notifications = notificationText(live, t.notifications);
+	const subagents = subagentResultWords(live, t.subagents!);
 	const out: NamedText[] = [];
 	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
 	push("one-shot note", undefined, notifications.oneShotSession);
@@ -45,13 +46,13 @@ function texts(live: LiveTools): NamedText[] {
 	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
 	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
 	const runs = [{ name: "a", taskId: "t1" }];
-	push("Agent launched", "subagents", subagentResultWords(live).launched({ lines: ["x"] }));
-	push("Agent inline report", "subagents", subagentResultWords(live).inlineReport({ name: "a", taskId: "t1", note: "n" }));
-	push("SendMessage next turn", "subagents", subagentResultWords(live).nextTurn({ name: "a" }));
-	push("SendMessage to resident", "subagents", subagentResultWords(live).sentToResident({ name: "a", taskId: "t1" }));
-	push("SendMessage sent", "subagents", subagentResultWords(live).sent({ name: "a", taskId: "t1" }));
-	push("pending claim", "subagents", subagentResultWords(live).pendingClaim({ runs }));
-	push("running after compaction", "subagents", subagentResultWords(live).runningAfterCompaction({ runs }));
+	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
+	push("Agent inline report", "subagents", subagents.inlineReport({ name: "a", taskId: "t1", note: "n" }));
+	push("SendMessage next turn", "subagents", subagents.nextTurn({ name: "a" }));
+	push("SendMessage to resident", "subagents", subagents.sentToResident({ name: "a", taskId: "t1" }));
+	push("SendMessage sent", "subagents", subagents.sent({ name: "a", taskId: "t1" }));
+	push("pending claim", "subagents", subagents.pendingClaim({ runs }));
+	push("running after compaction", "subagents", subagents.runningAfterCompaction({ runs }));
 	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
 	push("web_fetch failed", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));

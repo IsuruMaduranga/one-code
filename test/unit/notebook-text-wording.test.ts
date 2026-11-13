@@ -4,7 +4,10 @@
  * every result are pinned by the golden snapshot.
  */
 import { describe, expect, it } from "vitest";
-import { notebookResultText } from "../../extensions/tools/notebook/text.ts";
+import { notebookResultWords } from "../../extensions/tools/notebook/text.ts";
+import { ALL_LIVE } from "./helpers/live.ts";
+
+const notebookResultText = notebookResultWords(ALL_LIVE, { pathAlias: "the alias" });
 
 const cells = [
 	{ label: "aaa", type: "markdown" },
@@ -12,6 +15,10 @@ const cells = [
 ];
 
 describe("the notebook text", () => {
+	it("names the path's alias as the profile does, when no path came", () => {
+		expect(notebookResultText.failed({ failure: { kind: "missingPath" } })).toBe("`path` (or the alias) is required: the .ipynb file to edit.");
+	});
+
 	it("names every edit the way the model addresses the cell next", () => {
 		expect(notebookResultText.edited({ outcome: { kind: "replaced", cell: "bbb" }, path: "a.ipynb", cellCount: 2 })).toBe("Replaced cell bbb in a.ipynb (2 cells).");
 		expect(notebookResultText.edited({ outcome: { kind: "inserted", cellType: "code", cell: "new1" }, path: "a.ipynb", cellCount: 3 })).toContain("Inserted code cell new1 at the top");

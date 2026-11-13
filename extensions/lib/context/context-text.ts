@@ -9,6 +9,7 @@
  */
 
 import { brand } from "../profile/brand.mjs";
+import type { LiveTools } from "../profile/live-tools.ts";
 import type { EnvironmentFacts } from "./environment-block.ts";
 import type { GitSnapshot } from "./git-status.ts";
 
@@ -70,7 +71,7 @@ const MEMORY_CUT = (cut: MemoryIndexCut): string =>
 export const GIT_STATUS_TAKEN_AT = { start: "the start of the conversation", compaction: "the latest compaction" } as const;
 
 /** The words, with the profile's part. */
-export const contextText = (product: ContextText) => ({
+export const contextText = (_live: LiveTools, product: ContextText) => ({
 	/** The warning after a MEMORY.md index loaded in part. */
 	memoryIndexCut: ({ size, cut }: { size: MemoryIndexSize; cut: MemoryIndexCut }): string =>
 		`> WARNING: MEMORY.md is ${MEMORY_SIZE(size)}. Only part of it was loaded: ${MEMORY_CUT(cut)}. Keep index entries to one line under ~200 chars; move detail into topic files.`,

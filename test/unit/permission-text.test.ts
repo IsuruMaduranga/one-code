@@ -11,12 +11,12 @@ import { describe, expect, it } from "vitest";
 import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 
-const permissions = permissionWords(ALL_LIVE);
+const permissions = permissionWords(ALL_LIVE, {});
 
 describe("the permission-gate text", () => {
 	it("words a secret file's refusal itself, or as the profile does", () => {
 		expect(permissions.refused({ kind: "secretFile" })).toMatch(/^That file holds secrets the user manages/);
-		expect(permissionWords(ALL_LIVE, "Use config_status.").refused({ kind: "secretFile" })).toBe("Use config_status.");
+		expect(permissionWords(ALL_LIVE, { secretFileRefusal: "Use config_status." }).refused({ kind: "secretFile" })).toBe("Use config_status.");
 	});
 
 	it("words each refusal a fixture cannot provoke", () => {

@@ -9,10 +9,11 @@
 import { describe, expect, it } from "vitest";
 import { compactionGitStatus } from "../../extensions/context/instructions/context-facts.ts";
 import { clipGitStatus, formatGitStatus } from "../../extensions/lib/context/git-status.ts";
+import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { contextText } from "../../extensions/lib/context/context-text.ts";
 import { context as contextPart } from "../text/context/index.ts";
 
-const context = contextText(contextPart);
+const context = contextText(ALL_LIVE, contextPart);
 import { contextWords } from "../../extensions/lib/context/context-words.ts";
 
 describe("One Code's context text", () => {

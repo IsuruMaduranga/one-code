@@ -5,6 +5,9 @@
  * failures are here (`notebookResultText`).
  */
 
+import type { LiveTools } from "../../lib/profile/live-tools.ts";
+import { wordsInForce } from "../../lib/profile/live-words.ts";
+
 /** A cell as the model addresses it: its own id, else its position (`cell-0`). */
 export interface CellRef {
 	label: string;
@@ -20,8 +23,8 @@ export type EditOutcome =
 
 /** Why an edit failed. `osMessage` is the system's or the parser's own text, passed through. */
 export type NotebookFailure =
-	/** No path given; `alias` is how the profile names the alias parameter (`NotebookText.pathAlias`). */
-	| { kind: "missingPath"; alias: string }
+	/** No path given. */
+	| { kind: "missingPath" }
 	| { kind: "notANotebook" }
 	| { kind: "cellIdRequired"; mode: "replace" | "delete" }
 	| { kind: "newSourceRequired" }
@@ -97,11 +100,14 @@ function reason(failure: Exclude<NotebookFailure, { kind: "missingPath" }>, cell
 	}
 }
 
-/** The base's words of the group. */
-export const notebookResultText: NotebookResultText = {
+/** The base's words of the group, with the profile's name for the path's alias. */
+export const notebookResultWords = (_live: LiveTools, product: Pick<NotebookText, "pathAlias">): NotebookResultText => ({
 	edited: ({ outcome, path, cellCount }) => `${summary(outcome)} in ${path} (${cellCount} cells).`,
 	failed: ({ failure, cells }) =>
 		failure.kind === "missingPath"
-			? `\`path\` (or ${failure.alias}) is required: the .ipynb file to edit.`
+			? `\`path\` (or ${product.pathAlias}) is required: the .ipynb file to edit.`
 			: `Notebook edit failed: ${reason(failure, cells)}`,
-};
+});
+
+/** The words for the profile in force. */
+export const notebookResultText = wordsInForce("notebook", notebookResultWords);
