@@ -59,9 +59,9 @@ export function loadProjectInstructions(cwd: string, home: string, contextWindow
 	// The agent's own fit decides its files; the files only the classifier reads
 	// share what the agent's loaded ones leave of the half, the largest going first.
 	const sections = instructions.sections({ cwd });
-	const agentFit = fitToWindow([...sections.contextFiles, ...sections.oneCodeFiles], contextWindow);
+	const agentFit = fitToWindow([...sections.contextFiles, ...sections.productFiles], contextWindow);
 	const realKey = (path: string) => tryRealpath(path) ?? path;
-	const agentFiles = new Set([...sections.contextFiles, ...sections.oneCodeFiles].map((file) => realKey(file.path)));
+	const agentFiles = new Set([...sections.contextFiles, ...sections.productFiles].map((file) => realKey(file.path)));
 	const skipped = new Map(agentFit.skipped.map((file) => [realKey(file.path), file]));
 	/** A file as this prompt shows it: a skipped one is the classifier's note. */
 	const render = (file: (typeof files)[number]) => {

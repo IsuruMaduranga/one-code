@@ -103,6 +103,6 @@ export function restoredInstructionNotice(path: string, contextWindow: number | 
 /** The sections the agent's window budget skips for `contextWindow` (above); none without a window. */
 export function agentSkippedInstructions(opts: Parameters<typeof agentInstructionSections>[0] & { contextWindow: number | undefined }): SkippedInstruction[] {
 	if (!opts.contextWindow) return [];
-	const { contextFiles, oneCodeFiles } = agentInstructionSections(opts);
-	return fitToWindow([...contextFiles, ...oneCodeFiles], opts.contextWindow).skipped;
+	const { contextFiles, productFiles } = agentInstructionSections(opts);
+	return fitToWindow([...contextFiles, ...productFiles], opts.contextWindow).skipped;
 }

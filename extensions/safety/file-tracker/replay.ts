@@ -5,7 +5,7 @@
  * the model can see is false in its own transcript (review T9).
  *
  * The content the model saw is not in the transcript, but each read and write
- * result records what it saw (`details.oneCodeFile`, `FileObservation`) under
+ * result records what it saw (`details.productFile`, `FileObservation`) under
  * the absolute path the tool resolved. The replay keys on that path, never on
  * the call's own spelling: a worktree rewrites a relative path only in the
  * call it runs, so the transcript's `a.ts` would resolve to the main
@@ -29,9 +29,9 @@ interface ToolCallBlock {
 	arguments?: Record<string, unknown>;
 }
 
-type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; toolName?: string; isError?: boolean; details?: { oneCodeFile?: unknown } };
+type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; toolName?: string; isError?: boolean; details?: { productFile?: unknown } };
 
-/** What a read or write result saw of its file, recorded in its details as `oneCodeFile`: a version with its size and modification time. */
+/** What a read or write result saw of its file, recorded in its details as `productFile`: a version with its size and modification time. */
 export type FileObservation = Required<FileVersion>;
 
 const isObservation = (value: unknown): value is FileObservation => isFileVersion(value) && value.size !== undefined && value.mtimeMs !== undefined;
@@ -50,7 +50,7 @@ function* fileResults(entries: readonly unknown[]): Generator<{ index: number; n
 		if (m.role === "assistant" && Array.isArray(m.content)) {
 			for (const block of m.content as ToolCallBlock[]) if (block?.type === "toolCall" && block.id) names.set(block.id, block.name);
 		} else if (m.role === "toolResult" && !m.isError) {
-			const seen = m.details?.oneCodeFile;
+			const seen = m.details?.productFile;
 			if (isObservation(seen)) yield { index, name: (m.toolCallId ? names.get(m.toolCallId) : undefined) ?? m.toolName, seen };
 		}
 	}

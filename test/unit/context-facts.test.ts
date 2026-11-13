@@ -39,7 +39,7 @@ describe("context fact comparisons", () => {
 
 	it("reports a change to the product's own instruction file, and stays silent for a session that never told it", () => {
 		const product = [{ path: "/PRODUCT.md", content: "mine", descriptor: "product" }] as never;
-		const edited = live({ oneCodeFiles: product });
+		const edited = live({ productFiles: product });
 		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toBe(contextWords().changedSinceSnapshot({ changes: ["product"], atCompaction: false, file: instructionTargets().project }));
 		expect(resumeFactsNotice(told.blocks, false, edited)?.text).toContain(`${brand.productFile} instructions changed`);
 		const before = new Map([...told.blocks].filter(([key]) => key !== FACT_KEYS.product));

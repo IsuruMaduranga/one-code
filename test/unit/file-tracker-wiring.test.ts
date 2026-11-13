@@ -38,7 +38,7 @@ describe("file-tracker wiring", () => {
 
 	const path = (name: string) => join(dir, name);
 	const ctx = () => createFakeCtx({ cwd: dir });
-	/** What a result that read `file` now records of it (`details.oneCodeFile`). */
+	/** What a result that read `file` now records of it (`details.productFile`). */
 	const observed = (file: string) => {
 		const stat = statSync(file);
 		return { path: file, size: stat.size, mtimeMs: stat.mtimeMs, sha256: createHash("sha256").update(readFileSync(file, "utf-8")).digest("hex") };
@@ -292,7 +292,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(file, "resumed content");
 		const branch = [
 			{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: file } }] } },
-			{ type: "message", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(file) } } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "1", isError: false, details: { productFile: observed(file) } } },
 		];
 		await fake.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s1", getBranch: () => branch } }));
 
@@ -309,12 +309,12 @@ describe("file-tracker wiring", () => {
 		const file = path("moved-on.ts");
 		writeFileSync(file, "what the model read");
 		// The read records what it saw.
-		const readResult = await fake.fireOne<{ details?: { oneCodeFile?: unknown } }>("tool_result", { toolName: "read", toolCallId: "r1", input: { path: file }, isError: false, details: { truncation: undefined } }, ctx());
-		const observation = readResult?.details?.oneCodeFile;
+		const readResult = await fake.fireOne<{ details?: { productFile?: unknown } }>("tool_result", { toolName: "read", toolCallId: "r1", input: { path: file }, isError: false, details: { truncation: undefined } }, ctx());
+		const observation = readResult?.details?.productFile;
 		expect(observation).toMatchObject({ path: file, size: "what the model read".length });
 		const branch = [
 			{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "r1", name: "read", arguments: { path: file } }] } },
-			{ type: "message", message: { role: "toolResult", toolCallId: "r1", isError: false, details: { oneCodeFile: observation } } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "r1", isError: false, details: { productFile: observation } } },
 		];
 		// The file changes while the session is closed.
 		writeFileSync(file, "someone else's version");
@@ -398,7 +398,7 @@ describe("file-tracker wiring", () => {
 			}
 			const branch = [
 				{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-				{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
+				{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { productFile: observed(kept) } } },
 				{ type: "compaction", id: "c", firstKeptEntryId: "a1" },
 			];
 			const emitted: unknown[] = [];
@@ -423,7 +423,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(kept, "y");
 		const read = (id: string, file: string) => [
 			{ type: "message", id: `a${id}`, message: { role: "assistant", content: [{ type: "toolCall", id, name: "read", arguments: { path: file } }] } },
-			{ type: "message", id: `r${id}`, message: { role: "toolResult", toolCallId: id, isError: false, details: { oneCodeFile: observed(file) } } },
+			{ type: "message", id: `r${id}`, message: { role: "toolResult", toolCallId: id, isError: false, details: { productFile: observed(file) } } },
 		];
 		const branch = [...read("1", before), ...read("2", kept), { type: "compaction", id: "c", firstKeptEntryId: "a2" }];
 		await fake.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s2", getBranch: () => branch } }));
@@ -440,7 +440,7 @@ describe("file-tracker wiring", () => {
 		for (const file of [kept, other]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
 		const branch = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { productFile: observed(kept) } } },
 			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
 		];
 		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
@@ -483,7 +483,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(kept, "changed after the read, longer than before");
 		const branch = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: seen } } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { productFile: seen } } },
 			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
 		];
 		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
@@ -498,7 +498,7 @@ describe("file-tracker wiring", () => {
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: kept }, isError: false }, ctx());
 		const read = [
 			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
-			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { oneCodeFile: observed(kept) } } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false, details: { productFile: observed(kept) } } },
 		];
 		const first = [...read, { type: "compaction", id: "c1", firstKeptEntryId: "a1", timestamp: new Date().toISOString() }];
 		const emitted: string[] = [];

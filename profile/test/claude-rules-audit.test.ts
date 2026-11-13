@@ -59,7 +59,7 @@ describe("startup project import containment", () => {
 		mkdirSync(cwd);
 		write(join(root, "outside.txt"), "GLOBAL ONECODE IMPORT");
 		const path = write(join(root, "onecode", "ONECODE.md"), "@../outside.txt\n");
-		const files = discoverContextFiles({ cwd, home: root, homeClaudeDir: join(root, "home"), homeOneCodeDir: join(root, "onecode"), managedDir: join(root, "managed"), rule: "claude-md" });
+		const files = discoverContextFiles({ cwd, home: root, homeClaudeDir: join(root, "home"), homeProductDir: join(root, "onecode"), managedDir: join(root, "managed"), rule: "claude-md" });
 		expect(files.find((file) => file.path === path)?.content).toBe("GLOBAL ONECODE IMPORT\n");
 	});
 

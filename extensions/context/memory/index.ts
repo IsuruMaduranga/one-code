@@ -61,7 +61,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 	return buildMemoryEntries({
 		cwd,
 		home: os.homedir(),
-		homeOneCodeDir: productStateDir(),
+		homeProductDir: productStateDir(),
 		agentDir: getAgentDir(),
 		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd) : undefined,
 	});

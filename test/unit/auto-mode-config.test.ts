@@ -11,7 +11,7 @@ import {
 	borrowedUserPermissionAllow,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
-	oneCodePermissionAllow,
+	productPermissionAllow,
 	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/lib/rules/auto-mode-config.ts";
@@ -180,14 +180,14 @@ describe("loadAutoModeConfig", () => {
 		// The product's side is the removable set; a borrowed user file (none here)
 		// is the warn set, read separately.
 		writeUserSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
-		expect(oneCodePermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
+		expect(productPermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
 	});
 
 	it("returns an empty allow list when a settings file is absent or malformed", () => {
 		expect(borrowedUserPermissionAllow(home)).toEqual([]);
-		expect(oneCodePermissionAllow(home)).toEqual([]);
+		expect(productPermissionAllow(home)).toEqual([]);
 		writeFileSync(productSettingsPath(home), "{not json");
-		expect(oneCodePermissionAllow(home)).toEqual([]);
+		expect(productPermissionAllow(home)).toEqual([]);
 	});
 
 	it("never reads autoMode from project settings", () => {

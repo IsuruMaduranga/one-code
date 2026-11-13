@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import instructionsExtension from "../../extensions/context/instructions/index.ts";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
-import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
+import { discoverProductFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "../../test/unit/helpers/fake-pi.ts";
@@ -64,8 +64,8 @@ describe("instructions audit", () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: join(root, "alias", "child") }));
 
 		const startup = reminders.find((reminder) => reminder.key === "instructions")?.text ?? "";
-		const oneCode = reminders.find((reminder) => reminder.key === "one-code-context")?.text ?? "";
-		expect([startup.match(/UNIQUE AGENT INSTRUCTION/g)?.length, oneCode.match(/UNIQUE ONECODE INSTRUCTION/g)?.length]).toEqual([1, 1]);
+		const product = reminders.find((reminder) => reminder.key === "one-code-context")?.text ?? "";
+		expect([startup.match(/UNIQUE AGENT INSTRUCTION/g)?.length, product.match(/UNIQUE ONECODE INSTRUCTION/g)?.length]).toEqual([1, 1]);
 	});
 
 	it.each([
@@ -157,15 +157,15 @@ describe("instructions audit", () => {
 		// project file that happens to replace the stale key.
 		resetConfigModeForTest("claude-compatible");
 		const claudeConfig = join(root, "claude-config");
-		const oneCodeState = join(root, "onecode-state");
+		const productState = join(root, "onecode-state");
 		mkdirSync(claudeConfig, { recursive: true });
-		mkdirSync(oneCodeState, { recursive: true });
+		mkdirSync(productState, { recursive: true });
 		const claude = join(claudeConfig, "CLAUDE.md");
-		const oneCode = join(oneCodeState, "ONECODE.md");
+		const product = join(productState, "ONECODE.md");
 		writeFileSync(claude, "STALE CLAUDE INSTRUCTION\n");
-		writeFileSync(oneCode, "STALE ONECODE INSTRUCTION\n");
+		writeFileSync(product, "STALE ONECODE INSTRUCTION\n");
 		vi.stubEnv("CLAUDE_CONFIG_DIR", claudeConfig);
-		vi.stubEnv("ONECODE_STATE_DIR", oneCodeState);
+		vi.stubEnv("ONECODE_STATE_DIR", productState);
 		const fake = createFakePi();
 		// The queue must be installed before instructions, as it is in the extension load order.
 		systemReminderExtension(fake.pi as never);
@@ -176,7 +176,7 @@ describe("instructions audit", () => {
 		await fake.fireOne("context", { messages: request("first session") }, ctx);
 
 		rmSync(claude);
-		rmSync(oneCode);
+		rmSync(product);
 		await fake.fireOne("session_start", {}, ctx);
 		const afterClear = await fake.fireOne<{ messages: unknown[] }>("context", { messages: request("after clear") }, ctx);
 
@@ -199,8 +199,8 @@ describe("instructions audit", () => {
 		writeFileSync(join(root, "AGENTS.md"), "@.claude/private.md\n");
 		writeFileSync(join(root, "ONECODE.md"), "@.claude/private.md\n");
 		const files = openInstructions(root, undefined).sections({ cwd: root, includeExternal: false }).contextFiles;
-		const oneCode = discoverOneCodeFiles({ cwd: root, home: root, homeOneCodeDir: join(root, "home-onecode") });
-		expect([...files, ...oneCode].some((file) => file.content.includes("HIDDEN IMPORT RULE"))).toBe(false);
+		const product = discoverProductFiles({ cwd: root, home: root, homeProductDir: join(root, "home-onecode") });
+		expect([...files, ...product].some((file) => file.content.includes("HIDDEN IMPORT RULE"))).toBe(false);
 	});
 
 	it("does not enter a .claude directory through a project symlink when attaching nested AGENTS.md", () => {

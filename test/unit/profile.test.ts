@@ -317,7 +317,7 @@ describe("the plugins feature switch", () => {
 	it("hides every plugin from discovery, so no plugin resource reaches another feature", () => {
 		use({ features: { plugins: false } });
 		invalidatePluginsCache();
-		const found = discoverPlugins({ claudePluginsDir: "/nonexistent/claude", oneCodeRoot: "/nonexistent/onecode", cwd: "/", home: "/nonexistent" } as never);
+		const found = discoverPlugins({ claudePluginsDir: "/nonexistent/claude", productRoot: "/nonexistent/onecode", cwd: "/", home: "/nonexistent" } as never);
 		expect(found.plugins).toEqual([]);
 		expect(found.agentDirs).toEqual([]);
 		expect(found.skills).toEqual([]);

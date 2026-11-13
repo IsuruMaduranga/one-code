@@ -258,7 +258,7 @@ describe("plugin hooks", () => {
 
 	const pluginRoots = () => ({
 		claudePluginsDir: join(claudeDir, "plugins"),
-		oneCodeRoot: join(root, "one-code-plugins"),
+		productRoot: join(root, "one-code-plugins"),
 		cwd: root,
 		home: root,
 	});

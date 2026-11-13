@@ -201,8 +201,8 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 	const home = homedir();
 	// Use the context loader's import confinement and approval: a literal
 	// unapproved @import is not evidence that its file is still in context.
-	const { contextFiles, oneCodeFiles } = agentInstructionSections({ cwd: ctx.cwd, home, agentDir: getAgentDir() });
-	const skipped = new Set(fitToWindow([...contextFiles, ...oneCodeFiles], ctx.model?.contextWindow).skipped.map((file) => file.path));
+	const { contextFiles, productFiles } = agentInstructionSections({ cwd: ctx.cwd, home, agentDir: getAgentDir() });
+	const skipped = new Set(fitToWindow([...contextFiles, ...productFiles], ctx.model?.contextWindow).skipped.map((file) => file.path));
 	const stack = contextFiles.flatMap((file) => (skipped.has(file.path) ? [] : [file.path, ...(file.imported ?? [])]));
 	return new Set(
 		[...stack, autoMemoryEnabled(ctx.cwd) ? join(projectMemoryDir(ctx.cwd, home), "MEMORY.md") : undefined, planFileOnBranch(branch), ...kept, ...keptShell]
@@ -413,7 +413,7 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		if (!content && !observation) return undefined;
 		return {
 			...(content ? { content } : {}),
-			...(observation ? { details: { ...((event.details as Record<string, unknown> | undefined) ?? {}), oneCodeFile: observation } } : {}),
+			...(observation ? { details: { ...((event.details as Record<string, unknown> | undefined) ?? {}), productFile: observation } } : {}),
 		};
 	});
 

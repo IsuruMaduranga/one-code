@@ -180,26 +180,26 @@ describe("discoverPlugins two-root merge", () => {
 		writeRootRegistry(roots.claudePluginsDir, { "alpha@market": [{ scope: "user", installPath: a }] });
 		mkdirSync(join(roots.home, ".claude"), { recursive: true });
 		writeFileSync(join(roots.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { "alpha@market": true } }));
-		setOverride(roots.oneCodeRoot, "alpha@market", false);
+		setOverride(roots.productRoot, "alpha@market", false);
 		invalidatePluginsCache();
 
 		expect(discoverPlugins(roots).plugins[0]).toMatchObject({ enabled: false, overridden: true });
 	});
 
 	it("one-code origin: entry-level enabled respected, dataRoot points at our root", () => {
-		const a = writePlugin(roots.oneCodeRoot, "ours");
-		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
+		const a = writePlugin(roots.productRoot, "ours");
+		writeRootRegistry(roots.productRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const plugin = discoverPlugins(roots).plugins[0];
 		expect(plugin).toMatchObject({ originRoot: "product", enabled: false, rawEnabled: false });
-		expect(plugin?.dataRoot).toBe(join(roots.oneCodeRoot, "data"));
+		expect(plugin?.dataRoot).toBe(join(roots.productRoot, "data"));
 	});
 
 	it("same id in both roots: the one-code copy wins", () => {
 		const claude = writePlugin(roots.claudePluginsDir, "dup");
-		const ours = writePlugin(roots.oneCodeRoot, "dup");
+		const ours = writePlugin(roots.productRoot, "dup");
 		writeRootRegistry(roots.claudePluginsDir, { "dup@market": [{ scope: "user", installPath: claude }] });
-		writeRootRegistry(roots.oneCodeRoot, { "dup@market": [{ scope: "user", installPath: ours }] });
+		writeRootRegistry(roots.productRoot, { "dup@market": [{ scope: "user", installPath: ours }] });
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);
@@ -207,8 +207,8 @@ describe("discoverPlugins two-root merge", () => {
 	});
 
 	it("disabled plugins contribute no resources but still appear in plugins/byPlugin", () => {
-		const a = writePlugin(roots.oneCodeRoot, "alpha", { skill: "helper" });
-		writeRootRegistry(roots.oneCodeRoot, { "alpha@market": [{ scope: "user", installPath: a, enabled: false }] });
+		const a = writePlugin(roots.productRoot, "alpha", { skill: "helper" });
+		writeRootRegistry(roots.productRoot, { "alpha@market": [{ scope: "user", installPath: a, enabled: false }] });
 
 		const discovered = discoverPlugins(roots);
 		expect(discovered.plugins).toHaveLength(1);
@@ -217,20 +217,20 @@ describe("discoverPlugins two-root merge", () => {
 	});
 
 	it("skill overrides drop individual plugin skills from the wired set", () => {
-		const a = writePlugin(roots.oneCodeRoot, "ours", { skill: "helper" });
-		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a }] });
-		setSkillOverride(roots.oneCodeRoot, skillOverrideKey("plugin", "ours:helper"), false);
+		const a = writePlugin(roots.productRoot, "ours", { skill: "helper" });
+		writeRootRegistry(roots.productRoot, { "ours@market": [{ scope: "user", installPath: a }] });
+		setSkillOverride(roots.productRoot, skillOverrideKey("plugin", "ours:helper"), false);
 		invalidatePluginsCache();
 
 		expect(discoverPlugins(roots).skills).toEqual([]);
 	});
 
 	it("caches per roots; invalidatePluginsCache forces a re-read", () => {
-		const a = writePlugin(roots.oneCodeRoot, "ours");
-		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: true }] });
+		const a = writePlugin(roots.productRoot, "ours");
+		writeRootRegistry(roots.productRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: true }] });
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true);
 
-		writeRootRegistry(roots.oneCodeRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
+		writeRootRegistry(roots.productRoot, { "ours@market": [{ scope: "user", installPath: a, enabled: false }] });
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(true); // cached
 		invalidatePluginsCache();
 		expect(discoverPlugins(roots).plugins[0]?.enabled).toBe(false);

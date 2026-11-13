@@ -57,8 +57,12 @@ export const THEME_TOKENS = `:root {
   --hover: #252b36;
 }`;
 
-/** The global the gallery defines and every `download.js` calls. */
-export const DOWNLOAD_GLOBAL = "oneCodeArtifactDownload";
+/**
+ * The global the gallery defines and every `download.js` calls: the brand's
+ * id prefix in camel case, then `ArtifactDownload`. A saved artifact keeps
+ * calling the name it was written with, so it follows the brand.
+ */
+export const DOWNLOAD_GLOBAL = `${brand.idPrefix.replace(/-(.)/g, (_, letter: string) => letter.toUpperCase())}ArtifactDownload`;
 
 export function escapeHtml(text: string): string {
 	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");

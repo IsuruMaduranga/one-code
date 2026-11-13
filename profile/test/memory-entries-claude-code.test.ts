@@ -59,10 +59,10 @@ describe("buildMemoryEntries with Claude Code's files", () => {
 	it("includes a global ONECODE.md and ends with the auto-memory folder", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });
-		const globalOneCode = write(".onecode/ONECODE.md");
+		const globalProduct = write(".onecode/ONECODE.md");
 		const entries = build(cwd);
 		expect(entries).toContainEqual(
-			expect.objectContaining({ title: "One Code user instructions", path: globalOneCode }),
+			expect.objectContaining({ title: "One Code user instructions", path: globalProduct }),
 		);
 		const last = entries[entries.length - 1];
 		expect(last).toMatchObject({ title: "Open auto-memory folder", kind: "folder", path: join(root, "mem") });

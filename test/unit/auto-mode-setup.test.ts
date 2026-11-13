@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	loadAutoModeConfig,
 	persistAutoModeSetup,
-	removeOneCodePermissionAllow,
+	removeProductPermissionAllow,
 } from "../../extensions/lib/rules/auto-mode-config.ts";
 import {
 	auditPermissionAllow,
@@ -184,7 +184,7 @@ describe("auditPermissionAllow", () => {
 	});
 });
 
-describe("persistAutoModeSetup / removeOneCodePermissionAllow", () => {
+describe("persistAutoModeSetup / removeProductPermissionAllow", () => {
 	let home: string;
 	// Both writers persist to One Code's own file, never into ~/.claude.
 	const settingsPath = () => productSettingsPath(home);
@@ -231,13 +231,13 @@ describe("persistAutoModeSetup / removeOneCodePermissionAllow", () => {
 			settingsPath(),
 			JSON.stringify({ permissions: { allow: ["Bash(git status)", "Bash(npx *)", "Bash(pnpm run *)"], deny: ["Bash(rm:*)"] } }),
 		);
-		expect(removeOneCodePermissionAllow(["Bash(npx *)", "Bash(pnpm run *)", "Bash(never there)"], home)).toBe(2);
+		expect(removeProductPermissionAllow(["Bash(npx *)", "Bash(pnpm run *)", "Bash(never there)"], home)).toBe(2);
 		const file = JSON.parse(readFileSync(settingsPath(), "utf-8"));
 		expect(file.permissions.allow).toEqual(["Bash(git status)"]);
 		expect(file.permissions.deny).toEqual(["Bash(rm:*)"]);
 	});
 
 	it("is a no-op with nothing to remove", () => {
-		expect(removeOneCodePermissionAllow(["Bash(x)"], home)).toBe(0);
+		expect(removeProductPermissionAllow(["Bash(x)"], home)).toBe(0);
 	});
 });

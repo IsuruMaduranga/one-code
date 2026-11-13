@@ -19,7 +19,7 @@ describe("movesToSystemRole", () => {
 		for (const order of [CONTEXT_ORDER.environment, CONTEXT_ORDER.modelLine, CONTEXT_ORDER.deferredTools, CONTEXT_ORDER.agents, CONTEXT_ORDER.mcp, CONTEXT_ORDER.skills, CONTEXT_ORDER.autoModeNote, CONTEXT_ORDER.date]) {
 			expect(movesToSystemRole(order), String(order)).toBe(true);
 		}
-		for (const order of [CONTEXT_ORDER.instructions, CONTEXT_ORDER.oneCodeMd, CONTEXT_ORDER.context]) {
+		for (const order of [CONTEXT_ORDER.instructions, CONTEXT_ORDER.productMd, CONTEXT_ORDER.context]) {
 			expect(movesToSystemRole(order), String(order)).toBe(false);
 		}
 	});

@@ -35,15 +35,15 @@ import {
 	autoModeSettingsPaths,
 	listAutoModeEntries,
 	loadAutoModeConfig,
-	oneCodeEnvironmentExtendsDefault,
+	productEnvironmentExtendsDefault,
 	type SourcedAutoModeEntry,
-	updateOneCodeAutoModeList,
+	updateProductAutoModeList,
 	borrowedUserPermissionAllow,
 	loadAutoModeConfigWithDiagnostics,
-	oneCodePermissionAllow,
+	productPermissionAllow,
 	persistAutoModeSetup,
 	persistClassifierModel,
-	removeOneCodePermissionAllow,
+	removeProductPermissionAllow,
 } from "../../lib/rules/auto-mode-config.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../../lib/models/model-picker.ts";
 import { findConfigured, modelIdentity } from "../../lib/models/model-policy.ts";
@@ -1954,7 +1954,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const others = listed.length - own.length;
 		// `"$defaults"` in the list: the user's lines extend the built-in default,
 		// which stays out of the editor and is kept on save.
-		const extendsDefault = oneCodeEnvironmentExtendsDefault(home);
+		const extendsDefault = productEnvironmentExtendsDefault(home);
 		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : defaultEnvironment();
 		const title =
 			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
@@ -1964,7 +1964,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		if (edited === undefined) return undefined;
 		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 		if (lines.join("\n") === start.join("\n")) return undefined;
-		updateOneCodeAutoModeList(
+		updateProductAutoModeList(
 			"environment",
 			(entries) => {
 				const at = entries.findIndex((entry) => entry.trim() === "$defaults");
@@ -2047,7 +2047,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// from project settings (decisions/modes.md). The cached config is dropped
 			// so the next classifier call reads the change.
 			addAutoRule: (section, text) => {
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						if (entries.includes(text)) throw new Error(`That ${autoLabel(section)} rule is already in your settings.`);
@@ -2060,7 +2060,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			},
 			editAutoRule: (key, text) => {
 				const { section, text: old } = parseAutoKey(key);
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						const index = entries.indexOf(old);
@@ -2074,7 +2074,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			},
 			deleteAutoRule: (key) => {
 				const { section, text } = parseAutoKey(key);
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						if (!entries.includes(text)) throw new Error("That rule is no longer in your settings.");
@@ -2424,10 +2424,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// files is removable from One Code's AND still live in Claude Code's, so it
 		// must appear in both lists (removing the One Code copy alone would leave the
 		// exposure and a false "fixed" impression).
-		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
+		const productAllow = new Set(productPermissionAllow(os.homedir()));
 		// Without a borrowed user file (independent mode) the list is empty.
 		const claudeAllow = new Set(borrowedUserPermissionAllow(os.homedir()));
-		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
+		const removable = flagged.filter((entry) => productAllow.has(entry.rule));
 		const claudeSide = flagged.filter((entry) => claudeAllow.has(entry.rule));
 
 		ctx.ui.notify(
@@ -2449,7 +2449,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (act === "Remove them") {
 			try {
-				const removed = removeOneCodePermissionAllow(
+				const removed = removeProductPermissionAllow(
 					removable.map((entry) => entry.rule),
 					os.homedir(),
 				);

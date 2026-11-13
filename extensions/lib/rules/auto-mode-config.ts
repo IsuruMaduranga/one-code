@@ -425,7 +425,7 @@ export function listAutoModeEntries(home: string): SourcedAutoModeEntry[] {
 }
 
 /** Whether One Code's own `autoMode.environment` keeps the built-in default through `"$defaults"`. */
-export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
+export function productEnvironmentExtendsDefault(home: string): boolean {
 	const block = asRecord(readFile(productSettingsPath(home), [])?.autoMode);
 	return (stringArray(block?.environment) ?? []).some((text) => text.trim() === DEFAULTS_TOKEN);
 }
@@ -436,7 +436,7 @@ export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
  * is an emptied `autoMode` block. Throws on a malformed file, like the other
  * writers.
  */
-export function updateOneCodeAutoModeList(key: AutoModeListKey, update: (entries: string[]) => string[], home: string): void {
+export function updateProductAutoModeList(key: AutoModeListKey, update: (entries: string[]) => string[], home: string): void {
 	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
@@ -453,7 +453,7 @@ export function updateOneCodeAutoModeList(key: AutoModeListKey, update: (entries
  * setup audit can actually remove. Broad rules that live in Claude Code's files
  * are One Code's to warn about, never to delete.
  */
-export function oneCodePermissionAllow(home: string): string[] {
+export function productPermissionAllow(home: string): string[] {
 	// Lenient read (a missing/malformed file is skipped) — this is a read for
 	// auditing, not a write, so leniency is correct; the writers still refuse to
 	// clobber a malformed file. Diagnostics are discarded here.
@@ -485,7 +485,7 @@ function permissionAllowIn(path: string): string[] {
  * throws on a malformed file for the same reason as the writers above. Returns
  * how many entries were actually removed.
  */
-export function removeOneCodePermissionAllow(entries: string[], home: string): number {
+export function removeProductPermissionAllow(entries: string[], home: string): number {
 	const path = productSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const permissions = asRecord(file.permissions);

@@ -254,7 +254,7 @@ export interface DiscoverRoots {
 	/** Another tool's plugin install root, read only (the source view's `pluginsDir`; One Code's provider: `~/.claude/plugins`); unset without one. */
 	claudePluginsDir?: string;
 	/** One Code's plugin root (`<agentDir>/plugins`) — ours to write. */
-	oneCodeRoot: string;
+	productRoot: string;
 	cwd: string;
 	home: string;
 }
@@ -263,7 +263,7 @@ export interface DiscoverRoots {
 export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
 	return {
 		claudePluginsDir: openSources(home).pluginsDir,
-		oneCodeRoot: pluginRoot(agentDir),
+		productRoot: pluginRoot(agentDir),
 		cwd,
 		home,
 	};
@@ -282,7 +282,7 @@ export function claudePluginEnabled(
 }
 
 /** One Code-installed plugins carry enabled on their own registry entry. */
-export function oneCodePluginEnabled(rawEnabled: boolean | undefined): boolean {
+export function productPluginEnabled(rawEnabled: boolean | undefined): boolean {
 	return rawEnabled ?? true;
 }
 
@@ -350,12 +350,12 @@ function noPlugins(): DiscoveredPlugins {
 export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 	if (!featureEnabled("plugins")) return noPlugins();
 	const claudeDir = roots.claudePluginsDir;
-	const key = [claudeDir ?? "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
+	const key = [claudeDir ?? "", roots.productRoot, roots.cwd, roots.home].join("\n");
 	if (box.current?.key === key) return box.current.result;
 
 	const ccEnabled = claudeDir ? readEnabledPlugins(roots.cwd, roots.home) : {};
-	const overrides = readOverrides(roots.oneCodeRoot);
-	const skillOverrides = readSkillStates(roots.oneCodeRoot);
+	const overrides = readOverrides(roots.productRoot);
+	const skillOverrides = readSkillStates(roots.productRoot);
 
 	const claudePlugins: Plugin[] = claudeDir
 		? loadInstalledPlugins(claudeDir, roots.cwd).map((p) => ({
@@ -367,17 +367,17 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 			}))
 		: [];
 
-	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot, roots.cwd).map((p) => ({
+	const productPlugins: Plugin[] = loadInstalledPlugins(roots.productRoot, roots.cwd).map((p) => ({
 		...p,
 		originRoot: "product" as const,
-		enabled: oneCodePluginEnabled(p.rawEnabled),
-		dataRoot: join(roots.oneCodeRoot, "data"),
+		enabled: productPluginEnabled(p.rawEnabled),
+		dataRoot: join(roots.productRoot, "data"),
 	}));
 
 	// Same plugin id installed under both roots: the One Code copy wins — it's
 	// the one this harness actively manages.
 	const byId = new Map<string, Plugin>();
-	for (const plugin of [...claudePlugins, ...oneCodePlugins]) byId.set(plugin.id, plugin);
+	for (const plugin of [...claudePlugins, ...productPlugins]) byId.set(plugin.id, plugin);
 	const plugins = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 	const enabledPlugins = plugins.filter((p) => p.enabled);
 
