@@ -54,8 +54,22 @@ export interface RequestIdentity {
 	profile?: string;
 }
 
-export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean =>
-	a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth && a.effortMarkers === b.effortMarkers && a.profile === b.profile;
+/** Each field of the identity with the epoch a change in it opens, in the order the causes are reported. */
+const IDENTITY_CAUSES = [
+	["model", "model"],
+	["api", "model"],
+	["provider", "model"],
+	["auth", "auth"],
+	["effortMarkers", "effort"],
+	["profile", "profile"],
+] as const satisfies ReadonlyArray<readonly [keyof RequestIdentity, EpochCause]>;
+
+/** Why a request under `live` cannot extend one sent under `base`, or undefined when it can. */
+export function identityChange(base: RequestIdentity, live: RequestIdentity): EpochCause | undefined {
+	return IDENTITY_CAUSES.find(([field]) => base[field] !== live[field])?.[1];
+}
+
+export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean => identityChange(a, b) === undefined;
 
 /**
  * Which of the session's context messages a request covers: the first `count`

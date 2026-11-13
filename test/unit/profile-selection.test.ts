@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import data from "../../profile/brand.json" with { type: "json" };
 import { productBrand, resolveBrand, selectedProfileName, withoutProfileFlags } from "../../extensions/lib/profile/brand.mjs";
 import { profiledPi } from "../../extensions/lib/profile/feature.ts";
-import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { activeProfile, profileKey, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { loadUserProfile, type UserProfile, wordedByUser } from "../../extensions/lib/profile/user-profile.ts";
 import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
@@ -230,5 +230,11 @@ describe("the profile resolved with a user's own over it", () => {
 		expect(requestIdentity(model as never)).not.toHaveProperty("profile");
 		setActiveProfileForTest({ ...activeProfile(), user: user({ hash: "abc" }) });
 		expect(requestIdentity(model as never)?.profile).toBe(":lean:abc");
+		// The environment's off-switches shape the head too, in any order they are written.
+		setActiveProfileForTest(undefined);
+		const off = (tools: string) => profileKey({ [`${productBrand.envPrefix}_TOOLS_OFF`]: tools });
+		expect(off("web_fetch, notebook_edit")).toBe(off("notebook_edit,web_fetch"));
+		expect(off("web_fetch")).not.toBe(off("notebook_edit"));
+		expect(profileKey({})).toBeUndefined();
 	});
 });

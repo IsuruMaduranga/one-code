@@ -44,14 +44,13 @@ import { modelSpec } from "../../lib/models/model-policy.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
-import { profileRow } from "./profile-row.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { persistSubagentModel } from "../../lib/models/subagent-default.ts";
 import { buildDoctorReport, productVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { profileSummary, requireText } from "../../lib/profile/profile.ts";
 import { modeCycleKey } from "../../lib/ui/keys.ts";
 import { UPGRADE_COMMANDS } from "../../lib/app/update-check.mjs";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
@@ -114,7 +113,6 @@ function doctorExtension(pi: ExtensionAPI) {
 		if (!readCatalogRefreshEnabled(productSettingsPath(home))) return;
 		const outcome = await refreshModelCatalog({
 			stateDir: productStateDir(process.env, home),
-			...profileRow(home),
 			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
 			signal: refreshAbort.signal,
 		});
@@ -158,7 +156,7 @@ function doctorExtension(pi: ExtensionAPI) {
 				home,
 				agentDir: getAgentDir(),
 				stateDir: productStateDir(process.env, home),
-			...profileRow(home),
+			profile: profileSummary(home),
 				sources: sourceSwitchStatus(home),
 				env: process.env,
 				platform: process.platform,

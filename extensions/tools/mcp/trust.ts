@@ -63,9 +63,7 @@ export function isProjectScopedServer(server: McpServer, pluginConfigPaths: Read
 	if (pluginConfigPaths.has(server.source)) return false;
 	// By the file's declared scope, and by the two names a checkout has always shipped them under:
 	// a provider that calls such a file the user's own does not lift the gate.
-	if (server.scope === "project" || server.scope === "local" || server.piOrigin === "project") return true;
-	const base = basename(server.source);
-	return base === ".mcp.json" || base === "settings.local.json";
+	return definedInMcpjson(server) || definedInLocalSettings(server) || server.piOrigin === "project";
 }
 
 /** A server from a project `.mcp.json`: the only kind Claude Code's own answers approve. */

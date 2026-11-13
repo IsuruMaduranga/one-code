@@ -23,8 +23,9 @@ import { brandedId, envName, productBrand, profileDirName, profileSelection, use
 import { describeUserProfile, loadUserProfile, type UserProfile } from "./user-profile.ts";
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { isRelativeInside } from "./paths.ts";
+import { isRelativeInside, tildify } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
+import { processState } from "./process-state.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
@@ -255,9 +256,10 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	const envOff = envList(env, envName("FEATURES_OFF"));
+	const envTools = envList(env, envName("TOOLS_OFF"));
 	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
-	for (const name of [...envList(env, envName("TOOLS_OFF")), ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
+	for (const name of [...envTools, ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
 	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
 	const problems = featureProblems(featureMap);
@@ -268,7 +270,6 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
 	}
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
-	const envTools = envList(env, envName("TOOLS_OFF"));
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.
@@ -329,27 +330,31 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 function chosenUserProfile(): UserProfile | undefined {
 	const name = profileSelection.userProfile;
 	if (name === undefined) return undefined;
-	const { profile, problems } = loadUserProfile(name, join(userProfilesDir(), name), productBrand.profiles ?? []);
+	// Read once per process: each extension has its own copy of this module, and all of them must see one content hash.
+	const { profile, problems } = processState("profile:user", () => loadUserProfile(name, join(userProfilesDir(), name), productBrand.profiles ?? []));
 	if (!profile) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	return profile;
 }
 
 /**
- * What a session records of the profile it runs under: the product profile's
- * id and the user's profile with its content hash, or undefined on the
- * default profile alone. A session resumed under another one renders its
- * system prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch).
+ * What a session records of the launch choices that shape its system prompt
+ * and tools: the product profile's id, the user's profile with its content
+ * hash, and the environment's off-switches. Undefined when the launch chose
+ * none of them. A session resumed under other choices renders its system
+ * prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch);
+ * without that it would go on sending the recorded ones.
  */
-export function profileKey(): string | undefined {
+export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const user = activeProfile().user;
-	if (profileSelection.productProfile === undefined && !user) return undefined;
-	return [profileSelection.productProfile ?? "", ...(user ? [user.name, user.hash] : [])].join(":");
+	const off = [envName("FEATURES_OFF"), envName("TOOLS_OFF")].map((name) => envList(env, name).sort().join(","));
+	const parts = [profileSelection.productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : ""];
+	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
 }
 
-/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder and what it changes. Undefined on the default profile alone. */
-export function profileSummary(shorten: (path: string) => string = (path) => path): string | undefined {
+/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder (shown from `home`) and what it changes. Undefined on the default profile alone. */
+export function profileSummary(home: string): string | undefined {
 	const user = activeProfile().user;
-	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${shorten(user.dir)}): ${describeUserProfile(user)}`] : [])];
+	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}`] : [])];
 	return parts.length > 0 ? parts.join(", with your own profile ") : undefined;
 }
 

@@ -229,15 +229,20 @@ export const TOOL_NEEDS: Readonly<Record<string, readonly string[]>> = {
  */
 export function toolSetProblems(features: ReadonlySet<FeatureId>, off: ReadonlySet<string>): string[] {
 	const problems: string[] = [];
+	const coreOff = new Set<string>();
 	for (const [feature, tools] of Object.entries(FEATURE_CORE_TOOLS) as [FeatureId, readonly string[]][]) {
 		if (!features.has(feature)) continue;
-		for (const tool of tools) if (off.has(tool)) problems.push(`"${tool}" cannot be turned off while the "${feature}" feature is on: turn the feature off instead`);
+		for (const tool of tools) {
+			if (!off.has(tool)) continue;
+			coreOff.add(tool);
+			problems.push(`"${tool}" cannot be turned off while the "${feature}" feature is on: turn the feature off instead`);
+		}
 	}
 	for (const [tool, needs] of Object.entries(TOOL_NEEDS)) {
 		const feature = TOOL_FEATURES[tool];
 		if (off.has(tool) || (feature !== undefined && !features.has(feature))) continue;
 		// A core tool that is off is already named above.
-		for (const need of needs) if (off.has(need) && !problems.some((problem) => problem.startsWith(`"${need}" cannot`))) problems.push(`"${tool}" needs "${need}", which is off: turn "${tool}" off too`);
+		for (const need of needs) if (off.has(need) && !coreOff.has(need)) problems.push(`"${tool}" needs "${need}", which is off: turn "${tool}" off too`);
 	}
 	return problems;
 }
