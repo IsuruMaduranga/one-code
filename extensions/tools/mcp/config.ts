@@ -45,6 +45,8 @@ export interface StdioServer {
 	source: string;
 	/** Set for a server read in pi's format: which of pi's sources defined it. */
 	piOrigin?: PiOrigin;
+	/** Set for a server read from a source view's file (`McpFile.scope`): `project` and `local` files sit in the checkout. */
+	scope?: McpFile["scope"];
 	/** Config referenced these environment variables and they are not set. */
 	missingEnv?: string[];
 	/** Every env var the config references (set or not), for the consent dialog — values are expanded away by parse time. */
@@ -60,6 +62,8 @@ export interface HttpServer {
 	headers?: Record<string, string>;
 	source: string;
 	piOrigin?: PiOrigin;
+	/** Set for a server read from a source view's file (`McpFile.scope`): `project` and `local` files sit in the checkout. */
+	scope?: McpFile["scope"];
 	/** Config referenced these environment variables and they are not set. */
 	missingEnv?: string[];
 	/** Every env var the config references (set or not), for the consent dialog — values are expanded away by parse time. */
@@ -329,7 +333,9 @@ export function loadServers(
 	}
 	// Plugin configs come first so project and user files can override them,
 	// then pi's own files, then Claude Code's.
-	for (const path of [...extraPaths, ...piPaths, ...configPaths(cwd, home)]) {
+	const sourceFiles = mcpConfigFiles(cwd, home);
+	const scopes = new Map(sourceFiles.map((file) => [file.path, file.scope]));
+	for (const path of [...extraPaths, ...piPaths, ...sourceFiles.map((file) => file.path)]) {
 		if (!existsSync(path)) continue;
 		let file: Record<string, unknown> | undefined;
 		try {
@@ -356,7 +362,9 @@ export function loadServers(
 			if (!piOrigin && server && inherited?.piOrigin && hashServerConfig(server) !== hashServerConfig(inherited)) {
 				options.onNote?.(`MCP server "${name}" in ${inherited.source} is overridden by the one in ${path}.`);
 			}
-			if (server) byName.set(name, piOrigin ? { ...server, piOrigin } : server);
+			// A plugin's or pi's own file is never a source view's, whatever path it shares.
+			const scope = plugin || piOrigin ? undefined : scopes.get(path);
+			if (server) byName.set(name, piOrigin ? { ...server, piOrigin } : scope ? { ...server, scope } : server);
 			else byName.delete(name); // an explicit `disabled` entry removes an inherited one
 		}
 	}

@@ -196,4 +196,16 @@ describe("the app launcher (lib/app/create-app.mjs) applies the launcher environ
 		expect(source.indexOf("if (runDoctor) {")).toBeGreaterThan(applyAt);
 		expect(source.indexOf('await import(resolve("@earendil-works/pi-coding-agent"))')).toBeGreaterThan(applyAt);
 	});
+
+	it("gives a product profile with its own state folder its own transcripts, and the default profile pi's", async () => {
+		const { OWN_SESSIONS, profileSessionDir, SESSION_DIR_VAR } = await import("../../extensions/lib/app/app-launch.mjs");
+		const { productBrand } = await import("../../extensions/lib/profile/brand.mjs");
+		const env: Record<string, string | undefined> = { [SESSION_DIR_VAR]: "/user/sessions" };
+		applyLauncherEnv(env, { home: "/home/alice", appVersion: "1.0.0", installMethod: "npm" });
+		// This process runs the default profile: the user's own value stays, and pi files sessions in the agent directory.
+		expect(OWN_SESSIONS).toBe(brand.stateDir !== productBrand.stateDir);
+		expect(env[SESSION_DIR_VAR]).toBe(OWN_SESSIONS ? profileSessionDir(env, "/home/alice") : "/user/sessions");
+		expect(LAUNCHER_VARS.includes(SESSION_DIR_VAR)).toBe(OWN_SESSIONS);
+		expect(profileSessionDir({}, "/home/alice")).toBe(join("/home/alice", brand.stateDir, "sessions"));
+	});
 });

@@ -1,7 +1,9 @@
 /**
  * The profile in force: `profile/index.ts` at the repo root (One Code's, or a
- * product's in its place), resolved and checked once per module instance
- * (pure, apart from reading the environment and the profile module).
+ * product's in its place), or the product profile the launch chose
+ * (`profile/profiles/<id>/index.ts`, lib/profile/brand.mjs), resolved and
+ * checked once per module instance (pure, apart from reading the environment
+ * and the profile module).
  *
  * Two environment variables can only turn things OFF, never on, so they can't
  * weaken the safety core: `ONECODE_FEATURES_OFF` (feature ids, never a guard
@@ -17,11 +19,14 @@
  * in each of the extensions' copies cost about a third of a second at startup.
  */
 
-import { brandedId, envName } from "./brand.mjs";
+import { brandedId, envName, productBrand, profileDirName, profileSelection, userProfilesDir } from "./brand.mjs";
+import { describeUserProfile, loadUserProfile, type UserProfile } from "./user-profile.ts";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { isRelativeInside } from "./paths.ts";
+import { isRelativeInside, tildify } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
+import { processState } from "./process-state.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
 import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
@@ -33,7 +38,21 @@ import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
 
-export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
+/** The product's folder: the default profile, and what every profile of the product shares (`extensions/`, `themes/`). */
+export const PRODUCT_DIR = join(PACKAGE_ROOT, "profile");
+
+/** The folder of the profile in force: `PRODUCT_DIR`, or the chosen product profile's folder under it. */
+export const PROFILE_DIR = join(PACKAGE_ROOT, ...profileDirName.split("/"));
+
+/**
+ * A catalog folder of the profile in force (`agents`, `skills`): the chosen
+ * product profile's own when it has one, else the product's, so profiles
+ * share a catalog unless one brings its own.
+ */
+export function catalogDir(name: string): string {
+	const own = join(PROFILE_DIR, name);
+	return PROFILE_DIR === PRODUCT_DIR || existsSync(own) ? own : join(PRODUCT_DIR, name);
+}
 
 /**
  * Tools a profile may neither turn off nor defer: the harness's own plumbing.
@@ -191,6 +210,8 @@ export interface ResolvedProfile {
 	readOnlyCommands: ReadonlyMap<string, ReadonlyMap<string, OptionSpec>>;
 	/** The profile's language servers, `${PROFILE_DIR}` filled in (lib/profile/language-servers.ts). */
 	languageServers: readonly ResolvedLanguageServer[];
+	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
+	user?: UserProfile;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -228,16 +249,28 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * outside the profile's extensions folder, declares a provider entry the
  * base cannot read, turns off a tool its feature or another live tool
  * cannot do without, or leaves out a text group a feature that is on reads.
+ * `extensionsRoot` is the folder child extension entries are relative to: the
+ * product's, which every product profile shares (default: `profileDir`).
+ * `user` is the user's own profile over it: its switches join the
+ * environment's, under the same limits.
  */
-export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
+export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	const envOff = envList(env, envName("FEATURES_OFF"));
-	for (const id of envOff) featureMap[id] = false;
-	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
-	for (const name of envList(env, envName("TOOLS_OFF"))) tools.set(name, { ...tools.get(name), enabled: false });
-	const problems = featureProblems(featureMap);
-	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	const envTools = envList(env, envName("TOOLS_OFF"));
+	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
+	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
+	for (const name of [...envTools, ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
+	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
+	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
+	const problems = featureProblems(featureMap);
+	if (user) {
+		// The user's own lists: name the profile, since the fix is theirs to make.
+		const where = `the profile "${user.name}" (${tildify(user.dir, homedir())})`;
+		for (const id of user.featuresOff.filter(isGuardFeature)) problems.push(`${where} cannot turn off "${id}": it guards tool calls`);
+		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
+	}
+	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.
@@ -248,7 +281,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
-	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
+	problems.push(...childExtensionProblems(profile.childExtensions, extensionsRoot));
 	problems.push(...providerProblems(profile.providers ?? {}));
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
@@ -264,6 +297,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (feature !== undefined && !features.has(feature)) disabledTools.add(name);
 	}
 	const toolProblems = toolSetProblems(features, disabledTools);
+	// pi's own tools take a description only where an extension registers them again (tools/tool-style, and its child entry);
+	// wording that could reach no tool is refused, not dropped.
+	if (user && !features.has("tool-style")) {
+		for (const name of user.toolWording.keys()) {
+			if (BUILTIN_TOOLS.includes(name) && TOOL_FEATURES[name] === undefined) toolProblems.push(`the profile "${user.name}" words "${name}", whose description can change only while the "tool-style" feature is on: turn the feature on, or delete tools/${name}.md and tools/${name}.append.md`);
+		}
+	}
 	if (toolProblems.length > 0) throw new Error(`Invalid profile: ${toolProblems.join("; ")}.`);
 	const live: LiveTools = {
 		has: (name) => {
@@ -281,7 +321,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools,
 		live,
-		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
+		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,
 		textFor: (other) => profile.text({ live: other }),
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
@@ -290,7 +330,49 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
 		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 		languageServers: resolveLanguageServers(profile.languageServers ?? {}, profileDir),
+		...(user ? { user } : {}),
 	};
+}
+
+/** The user's own profile the launch chose, read from its folder; throws, naming every problem, when it cannot be used. */
+function chosenUserProfile(): UserProfile | undefined {
+	const name = profileSelection.userProfile;
+	if (name === undefined) return undefined;
+	// Read once per process: each extension has its own copy of this module, and all of them must see one content hash.
+	const { profile, problems } = processState("profile:user", () => loadUserProfile(name, join(userProfilesDir(), name), productBrand.profiles ?? []));
+	// The loader names each file by its full path; a message shows it from the home folder.
+	if (!profile) throw new Error(`Invalid profile: ${problems.map((problem) => problem.replaceAll(userProfilesDir(), tildify(userProfilesDir(), homedir()))).join("; ")}.`);
+	return profile;
+}
+
+/**
+ * What a session records of the launch choices that shape its system prompt
+ * and tools: the product profile's id, the user's profile with its content
+ * hash, and the environment's off-switches. Undefined when the launch chose
+ * none of them. A session resumed under other choices renders its system
+ * prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch);
+ * without that it would go on sending the recorded ones.
+ */
+export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+	const user = activeProfile().user;
+	const off = [envName("FEATURES_OFF"), envName("TOOLS_OFF")].map((name) => envList(env, name).sort().join(","));
+	const parts = [profileSelection.productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : ""];
+	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
+}
+
+/** The tools registered so far with the user's wording, for the process (lib/profile/feature.ts fills it). */
+export function wordedTools(): Set<string> {
+	return processState("profile:worded-tools", () => new Set<string>());
+}
+
+/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder (shown from `home`) and what it changes. Undefined on the default profile alone. */
+export function profileSummary(home: string): string | undefined {
+	const user = activeProfile().user;
+	// A worded tool no extension has registered by now: a misspelled name, or a server that is not connected.
+	const unused = user ? [...user.toolWording.keys()].filter((name) => !wordedTools().has(name)) : [];
+	const note = unused.length > 0 ? `; no tool named ${unused.join(", ")} is registered, so that wording is unused` : "";
+	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}${note}`] : [])];
+	return parts.length > 0 ? parts.join(", with your own profile ") : undefined;
 }
 
 /** The slot the evaluated profile module is shared under (lib/profile/shared-module.ts). */
@@ -317,7 +399,7 @@ let active: ResolvedProfile | undefined;
 
 /** The shipped profile, resolved against this process's environment on first use. Throws when it is invalid. */
 export function activeProfile(): ResolvedProfile {
-	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR);
+	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile());
 	return active;
 }
 
@@ -355,7 +437,7 @@ export function profileText(): ProfileText {
 /** Stop the process: an invalid profile must never run degraded or without its gate. */
 export function failClosed(error: unknown): never {
 	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
+	process.stderr.write(`\nThe profile in ${profileDirName}/, or a switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
 	process.exit(1);
 }
 

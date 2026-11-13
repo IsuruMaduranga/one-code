@@ -57,7 +57,7 @@ import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { loadServers, mcpConfigFiles, mcpConfigWhere, type McpServer, noMcpServersMessage, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
-import { type McpFile, openSources } from "../../lib/profile/sources.ts";
+import { type McpFile, openSources, otherToolSettings } from "../../lib/profile/sources.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -423,7 +423,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			withheldNames.set(
 				server.name,
 				reason === "disabled-by-settings"
-					? `disabled by disabledMcpjsonServers in ${openSources(os.homedir()).name ?? "the"} settings`
+					? `disabled by disabledMcpjsonServers in ${otherToolSettings()}`
 					: reason === "declined"
 						? "not approved this session (project .mcp.json)"
 						: "not approved (project .mcp.json; approve in an interactive session)",

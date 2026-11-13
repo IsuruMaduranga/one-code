@@ -11,7 +11,9 @@
  * `CLAUDE.md`, or `ONECODE.md` and `AGENTS.md` without a provider, created on
  * save), AGENTS.md **when a loaded file `@`-imports it** (a standalone AGENTS.md
  * is not in our context, so trimming it changes nothing — CC has no AGENTS.md
- * concept at all), and the auto-memory folder as the last entry.
+ * concept at all), then every other loaded file by its path (a provider's
+ * rules files, a file in the project's config folder, the managed file), and
+ * the auto-memory folder as the last entry.
  */
 
 import { brand } from "../../lib/profile/brand.mjs";
@@ -24,6 +26,7 @@ import {
 	type ContextFilePath,
 	instructionTargets,
 	LOCAL_DESCRIPTOR,
+	MEMORY_DESCRIPTOR,
 	PRODUCT_DESCRIPTOR,
 	PRODUCT_GLOBAL_DESCRIPTOR,
 	openInstructions,
@@ -172,6 +175,13 @@ export function buildMemoryEntries(opts: {
 				exists: true,
 			});
 		}
+	}
+
+	// Every other file the context loads, wherever its provider keeps it (a rules file, a file in the
+	// project's config folder, organisation policy): in the context and so in the list, by its path.
+	// The auto-memory index is the folder row's.
+	for (const { path, descriptor } of discovered) {
+		if (descriptor !== MEMORY_DESCRIPTOR) add({ title: disp(path), path, kind: "file", exists: true });
 	}
 
 	if (memoryDir) add({ title: "Open auto-memory folder", path: memoryDir, kind: "folder", exists: true });

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { CONFIG_DIR_NAME, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { keepView, replacedBuiltinsView } from "./builtins.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
+import { profileSummary } from "../../lib/profile/profile.ts";
 import { loadPermissionSettings } from "../../lib/rules/settings.ts";
 import { buildDoctorReport } from "./build.ts";
 import { type DoctorReport, renderDoctorText, type SessionView } from "./report.ts";
@@ -71,6 +72,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 			home,
 			agentDir,
 			stateDir: productStateDir(env, home),
+			profile: profileSummary(home),
 			sources: sourceSwitchStatus(home, env),
 			env,
 			platform: process.platform,

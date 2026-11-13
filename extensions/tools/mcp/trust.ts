@@ -58,23 +58,29 @@ export function approvalStorePath(): string {
  * so it is consent-gated. A plugin's `.mcp.json` (also named `.mcp.json`) is
  * excluded: installing the plugin was the consent. pi's user file
  * (`<agentDir>/mcp.json`) is the user's own, like `~/.claude.json`.
+ * The rule is the settings ladder's (lib/profile/settings-files.ts
+ * `withRepoFiles`): a checked-in file, and another tool's per-project file.
+ * Only a source view's files carry a scope here, so a `local` one is always
+ * another tool's.
  */
 export function isProjectScopedServer(server: McpServer, pluginConfigPaths: ReadonlySet<string>): boolean {
 	if (pluginConfigPaths.has(server.source)) return false;
-	const base = basename(server.source);
-	return base === ".mcp.json" || base === "settings.local.json" || server.piOrigin === "project";
+	// By the file's declared scope, and by the two names a checkout has always shipped them under:
+	// a provider that calls such a file the user's own does not lift the gate.
+	return definedInMcpjson(server) || definedInLocalSettings(server) || server.piOrigin === "project";
 }
 
 /** A server from a project `.mcp.json`: the only kind Claude Code's own answers approve. */
 function definedInMcpjson(server: McpServer): boolean {
-	return basename(server.source) === ".mcp.json";
+	return server.scope === "project" || basename(server.source) === ".mcp.json";
 }
 
 /** The project file a consent-gated server comes from, as the dialog names it. */
 function configLabel(server: McpServer): string {
 	if (definedInLocalSettings(server)) return `${basename(dirname(server.source))}/${basename(server.source)}`;
 	// pi's project file is `<dir>/<pi's config dir>/mcp.json`, `.pi/mcp.json` unless pi is rebranded.
-	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : ".mcp.json";
+	// Any other gated file by its own name: `.mcp.json`, or what a source provider calls its project file.
+	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : basename(server.source);
 }
 
 /** "a and b" for the distinct config files of `servers`. */
@@ -84,7 +90,7 @@ function configLabels(servers: McpServer[]): string {
 
 /** A server defined in a local settings file (`.claude/settings.local.json`) rather than a `.mcp.json`. */
 function definedInLocalSettings(server: McpServer): boolean {
-	return basename(server.source) === "settings.local.json";
+	return server.scope === "local" || basename(server.source) === "settings.local.json";
 }
 
 /** The directory the `.mcp.json` lives in — approvals are per config file, not per cwd. */

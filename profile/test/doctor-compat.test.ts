@@ -54,7 +54,7 @@ describe("collectCompat: settings files", () => {
 		write(join(home, ".claude", "settings.json"), {
 			permissions: { allow: ["Bash(git status)"], deny: ["Read(.env)"], defaultMode: "plan" },
 			hooks: { PostToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: "npx prettier" }] }] },
-			env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet", FOO: "1" },
+			env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet", CLAUDE_CODE_GIT_BASH_PATH: "C:\\Git\\bin\\bash.exe", FOO: "1" },
 			enabledPlugins: { "a@b": true },
 			model: "opus",
 			statusLine: { type: "command", command: "echo" },
@@ -67,6 +67,8 @@ describe("collectCompat: settings files", () => {
 			"hooks: PostToolUse ×1",
 			"enabledPlugins: 1",
 			'env.CLAUDE_CODE_SUBAGENT_MODEL = "sonnet"',
+			// Git Bash's path is read from the block too (lib/shell-run/shell-spawn.ts).
+			'env.CLAUDE_CODE_GIT_BASH_PATH = "C:\\Git\\bin\\bash.exe"',
 		]);
 		expect(user.ignored).toEqual(["env (1 variable — One Code does not export settings env blocks)", "model", "statusLine"]);
 		const project = compat.files.find((f) => f.scope === "borrowed-project")!;

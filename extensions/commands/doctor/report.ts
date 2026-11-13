@@ -69,6 +69,8 @@ export interface DoctorEnvironment {
 	agentDir: string;
 	/** One Code's own state dir (~/.onecode or ONECODE_STATE_DIR). */
 	stateDir: string;
+	/** The profile the launch chose (lib/profile/brand.mjs), as /doctor names it; absent on the default profile alone. */
+	profile?: string;
 	/** The source provider's switch, and what it reads (lib/profile/sources.ts); absent without one. */
 	sources?: SwitchStatus;
 	env: NodeJS.ProcessEnv;

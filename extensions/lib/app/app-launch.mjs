@@ -19,7 +19,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { brand, envName } from "../profile/brand.mjs";
+import { brand, envName, productBrand, productStateDir } from "../profile/brand.mjs";
 
 /** The app-only override for the app's pi agent directory. */
 export const APP_AGENT_DIR_VAR = envName("AGENT_DIR");
@@ -30,11 +30,31 @@ export const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
 /** The variables the launcher sets for its own process. */
 /** The variable the launcher passes the app's version in: its presence is how the base tells the bundled app from a plain pi package. */
 export const VERSION_VAR = envName("VERSION");
-export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", VERSION_VAR, INSTALL_METHOD_VAR];
+/** pi's variable for where session transcripts are kept and looked up. */
+export const SESSION_DIR_VAR = "PI_CODING_AGENT_SESSION_DIR";
+/**
+ * Whether the profile in force keeps its own transcripts: a product profile
+ * with a state folder of its own (`.bi` beside the product's). Sign-in and
+ * the model list stay in the product's agent directory; the transcripts go
+ * to the profile's folder, so one profile's sessions are never listed or
+ * resumed under another.
+ */
+export const OWN_SESSIONS = brand.stateDir !== productBrand.stateDir;
+export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", VERSION_VAR, INSTALL_METHOD_VAR, ...(OWN_SESSIONS ? [SESSION_DIR_VAR] : [])];
 
-/** The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`. */
+/** Where the profile in force keeps its transcripts when it keeps its own: `<its state folder>/sessions`. pi files every project's sessions there and lists them by working directory. */
+export function profileSessionDir(env = process.env, home = homedir()) {
+	return join(productStateDir(env, home), "sessions");
+}
+
+/**
+ * The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`.
+ * It sits in the product's own folder whichever profile runs, so every
+ * profile of a product shares one sign-in and model list. A product profile
+ * with its own state folder keeps its transcripts there (`OWN_SESSIONS`).
+ */
 export function appAgentDir(env = process.env, home = homedir()) {
-	return env[APP_AGENT_DIR_VAR] || join(home, brand.stateDir, "agent");
+	return env[APP_AGENT_DIR_VAR] || join(home, productBrand.stateDir, "agent");
 }
 
 /**
@@ -63,6 +83,7 @@ export function applyLauncherEnv(env, { home = homedir(), appVersion, installMet
 	}
 	const agentDir = appAgentDir(env, home);
 	env.PI_CODING_AGENT_DIR = agentDir;
+	if (OWN_SESSIONS) env[SESSION_DIR_VAR] = profileSessionDir(env, home);
 	env.PI_SKIP_VERSION_CHECK = "1"; // the app ships its own update check
 	env[VERSION_VAR] = appVersion; // the banner shows the app version
 	env[INSTALL_METHOD_VAR] = installMethod;

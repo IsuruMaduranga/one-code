@@ -26,10 +26,11 @@ import {
 	trimOpenRouter,
 	unknownRepos,
 } from "../extensions/lib/models/model-catalog-data.ts";
+import { brand } from "../extensions/lib/profile/brand.mjs";
 import { BUILTIN_PROVIDER_POLICIES } from "../extensions/lib/models/model-policy.ts";
 
 const dir = bundledCatalogDir();
-const headers = { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; one-code-gen-model-catalog)" };
+const headers = { accept: "application/json", "user-agent": `Mozilla/5.0 (compatible; ${brand.idPrefix}-gen-model-catalog)` };
 const get = async (url) => {
 	const response = await fetch(url, { headers, signal: AbortSignal.timeout(60_000) });
 	if (!response.ok) throw new Error(`${url} responded ${response.status}`);

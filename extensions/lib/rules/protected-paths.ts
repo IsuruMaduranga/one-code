@@ -12,7 +12,7 @@
  * the check runs before allow rules are evaluated.
  */
 
-import { brand } from "../profile/brand.mjs";
+import { brand, productBrand } from "../profile/brand.mjs";
 import { relative, resolve, sep } from "node:path";
 
 /** Directories whose entire contents are protected. */
@@ -31,6 +31,8 @@ const PROTECTED_DIRS = [
 	// as generated state moves here, a write that reconfigures the gate must
 	// stay just as guarded in its new home.
 	brand.stateDir.toLowerCase(),
+	// The folder a product's profiles share (sign-in, users' profiles), when the profile in force names its own.
+	...(productBrand.stateDir === brand.stateDir ? [] : [productBrand.stateDir.toLowerCase()]),
 	// Run-at-login and on-PATH locations (PERMISSIONS-REVIEW-2026-09-05 M7): a
 	// launchd agent plist runs at the next login, a fish config at the next
 	// shell, and `~/.local/bin` is where the `pi` shim and user tools live.

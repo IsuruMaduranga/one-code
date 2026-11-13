@@ -36,7 +36,7 @@ export const FEATURES = {
 	hooks: { entries: ["safety/hooks/index.ts"], guard: true },
 	"tool-search": { entries: ["request/tool-search/index.ts"], required: true },
 	"search-tools": { entries: ["tools/search-tools/index.ts"] },
-	"tool-style": { entries: ["tools/tool-style/index.ts"] },
+	"tool-style": { entries: ["tools/tool-style/index.ts", "tools/tool-style/child.ts"] },
 	// A guard: plugin discovery supplies the hooks of installed plugins (safety/hooks/plugin-hooks.ts).
 	plugins: { entries: ["tools/plugins/index.ts"], guard: true },
 	worktree: { entries: ["safety/worktree/index.ts"] },
@@ -155,20 +155,17 @@ export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
 	exit_worktree: "worktree",
 };
 
-/** The feature a bundled skill serves (its body drives that feature's tools); the skill is hidden when the feature is off. */
-export const BUNDLED_SKILL_FEATURES: Readonly<Record<string, FeatureId>> = {
-	"artifact-design": "artifacts",
-	loop: "background",
-	"workflow-authoring": "workflow",
-};
-
 /**
  * The tools a bundled skill's body tells the model to call: the skill is
- * hidden unless every one is live. /loop schedules with the cron tools or
- * `schedule_wakeup`, arms a monitor and stops what it armed.
+ * hidden unless the session has every one, so it goes with a feature that is
+ * off, a tool turned off alone, and a child session that loads neither.
+ * /loop schedules with the cron tools or `schedule_wakeup`, arms a monitor
+ * and stops what it armed.
  */
 export const BUNDLED_SKILL_TOOLS: Readonly<Record<string, readonly string[]>> = {
+	"artifact-design": ["artifact"],
 	loop: ["cron_create", "cron_delete", "schedule_wakeup", "monitor", "task_output", "task_stop"],
+	"workflow-authoring": ["workflow"],
 };
 
 /** The feature an entry file belongs to (`tools/bash/child.ts` → `bash`), or undefined. */
@@ -229,15 +226,20 @@ export const TOOL_NEEDS: Readonly<Record<string, readonly string[]>> = {
  */
 export function toolSetProblems(features: ReadonlySet<FeatureId>, off: ReadonlySet<string>): string[] {
 	const problems: string[] = [];
+	const coreOff = new Set<string>();
 	for (const [feature, tools] of Object.entries(FEATURE_CORE_TOOLS) as [FeatureId, readonly string[]][]) {
 		if (!features.has(feature)) continue;
-		for (const tool of tools) if (off.has(tool)) problems.push(`"${tool}" cannot be turned off while the "${feature}" feature is on: turn the feature off instead`);
+		for (const tool of tools) {
+			if (!off.has(tool)) continue;
+			coreOff.add(tool);
+			problems.push(`"${tool}" cannot be turned off while the "${feature}" feature is on: turn the feature off instead`);
+		}
 	}
 	for (const [tool, needs] of Object.entries(TOOL_NEEDS)) {
 		const feature = TOOL_FEATURES[tool];
 		if (off.has(tool) || (feature !== undefined && !features.has(feature))) continue;
 		// A core tool that is off is already named above.
-		for (const need of needs) if (off.has(need) && !problems.some((problem) => problem.startsWith(`"${need}" cannot`))) problems.push(`"${tool}" needs "${need}", which is off: turn "${tool}" off too`);
+		for (const need of needs) if (off.has(need) && !coreOff.has(need)) problems.push(`"${tool}" needs "${need}", which is off: turn "${tool}" off too`);
 	}
 	return problems;
 }

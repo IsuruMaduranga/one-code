@@ -85,6 +85,7 @@ describe("ledger fold", () => {
 		expect(foldBranch(b.entries, live).opensEpoch).toBe(false);
 		expect(foldBranch(b.entries, { ...live, model: "claude-haiku-4-5" }).opensEpoch).toBe(true);
 		expect(foldBranch(b.entries, { ...live, auth: "oauth" }).opensEpoch).toBe(true);
+		expect(foldBranch(b.entries, { ...live, profile: "BI" }).cause).toBe("profile");
 		b.compaction();
 		expect(foldBranch(b.entries, live).opensEpoch).toBe(true);
 	});

@@ -14,7 +14,7 @@
  * Subdirectories are searched recursively.
  */
 
-import { activeProfile, PROFILE_DIR } from "../profile/profile.ts";
+import { activeProfile, catalogDir } from "../profile/profile.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
@@ -184,7 +184,7 @@ export function agentDirs(cwd: string, home: string, bundled?: string): string[]
 }
 
 /** The profile's agent files (One Code's: general-purpose, explore, plan, …); `general-purpose` is the Agent tool's default. */
-export const BUNDLED_AGENTS_DIR = join(PROFILE_DIR, "agents");
+export const BUNDLED_AGENTS_DIR = catalogDir("agents");
 
 /**
  * Every agent-file source in rank order, as the Agent tool loads them:

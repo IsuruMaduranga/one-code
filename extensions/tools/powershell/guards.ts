@@ -18,7 +18,7 @@
 import { leadingSleepReason } from "../../lib/shell/bash-guards.ts";
 import { gitSubcommand } from "../../lib/shell/shell-analysis.ts";
 import { powershellStatements, statementCommand } from "../../lib/shell/powershell-rules.ts";
-import { type ShellResultText, shellResultText } from "../../lib/shell-run/shell-text.ts";
+import { type ShellBlock, type ShellResultText, shellResultText } from "../../lib/shell-run/shell-text.ts";
 
 /** Seconds a `Start-Sleep` statement provably lasts, or undefined when its argument is not a literal. */
 export function startSleepSeconds(statement: string): number | undefined {
@@ -47,16 +47,21 @@ export function startSleepSeconds(statement: string): number | undefined {
 
 const INTERACTIVE = new Set(["read-host", "get-credential", "out-gridview", "pause"]);
 
-/** `opts.words`: the session's words for a refusal; the main session's by default. */
+/** Why the call is refused, in words: the main session's by default (`opts.words`). */
 export function powershellGuardReason(command: string, opts: { background: boolean; words?: ShellResultText }): string | undefined {
-	const say = opts.words ?? shellResultText();
+	const block = powershellGuardBlock(command, opts);
+	return block && (opts.words ?? shellResultText()).blocked(block);
+}
+
+/** Why the call is refused, as data (lib/shell-run/shell-tool.ts words it for its session). */
+export function powershellGuardBlock(command: string, opts: { background: boolean }): ShellBlock | undefined {
 	const statements = powershellStatements(command);
 	if (!statements || statements.length === 0) return undefined;
 
 	for (const statement of statements) {
 		const cmd = statementCommand(statement);
 		if (INTERACTIVE.has(cmd)) {
-			return say.blocked({ kind: "consolePrompt", command: cmd });
+			return { kind: "consolePrompt", command: cmd };
 		}
 		if (cmd === "git") {
 			// `gitSubcommand` skips git's value-taking global flags (`-C <dir>`,
@@ -67,10 +72,10 @@ export function powershellGuardReason(command: string, opts: { background: boole
 			const { sub, rest } = gitSubcommand(words.map((value) => ({ value })));
 			const flags = new Set(rest.map((t) => t.value));
 			if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
-				return say.blocked({ kind: "rebaseInteractive", shell: "powershell" });
+				return { kind: "rebaseInteractive", shell: "powershell" };
 			}
 			if (sub === "add" && ["-i", "--interactive", "-p", "--patch"].some((f) => flags.has(f))) {
-				return say.blocked({ kind: "addInteractive" });
+				return { kind: "addInteractive" };
 			}
 		}
 	}
@@ -80,6 +85,6 @@ export function powershellGuardReason(command: string, opts: { background: boole
 		statements,
 		(statement) => (statementCommand(statement) === "start-sleep" ? startSleepSeconds(statement) : null),
 		(statement) => statement,
-		{ sleepName: "Start-Sleep", joiner: "; ", untilExample: "while (-not (<check>)) { Start-Sleep 2 }", words: say },
+		{ sleepName: "Start-Sleep", joiner: "; ", untilExample: "while (-not (<check>)) { Start-Sleep 2 }" },
 	);
 }

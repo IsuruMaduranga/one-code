@@ -5,7 +5,9 @@
  * the main session's words would send it to tools it lacks.
  */
 import { describe, expect, it } from "vitest";
-import { childLive, childShellWords, childText } from "../../extensions/lib/agents/child-extensions.ts";
+import { childLive, childText, markChildBus, sessionView } from "../../extensions/lib/agents/child-extensions.ts";
+import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
+import { createFakePi } from "./helpers/fake-pi.ts";
 import { TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import { activeProfile } from "../../extensions/lib/profile/profile.ts";
 import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
@@ -31,18 +33,29 @@ describe("a child session's tools", () => {
 		const texts = [
 			...(["short", "long"] as const).flatMap((form) => [true, false].map((autoMode) => shell.bashDescription({ form, autoMode, searchTools: false }))),
 			...(["core", "desktop", "unknown"] as const).map((edition) => shell.powershellDescription({ edition })),
-			childShellWords().blocked({ kind: "sleep", shown: "sleep 30", sleepName: "sleep", untilExample: "until test -f x; do sleep 2; done" }),
-			childShellWords().blocked({ kind: "consolePrompt", command: "Read-Host" }),
-			childShellWords().backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }),
+			shellResultText(childLive()).blocked({ kind: "sleep", shown: "sleep 30", sleepName: "sleep", untilExample: "until test -f x; do sleep 2; done" }),
+			shellResultText(childLive()).blocked({ kind: "consolePrompt", command: "Read-Host" }),
+			shellResultText(childLive()).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }),
 		];
 		for (const text of texts) for (const tool of ABSENT) expect(mentions(text, tool, { monitor: [/monitor for regressions/] }), tool).toEqual([]);
 	});
 
 	it("refuse a command in the words the session is given", () => {
-		const child = bashGuardReason("sleep 60", { background: false, words: childShellWords() });
+		const child = bashGuardReason("sleep 60", { background: false, words: shellResultText(childLive()) });
 		const main = bashGuardReason("sleep 60", { background: false });
 		expect(child).toBeDefined();
 		expect(child).not.toContain("monitor");
 		if (activeProfile().live.has("monitor")) expect(main).toContain("monitor");
+	});
+
+	it("are what an extension reads through its session's view, in a child and only there", () => {
+		const main = createFakePi();
+		expect(sessionView(main.pi as never)).toMatchObject({ child: false, live: activeProfile().live });
+		const child = createFakePi();
+		markChildBus(child.events as never);
+		const view = sessionView(child.pi as never);
+		expect(view.child).toBe(true);
+		expect(view.live).toBe(childLive());
+		expect(view.text("toolSearch")).toBe(childText().toolSearch);
 	});
 });

@@ -7,7 +7,7 @@
  */
 
 import { brand } from "../../../lib/profile/brand.mjs";
-import { sourceName } from "../../../lib/profile/sources.ts";
+import { otherToolName, otherToolSettings } from "../../../lib/profile/sources.ts";
 import { formatInstallCount } from "../counts.ts";
 import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../../lib/ui/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
@@ -201,12 +201,12 @@ function detailLines(input: PanelRenderInput, paint: PanelPaint): { lines: strin
 
 	if ("kind" in row && row.kind === "plugin") {
 		push(`${row.name} Plugin${row.marketplace ? ` · ${row.marketplace}` : ""}`, paint.bold);
-		push(`Origin: ${row.origin === "product" ? `installed by ${brand.name}` : `installed by ${sourceName() ?? "another tool"} (read-only files)`}`);
+		push(`Origin: ${row.origin === "product" ? `installed by ${brand.name}` : `installed by ${otherToolName()} (read-only files)`}`);
 		push(`State: ${row.enabled ? "enabled" : "disabled"}${row.overridden ? ` (${brand.name} override)` : ""}`);
 		push("");
 		for (const noteLine of wrapNote(TRUST_NOTE, width - 4)) push(noteLine, (t) => paint.fg("warning", t));
 		const uninstall = row.origin === "product" ? " · u to uninstall" : "";
-		const overrideNote = row.origin === "claude" ? ` (${brand.name} override — ${sourceName() ?? "the other tool's"} settings untouched)` : "";
+		const overrideNote = row.origin === "claude" ? ` (${brand.name} override — ${otherToolSettings()} untouched)` : "";
 		return { lines, footer: `Enter/Space/e/d to toggle${overrideNote}${uninstall} · f to favorite · Esc to go back` };
 	}
 

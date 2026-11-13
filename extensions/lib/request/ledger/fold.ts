@@ -28,7 +28,7 @@
  *
  * Pure: no pi imports.
  */
-import { type Coverage, type EntryLike, type EpochCause, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
+import { type Coverage, type EntryLike, type EpochCause, identityChange, type PendingRecordData, readRecord, type RequestIdentity, type RequestRecordData, sameIdentity, type ToldFact } from "./records.ts";
 import { declaredToolNames, leadingToolsItem, loadedInList, type RecordedRequest } from "./wire.ts";
 
 export type { EpochCause };
@@ -242,17 +242,9 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 		.filter(({ item, index }) => !consumed.has(item.id) && !(item.untilCompaction && index < lastCompaction))
 		.map(({ item }) => item);
 
-	const changed = (b: RequestIdentity, live: RequestIdentity): EpochCause | undefined =>
-		b.model !== live.model || b.api !== live.api || b.provider !== live.provider
-			? "model"
-			: b.auth !== live.auth
-				? "auth"
-				: b.effortMarkers !== live.effortMarkers
-					? "effort"
-					: undefined;
 	// A compaction with no settled request before it (the only request failed, a
 	// session recorded before the ledger) still opens the compaction's epoch.
-	const cause: EpochCause | undefined = resetSinceBase ?? (!base ? "first" : identity ? changed(base.identity, identity) : undefined);
+	const cause: EpochCause | undefined = resetSinceBase ?? (!base ? "first" : identity ? identityChange(base.identity, identity) : undefined);
 	return {
 		opensEpoch: cause !== undefined,
 		...(cause ? { cause } : {}),

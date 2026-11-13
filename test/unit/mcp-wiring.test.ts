@@ -7,10 +7,11 @@
  * `close` / `callTool` / `isUnauthorized` are replaced at the `./client.ts`
  * module boundary with controllable fakes; the rest of that module (schema
  * conversion, reminder formatting) is kept real via `importOriginal`.
- * `os.homedir()` and One Code's state folder are redirected to a private temp
- * dir that holds this test's own `.claude.json` and MCP approvals, so results
+ * `os.homedir()` and the product's state folder are redirected to a private
+ * temp dir that holds this test's own MCP files and approvals, so results
  * don't depend on the real developer machine's MCP config or installed
- * plugins.
+ * plugins. The files are a test provider's (`useBorrowedLadder`): the base
+ * reads another tool's MCP files only through a source provider.
  */
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -29,10 +30,11 @@ import type { McpFailure } from "../../extensions/tools/mcp/text.ts";
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
 	return renderRequest(events, { facts: mcpFacts(told) }).map((block) => block.text);
 }
-import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "../../test/unit/helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { localCommandBlocks } from "../../extensions/lib/ui/local-command.ts";
-import { resetConfigModeForTest } from "../claude-code/mode.ts";
-import { tempHome } from "../../test/unit/helpers/temp-home.ts";
+import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { BORROWED_MCP_WHERE, borrowedMcpPaths, useBorrowedLadder } from "./helpers/settings-files.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 
 interface Fixture {
 	tools?: Array<{ name: string; description?: string; inputSchema?: Record<string, unknown> }>;
@@ -94,6 +96,8 @@ describe("mcp wiring", () => {
 	let cwd: string;
 	let fake: FakePi;
 
+	useBorrowedLadder();
+
 	beforeEach(() => {
 		({ home, cwd } = tempHome("mcp-wiring-"));
 		state.fakeHome = home;
@@ -105,10 +109,13 @@ describe("mcp wiring", () => {
 	});
 
 	const writeUserServers = (servers: Record<string, unknown>) => {
-		writeFileSync(join(home, ".claude.json"), JSON.stringify({ mcpServers: servers }));
+		writeFileSync(borrowedMcpPaths(cwd, home).user, JSON.stringify({ mcpServers: servers }));
+	};
+	const writeProjectServers = (servers: Record<string, unknown>) => {
+		writeFileSync(borrowedMcpPaths(cwd, home).project, JSON.stringify({ mcpServers: servers }));
 	};
 
-	// User-scope servers (~/.claude.json) never need consent, so session_start
+	// User-scope servers never need consent, so session_start
 	// with hasUI:false both skips the trust dialog AND awaits the whole
 	// connect (tools/mcp/index.ts's non-UI path) — deterministic, no polling needed.
 	const boot = async () => {
@@ -135,7 +142,7 @@ describe("mcp wiring", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 
-	it("records the empty-server guidance, naming One Code's commands, as the local result", async () => {
+	it("records the empty-server guidance, naming the provider's files, as the local result", async () => {
 		await boot();
 		const blocks: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
@@ -143,10 +150,9 @@ describe("mcp wiring", () => {
 			if (payload.placement === "user-prepend" && payload.text !== undefined) blocks.push(payload.text);
 		});
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
-		const stdout = noMcpServersMessage(".mcp.json in the project, ~/.claude.json");
+		const stdout = noMcpServersMessage(BORROWED_MCP_WHERE);
 		expect(stdout).toContain("Run /doctor if this is unexpected");
-		expect(stdout).toContain(".mcp.json in the project, ~/.claude.json");
-		expect(stdout).not.toMatch(/claude (doctor|mcp)|code\.claude\.com/);
+		expect(stdout).toContain(BORROWED_MCP_WHERE);
 		await fake.commands.get("mcp")!.handler("", ctx);
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
@@ -167,8 +173,8 @@ describe("mcp wiring", () => {
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout: shown.join("\n") }));
 	});
 
-	it("records the independent-mode empty-server notice as the local result too", async () => {
-		resetConfigModeForTest("independent");
+	it("records the empty-server notice of a profile without a provider as the local result too", async () => {
+		setActiveProfileForTest({ ...activeProfile(), sourcesModule: undefined });
 		await boot();
 		const blocks: string[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => {
@@ -179,7 +185,7 @@ describe("mcp wiring", () => {
 		await fake.commands.get("mcp")!.handler("", ctx);
 		const stdout = noMcpServersMessage(undefined);
 		expect(stdout).toContain("add servers to .pi/mcp.json or the agent dir's mcp.json");
-		expect(stdout).not.toContain(".claude");
+		expect(stdout).not.toContain("borrowed");
 		expect(blocks).toEqual(localCommandBlocks({ name: "mcp", stdout }));
 	});
 
@@ -609,7 +615,7 @@ describe("mcp wiring", () => {
 	};
 
 	it("Reconnect never spawns a project server whose variable is unset, and names the variable", async () => {
-		writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: { s: { command: "run-it", env: { TOKEN: "$B1_UNSET_TOKEN_VAR" } } } }));
+		writeProjectServers({ s: { command: "run-it", env: { TOKEN: "$B1_UNSET_TOKEN_VAR" } } });
 		delete process.env.B1_UNSET_TOKEN_VAR;
 		await boot();
 		expect(state.connectCalls).toEqual([]);
@@ -621,7 +627,7 @@ describe("mcp wiring", () => {
 	});
 
 	it("Reconnect asks for consent before respawning a project server, and a No keeps it off", async () => {
-		writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: { p: { command: "run-it" } } }));
+		writeProjectServers({ p: { command: "run-it" } });
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: true, ui: { select: vi.fn(async () => "Use this MCP server") } }));
 		await vi.waitFor(() => expect(state.connectCalls).toEqual(["p"]));
@@ -632,7 +638,7 @@ describe("mcp wiring", () => {
 		resetMcpTrustSessionState();
 		const panel = await reconnectFirst("No");
 		await vi.waitFor(() => expect(panel.selects).toHaveLength(1));
-		expect(panel.selects[0]).toContain("New MCP server found in .mcp.json: p");
+		expect(panel.selects[0]).toContain("New MCP server found in .borrowed-mcp.json: p");
 		await vi.waitFor(() => expect(panel.component.render(120).join("\n")).toContain("was not approved"));
 		expect(state.connectCalls).toEqual(["p"]);
 		await panel.close();

@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { bashTool } from "./index.ts";
 
 function childBashExtension(pi: ExtensionAPI) {
-	bashTool(pi, { announce: false, child: true });
+	bashTool(pi, { announce: false });
 }
 
 export default feature("bash", childBashExtension);

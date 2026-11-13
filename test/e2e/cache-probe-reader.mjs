@@ -194,7 +194,9 @@ if (isMain) {
 	const result = runReaderProbe();
 	for (const line of result.lines) console.log(line);
 	for (const failure of result.failures) console.log(`FAIL  ${failure}`);
-	if (result.status === "pass") console.log("PASS  reader cache warm for the repeated identical page");
+	// A miss on an implicit cache is a warning, not a failure: say so, never "warm" over a read that did not happen.
+	const unconfirmed = result.lines.some((line) => line.startsWith("WARN  "));
+	if (result.status === "pass") console.log(unconfirmed ? "PASS  with a warning: the reader's cache read was not confirmed" : "PASS  reader cache warm for the repeated identical page");
 	if (result.status === "skip") console.log("SKIP  reader cache was not measured");
 	if (result.status === "fail") console.log(`FAILED  ${result.failures.length} check(s)`);
 	process.exitCode = result.status === "fail" ? (result.usage ? 2 : 1) : 0;

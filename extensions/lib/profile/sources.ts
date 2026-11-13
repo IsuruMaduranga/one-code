@@ -106,7 +106,9 @@ export interface SettingsFile {
 	/**
 	 * The file sits in the repository's checkout, so the repository controls
 	 * it: its allow rules wait for the repository-trust consent, and it may
-	 * not select the modes a repository may not grant itself.
+	 * not select the modes a repository may not grant itself. The base sets
+	 * it for a `project` file and for another tool's `local` file whatever a
+	 * provider says (lib/profile/settings-files.ts `withRepoFiles`).
 	 */
 	repo?: boolean;
 	/**
@@ -216,6 +218,21 @@ export function openSources(home: string): SourceView {
 /** The other tool whose files the session reads, by name, or undefined when it reads none (no provider, or one switched off). */
 export function sourceName(home: string = os.homedir()): string | undefined {
 	return openSources(home).name;
+}
+
+/**
+ * How interface text names the tool whose files a row or a notice is about,
+ * for the lines that show only where such files exist: the provider's name,
+ * or one neutral phrase when a provider gives none.
+ */
+export function otherToolName(home: string = os.homedir()): string {
+	return sourceName(home) ?? "another tool";
+}
+
+/** "<name> settings", as `otherToolName` names the tool: "Claude Code settings", or "another tool's settings". */
+export function otherToolSettings(home: string = os.homedir()): string {
+	const name = sourceName(home);
+	return name ? `${name} settings` : "another tool's settings";
 }
 
 /** The config folders for `home`: the provider's, else the product's own state dir and `.onecode`. */

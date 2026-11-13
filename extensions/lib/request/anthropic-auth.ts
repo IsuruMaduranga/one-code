@@ -10,6 +10,7 @@
  * shape pi would not build.
  */
 
+import { profileKey } from "../profile/profile.ts";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -86,7 +87,15 @@ function effortMarkers(model: IdentityModel, thinkingLevel: string | undefined):
 export function requestIdentity(model: IdentityModel | undefined, thinkingLevel?: string): RequestIdentity | undefined {
 	if (!model?.api || !model.provider || !model.id) return undefined;
 	const markers = effortMarkers(model, thinkingLevel);
-	return { api: model.api, provider: model.provider, model: model.id, auth: authKind(model.provider, model.baseUrl), ...(markers !== undefined ? { effortMarkers: markers } : {}) };
+	const profile = profileKey();
+	return {
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		auth: authKind(model.provider, model.baseUrl),
+		...(markers !== undefined ? { effortMarkers: markers } : {}),
+		...(profile !== undefined ? { profile } : {}),
+	};
 }
 
 /**

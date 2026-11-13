@@ -15,9 +15,9 @@
 
 import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { knobValue } from "../../lib/profile/knobs.ts";
-import { brand } from "../../lib/profile/brand.mjs";
+import { brand, profileSelection } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
-import { PROFILE_DIR } from "../../lib/profile/profile.ts";
+import { PRODUCT_DIR } from "../../lib/profile/profile.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../../lib/ui/argument-hints.ts";
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
@@ -63,6 +63,8 @@ const SUBTITLE = brand.subtitle;
 
 export interface BannerInput {
 	version: string;
+	/** The user's own profile the session runs under, by name. */
+	profile?: string;
 	model?: string;
 	cwd: string;
 	mode: string;
@@ -178,7 +180,9 @@ export function bannerLines(
 	const indent = " ";
 	const budget = width === undefined ? undefined : width - indent.length;
 
-	const subtitle = `${paint("dim", SUBTITLE)}${paint("muted", " · ")}${paint("dim", `v${input.version}`)}`;
+	// A user's own profile is named beside the version; a product profile shows through the brand's own name and wordmark.
+	const profileNote = input.profile ? `${paint("muted", " · ")}${paint("accent", `profile ${input.profile}`)}` : "";
+	const subtitle = `${paint("dim", SUBTITLE)}${paint("muted", " · ")}${paint("dim", `v${input.version}`)}${profileNote}`;
 	const context = [
 		input.model ? `${paint("muted", "model")} ${input.model}` : undefined,
 		`${paint("muted", "mode")} ${input.mode}`,
@@ -497,7 +501,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// Use pi's effective settings, including project overrides, so the two
 		// listings agree on whether quiet startup is enabled.
 		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
-			? collectStartupSections(ctx.cwd, home, join(PROFILE_DIR, "themes"), agentDir)
+			? collectStartupSections(ctx.cwd, home, join(PRODUCT_DIR, "themes"), agentDir)
 			: undefined;
 
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
@@ -516,6 +520,7 @@ function brandingExtension(pi: ExtensionAPI) {
 					...bannerLines(
 						{
 							version,
+							...(profileSelection.userProfile !== undefined ? { profile: profileSelection.userProfile } : {}),
 							keyText: userKey,
 							model: modelLabel ?? "none",
 							cwd: ctx.cwd,

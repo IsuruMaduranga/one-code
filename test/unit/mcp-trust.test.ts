@@ -60,6 +60,12 @@ describe("isProjectScopedServer", () => {
 		// A repo can ship settings.local.json too, so it is consent-gated (review H1).
 		expect(isProjectScopedServer(stdio("l", join(cwd, ".claude", "settings.local.json")), plugins)).toBe(true);
 		expect(isProjectScopedServer(stdio("p", join(root, "plugin", ".mcp.json")), plugins)).toBe(false);
+		// A source view's file is gated by its declared scope, whatever it is named; a user's own file is not.
+		expect(isProjectScopedServer({ ...stdio("s", join(cwd, "servers.json")), scope: "project" }, plugins)).toBe(true);
+		expect(isProjectScopedServer({ ...stdio("t", join(cwd, "mine.json")), scope: "local" }, plugins)).toBe(true);
+		expect(isProjectScopedServer({ ...stdio("u", join(root, "home", "servers.json")), scope: "user" }, plugins)).toBe(false);
+		// The two names a checkout ships stay gated even when a provider calls the file the user's.
+		expect(isProjectScopedServer({ ...stdio("v", join(cwd, ".mcp.json")), scope: "user" }, plugins)).toBe(true);
 		expect(isProjectScopedServer(stdio("u", join(home, ".claude.json")), plugins)).toBe(false);
 		// pi's files: the project's is gated like .mcp.json, the user's agent-dir file is not.
 		expect(isProjectScopedServer({ ...stdio("pp", join(cwd, ".pi", "mcp.json")), piOrigin: "project" }, plugins)).toBe(true);

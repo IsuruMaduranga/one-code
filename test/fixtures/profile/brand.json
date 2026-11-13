@@ -28,5 +28,8 @@
 				"fixture"
 			]
 		}
-	}
+	},
+	"profiles": [
+		"Alt"
+	]
 }

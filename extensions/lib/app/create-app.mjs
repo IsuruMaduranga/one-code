@@ -41,7 +41,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { applyLauncherEnv, installMethodFor } from "./app-launch.mjs";
-import { brand, envName } from "../profile/brand.mjs";
+import { brand, envName, productBrand, withoutProfileFlags } from "../profile/brand.mjs";
 import { withCompactionKeepBackfilled } from "./compaction-keep.mjs";
 import { withReplacedBuiltinsOff } from "./replaced-builtins.mjs";
 import { createUpdateCheck, minReleaseAgeFor, UPGRADE_COMMANDS } from "./update-check.mjs";
@@ -86,7 +86,8 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 	const agentDir = applyLauncherEnv(process.env, { home: homedir(), appVersion, installMethod });
 
 	// --- fast path: --version reports the app, not the harness ----------------
-	const argv = processArgv.slice(2);
+	// The choice of profile is already read (lib/profile/brand.mjs); pi never sees its flags.
+	const argv = withoutProfileFlags(processArgv.slice(2), productBrand);
 	if (argv[0] === "--version" || argv[0] === "-v") {
 		process.stdout.write(`${appVersion} (pi ${piVersion ?? "unknown"})\n`);
 		process.exit(0);

@@ -1,4 +1,5 @@
 import { feature } from "../../lib/profile/feature.ts";
+import { SESSION_DIR_VAR } from "../../lib/app/app-launch.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
 /**
  * doctor extension — `/doctor`, One Code's setup checkup.
@@ -49,7 +50,7 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rule
 import { persistSubagentModel } from "../../lib/models/subagent-default.ts";
 import { buildDoctorReport, productVersion } from "./build.ts";
 import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { profileSummary, requireText } from "../../lib/profile/profile.ts";
 import { modeCycleKey } from "../../lib/ui/keys.ts";
 import { UPGRADE_COMMANDS } from "../../lib/app/update-check.mjs";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
@@ -155,6 +156,7 @@ function doctorExtension(pi: ExtensionAPI) {
 				home,
 				agentDir: getAgentDir(),
 				stateDir: productStateDir(process.env, home),
+			profile: profileSummary(home),
 				sources: sourceSwitchStatus(home),
 				env: process.env,
 				platform: process.platform,
@@ -198,7 +200,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			reportText: renderDoctorText(report, 100),
 			install: installKind(),
 			productVersion: productVersion(),
-			sessionsDir: join(getAgentDir(), "sessions"),
+			sessionsDir: process.env[SESSION_DIR_VAR] || join(getAgentDir(), "sessions"),
 			sessionDir: ctx.sessionManager.getSessionDir(),
 			productSettingsPath: productSettingsPath(home),
 			productProjectSettingsPath: productProjectSettingsPath(ctx.cwd, home),

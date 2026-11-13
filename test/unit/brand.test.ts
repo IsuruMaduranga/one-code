@@ -18,6 +18,9 @@ describe("brand", () => {
 		expect(() => checkBrand({ ...data, name: "" })).toThrow(/"name" must be a non-empty string/);
 		expect(() => checkBrand({ ...data, envPrefix: "one-code" })).toThrow(/"envPrefix" must be upper-case/);
 		expect(() => checkBrand({ ...data, idPrefix: "One Code" })).toThrow(/"idPrefix" must be lower-case/);
+		// The prefix also becomes an identifier, so its hyphens join words one at a time.
+		for (const idPrefix of ["acme--tools", "acme-"]) expect(() => checkBrand({ ...data, idPrefix }), idPrefix).toThrow(/joined by single hyphens/);
+		expect(() => checkBrand({ ...data, idPrefix: "acme-tools-2" })).not.toThrow();
 		expect(() => checkBrand({ ...data, stateDir: ".BICopilot" })).toThrow(/"stateDir" must be one lower-case folder name/);
 		expect(() => checkBrand({ ...data, stateDir: "a/b" })).toThrow(/"stateDir"/);
 		for (const guideDir of [".", "docs/../..", "/abs", "profile/test/guide", "docs\\guide"]) expect(() => checkBrand({ ...data, guideDir }), guideDir).toThrow(/"guideDir"/);

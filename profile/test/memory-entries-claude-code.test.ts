@@ -37,6 +37,20 @@ describe("buildMemoryEntries with Claude Code's files", () => {
 		);
 	});
 
+	it("lists a loaded file outside the fixed layout by its path, before the memory folder", () => {
+		const cwd = join(root, "proj");
+		mkdirSync(join(cwd, ".git"), { recursive: true });
+		write("proj/CLAUDE.md", "# Project\n");
+		const inner = write("proj/.claude/CLAUDE.md", "# Inner\n");
+		const entries = build(cwd);
+		const paths = entries.map((entry) => entry.path);
+		// It is in the context, so it is in the list, once.
+		expect(paths.filter((listed) => listed === inner)).toHaveLength(1);
+		expect(entries.find((entry) => entry.path === inner)?.title).toBe("./.claude/CLAUDE.md");
+		expect(entries.at(-1)).toMatchObject({ kind: "folder" });
+		expect(paths.indexOf(inner)).toBeGreaterThan(paths.indexOf(join(cwd, "CLAUDE.md")));
+	});
+
 	it("omits AGENTS.md when a CLAUDE.md exists and does not import it (CLAUDE.md wins)", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });

@@ -56,11 +56,23 @@ export function settingsSources(cwd: string, home: string, opts: { productLocal?
 	];
 	// A repository's file is never the primary one: the keys read from it (MCP
 	// approvals, defaultMode, env) would let a repository grant itself access.
-	const files = (openSources(home).settings?.(base, { cwd }) ?? base).map((file) => (file.primary && file.repo ? { ...file, primary: false } : file));
+	const files = withRepoFiles(openSources(home).settings?.(base, { cwd }) ?? base).map((file) => (file.primary && file.repo ? { ...file, primary: false } : file));
 	if (files.some((file) => file.primary)) return files;
 	// Marked by role, not identity, so a provider may hand back copies of the base's entries.
 	const own = files.findIndex((file) => file.owner === "product" && file.scope === "user" && !file.repo);
 	return files.map((file, index) => (index === own ? { ...file, primary: true } : file));
+}
+
+/**
+ * `files` with every file the repository controls marked `repo`, whatever the
+ * provider said: a checked-in file (`project`), and another tool's
+ * per-project file, which sits in the checkout (`SettingsFile.scope`). A
+ * provider that forgot the flag would otherwise let a repository grant
+ * itself a permission mode or approve its own servers. The product's own
+ * per-project file is in its state dir, outside the checkout.
+ */
+export function withRepoFiles(files: readonly SettingsFile[]): SettingsFile[] {
+	return files.map((file) => (!file.repo && (file.scope === "project" || (file.scope === "local" && file.owner === "borrowed")) ? { ...file, repo: true } : file));
 }
 
 /** The primary user file: the one holding the keys a user edits by hand (`SettingsFile.primary`). */

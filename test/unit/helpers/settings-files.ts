@@ -102,11 +102,20 @@ export function borrowedLadderPaths(cwd: string, home: string): LadderPaths {
 	};
 }
 
+/** The borrowed family's MCP files: the user's, and the one checked into the repository (which needs consent). */
+export function borrowedMcpPaths(cwd: string, home: string): { user: string; project: string } {
+	return { user: join(home, ".borrowed.json"), project: join(cwd, ".borrowed-mcp.json") };
+}
+
+/** How the borrowed ladder's provider names its MCP files in the "no servers" notice. */
+export const BORROWED_MCP_WHERE = ".borrowed-mcp.json in the project, ~/.borrowed.json";
+
 /**
  * A source provider with a whole borrowed family, in the order One Code's
  * lists Claude Code's: the user file (the primary one), the product's user
  * file, the repository's checked-in and local files, the product's
- * per-project file, then managed policy.
+ * per-project file, then managed policy. Its MCP files are the family's
+ * user file and the repository's (`borrowedMcpPaths`).
  */
 const borrowedLadderProvider: SourceProvider = {
 	open: ({ home }) => ({
@@ -122,6 +131,14 @@ const borrowedLadderProvider: SourceProvider = {
 				{ path: paths.managed, scope: "managed", owner: "borrowed", label: "managed settings" },
 			];
 		},
+		mcpFiles: ({ cwd }) => {
+			const paths = borrowedMcpPaths(cwd, home);
+			return [
+				{ path: paths.user, scope: "user" },
+				{ path: paths.project, scope: "project" },
+			];
+		},
+		mcpWhere: BORROWED_MCP_WHERE,
 	}),
 };
 

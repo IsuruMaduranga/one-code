@@ -13,6 +13,8 @@
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 
+import type { LiveTools } from "../../lib/profile/live-tools.ts";
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
@@ -55,8 +57,7 @@ import {
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
-import { BUNDLED_SKILL_FEATURES, BUNDLED_SKILL_TOOLS } from "../../lib/profile/features.ts";
-import { featureEnabled, requireText, toolLive } from "../../lib/profile/profile.ts";
+import { BUNDLED_SKILL_TOOLS } from "../../lib/profile/features.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { listableSkillNames } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
@@ -99,17 +100,18 @@ const BUNDLED_ROOT = resolve(BUNDLED_SKILLS_DIR);
 
 /** A skill in One Code's own catalog, like one built into Claude Code: listed last, kept whole over budget, no folder named. */
 const isBundled = (path: string): boolean => resolve(path).startsWith(BUNDLED_ROOT + sep);
-/** A bundled skill whose feature is off (BUNDLED_SKILL_FEATURES) or that lacks a tool it calls (BUNDLED_SKILL_TOOLS): its body drives tools the session does not have. */
-function bundledSkillOff(skill: { name: string; path?: string }): boolean {
+/** A bundled skill that lacks a tool it calls (BUNDLED_SKILL_TOOLS): its body drives tools the session does not have. */
+function bundledSkillOff(skill: { name: string; path?: string }, live: LiveTools): boolean {
 	if (!skill.path || !isBundled(skill.path)) return false;
-	const feature = BUNDLED_SKILL_FEATURES[skill.name];
-	return (feature !== undefined && !featureEnabled(feature)) || (BUNDLED_SKILL_TOOLS[skill.name] ?? []).some((tool) => !toolLive(tool));
+	return (BUNDLED_SKILL_TOOLS[skill.name] ?? []).some((tool) => !live.has(tool));
 }
 const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
 const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
 
 function skillExtension(pi: ExtensionAPI) {
-	const text = requireText("skill");
+	// A child session lists only the skills whose tools it has (lib/agents/child-extensions.ts).
+	const view = sessionView(pi);
+	const text = view.text("skill");
 	const requestTier = sessionModelTier(pi);
 	// pi draws a user message as markdown, so a typed skill, `/init` and
 	// `/doctor` showed their whole expanded prompt; show the command line.
@@ -341,7 +343,7 @@ function skillExtension(pi: ExtensionAPI) {
 						state: "on" as const,
 						disableModelInvocation: readModelInvocationDisabled(skill.path),
 					}));
-		const project = base.filter((skill) => !bundledSkillOff(skill)).map((skill) => ({
+		const project = base.filter((skill) => !bundledSkillOff(skill, view.live)).map((skill) => ({
 			...skill,
 			whenToUse: readWhenToUse(skill.path),
 			state: skillStateFor(states, skillOverrideKey(skill.scope, skill.name)),
