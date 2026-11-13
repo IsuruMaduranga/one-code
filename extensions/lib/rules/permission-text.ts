@@ -10,9 +10,7 @@
  */
 
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
-import { memoOn } from "../core/text-spans.ts";
-import { forLive } from "../profile/live-words.ts";
-import { requireText } from "../profile/profile.ts";
+import { wordsInForce } from "../profile/live-words.ts";
 
 /** Why the gate refused a call. */
 export type PermissionRefusal =
@@ -175,12 +173,12 @@ export interface PermissionsText {
 
 /**
  * The words, for the tools this session can have (`live`): text naming a
- * tool that is off leaves it out. `secretFileRefusal` is the profile's
+ * tool that is off leaves it out. `product.secretFileRefusal` is the profile's
  * wording of that refusal, when it has one.
  */
-export const permissionWords = (live: LiveTools, secretFileRefusal?: string) => ({
+export const permissionWords = (live: LiveTools, product: Pick<PermissionsText, "secretFileRefusal">) => ({
 	/** Why the gate refused a call. */
-	refused: (refusal: PermissionRefusal): string => withoutOff(refused(refusal, secretFileRefusal), live, REFUSAL_PASSAGES),
+	refused: (refusal: PermissionRefusal): string => withoutOff(refused(refusal, product.secretFileRefusal), live, REFUSAL_PASSAGES),
 	/** A switch of the permission mode; `planFile` when the mode is plan and its file is known. */
 	modeChanged: ({ mode, planFile }: { mode: string; planFile?: string }): string => {
 		const plan =
@@ -200,10 +198,8 @@ export const permissionWords = (live: LiveTools, secretFileRefusal?: string) => 
 	reviewFailed: ({ osMessage }: { osMessage: string }): string => `the review itself failed (${osMessage})`,
 });
 
-const wordsFor = forLive((live) => memoOn((group: PermissionsText) => permissionWords(live, group.secretFileRefusal)));
-
 /** The words for this session's tools and the profile's part (the profile in force), built once per pair. */
-export const permissionText = () => wordsFor()(requireText("permissions"));
+export const permissionText = wordsInForce("permissions", permissionWords);
 
 /** Why the gate refused a call, in this session's words. */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);

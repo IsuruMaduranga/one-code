@@ -22,7 +22,7 @@ export function usePluginRoots(): PluginRoots {
 		const root = mkdtempSync(join(tmpdir(), "cc-plugins-merge-"));
 		Object.assign(roots, {
 			claudePluginsDir: join(root, ".claude", "plugins"),
-			oneCodeRoot: join(root, "one-code", "plugins"),
+			productRoot: join(root, "one-code", "plugins"),
 			cwd: join(root, "project"),
 			home: root,
 		});

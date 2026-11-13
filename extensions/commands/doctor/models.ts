@@ -62,8 +62,8 @@ export interface ModelFacts {
 }
 
 export const TIER_LABEL: Record<PromptTier, string> = {
-	frontier: "frontier tier — terse Claude Code prompt",
-	workhorse: "workhorse tier — full Claude Code prompt",
+	frontier: "frontier tier — terse prompt",
+	workhorse: "workhorse tier — full prompt",
 	cheap: "cheap tier — full prompt, Haiku register",
 	tiny: "tiny tier — full prompt plus weak-model scaffolding and grep/find/ls",
 };

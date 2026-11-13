@@ -11,7 +11,7 @@ import {
 	borrowedUserPermissionAllow,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
-	oneCodePermissionAllow,
+	productPermissionAllow,
 } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
@@ -24,7 +24,7 @@ beforeEach(() => {
 });
 
 const writeClaudeSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
-const writeOneCodeSettings = (data: unknown) => {
+const writeProductSettings = (data: unknown) => {
 	mkdirSync(join(home, ".onecode"), { recursive: true });
 	writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify(data));
 };
@@ -39,7 +39,7 @@ describe("auto mode's configuration from Claude Code's settings", () => {
 
 	it("reads classifierModel and its stamp from One Code's settings, other keys from Claude Code's too", () => {
 		writeClaudeSettings({ autoMode: { classifyAllShell: true } });
-		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
+		writeProductSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
 		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
@@ -65,9 +65,9 @@ describe("auto mode's configuration from Claude Code's settings", () => {
 		// side; a rule in BOTH must be seen by both readers so the still-live
 		// .claude copy is never silently left behind.
 		writeClaudeSettings({ permissions: { allow: ["Bash(git status)", "Bash(*)"] } });
-		writeOneCodeSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
+		writeProductSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
 		expect(borrowedUserPermissionAllow(home)).toEqual(["Bash(git status)", "Bash(*)"]);
-		expect(oneCodePermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
+		expect(productPermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
 		// "Bash(*)" is in both — it lands in the removable set AND the warn set.
 	});
 });

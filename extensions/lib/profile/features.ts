@@ -162,6 +162,15 @@ export const BUNDLED_SKILL_FEATURES: Readonly<Record<string, FeatureId>> = {
 	"workflow-authoring": "workflow",
 };
 
+/**
+ * The tools a bundled skill's body tells the model to call: the skill is
+ * hidden unless every one is live. /loop schedules with the cron tools or
+ * `schedule_wakeup`, arms a monitor and stops what it armed.
+ */
+export const BUNDLED_SKILL_TOOLS: Readonly<Record<string, readonly string[]>> = {
+	loop: ["cron_create", "cron_delete", "schedule_wakeup", "monitor", "task_output", "task_stop"],
+};
+
 /** The feature an entry file belongs to (`tools/bash/child.ts` → `bash`), or undefined. */
 export function featureOfEntry(entry: string): FeatureId | undefined {
 	return FEATURE_IDS.find((id) => (FEATURES[id].entries as readonly string[]).includes(entry));
@@ -183,6 +192,52 @@ export function featureProblems(features: Partial<Record<string, boolean>>): str
 		.map((id) => `unknown feature "${id}"`);
 	for (const id of FEATURE_IDS) {
 		if ("required" in FEATURES[id] && features[id] === false) problems.push(`"${id}" is part of the required core and cannot be turned off`);
+	}
+	return problems;
+}
+
+/**
+ * The tools a feature cannot run without: each is off only with the feature.
+ * The feature's texts name them throughout (the plan-mode reminder ends in
+ * `exit_plan_mode`; each task tool's description sends the model to the
+ * others), so one switched off alone would leave a session told to call a
+ * tool it lacks.
+ */
+export const FEATURE_CORE_TOOLS: Readonly<Partial<Record<FeatureId, readonly string[]>>> = {
+	subagents: ["Agent"],
+	"plan-mode": ["exit_plan_mode"],
+	tasks: ["task_create", "task_get", "task_list", "task_update"],
+};
+
+/**
+ * The tools of its own feature a tool rests on: it works on what they make
+ * (a cron job, a task id, an agent, a resource uri) and its text names them,
+ * so it is off whenever one of them is.
+ */
+export const TOOL_NEEDS: Readonly<Record<string, readonly string[]>> = {
+	cron_list: ["cron_create"],
+	cron_delete: ["cron_create"],
+	monitor: ["task_output", "task_stop"],
+	read_mcp_resource: ["list_mcp_resources"],
+	list_agents: ["Agent"],
+};
+
+/**
+ * What is wrong with the tools turned `off` while `features` are on, one
+ * sentence each with the fix: a feature's core tool off alone, or a tool left
+ * on without one it rests on.
+ */
+export function toolSetProblems(features: ReadonlySet<FeatureId>, off: ReadonlySet<string>): string[] {
+	const problems: string[] = [];
+	for (const [feature, tools] of Object.entries(FEATURE_CORE_TOOLS) as [FeatureId, readonly string[]][]) {
+		if (!features.has(feature)) continue;
+		for (const tool of tools) if (off.has(tool)) problems.push(`"${tool}" cannot be turned off while the "${feature}" feature is on: turn the feature off instead`);
+	}
+	for (const [tool, needs] of Object.entries(TOOL_NEEDS)) {
+		const feature = TOOL_FEATURES[tool];
+		if (off.has(tool) || (feature !== undefined && !features.has(feature))) continue;
+		// A core tool that is off is already named above.
+		for (const need of needs) if (off.has(need) && !problems.some((problem) => problem.startsWith(`"${need}" cannot`))) problems.push(`"${tool}" needs "${need}", which is off: turn "${tool}" off too`);
 	}
 	return problems;
 }

@@ -7,6 +7,7 @@
  */
 
 import { brand } from "../../../lib/profile/brand.mjs";
+import { rulesetOwner } from "../auto-mode/classifier-prompt.ts";
 import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../../lib/ui/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -318,8 +319,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 					...wrapped(
 						`The ${view.autoMode.builtins[dialog.section]} built-in ${SECTION_LABEL[dialog.section].toLowerCase()} rules are always in effect in ${brand.name}. Your own rules are added after them and never replace them, so a rule can tighten or carve out, but not switch the built-ins off.`,
 					),
-					"",
-					...wrapped("They are Claude Code's own classifier rules, embedded verbatim."),
+					...(rulesetOwner() ? ["", ...wrapped(`They are ${rulesetOwner()} own classifier rules, embedded verbatim.`)] : []),
 				],
 				footer: "Enter or Esc to go back",
 			};

@@ -11,7 +11,7 @@
  * blocks are identical across model tiers — only the `# Memory` *spec* in the
  * system prompt varies by tier (handled in lib/context/memory.ts), never these blocks.
  *
- * ONECODE.md files ride their OWN `# oneCodeMd` block (`buildOneCodeBlock`),
+ * ONECODE.md files ride their OWN `# oneCodeMd` block (`buildProductBlock`),
  * emitted after the instructions block so they take precedence over it,
  * keeping that block byte-exact with Claude Code.
  */
@@ -35,7 +35,7 @@ function productPreamble(): string {
  * section per file (same raw-content join as the claudeMd block). Returns null when
  * there are no ONECODE.md files, so nothing extra rides when the feature is unused.
  */
-export function buildOneCodeBlock(files: ContextFile[]): string | null {
+export function buildProductBlock(files: ContextFile[]): string | null {
 	if (files.length === 0) return null;
 	return withoutFinalNewline(`${productPreamble()}\n\n${files.map(section).join("\n")}`);
 }

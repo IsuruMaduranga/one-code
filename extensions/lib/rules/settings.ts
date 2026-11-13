@@ -276,17 +276,17 @@ export function persistBlockOutsideReads(filePath: string): void {
  * Code's provider: `~/.claude.json`, read only), so a user who answered it in
  * Claude Code is not asked again.
  */
-export function outsideReadPromptSeen(oneCodeSettings: string, stateFiles: readonly string[]): boolean {
+export function outsideReadPromptSeen(productSettings: string, stateFiles: readonly string[]): boolean {
 	const seen = (path: string) => (readClaudeSettingsFile(path) as { hasSeenAutoModeOutsideReadPrompt?: unknown } | undefined)?.hasSeenAutoModeOutsideReadPrompt === true;
-	return seen(oneCodeSettings) || stateFiles.some(seen);
+	return seen(productSettings) || stateFiles.some(seen);
 }
 
 /** Record that the first outside-read prompt was answered (Claude Code's key, in One Code's file). */
-export function markOutsideReadPromptSeen(oneCodeSettings: string): void {
-	const file = readSettingsForWrite(oneCodeSettings);
+export function markOutsideReadPromptSeen(productSettings: string): void {
+	const file = readSettingsForWrite(productSettings);
 	if (file.hasSeenAutoModeOutsideReadPrompt === true) return;
 	file.hasSeenAutoModeOutsideReadPrompt = true;
-	writeSettings(oneCodeSettings, file);
+	writeSettings(productSettings, file);
 }
 
 /** A string list under `permissions` that One Code edits in its own files. */

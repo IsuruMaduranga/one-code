@@ -186,13 +186,13 @@ describe("blockReadsOutsideWorkingDirectories and the first outside-read prompt"
 	});
 
 	it("counts the prompt as answered from the product's flag or Claude Code's ~/.claude.json", () => {
-		const oneCode = productSettingsPath(home);
+		const product = productSettingsPath(home);
 		const claudeJson = join(home, ".claude.json");
-		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(false);
+		expect(outsideReadPromptSeen(product, [claudeJson])).toBe(false);
 		write(claudeJson, { hasSeenAutoModeOutsideReadPrompt: true });
-		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(true);
+		expect(outsideReadPromptSeen(product, [claudeJson])).toBe(true);
 		rmSync(claudeJson);
-		markOutsideReadPromptSeen(oneCode);
-		expect(outsideReadPromptSeen(oneCode, [claudeJson])).toBe(true);
+		markOutsideReadPromptSeen(product);
+		expect(outsideReadPromptSeen(product, [claudeJson])).toBe(true);
 	});
 });

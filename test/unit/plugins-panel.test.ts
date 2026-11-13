@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { sourceName } from "../../extensions/lib/profile/sources.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { decodePanelKey } from "../../extensions/tools/plugins/panel/keys.ts";
 import { renderPanel, type PanelPaint } from "../../extensions/tools/plugins/panel/render.ts";
@@ -385,7 +386,7 @@ describe("renderPanel", () => {
 			],
 		});
 		const lines = renderPanel(renderInput(state, view), paint).map(strip);
-		expect(lines.some((l) => l.includes("installed by Claude Code"))).toBe(true);
+		expect(lines.some((l) => l.includes(`installed by ${sourceName() ?? "another tool"} (read-only files)`))).toBe(true);
 		expect(lines.some((l) => l.includes(`${brand.name} override`))).toBe(true);
 		expect(lines.some((l) => l.includes("Make sure you trust a plugin"))).toBe(true);
 		expect(lines.some((l) => l.includes("Enter/Space/e/d to toggle"))).toBe(true);

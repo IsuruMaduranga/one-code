@@ -45,20 +45,20 @@ describe("the base's instruction files without a provider", () => {
 		write(join(cwd, "CLAUDE.md"), "claude\n");
 		write(join(home, ".claude", "CLAUDE.md"), "global claude\n");
 		const product = write(join(cwd, brand.productFile), "product\n");
-		const { contextFiles, oneCodeFiles } = openInstructions(home, undefined).sections({ cwd, homeOneCodeDir: state, includeExternal: false });
+		const { contextFiles, productFiles } = openInstructions(home, undefined).sections({ cwd, homeProductDir: state, includeExternal: false });
 		expect(contextFiles.map((file) => [file.path, file.descriptor, file.content])).toEqual([
 			[outer, "agents", "outer\n"],
 			[inner, "agents", "inner\n"],
 		]);
-		expect(oneCodeFiles.map((file) => file.path)).toEqual([product]);
-		expect(openInstructions(home, undefined).paths({ cwd, homeOneCodeDir: state }).map((entry) => entry.path)).toEqual([outer, inner, product]);
+		expect(productFiles.map((file) => file.path)).toEqual([product]);
+		expect(openInstructions(home, undefined).paths({ cwd, homeProductDir: state }).map((entry) => entry.path)).toEqual([outer, inner, product]);
 	});
 
 	it("confines an AGENTS.md import to the project", () => {
 		write(join(root, "outside.md"), "OUTSIDE\n");
 		write(join(cwd, "inside.md"), "INSIDE\n");
 		write(join(cwd, "AGENTS.md"), "@inside.md\n@../../outside.md\n");
-		const [file] = openInstructions(home, undefined).sections({ cwd, homeOneCodeDir: state, includeExternal: false }).contextFiles;
+		const [file] = openInstructions(home, undefined).sections({ cwd, homeProductDir: state, includeExternal: false }).contextFiles;
 		expect(file.content).toContain("INSIDE");
 		expect(file.content).not.toContain("OUTSIDE");
 		expect(file.content).toContain("@../../outside.md");
@@ -79,8 +79,8 @@ describe("the base's instruction files without a provider", () => {
 		const product = write(join(cwd, brand.productFile), "@../../outside.md\n");
 		const outside = write(join(root, "outside.md"), "OUTSIDE\n");
 		write(join(cwd, "CLAUDE.md"), "@../../outside.md\n");
-		expect(openInstructions(home, undefined).classifier({ cwd, homeOneCodeDir: state }).map((file) => file.path)).toEqual([agents, product]);
-		expect(openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state })).toEqual([{ path: realpathSync.native(outside), importer: brand.productFile }]);
+		expect(openInstructions(home, undefined).classifier({ cwd, homeProductDir: state }).map((file) => file.path)).toEqual([agents, product]);
+		expect(openInstructions(home, undefined).externalIncludes({ cwd, homeProductDir: state })).toEqual([{ path: realpathSync.native(outside), importer: brand.productFile }]);
 	});
 
 	it("gives every reader nothing while the agent's instruction files are off", () => {
@@ -88,15 +88,15 @@ describe("the base's instruction files without a provider", () => {
 		write(join(cwd, brand.productFile), "product\n");
 		setActiveProfileForTest(resolveProfile(profile, { [envName("FEATURES_OFF")]: "instructions" }, "/profile"));
 		const instructions = openInstructions(home, undefined);
-		expect(instructions.sections({ cwd, homeOneCodeDir: state })).toEqual({ contextFiles: [], oneCodeFiles: [] });
-		expect(instructions.paths({ cwd, homeOneCodeDir: state })).toEqual([]);
-		expect(instructions.classifier({ cwd, homeOneCodeDir: state })).toEqual([]);
+		expect(instructions.sections({ cwd, homeProductDir: state })).toEqual({ contextFiles: [], productFiles: [] });
+		expect(instructions.paths({ cwd, homeProductDir: state })).toEqual([]);
+		expect(instructions.classifier({ cwd, homeProductDir: state })).toEqual([]);
 	});
 
 	it("shows the classifier a product file's approved external imports, as the agent gets them", () => {
 		write(join(root, "rules.md"), "NEVER DEPLOY\n");
 		write(join(cwd, brand.productFile), "@../../rules.md\n");
-		const classifierText = () => openInstructions(home, undefined).classifier({ cwd, homeOneCodeDir: state }).map((file) => file.content).join("\n");
+		const classifierText = () => openInstructions(home, undefined).classifier({ cwd, homeProductDir: state }).map((file) => file.content).join("\n");
 		expect(classifierText()).not.toContain("NEVER DEPLOY");
 		persistExternalIncludesApproval(cwd, home, true);
 		expect(classifierText()).toContain("NEVER DEPLOY");

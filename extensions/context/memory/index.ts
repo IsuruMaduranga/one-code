@@ -28,6 +28,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { claudeMdLimitWarning, combinedLimitWarning, projectMemoryDir } from "../../lib/context/memory.ts";
 import { INDEX_MAX_CHARS, INDEX_MAX_LINES, indexLimitStatus, stampFrontmatter } from "../../lib/context/memory-content.ts";
 import { allowedPath, sourceSwitch } from "../../lib/profile/sources.ts";
+import { instructionTargets } from "../../lib/context/instructions.ts";
 import { agentSkippedInstructions } from "../../lib/context/instruction-budget.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
 import { comparablePath, isPathAtOrUnder, productStateDir, tildify, tryRealpath } from "../../lib/profile/paths.ts";
@@ -61,7 +62,7 @@ function memoryEntriesFor(cwd: string): MemoryEntry[] {
 	return buildMemoryEntries({
 		cwd,
 		home: os.homedir(),
-		homeOneCodeDir: productStateDir(),
+		homeProductDir: productStateDir(),
 		agentDir: getAgentDir(),
 		memoryDir: autoMemoryEnabled(cwd) ? projectMemoryDir(cwd) : undefined,
 	});
@@ -171,7 +172,7 @@ function memoryExtension(pi: ExtensionAPI) {
 	// external editor, matching CC. Pure panel logic lives in ./panel.ts. The
 	// returned text is the model's `<local-command-stdout>`, worded as CC's.
 	registerLocalCommand(pi, "memory", {
-		description: "View or edit CLAUDE.md and memory files",
+		description: `View or edit ${instructionTargets().project} and memory files`,
 		reportsResult: true,
 		handler: async (_args, ctx): Promise<string | undefined> => {
 			const entries = memoryEntriesFor(ctx.cwd);
@@ -180,7 +181,7 @@ function memoryExtension(pi: ExtensionAPI) {
 				const lines = entries.map(
 					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,
 				);
-				const stdout = `${limitation}Memory / CLAUDE.md files:\n${lines.join("\n")}`;
+				const stdout = `${limitation}Memory / ${instructionTargets().project} files:\n${lines.join("\n")}`;
 				ctx.ui.notify(stdout, "info");
 				return ctx.mode === "rpc" ? limitation.trim() : undefined;
 			}

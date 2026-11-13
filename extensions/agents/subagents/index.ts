@@ -1544,7 +1544,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (!agentDef) {
 					return refuseCall({ kind: "nestedUnknownAgent", ...(agentName ? { name: agentName } : {}), catalog: catalogLines(agents) });
 				}
-				if (!task) return refuseCall({ kind: "taskRequired", aliasNote: words.taskAliasNote });
+				if (!task) return refuseCall({ kind: "taskRequired" });
 
 				const { name, note: renamedNote } = resolveRunName(registry, agentDef.name, typeof p.name === "string" ? p.name : undefined);
 				// Same parent-side model resolution as the main Agent tool, minus
@@ -2138,7 +2138,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// child prompted with "" (H1). Fork included — cloning to do nothing is
 			// never intended.
 			if (!taskText || !taskText.trim()) {
-				return refuseCall({ kind: "taskRequired", aliasNote: words.taskAliasNote });
+				return refuseCall({ kind: "taskRequired" });
 			}
 
 			// Match `subagent_type` against the catalog case-insensitively and run

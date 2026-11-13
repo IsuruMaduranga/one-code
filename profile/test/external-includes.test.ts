@@ -7,7 +7,7 @@ import systemReminderExtension from "../../extensions/request/system-reminder/in
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { buildClaudeMdBlock } from "../../extensions/context/instructions/instructions.ts";
-import { discoverOneCodeFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
+import { discoverProductFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../claude-code/instructions.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesDialog, externalIncludesNone, externalIncludesTitle, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
@@ -303,18 +303,18 @@ describe("startup probe and approved readers", () => {
 		write(join(cwd, "ONECODE.md"), "Project One Code.\n@../shared.md\n@~/personal.md\n@inside.md\n");
 		write(join(cwd, "inside.md"), "INSIDE ONECODE IMPORT\n");
 		const state = join(root, "state");
-		const oneCode = (includeExternal?: boolean) => JSON.stringify(discoverOneCodeFiles({ cwd, homeOneCodeDir: state, home, includeExternal }));
-		expect(oneCode()).toContain("INSIDE ONECODE IMPORT");
-		expect(oneCode()).not.toContain("ONECODE EXTERNAL SECRET");
-		expect(oneCode()).not.toContain("ONECODE HOME SECRET");
-		expect(oneCode(true)).toContain("ONECODE EXTERNAL SECRET");
-		expect(oneCode(true)).toContain("ONECODE HOME SECRET");
+		const product = (includeExternal?: boolean) => JSON.stringify(discoverProductFiles({ cwd, homeProductDir: state, home, includeExternal }));
+		expect(product()).toContain("INSIDE ONECODE IMPORT");
+		expect(product()).not.toContain("ONECODE EXTERNAL SECRET");
+		expect(product()).not.toContain("ONECODE HOME SECRET");
+		expect(product(true)).toContain("ONECODE EXTERNAL SECRET");
+		expect(product(true)).toContain("ONECODE HOME SECRET");
 		// ONECODE.md is the base's: its imports are asked about through every provider.
-		const asked = () => openInstructions(home, undefined).externalIncludes({ cwd, homeOneCodeDir: state }).map((found) => found.path);
+		const asked = () => openInstructions(home, undefined).externalIncludes({ cwd, homeProductDir: state }).map((found) => found.path);
 		expect(asked()).toEqual([outside, personal]);
 		// The user's own global ONECODE.md is not project-controlled: its imports load and never ask.
 		write(join(state, "ONECODE.md"), `@${write(join(root, "global-import.md"), "GLOBAL ONECODE IMPORT")}`);
-		expect(oneCode()).toContain("GLOBAL ONECODE IMPORT");
+		expect(product()).toContain("GLOBAL ONECODE IMPORT");
 		expect(asked()).toEqual([outside, personal]);
 		// A nested ONECODE.md attached on a read follows the same consent.
 		write(join(cwd, "nested", "ONECODE.md"), "@../../shared.md");

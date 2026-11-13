@@ -48,22 +48,22 @@ function dirHasClaudeMd(dir: string, present: (path: string) => boolean = isPres
  * `managed-only` drops the user's and the project's files, retaining managed
  * instructions.
  *
- * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
+ * When `homeProductDir` is given, One Code's own `ONECODE.md` files join the
  * list: the global one from `~/.onecode` right after the global CLAUDE.md, and
  * each directory's last. The `/memory` picker passes it (so ONECODE.md is an
  * editable target); the model-facing `# claudeMd` block does NOT — there
- * ONECODE.md rides its own `# oneCodeMd` block via `discoverOneCodeFiles`
+ * ONECODE.md rides its own `# oneCodeMd` block via `discoverProductFiles`
  * instead, so `# claudeMd` stays byte-exact with CC.
  */
 interface DiscoveryOptions {
 	cwd: string;
 	homeClaudeDir: string;
-	homeOneCodeDir?: string;
+	homeProductDir?: string;
 	managedDir?: string;
 	rule?: InstructionFiles;
 	/** User consent for this project's external instruction imports. Never sourced from project files. */
 	includeExternal?: boolean;
-	/** The base's files: the global and per-directory AGENTS.md files, and the product files with `homeOneCodeDir` (lib/context/instructions.ts basePaths); found here when absent. */
+	/** The base's files: the global and per-directory AGENTS.md files, and the product files with `homeProductDir` (lib/context/instructions.ts basePaths); found here when absent. */
 	base?: readonly ContextFilePath[];
 }
 
@@ -84,13 +84,13 @@ function discoverInstructionEntries(
 	const rule = opts.rule ?? "claude-md";
 	const claudeFiles = rule !== "managed-only";
 	const dirs = ancestorDirs(opts.cwd);
-	const base = opts.base ?? basePaths(opts.cwd, { homeOneCodeDir: opts.homeOneCodeDir });
+	const base = opts.base ?? basePaths(opts.cwd, { homeProductDir: opts.homeProductDir });
 	// Keyed by the directory as join() spells it, so a cwd given with a trailing separator still matches.
 	const inDir = (descriptor: InstructionSource) => new Map(base.filter((entry) => entry.descriptor === descriptor).map((entry) => [dirname(entry.path), entry]));
 	const at = (dir: string) => dirname(join(dir, "AGENTS.md"));
 	const baseAgents = inDir(AGENTS_DESCRIPTOR);
 	// The product files ride in the list only when the caller asked for them (/memory, /doctor, the banner).
-	const baseOneCode = inDir(PRODUCT_DESCRIPTOR);
+	const baseProduct = inDir(PRODUCT_DESCRIPTOR);
 	// Each path is checked once per call: the per-project test and the walk share it.
 	const presence = new Map<string, boolean>();
 	const present = (path: string): boolean => {
@@ -138,8 +138,8 @@ function discoverInstructionEntries(
 			if (dirname(d) !== d) paths.push(...rules(join(d, ".claude", "rules"), "Project", PROJECT_DESCRIPTOR));
 			push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		}
-		const oneCode = baseOneCode.get(at(d));
-		if (oneCode) push(oneCode.path, oneCode.descriptor);
+		const product = baseProduct.get(at(d));
+		if (product) push(product.path, product.descriptor);
 	}
 
 	return paths;
@@ -204,8 +204,8 @@ export function nestedInstructionFiles(opts: {
 			if (claudeFiles) candidates.push(join(dir, ".claude", "AGENTS.md"));
 		}
 		if (claudeFiles) candidates.push(join(dir, "CLAUDE.local.md"));
-		const oneCode = firstProductFile(dir);
-		if (oneCode) candidates.push(oneCode);
+		const product = firstProductFile(dir);
+		if (product) candidates.push(product);
 		for (const path of candidates) {
 			const key = tryRealpath(path);
 			if (!inProject(key) || seen.has(key)) continue;
@@ -217,7 +217,7 @@ export function nestedInstructionFiles(opts: {
 				}
 				continue;
 			}
-			const external = path !== oneCode ? approvedExternalInstructions(path, opts) : undefined;
+			const external = path !== product ? approvedExternalInstructions(path, opts) : undefined;
 			if (external) {
 				for (const file of external) {
 					if (seen.has(file.key)) continue;
@@ -230,7 +230,7 @@ export function nestedInstructionFiles(opts: {
 			if (content === null || content.trim() === "") continue;
 			seen.add(key);
 			// ONECODE.md keeps its inline expander; approval lifts the confinement, as at startup.
-			const read = path === oneCode && opts.includeExternal ? readAllowed : readInProject;
+			const read = path === product && opts.includeExternal ? readAllowed : readInProject;
 			const expanded = expandWithImports(content, dirname(path), { home: opts.home, read });
 			const imported = expanded.imported.map((p) => tryRealpath(p) ?? p);
 			for (const p of imported) seen.add(p);
@@ -392,7 +392,7 @@ export function claudeCodeInstructionView(home: string): InstructionView {
 	let rule: InstructionFiles | undefined;
 	const currentRule = () => (rule ??= readInstructionFiles(home));
 	return {
-		paths: (base, { cwd, homeOneCodeDir }) => discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule: currentRule(), base }),
+		paths: (base, { cwd, homeProductDir }) => discoverContextFilePaths({ cwd, homeClaudeDir, homeProductDir, rule: currentRule(), base }),
 		// Its own reading replaces the base's (rule files, external chains, deduplication), so the base's contents are never read.
 		files: (base, { cwd, includeExternal }) => discoverContextFiles({ cwd, homeClaudeDir, rule: currentRule(), home, includeExternal, base: base.paths }),
 		nested: (_base, { filePath, cwd, includeExternal }) => nestedInstructionFiles({ filePath, cwd, rule: currentRule(), home, homeClaudeDir, includeExternal }),

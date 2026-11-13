@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { instructionTargets } from "../../extensions/lib/context/instructions.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -46,7 +47,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
 		await fake.commands.get("memory")!.handler("", ctx);
 		expect(custom).not.toHaveBeenCalled();
-		expect(notices()).toContain("CLAUDE.md");
+		expect(notices()).toContain(`Memory / ${instructionTargets().project} files:`);
 		expect(notices()).toMatch(/RPC.*(TUI|terminal)/);
 		expect(reminders.join("\n")).not.toContain("Cancelled memory editing");
 		expect(reminders.join("\n")).toContain("RPC");

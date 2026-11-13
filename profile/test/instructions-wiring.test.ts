@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildOneCodeBlock } from "../../extensions/context/instructions/instructions.ts";
-import { AGENTS_DESCRIPTOR, discoverOneCodeFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/context/instructions.ts";
+import { buildClaudeMdBlock, buildContextBlock, dateBlock, buildProductBlock } from "../../extensions/context/instructions/instructions.ts";
+import { AGENTS_DESCRIPTOR, discoverProductFiles, expandImports, PRODUCT_DESCRIPTOR, PRODUCT_GLOBAL_DESCRIPTOR, openInstructions, PROJECT_DESCRIPTOR } from "../../extensions/lib/context/instructions.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { discoverContextFilePaths, discoverContextFiles } from "../claude-code/instructions.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
@@ -87,9 +87,9 @@ describe("buildClaudeMdBlock", () => {
 		expect(inner).toContain("Use tabs.\n\nContents of /m/MEMORY.md");
 		expect(inner).toContain("- [entry 200](e200.md) — one line\n\n> WARNING: MEMORY.md is 230 lines (limit: 200).");
 		expect(inner?.endsWith("move detail into topic files.")).toBe(true);
-		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: PRODUCT_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: PRODUCT_DESCRIPTOR }]);
-		expect(oneCode).toContain("Be brief.\n\nContents of /q/ONECODE.md");
-		expect(oneCode?.endsWith("x")).toBe(true);
+		const product = buildProductBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: PRODUCT_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: PRODUCT_DESCRIPTOR }]);
+		expect(product).toContain("Be brief.\n\nContents of /q/ONECODE.md");
+		expect(product?.endsWith("x")).toBe(true);
 	});
 
 	it("returns null when there is nothing to inject", () => {
@@ -206,28 +206,28 @@ describe("ONECODE.md discovery", () => {
 
 	it("places global then per-directory ONECODE.md after the matching CLAUDE.md", () => {
 		const homeClaude = join(root, "home-claude");
-		const homeOneCode = join(root, "home-onecode");
+		const homeProduct = join(root, "home-onecode");
 		const gClaude = write("home-claude/CLAUDE.md", "g\n");
-		const gOneCode = write("home-onecode/ONECODE.md", "go\n");
+		const gProduct = write("home-onecode/ONECODE.md", "go\n");
 		const pClaude = write("proj/CLAUDE.md", "p\n");
-		const pOneCode = write("proj/ONECODE.md", "po\n");
+		const pProduct = write("proj/ONECODE.md", "po\n");
 		mkdirSync(join(root, "proj", "sub"), { recursive: true });
 
 		const paths = discoverContextFilePaths({
 			cwd: join(root, "proj", "sub"),
 			homeClaudeDir: homeClaude,
-			homeOneCodeDir: homeOneCode,
+			homeProductDir: homeProduct,
 		});
 
 		expect(paths).toEqual([
 			expect.objectContaining({ path: gClaude }),
-			{ path: gOneCode, descriptor: PRODUCT_GLOBAL_DESCRIPTOR },
+			{ path: gProduct, descriptor: PRODUCT_GLOBAL_DESCRIPTOR },
 			expect.objectContaining({ path: pClaude }),
-			{ path: pOneCode, descriptor: PRODUCT_DESCRIPTOR },
+			{ path: pProduct, descriptor: PRODUCT_DESCRIPTOR },
 		]);
 	});
 
-	it("omits ONECODE.md entirely when homeOneCodeDir is not passed (the memory picker path)", () => {
+	it("omits ONECODE.md entirely when homeProductDir is not passed (the memory picker path)", () => {
 		write("home-claude/CLAUDE.md", "g\n");
 		write("proj/ONECODE.md", "po\n");
 		const paths = discoverContextFilePaths({
@@ -290,11 +290,11 @@ describe("ONECODE.md discovery", () => {
 		write("proj/CLAUDE.local.md", "l\n");
 		write("proj/.claude/AGENTS.md", "dot\n");
 		const agents = write("proj/AGENTS.md", "a\n");
-		const oneCode = write("proj/ONECODE.md", "o\n");
-		const paths = openInstructions(root, undefined).paths({ cwd: join(root, "proj"), homeOneCodeDir: join(root, "home-onecode") });
+		const product = write("proj/ONECODE.md", "o\n");
+		const paths = openInstructions(root, undefined).paths({ cwd: join(root, "proj"), homeProductDir: join(root, "home-onecode") });
 		expect(paths).toEqual([
 			{ path: agents, descriptor: AGENTS_DESCRIPTOR },
-			{ path: oneCode, descriptor: PRODUCT_DESCRIPTOR },
+			{ path: product, descriptor: PRODUCT_DESCRIPTOR },
 		]);
 	});
 
@@ -310,7 +310,7 @@ describe("ONECODE.md discovery", () => {
 		const paths = discoverContextFilePaths({
 			cwd: join(root, "proj"),
 			homeClaudeDir: join(root, "home-claude"),
-			homeOneCodeDir: join(root, "home-onecode"),
+			homeProductDir: join(root, "home-onecode"),
 		});
 		expect(paths).toContainEqual({ path: p, descriptor: PRODUCT_DESCRIPTOR });
 	});
@@ -321,7 +321,7 @@ describe("ONECODE.md discovery", () => {
 		const files = discoverContextFiles({
 			cwd: join(root, "proj"),
 			homeClaudeDir: join(root, "home-claude"),
-			homeOneCodeDir: join(root, "home-onecode"),
+			homeProductDir: join(root, "home-onecode"),
 			home: root,
 		});
 		const claudeMd = files.find((f) => f.path.endsWith("CLAUDE.md"));
@@ -346,20 +346,20 @@ describe("the # oneCodeMd block", () => {
 
 	it("is null when there are no ONECODE.md files (nothing extra rides)", () => {
 		mkdirSync(join(root, "proj"), { recursive: true });
-		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
-		expect(buildOneCodeBlock(files)).toBeNull();
+		const files = discoverProductFiles({ cwd: join(root, "proj"), homeProductDir: join(root, ".onecode"), home: root });
+		expect(buildProductBlock(files)).toBeNull();
 	});
 
 	it("carries the ONECODE files under a precedence-over-CLAUDE.md preamble, nearer last", () => {
 		const globalOne = write(".onecode/ONECODE.md", "global one-code\n");
 		mkdirSync(join(root, "proj", "sub"), { recursive: true });
 		const projOne = write("proj/ONECODE.md", "project one-code\n");
-		const files = discoverOneCodeFiles({
+		const files = discoverProductFiles({
 			cwd: join(root, "proj", "sub"),
-			homeOneCodeDir: join(root, ".onecode"),
+			homeProductDir: join(root, ".onecode"),
 			home: root,
 		});
-		const block = buildOneCodeBlock(files);
+		const block = buildProductBlock(files);
 		expect(block).toBeTruthy();
 		const text = block as string;
 		expect(text).toContain("# oneCodeMd");
@@ -377,8 +377,8 @@ describe("the # oneCodeMd block", () => {
 		mkdirSync(join(root, "proj"), { recursive: true });
 		write("proj/ONECODE.md", "@snippet.md\n");
 		write("proj/snippet.md", "SNIPPET BODY\n");
-		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
-		expect(buildOneCodeBlock(files)).toContain("SNIPPET BODY");
+		const files = discoverProductFiles({ cwd: join(root, "proj"), homeProductDir: join(root, ".onecode"), home: root });
+		expect(buildProductBlock(files)).toContain("SNIPPET BODY");
 	});
 });
 

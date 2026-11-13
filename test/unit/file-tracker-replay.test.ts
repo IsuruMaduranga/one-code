@@ -9,7 +9,7 @@ const seen = (path: string, sha256 = "h1") => ({ path, size: 1, mtimeMs: 7, sha2
 /** A result that recorded what it saw of `path` (none when `path` is undefined). */
 const result = (toolCallId: string, path: string | undefined, { isError = false, sha256 = "h1" } = {}) => ({
 	type: "message",
-	message: { role: "toolResult", toolCallId, isError, ...(path ? { details: { oneCodeFile: seen(path, sha256) } } : {}) },
+	message: { role: "toolResult", toolCallId, isError, ...(path ? { details: { productFile: seen(path, sha256) } } : {}) },
 });
 const pending = (fields: Partial<PendingRecordData>) => ({ type: "custom", id: `p${Math.random()}`, customType: RECORD.pending, data: makeRecord("pending", "test", { id: "x", text: "t", ...fields }) });
 const compaction = { type: "compaction", id: "c" };

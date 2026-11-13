@@ -7,9 +7,19 @@
  * are the profile's (`SubagentsText`, agents/subagents/text.ts).
  */
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
-import { forLive } from "../profile/live-words.ts";
+import { wordsInForce } from "../profile/live-words.ts";
 import { checkoutProgram } from "../rules/worktree-guard-text.ts";
 import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
+
+/**
+ * The profile's clauses in these words (`SubagentsText`): the note on the
+ * alias of `task` in the refusal for a call without one, and the sentence on
+ * the names an agent file's `tools` list may use.
+ */
+export interface SubagentClauses {
+	taskAliasNote: string;
+	toolNamesHint: string;
+}
 
 /** What an agent may use, as its catalog row says. */
 export type AgentTools =
@@ -36,8 +46,8 @@ export type SubagentRefusal =
 	/** A nested call named no agent (`name` absent) or an unknown one; `catalog` is the rows. */
 	| { kind: "nestedUnknownAgent"; name?: string; catalog: string[] }
 	| { kind: "unknownAgents"; names: string[]; catalog: string[] }
-	/** No task given; `aliasNote` is the profile's note on the parameter's alias (`SubagentsText.taskAliasNote`). */
-	| { kind: "taskRequired"; aliasNote: string }
+	/** No task given. */
+	| { kind: "taskRequired" }
 	/** A fork with a `model` or `thinking` override. */
 	| { kind: "forkOverrides" }
 	/** A fork in a session with no session file. */
@@ -110,8 +120,8 @@ export interface SubagentsResultText {
 	modelFallback(p: { model?: string; osMessage: string; fallback: string }): string;
 	/** A requested run name already taken. */
 	renamed(p: { wanted: string; takenBy: string; name: string }): string;
-	/** An agent file whose `tools` list matches no tool; `hint` is the profile's sentence on the names a list may use (`SubagentsText.toolNamesHint`). */
-	unusableTools(p: { name: string; tools: string[]; hint: string }): string;
+	/** An agent file whose `tools` list matches no tool. */
+	unusableTools(p: { name: string; tools: string[] }): string;
 	/** Creating an isolation worktree was refused; `program` names what git would run. */
 	worktreeRefused(p: { program: CheckoutProgram }): string;
 	/** A worktree kept because it holds the agent's work. */
@@ -172,7 +182,7 @@ function toolsClause(tools: AgentTools): string {
 	return tools.builtIn ? " (Tools: *)" : " (Tools: All tools)";
 }
 
-function refused(refusal: SubagentRefusal): string {
+function refused(refusal: SubagentRefusal, product: SubagentClauses): string {
 	switch (refusal.kind) {
 		case "hostNotReady":
 			return "The host session is not ready to spawn agents — retry shortly.";
@@ -187,7 +197,7 @@ function refused(refusal: SubagentRefusal): string {
 		case "unknownAgents":
 			return `Unknown agent(s): ${refusal.names.join(", ")}\n\nAvailable agents:\n${refusal.catalog.join("\n")}`;
 		case "taskRequired":
-			return `\`task\` is required: a complete, self-contained instruction for the agent (${refusal.aliasNote}).`;
+			return `\`task\` is required: a complete, self-contained instruction for the agent (${product.taskAliasNote}).`;
 		// Claude Code silently ignores `model` for forks; One Code fails loud.
 		case "forkOverrides":
 			return '`model`/`thinking` overrides are not applied to fork runs — a fork continues this conversation and keeps its exact model and reasoning settings. Drop the override, or use a named agent (e.g. "general-purpose") to run the task with different settings.';
@@ -287,7 +297,7 @@ const RESULT_PASSAGES: ToolPassages = {
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
-export const subagentResultWords = (live: LiveTools): SubagentsResultText => {
+export const subagentResultWords = (live: LiveTools, product: SubagentClauses): SubagentsResultText => {
 	/** A run's result or note without the task tools that are off. */
 	const results = (text: string) => withoutOff(text, live, RESULT_PASSAGES);
 	return {
@@ -296,14 +306,14 @@ export const subagentResultWords = (live: LiveTools): SubagentsResultText => {
 		catalogList: ({ rows }) => `Available agents:\n${rows.join("\n")}`,
 		catalogBlock: ({ rows }) =>
 			`Available agent types for the Agent tool:\n${rows.join("\n")}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
-		refused,
+		refused: (refusal) => refused(refusal, product),
 		runtimeProblem: (problem) =>
 			problem.kind === "sessionEnded" ? "the session ended before the agent started" : `could not start the subagent runtime: ${problem.osMessage}`,
 		failure,
 		noOutput: "(Subagent completed but returned no output.)",
 		modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 		renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
-		unusableTools: ({ name, tools, hint }) => `Agent "${name}" lists tools (${tools.join(", ")}) that match no available tool. ${hint}`,
+		unusableTools: ({ name, tools }) => `Agent "${name}" lists tools (${tools.join(", ")}) that match no available tool. ${product.toolNamesHint}`,
 		worktreeRefused: ({ program }) =>
 			`Cannot create an isolation worktree: ${checkoutProgram(program)}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`,
 		worktreeKept: ({ path, branch }) => `(Changes or commits left in worktree ${path}${branch ? ` on branch ${branch}` : ""} — review or merge them.)`,
@@ -352,5 +362,5 @@ export const subagentResultWords = (live: LiveTools): SubagentsResultText => {
 	};
 };
 
-/** The words for this session's tools. */
-export const subagentResultText = forLive(subagentResultWords);
+/** The words for this session's tools and the profile's clauses. */
+export const subagentResultText = wordsInForce("subagents", subagentResultWords);

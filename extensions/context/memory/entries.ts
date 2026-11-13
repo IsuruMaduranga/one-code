@@ -72,19 +72,19 @@ function referencedImports(discovered: ContextFilePath[], home: string): Set<str
 export function buildMemoryEntries(opts: {
 	cwd: string;
 	home: string;
-	homeOneCodeDir: string;
+	homeProductDir: string;
 	/** pi's agent dir (`getAgentDir()`), for its global AGENTS.md. */
 	agentDir: string | undefined;
 	/** The auto-memory folder; undefined while auto-memory is off (no folder row, as in Claude Code). */
 	memoryDir: string | undefined;
 }): MemoryEntry[] {
-	const { cwd, home, homeOneCodeDir, agentDir, memoryDir } = opts;
+	const { cwd, home, homeProductDir, agentDir, memoryDir } = opts;
 	// The always-offered rows are the files a user writes: CLAUDE.md with One
 	// Code's provider on, the global ONECODE.md and the project's AGENTS.md
 	// without it (lib/context/instructions.ts instructionTargets).
-	const targets = instructionTargets(home, homeOneCodeDir);
+	const targets = instructionTargets(home, homeProductDir);
 	// The same files the # claudeMd block takes, so the list matches what it sends.
-	const discovered = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir });
+	const discovered = openInstructions(home, agentDir).paths({ cwd, homeProductDir });
 	const referenced = referencedImports(discovered, home);
 	// (descriptor, dir) → the discovered path, so per-dir lookups reuse the real
 	// on-disk casing discovery already resolved (no second stat/readdir here).
@@ -101,7 +101,7 @@ export function buildMemoryEntries(opts: {
 	const disp = (path: string) => displayPath(path, cwd, home);
 
 	// Global user instructions — always offered, matching CC (created on save).
-	const globalOneCode = found.get(`${PRODUCT_GLOBAL_DESCRIPTOR}\0${homeOneCodeDir}`);
+	const globalProduct = found.get(`${PRODUCT_GLOBAL_DESCRIPTOR}\0${homeProductDir}`);
 	const discoveredPaths = new Set(discovered.map(({ path }) => path));
 	add({
 		title: "User instructions",
@@ -110,11 +110,11 @@ export function buildMemoryEntries(opts: {
 		kind: "file",
 		exists: discoveredPaths.has(targets.user),
 	});
-	if (globalOneCode) {
+	if (globalProduct) {
 		add({
 			title: `${brand.name} user instructions`,
-			description: `${disp(globalOneCode)} (${brand.name} only)`,
-			path: globalOneCode,
+			description: `${disp(globalProduct)} (${brand.name} only)`,
+			path: globalProduct,
 			kind: "file",
 			exists: true,
 		});
@@ -162,12 +162,12 @@ export function buildMemoryEntries(opts: {
 		const configAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, configDir)}`);
 		if (configAgents) add({ title: disp(configAgents), path: configAgents, kind: "file", exists: true });
 
-		const oneCode = found.get(`${PRODUCT_DESCRIPTOR}\0${d}`);
-		if (oneCode) {
+		const product = found.get(`${PRODUCT_DESCRIPTOR}\0${d}`);
+		if (product) {
 			add({
-				title: isCwd ? `${brand.name} instructions` : disp(oneCode),
-				description: `${disp(oneCode)} (${brand.name} only)`,
-				path: oneCode,
+				title: isCwd ? `${brand.name} instructions` : disp(product),
+				description: `${disp(product)} (${brand.name} only)`,
+				path: product,
 				kind: "file",
 				exists: true,
 			});

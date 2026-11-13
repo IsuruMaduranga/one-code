@@ -138,11 +138,16 @@ function answerLines(answer: FetchAnswer): (string | undefined)[] {
 	}
 }
 
-const FAILED_PASSAGES: ToolPassages = { web_search: [["Verify the URL and host, retry, or use web_search instead.", "Verify the URL and host, or retry."]] };
+const FAILED_PASSAGES: ToolPassages = {
+	web_search: [["Verify the URL and host, retry, or use web_search instead.", "Verify the URL and host, or retry."]],
+	bash: ["; use bash to download the file, then read it with a tool that supports that format", "; use bash to download the file instead"],
+};
+
+const REJECTED_PASSAGES: ToolPassages = { bash: [" To reach a local server, use bash with curl instead."] };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const webFetchResultWords = (live: LiveTools): WebFetchResultText => ({
-	urlRejected,
+	urlRejected: (problem) => withoutOff(urlRejected(problem), live, REJECTED_PASSAGES),
 	cancelled: (url) => `Fetch of ${url} was cancelled.`,
 	failed: ({ url, failure }) => withoutOff(`Could not fetch ${url}: ${failureReason(failure)}. Verify the URL and host, retry, or use web_search instead.`, live, FAILED_PASSAGES),
 	// Claude Code's WebFetch redirect result, with our tool name, and the prompt

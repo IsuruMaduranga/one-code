@@ -104,7 +104,7 @@ export const CONTEXT_ORDER = {
 	// One Code's own instructions ride in their own block AFTER the instructions
 	// block (higher `order` = closer to the user text = higher precedence), so
 	// ONECODE.md takes precedence over CLAUDE.md/AGENTS.md. Not part of CC.
-	oneCodeMd: 52,
+	productMd: 52,
 	/** The user's email and the git snapshot. */
 	context: 54,
 	date: 56,

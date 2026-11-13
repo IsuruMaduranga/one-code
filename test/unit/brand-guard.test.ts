@@ -47,7 +47,9 @@ describe("the base names the product only through its brand", () => {
 	});
 
 	it("names the product, its paths, packages and variables only through the brand", () => {
-		expect(offenders(/One Code|\bonecode\b|\.onecode\b|ONECODE|one-code(?!:)/)).toEqual([]);
+		expect(offenders(/One Code|one-code(?!:)/)).toEqual([]);
+		// In any case and inside an identifier too (`homeOneCodeDir`): a name in the base says "product".
+		expect(offenders(/onecode/i)).toEqual([]);
 	});
 
 	it("reads an environment knob by its suffix, never by Claude Code's spelling (the provider's alias)", () => {

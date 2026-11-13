@@ -10,7 +10,7 @@ import { sourceFiles } from "./helpers/import-graph.ts";
 import { childExtensionPaths } from "../../extensions/lib/agents/child-extensions.ts";
 import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest, TEXT_GROUP_READERS } from "../../extensions/lib/profile/profile.ts";
-import { isFeatureId } from "../../extensions/lib/profile/features.ts";
+import { BUNDLED_SKILL_TOOLS, FEATURE_CORE_TOOLS, isFeatureId, TOOL_FEATURES, TOOL_NEEDS } from "../../extensions/lib/profile/features.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { profile as shippedProfile } from "../../profile/index.ts";
 import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
@@ -120,17 +120,17 @@ describe("resolveProfile", () => {
 		}
 	});
 
-	// A reader the table misses passes the load check and then stops the process in the middle of a session (requireText).
+	// A reader the table misses passes the load check and then stops the process in the middle of a session (requireText, or wordsInForce over it).
 	it("lists every feature that reads an optional text group as one of its readers", () => {
 		// `lib/` belongs to no one feature, so its reads of an optional group are frozen here: each one's
 		// callers are the table's hand-written readers. A new one needs a row here and its callers in the table.
-		const LIB_READS = ["lib/agents/agent-catalog.ts: subagents", "lib/agents/subagent-handback.ts: handback", "lib/models/subagent-model.ts: subagentModels"];
+		const LIB_READS = ["lib/agents/subagent-handback.ts: handback", "lib/agents/subagent-text.ts: subagents", "lib/models/subagent-model.ts: subagentModels"];
 		const root = join(import.meta.dirname, "..", "..", "extensions");
 		const sites: string[] = [];
 		const libReads: string[] = [];
 		for (const entry of sourceFiles(root, root)) {
 			const [area, folder] = entry.split("/");
-			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/requireText\("(\w+)"\)/g)) {
+			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/(?:requireText|wordsInForce)\("(\w+)"/g)) {
 				const readers: readonly string[] | undefined = (TEXT_GROUP_READERS as Record<string, readonly string[]>)[group];
 				if (readers === undefined) continue; // a required group
 				if (area === "lib") {
@@ -144,6 +144,25 @@ describe("resolveProfile", () => {
 		}
 		expect(sites.length).toBeGreaterThan(20);
 		expect([...new Set(libReads)]).toEqual(LIB_READS);
+	});
+
+	it("refuses a tool turned off without what rests on it, naming the fix", () => {
+		const off = (...names: string[]): Profile => ({ ...empty, tools: Object.fromEntries(names.map((name) => [name, { enabled: false }])) });
+		expect(() => resolveProfile(off("exit_plan_mode"), {}, "/p")).toThrow(/"exit_plan_mode" cannot be turned off while the "plan-mode" feature is on: turn the feature off instead/);
+		expect(() => resolveProfile(off("task_update"), {}, "/p")).toThrow(/"task_update" cannot be turned off while the "tasks" feature is on/);
+		expect(() => resolveProfile(off("cron_create"), {}, "/p")).toThrow(/"cron_list" needs "cron_create", which is off: turn "cron_list" off too; "cron_delete" needs "cron_create"/);
+		expect(() => resolveProfile(off("task_stop"), {}, "/p")).toThrow(/"monitor" needs "task_stop"/);
+		// The whole set off, or the feature off, is a product's choice.
+		expect(resolveProfile(off("cron_create", "cron_list", "cron_delete", "monitor", "schedule_wakeup"), {}, "/p").live.has("task_output")).toBe(true);
+		expect(resolveProfile({ ...off("exit_plan_mode"), features: { "plan-mode": false } }, {}, "/p").live.has("exit_plan_mode")).toBe(false);
+		// The user's own list is refused the same way.
+		expect(() => resolveProfile(empty, { [envName("TOOLS_OFF")]: "Agent" }, "/p")).toThrow(/"Agent" cannot be turned off while the "subagents" feature is on/);
+	});
+
+	it("keeps each tool's needs inside its own feature, so a feature switched off never strands one", () => {
+		for (const [tool, needs] of Object.entries(TOOL_NEEDS)) for (const need of needs) expect(TOOL_FEATURES[need], `${tool} needs ${need}`).toBe(TOOL_FEATURES[tool]);
+		for (const [feature, tools] of Object.entries(FEATURE_CORE_TOOLS)) for (const tool of tools ?? []) expect(TOOL_FEATURES[tool], tool).toBe(feature);
+		for (const tools of Object.values(BUNDLED_SKILL_TOOLS)) for (const tool of tools) expect(TOOL_FEATURES[tool], tool).toBeDefined();
 	});
 
 	it("refuses turning off or deferring tool_search", () => {
@@ -317,7 +336,7 @@ describe("the plugins feature switch", () => {
 	it("hides every plugin from discovery, so no plugin resource reaches another feature", () => {
 		use({ features: { plugins: false } });
 		invalidatePluginsCache();
-		const found = discoverPlugins({ claudePluginsDir: "/nonexistent/claude", oneCodeRoot: "/nonexistent/onecode", cwd: "/", home: "/nonexistent" } as never);
+		const found = discoverPlugins({ claudePluginsDir: "/nonexistent/claude", productRoot: "/nonexistent/onecode", cwd: "/", home: "/nonexistent" } as never);
 		expect(found.plugins).toEqual([]);
 		expect(found.agentDirs).toEqual([]);
 		expect(found.skills).toEqual([]);

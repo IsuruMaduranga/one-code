@@ -37,22 +37,8 @@ const files = sourceFiles(BASE, BASE).map((path) => [path, stringLiterals(readFi
 
 const naming = (pattern: RegExp): string[] => files.filter(([, texts]) => texts.some((text) => pattern.test(text))).map(([path]) => path);
 
-/** Base files whose text names Claude Code today, and why each is left (S8 and S9 shrink this list). */
-const KNOWN_OTHER_PRODUCT: Record<string, string> = {
-	"commands/doctor/build.ts": "ui: /doctor's compaction row compares the keep window with Claude Code's",
-	"commands/doctor/compat.ts": "ui: /doctor's imported-configuration section words the provider's files itself; the provider should",
-	"commands/doctor/index.ts": "ui: /doctor's command and subcommand descriptions",
-	"commands/doctor/models.ts": "ui: /doctor's tier labels name the prompt register",
-	"context/memory/index.ts": "ui: /memory's description and listing heading; should take the instruction file's name",
-	"lib/app/compaction-keep.mjs": "ui: the app's first-run note on the compaction keep window",
-	"lib/app/replaced-builtins.mjs": "ui: the app's first-run note on pi's replaced built-ins",
-	"lib/models/classifier-model.ts": "ui: the cross-provider classifier notice; should take the instruction file's name",
-	"safety/permissions/index.ts": "ui: the bypass flag's description, the fast-path notice, /auto-mode's notes on the ruleset and on Claude Code's settings",
-	"safety/permissions/panel/render.ts": "ui: the /permissions panel's note on the built-in ruleset",
-	"tools/mcp/index.ts": "ui: why a server is off, naming the provider's setting",
-	"tools/plugins/index.ts": "ui: /plugins' description and the read-only notice for the provider's plugins",
-	"tools/plugins/panel/render.ts": "ui: the /plugins panel's origin rows",
-};
+/** Base files whose text names Claude Code: none since 2026-11-13. A sentence about the provider's files takes its name (lib/profile/sources.ts `sourceName`). */
+const KNOWN_OTHER_PRODUCT: Record<string, string> = {};
 
 /** Base files whose text names an agent or skill only One Code ships. */
 const KNOWN_CATALOG: Record<string, string> = {};

@@ -4,10 +4,7 @@
  * without that part: every session sends the context.
  */
 
-import { memoOn } from "../core/text-spans.ts";
-import { requireText } from "../profile/profile.ts";
+import { wordsInForce } from "../profile/live-words.ts";
 import { type ContextWords, contextText } from "./context-text.ts";
 
-const built = memoOn(contextText);
-
-export const contextWords = (): ContextWords => built(requireText("context"));
+export const contextWords: () => ContextWords = wordsInForce("context", contextText);

@@ -194,7 +194,7 @@ export function turnOffPrompt(left, settingsPath, configCommand = "pi config") {
 	return [
 		`Turn off pi's built-in ${names}?`,
 		"",
-		`pi ${plural ? "ships these" : "ships this"} as built-in ${plural ? "extensions" : "extension"}. ${brand.name} brings its own ${ours} (Claude Code's tool search, and MCP that reads your Claude Code config), so pi already skips ${plural ? "them" : "it"} and warns about ${plural ? "each" : "it"} at every start, telling you to remove ${brand.name}.`,
+		`pi ${plural ? "ships these" : "ships this"} as built-in ${plural ? "extensions" : "extension"}. ${brand.name} brings its own ${ours}, so pi already skips ${plural ? "them" : "it"} and warns about ${plural ? "each" : "it"} at every start, telling you to remove ${brand.name}.`,
 		"",
 		`Turning ${plural ? "them" : "it"} off changes nothing while ${brand.name} is installed and silences the ${plural ? "warnings" : "warning"} from the next start. ${brand.name} adds ${left.map((builtin) => `"-${PREFIX}${builtin.name}"`).join(" and ")} to "extensions" in ${settingsPath}. If you remove ${brand.name} later, turn ${plural ? "them" : "it"} back on with \`${configCommand}\`.`,
 	].join("\n");

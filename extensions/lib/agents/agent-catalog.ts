@@ -14,7 +14,7 @@
  * Subdirectories are searched recursively.
  */
 
-import { activeProfile, PROFILE_DIR, requireText } from "../profile/profile.ts";
+import { activeProfile, PROFILE_DIR } from "../profile/profile.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
@@ -284,5 +284,5 @@ export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: 
  */
 export function unusableAllowlistError(agent: AgentDefinition | undefined, registered: string[]): string | undefined {
 	if (!agent?.tools || usableAllowlistedTools(registered, agent.tools).length > 0) return undefined;
-	return subagentResultText().unusableTools({ name: agent.name, tools: agent.tools, hint: requireText("subagents").toolNamesHint });
+	return subagentResultText().unusableTools({ name: agent.name, tools: agent.tools });
 }

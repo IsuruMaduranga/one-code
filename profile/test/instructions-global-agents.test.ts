@@ -131,7 +131,7 @@ describe("a global AGENTS.md that is also a project's", () => {
 
 describe("/memory's rows", () => {
 	it("offer each global AGENTS.md the agent reads", () => {
-		const rows = buildMemoryEntries({ cwd, home, homeOneCodeDir: join(home, ".onecode"), agentDir, memoryDir: undefined });
+		const rows = buildMemoryEntries({ cwd, home, homeProductDir: join(home, ".onecode"), agentDir, memoryDir: undefined });
 		expect(rows.filter((row) => row.title === "Global AGENTS.md").map((row) => row.path)).toEqual([piGlobal, userGlobal]);
 	});
 });

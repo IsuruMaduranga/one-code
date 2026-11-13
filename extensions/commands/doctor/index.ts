@@ -301,7 +301,7 @@ function doctorExtension(pi: ExtensionAPI) {
 
 	/** The subcommands, with the one-line explanation the completion menu shows next to each. */
 	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
-		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported Claude Code config, MCP servers, dependencies" },
+		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported configuration, MCP servers, dependencies" },
 		{ value: "presets", description: "List the economical / balanced / maximum-quality model presets for this provider, with the models each would pick" },
 		{ value: "preset economical", description: "Apply: one cheap model for the main session and subagents; automatic classifier" },
 		{ value: "preset balanced", description: "Apply: a capable main model with automatic subagents and classifier" },
@@ -311,7 +311,7 @@ function doctorExtension(pi: ExtensionAPI) {
 	announceArgumentHint(pi, "doctor", "[report|presets|preset <name>]");
 	pi.registerCommand("doctor", {
 		description:
-			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
+			"Health-check your setup and fix what's wrong (a checkup run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
 		getArgumentCompletions: (prefix) =>
 			extendingCompletions(prefix, SUBCOMMANDS.map((option) => ({ value: option.value, label: option.value, description: option.description }))),
 		handler: async (args, ctx) => {

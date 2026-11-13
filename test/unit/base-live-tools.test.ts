@@ -16,7 +16,7 @@ import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../../profile/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
-import { type EnglishPhrases, type NamedText, toolLeaks } from "./helpers/tool-mentions.ts";
+import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "./helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: EnglishPhrases = { edit: [/write or edit any files/] };
@@ -25,10 +25,11 @@ function texts(live: LiveTools): NamedText[] {
 	// The base's words take the profile's part where a sentence names another product.
 	const t = profile.text({ live });
 	const subagentModels = subagentModelWords(live, t.subagentModels!);
-	const permissions = permissionWords(live);
+	const permissions = permissionWords(live, t.permissions);
 	const notifications = notificationText(live, t.notifications);
+	const subagents = subagentResultWords(live, t.subagents!);
 	const out: NamedText[] = [];
-	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
+	const push = (label: string, owner: string | undefined, text: string, tool?: string) => out.push([label, owner, text, tool]);
 	push("one-shot note", undefined, notifications.oneShotSession);
 	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [] }));
 	push("refused model", undefined, subagentModels.refused({ model: "a/b" }));
@@ -45,22 +46,29 @@ function texts(live: LiveTools): NamedText[] {
 	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
 	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
 	const runs = [{ name: "a", taskId: "t1" }];
-	push("Agent launched", "subagents", subagentResultWords(live).launched({ lines: ["x"] }));
-	push("Agent inline report", "subagents", subagentResultWords(live).inlineReport({ name: "a", taskId: "t1", note: "n" }));
-	push("SendMessage next turn", "subagents", subagentResultWords(live).nextTurn({ name: "a" }));
-	push("SendMessage to resident", "subagents", subagentResultWords(live).sentToResident({ name: "a", taskId: "t1" }));
-	push("SendMessage sent", "subagents", subagentResultWords(live).sent({ name: "a", taskId: "t1" }));
-	push("pending claim", "subagents", subagentResultWords(live).pendingClaim({ runs }));
-	push("running after compaction", "subagents", subagentResultWords(live).runningAfterCompaction({ runs }));
+	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
+	push("Agent inline report", "subagents", subagents.inlineReport({ name: "a", taskId: "t1", note: "n" }));
+	push("SendMessage next turn", "subagents", subagents.nextTurn({ name: "a" }));
+	push("SendMessage to resident", "subagents", subagents.sentToResident({ name: "a", taskId: "t1" }));
+	push("SendMessage sent", "subagents", subagents.sent({ name: "a", taskId: "t1" }));
+	push("pending claim", "subagents", subagents.pendingClaim({ runs }));
+	push("running after compaction", "subagents", subagents.runningAfterCompaction({ runs }));
 	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
 	push("web_fetch failed", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
+	push("web_fetch binary", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "binary", mime: "application/zip" } }));
+	push("web_fetch too large", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "tooLarge", limitMiB: 10 } }));
+	push("web_fetch local host", "web-fetch", webFetchResultWords(live).urlRejected({ kind: "noDot" }), "web_fetch");
 	return out;
 }
 
 describe("the base's words naming another tool", () => {
 	it("leave out the tools of each optional feature that is off, and edit", () => {
 		expect(toolLeaks(texts, ENGLISH)).toEqual([]);
+	});
+
+	it("have every passage their tables cut", () => {
+		expect(stalePassages(texts)).toEqual([]);
 	});
 
 	it("name the tools when every one is on", () => {

@@ -89,6 +89,7 @@ export const sources: SourceProvider = {
 		const homeClaudeDir = claudeUserDir(home);
 		if (!claudeSourcesOn()) return { allowPath: (path) => !isClaudeLocation(path, homeClaudeDir) };
 		return {
+			name: "Claude Code",
 			instructions: claudeCodeInstructionView(home),
 			instructionTargets: { project: "CLAUDE.md", user: join(homeClaudeDir, "CLAUDE.md") },
 			configDirs: { user: homeClaudeDir, project: PROJECT_DIR },

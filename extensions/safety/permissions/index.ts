@@ -18,6 +18,8 @@
  */
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
+import { featureEnabled } from "../../lib/profile/profile.ts";
+import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -35,15 +37,15 @@ import {
 	autoModeSettingsPaths,
 	listAutoModeEntries,
 	loadAutoModeConfig,
-	oneCodeEnvironmentExtendsDefault,
+	productEnvironmentExtendsDefault,
 	type SourcedAutoModeEntry,
-	updateOneCodeAutoModeList,
+	updateProductAutoModeList,
 	borrowedUserPermissionAllow,
 	loadAutoModeConfigWithDiagnostics,
-	oneCodePermissionAllow,
+	productPermissionAllow,
 	persistAutoModeSetup,
 	persistClassifierModel,
-	removeOneCodePermissionAllow,
+	removeProductPermissionAllow,
 } from "../../lib/rules/auto-mode-config.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../../lib/models/model-picker.ts";
 import { findConfigured, modelIdentity } from "../../lib/models/model-policy.ts";
@@ -128,7 +130,7 @@ import { findProjectRoot } from "../../lib/context/git.ts";
 import { productProjectSettingsPath, productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { protectedFiles } from "../../lib/profile/sources.ts";
+import { protectedFiles, sourceName, userConfigDir } from "../../lib/profile/sources.ts";
 import { relativeDisplayPath, tildify, tryRealpath } from "../../lib/profile/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../../lib/ui/panel-focus.ts";
@@ -311,7 +313,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		type: "string",
 	});
 	pi.registerFlag("dangerously-skip-permissions", {
-		description: "Skip all permission prompts (Claude Code compatible)",
+		description: "Skip all permission prompts",
 		type: "boolean",
 	});
 
@@ -1161,7 +1163,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				ctx,
 				"info",
 				fastPaths
-					? `${name}: permissions now follow Claude Code's fast paths.`
+					? `${name}: permissions now follow the standard fast paths.`
 					: `${name}: permissions now use ${brand.name}'s stricter checks, so more calls prompt or go to the auto-mode classifier.`,
 			);
 		}
@@ -1220,7 +1222,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		description: "Cycle permission mode",
 		handler: (ctx) => {
 			badgeCtx = ctx;
-			setMode(nextMode(mode, { bypassInCycle, autoInCycle }));
+			setMode(nextMode(mode, { bypassInCycle, autoInCycle, planInCycle: featureEnabled("plan-mode") }));
 		},
 	});
 
@@ -1954,7 +1956,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const others = listed.length - own.length;
 		// `"$defaults"` in the list: the user's lines extend the built-in default,
 		// which stays out of the editor and is kept on save.
-		const extendsDefault = oneCodeEnvironmentExtendsDefault(home);
+		const extendsDefault = productEnvironmentExtendsDefault(home);
 		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : defaultEnvironment();
 		const title =
 			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
@@ -1964,7 +1966,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		if (edited === undefined) return undefined;
 		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 		if (lines.join("\n") === start.join("\n")) return undefined;
-		updateOneCodeAutoModeList(
+		updateProductAutoModeList(
 			"environment",
 			(entries) => {
 				const at = entries.findIndex((entry) => entry.trim() === "$defaults");
@@ -2047,7 +2049,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// from project settings (decisions/modes.md). The cached config is dropped
 			// so the next classifier call reads the change.
 			addAutoRule: (section, text) => {
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						if (entries.includes(text)) throw new Error(`That ${autoLabel(section)} rule is already in your settings.`);
@@ -2060,7 +2062,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			},
 			editAutoRule: (key, text) => {
 				const { section, text: old } = parseAutoKey(key);
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						const index = entries.indexOf(old);
@@ -2074,7 +2076,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			},
 			deleteAutoRule: (key) => {
 				const { section, text } = parseAutoKey(key);
-				updateOneCodeAutoModeList(
+				updateProductAutoModeList(
 					section,
 					(entries) => {
 						if (!entries.includes(text)) throw new Error("That rule is no longer in your settings.");
@@ -2371,7 +2373,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		]);
 		if (!history) return;
 
-		ctx.ui.notify("Gathering environment facts (git, gh, CLAUDE.md)…", "info");
+		ctx.ui.notify("Gathering environment facts (git, gh, instruction files)…", "info");
 		const facts = await gatherFacts({
 			cwd: ctx.cwd,
 			home: os.homedir(),
@@ -2424,10 +2426,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// files is removable from One Code's AND still live in Claude Code's, so it
 		// must appear in both lists (removing the One Code copy alone would leave the
 		// exposure and a false "fixed" impression).
-		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
+		const productAllow = new Set(productPermissionAllow(os.homedir()));
 		// Without a borrowed user file (independent mode) the list is empty.
 		const claudeAllow = new Set(borrowedUserPermissionAllow(os.homedir()));
-		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
+		const removable = flagged.filter((entry) => productAllow.has(entry.rule));
 		const claudeSide = flagged.filter((entry) => claudeAllow.has(entry.rule));
 
 		ctx.ui.notify(
@@ -2437,7 +2439,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (claudeSide.length > 0) {
 			ctx.ui.notify(
-				`These live in your Claude Code settings (~/.claude) and stay in force even after any ${brand.name} copy is removed. ${brand.name} never edits Claude Code's files — remove them there yourself if you want them gated:\n` +
+				`These live in your ${sourceName() ?? "other tool's"} settings (${tildify(userConfigDir(os.homedir()), os.homedir())}) and stay in force even after any ${brand.name} copy is removed. ${brand.name} never edits ${sourceName() ?? "another tool"}'s files — remove them there yourself if you want them gated:\n` +
 					claudeSide.map((entry) => `  · ${entry.rule}`).join("\n"),
 				"warning",
 			);
@@ -2449,7 +2451,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (act === "Remove them") {
 			try {
-				const removed = removeOneCodePermissionAllow(
+				const removed = removeProductPermissionAllow(
 					removable.map((entry) => entry.rule),
 					os.homedir(),
 				);
@@ -2601,7 +2603,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					which === "config"
 						? `read from: ${autoModeSettingsPaths(os.homedir()).join(", ")}\n(project settings are deliberately not read — a repo could otherwise grant itself permissions)`
 						: 'built-in environment; add "$defaults" to autoMode.environment in settings to keep it while adding your own',
-					"The built-in ruleset is Claude Code's fixed classifier ruleset (not shown); customize via the environment and the append-only hard_deny/soft_deny/allow extras.",
+					`The built-in ruleset is ${rulesetOwner() ?? "a"} fixed classifier ruleset (not shown); customize via the environment and the append-only hard_deny/soft_deny/allow extras.`,
 					section("environment", shown.environment),
 					...ruleSections,
 					...(which === "config" && "classifyAllShell" in shown

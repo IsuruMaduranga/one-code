@@ -13,7 +13,7 @@
  * midnight learns the new date, both on the request's tail.
  *
  * When ONECODE.md files exist, this extension also emits a separate `# oneCodeMd`
- * block at CONTEXT_ORDER.oneCodeMd — after the instructions block, so One
+ * block at CONTEXT_ORDER.productMd — after the instructions block, so One
  * Code-specific instructions take precedence over CLAUDE.md. Keeping them out
  * of that block leaves it byte-exact with Claude Code.
  *
@@ -28,7 +28,7 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname } from "node:path";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { buildClaudeMdBlock, buildContextBlock, buildOneCodeBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./instructions.ts";
+import { buildClaudeMdBlock, buildContextBlock, buildProductBlock, dateBlock, dateChangeReminder, localDate, nestedInstructionText } from "./instructions.ts";
 import { collectImportedPaths, type ExternalInclude, instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { readMemoryIndex } from "./memory-index.ts";
@@ -199,7 +199,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 	 */
 	const adoptShown = (current: ReturnType<typeof readFiles>) => {
 		const skippedPaths = new Set(live.map((file) => file.path));
-		startupShown = new Set([...current.contextFiles, ...current.oneCodeFiles].flatMap((file) =>
+		startupShown = new Set([...current.contextFiles, ...current.productFiles].flatMap((file) =>
 			skippedPaths.has(file.path) ? [file.path] : [file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
 		).map((path) => tryRealpath(path) ?? path));
 		for (const path of startupShown) attachedNested.add(path);
@@ -226,9 +226,9 @@ function instructionsExtension(pi: ExtensionAPI) {
 	let contextWindow: number | undefined;
 	/** The instruction files fitted to the current window: both blocks' files in one budget. */
 	const fitFiles = (current: ReturnType<typeof readFiles>) => {
-		const fit = fitToWindow([...current.contextFiles, ...current.oneCodeFiles], contextWindow);
+		const fit = fitToWindow([...current.contextFiles, ...current.productFiles], contextWindow);
 		const split = current.contextFiles.length;
-		return { contextFiles: fit.files.slice(0, split), oneCodeFiles: fit.files.slice(split), skipped: fit.skipped, loaded: fit.loaded };
+		return { contextFiles: fit.files.slice(0, split), productFiles: fit.files.slice(split), skipped: fit.skipped, loaded: fit.loaded };
 	};
 	/** What a fit changes in the blocks' text: the skipped files and the sizes their notes state. */
 	const skipKey = (skipped: readonly SkippedInstruction[]) => skipped.map((file) => `${file.path}\0${file.tokens}\0${file.contextWindow}`).join("\n");
@@ -250,7 +250,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 		for (const file of live) if (!toldPaths.has(file.path)) warnSkipped(ctx, file);
 		if (ctx.hasUI) {
 			// Only a file still loaded is restored; a deleted one has nothing to say.
-			const loaded = new Set([...(files?.contextFiles ?? []), ...(files?.oneCodeFiles ?? [])].map((file) => file.path));
+			const loaded = new Set([...(files?.contextFiles ?? []), ...(files?.productFiles ?? [])].map((file) => file.path));
 			for (const path of toldPaths) if (!paths.has(path) && loaded.has(path)) queueNotice(pi.events, ctx, "info", restoredInstructionNotice(tildify(path, os.homedir()), contextWindow));
 		}
 		toldPaths = paths;
@@ -282,13 +282,13 @@ function instructionsExtension(pi: ExtensionAPI) {
 		}
 		// One Code's own instructions ride in a separate block AFTER the instructions
 		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
-		const oneCode = buildOneCodeBlock(fit.oneCodeFiles);
-		if (oneCode) {
+		const product = buildProductBlock(fit.productFiles);
+		if (product) {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: oneCode,
+				text: product,
 				key: PRODUCT_REMINDER_KEY,
 				placement: "first-prepend",
-				order: CONTEXT_ORDER.oneCodeMd,
+				order: CONTEXT_ORDER.productMd,
 			});
 		} else pi.events.emit(REMINDER_CHANNEL, { remove: true, key: PRODUCT_REMINDER_KEY });
 	};

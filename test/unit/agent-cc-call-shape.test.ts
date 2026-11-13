@@ -45,7 +45,7 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 	it("fails loud when a run names an agent but has no task", async () => {
 		const result = (await run({ subagent_type: "general-purpose" })) as { isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(text(result)).toBe(refused({ kind: "taskRequired", aliasNote: requireText("subagents").taskAliasNote }));
+		expect(text(result)).toBe(refused({ kind: "taskRequired" }));
 	});
 
 	// Battery round 7: DeepSeek V3.2 repeated a run without `subagent_type` up to
@@ -80,7 +80,7 @@ describe("Agent tool, Claude Code call shape (H1)", () => {
 	it("rejects a blank task rather than spawning an empty child", async () => {
 		const result = (await run({ subagent_type: "general-purpose", prompt: "   " })) as { isError?: boolean };
 		expect(result.isError).toBe(true);
-		expect(text(result)).toBe(refused({ kind: "taskRequired", aliasNote: requireText("subagents").taskAliasNote }));
+		expect(text(result)).toBe(refused({ kind: "taskRequired" }));
 	});
 
 	it("accepts `prompt` as the task (CC's name), reaching agent validation", async () => {

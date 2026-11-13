@@ -22,7 +22,7 @@ export function memoryEntriesIn(root: string, cwd: string) {
 		agentDir: undefined,
 		cwd,
 		home: root,
-		homeOneCodeDir: join(root, brand.stateDir),
+		homeProductDir: join(root, brand.stateDir),
 		memoryDir: join(root, "mem"),
 	});
 }

@@ -34,9 +34,9 @@ import { type HooksSource, loadHookSettings } from "../../safety/hooks/settings.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../../lib/context/auto-memory.ts";
 import { isPathAtOrUnder, productStateDir } from "../../lib/profile/paths.ts";
 import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/settings-files.ts";
-import { protectedFiles, type SettingsFile, sourceSwitch } from "../../lib/profile/sources.ts";
+import { protectedFiles, type SettingsFile, sourceName, sourceSwitch } from "../../lib/profile/sources.ts";
 import { agentSkippedInstructions } from "../../lib/context/instruction-budget.ts";
-import { openInstructions } from "../../lib/context/instructions.ts";
+import { instructionTargets, openInstructions } from "../../lib/context/instructions.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, projectMemoryDir } from "../../lib/context/memory.ts";
 import { skippedInstructionWarning } from "../../lib/context/instruction-budget.ts";
 import { indexLimitStatus } from "../../lib/context/memory-content.ts";
@@ -84,7 +84,7 @@ export interface CompatReport {
 	agents: { user: number; project: number; plugin: number; bundled: number; failed: string[] };
 	skills: { user: number; project: number; plugin: number; bundled: number; noDescription: string[] };
 	commands: number;
-	plugins: { claude: { total: number; enabled: number }; oneCode: { total: number; enabled: number } };
+	plugins: { claude: { total: number; enabled: number }; product: { total: number; enabled: number } };
 	hooks: { sources: HooksSource[]; commands: number; diagnostics: string[] };
 	mcp: { servers: McpServer[]; disabled: Set<string>; configErrors: string[] };
 	findings: Finding[];
@@ -203,7 +203,7 @@ function permissionsSummary(perms: unknown, file: SettingsFile, primaryPath: str
 			refused = `permissions.defaultMode "${mode}" — a repository's files may not select it`;
 			findings.push({
 				level: "warn",
-				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}"; a repository's own settings never select that mode (it would let a cloned repo grant itself unattended approval). Claude Code applies the same rule.`,
+				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}"; a repository's own settings never select that mode (it would let a cloned repo grant itself unattended approval).`,
 				fix: `Set it in ${shortenHome(primaryPath, home)} instead, or pass --permission-mode.`,
 			});
 		} else {
@@ -308,7 +308,7 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 			report.refused.push(`autoMode (${keys.join(", ")}) — never read from a repository's files`);
 			findings.push({
 				level: "warn",
-				text: `${shortenHome(path, home)} has an autoMode block; auto-mode configuration is read from user and managed settings only, so it is ignored here (Claude Code does the same).`,
+				text: `${shortenHome(path, home)} has an autoMode block; auto-mode configuration is read from user and managed settings only, so it is ignored here.`,
 				fix: `Move the block to ${SETTINGS_DISPLAY} (or run /auto-mode setup there).`,
 			});
 		}
@@ -394,13 +394,13 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// The session's window budget, over the sections it loads (imports inlined,
 	// ONECODE.md included): past half the window, the largest are not loaded.
-	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeOneCodeDir: productStateDir(env, home), contextWindow: input.contextWindow });
+	const skipped = agentSkippedInstructions({ cwd, home, agentDir, homeProductDir: productStateDir(env, home), contextWindow: input.contextWindow });
 	const fix = "Trim the instruction files below half of the model's context window together, split this one into files the model reads when needed, or switch to a model with a larger window.";
 	for (const file of skipped) findings.push({ level: "warn", text: skippedInstructionWarning(shortenHome(file.path, home), file), fix });
 	const skippedPaths = new Set(skipped.map((file) => file.path));
 
 	// Context files, sized — the block every turn pays for.
-	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeOneCodeDir: productStateDir(env, home) }).map(({ path, descriptor }) => {
+	const contextFiles: ContextFileReport[] = openInstructions(home, agentDir).paths({ cwd, homeProductDir: productStateDir(env, home) }).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {
 			chars = readFileSync(path, "utf-8").length;
@@ -537,7 +537,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 		agents,
 		skills,
 		commands: promptTemplateNames(cwd, home, agentDir).length,
-		plugins: { claude: pluginCounts("claude"), oneCode: pluginCounts("product") },
+		plugins: { claude: pluginCounts("claude"), product: pluginCounts("product") },
 		hooks: { sources: hookSources, commands: hookCommands, diagnostics: hookDiagnostics },
 		mcp: { servers, disabled: readDisabledMcpServers(cwd, home, env), configErrors },
 		findings,
@@ -551,6 +551,8 @@ const byOrigin = (counts: Record<string, number>): string =>
 		.join(" · ");
 
 export function importedConfigSection(compat: CompatReport, home: string): ReportSection {
+	// The other tool whose files the session reads too, when the profile's provider adds one.
+	const other = sourceName(home);
 	const lines: ReportLine[] = [];
 	for (const file of compat.files) {
 		if (!file.exists) continue;
@@ -573,11 +575,12 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 			lines.push({ text: `${shortenHome(file.path, home)} — ${(file.chars / 1000).toFixed(1)}k chars${file.overLimit ? " (over the 40k soft limit)" : ""}`, indent: 1, level: file.overLimit ? "warn" : "dim" });
 		}
 	} else {
-		lines.push({ text: `Instruction files: none (no CLAUDE.md, AGENTS.md or ${brand.productFile} from here to the repository root)`, level: "dim" });
+		const names = [...new Set([instructionTargets(home).project, "AGENTS.md", brand.productFile])];
+		lines.push({ text: `Instruction files: none (no ${names.slice(0, -1).join(", ")} or ${names.at(-1)} from here to the repository root)`, level: "dim" });
 	}
 	lines.push({
 		text: compat.memory.indexExists
-			? `Auto-memory: ${shortenHome(compat.memory.dir, home)} (MEMORY.md ${compat.memory.indexStatus ?? "present"}; shared with Claude Code)`
+			? `Auto-memory: ${shortenHome(compat.memory.dir, home)} (MEMORY.md ${compat.memory.indexStatus ?? "present"}${other ? `; shared with ${other}` : ""})`
 			: `Auto-memory: ${shortenHome(compat.memory.dir, home)} (empty; created when the model saves its first note)`,
 		level: "dim",
 	});
@@ -593,7 +596,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	});
 	const p = compat.plugins;
 	lines.push({
-		text: `Plugins: ${p.claude.enabled}/${p.claude.total} Claude Code-installed enabled (read-only; toggle in /plugins), ${p.oneCode.enabled}/${p.oneCode.total} installed by ${brand.name}`,
+		text: `Plugins: ${other ? `${p.claude.enabled}/${p.claude.total} ${other}-installed enabled (read-only; toggle in /plugins), ` : ""}${p.product.enabled}/${p.product.total} installed by ${brand.name}`,
 		level: "ok",
 	});
 	if (compat.hooks.sources.length) {
@@ -602,7 +605,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	} else {
 		lines.push({ text: "Hooks: none configured", level: "dim" });
 	}
-	return { title: "Imported configuration", subtitle: `what ${brand.name} reads from your Claude Code and ${brand.name} files`, lines };
+	return { title: "Imported configuration", subtitle: `what ${brand.name} reads from your ${other ? `${other} and ` : ""}${brand.name} files`, lines };
 }
 
 export function mcpSection(compat: CompatReport, session: SessionView | undefined, home: string): ReportSection {

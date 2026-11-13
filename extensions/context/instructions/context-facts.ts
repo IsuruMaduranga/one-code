@@ -35,12 +35,12 @@ export interface ContextFingerprints {
 	product: string;
 }
 
-export function contextFingerprints(input: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null; oneCodeFiles?: ContextFile[] }): ContextFingerprints {
+export function contextFingerprints(input: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null; productFiles?: ContextFile[] }): ContextFingerprints {
 	return {
 		instructions: fingerprint(buildClaudeMdBlock({ contextFiles: input.contextFiles })),
 		memory: fingerprint(buildClaudeMdBlock({ contextFiles: [], memoryIndex: input.memoryIndex })),
 		// The files alone: the block's preamble names the instruction file above it, which a change of sources renames.
-		product: fingerprint((input.oneCodeFiles ?? []).map((file) => [file.path, file.content])),
+		product: fingerprint((input.productFiles ?? []).map((file) => [file.path, file.content])),
 	};
 }
 

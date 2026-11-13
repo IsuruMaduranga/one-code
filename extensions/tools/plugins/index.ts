@@ -17,6 +17,7 @@
  */
 
 import { brand } from "../../lib/profile/brand.mjs";
+import { sourceName } from "../../lib/profile/sources.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
@@ -170,14 +171,14 @@ function pluginsExtension(pi: ExtensionAPI) {
 					inverse: safeThemeInverse(theme),
 				};
 				const roots = defaultDiscoverRoots(getAgentDir(), ctx.cwd);
-				const oneCodeRoot = roots.oneCodeRoot;
+				const productRoot = roots.productRoot;
 
 				const state = initialPanelState();
 				const snapshots = new Map<string, MarketplaceSnapshot>();
 				const loading = new Set<string>();
 				const actionErrors: string[] = [];
 				const busy = new Set<string>();
-				let counts = readCachedCounts(oneCodeRoot);
+				let counts = readCachedCounts(productRoot);
 				let known: Record<string, KnownMarketplace> = {};
 
 				// Two caches: rendered lines (per width, cleared on ANY repaint) and
@@ -226,7 +227,7 @@ function pluginsExtension(pi: ExtensionAPI) {
 				const syncOne = async (name: string, entry: KnownMarketplace, refreshContent: boolean) => {
 					const snapshot = await track(
 						`${refreshContent ? "updating" : "loading"} ${name}…`,
-						syncMarketplace(oneCodeRoot, name, entry, { refresh: refreshContent }),
+						syncMarketplace(productRoot, name, entry, { refresh: refreshContent }),
 					);
 					if (snapshot) {
 						snapshots.set(name, snapshot);
@@ -239,16 +240,16 @@ function pluginsExtension(pi: ExtensionAPI) {
 				// when stale), fetch install counts, ask mcp for a status snapshot.
 				const openTasks = async () => {
 					ensureOfficialRegistered(
-						oneCodeRoot,
-						installLocationFor(oneCodeRoot, OFFICIAL_MARKETPLACE_NAME, OFFICIAL_MARKETPLACE_SOURCE),
+						productRoot,
+						installLocationFor(productRoot, OFFICIAL_MARKETPLACE_NAME, OFFICIAL_MARKETPLACE_SOURCE),
 					);
-					known = readKnownMarketplaces(oneCodeRoot);
+					known = readKnownMarketplaces(productRoot);
 					// The counts fetch is independent of the marketplace syncs.
 					await Promise.all([
 						...Object.entries(known).map(([name, entry]) =>
 							syncOne(name, entry, name === OFFICIAL_MARKETPLACE_NAME && isStale(entry)),
 						),
-						track("fetching install counts…", fetchInstallCounts(oneCodeRoot)).then((fetched) => {
+						track("fetching install counts…", fetchInstallCounts(productRoot)).then((fetched) => {
 							if (fetched) counts = fetched;
 						}),
 					]);
@@ -268,9 +269,9 @@ function pluginsExtension(pi: ExtensionAPI) {
 
 				const buildView = (): PanelView => {
 					const installedIds = new Set(discovered.plugins.map((p) => p.id));
-					const usage = readUsage(oneCodeRoot);
-					const favorites = readFavorites(oneCodeRoot);
-					const skillOverrides = readSkillStates(oneCodeRoot);
+					const usage = readUsage(productRoot);
+					const favorites = readFavorites(productRoot);
+					const skillOverrides = readSkillStates(productRoot);
 					// /plugins manages plugin skills only; project/user skills (with their
 					// on/name-only/user-only/off nuance) belong to the /skills panel. Build
 					// the rows straight from the discovered plugin skills — no project/user
@@ -348,19 +349,19 @@ function pluginsExtension(pi: ExtensionAPI) {
 				const installToggle = async (row: DiscoverRow) => {
 					const plugin = discovered.plugins.find((p) => p.id === row.id);
 					if (row.installed && plugin?.originRoot === "claude") {
-						state.notice = `${row.name} was installed by Claude Code — uninstall it there (files are read-only here).`;
+						state.notice = `${row.name} was installed by ${sourceName() ?? "another tool"} — uninstall it there (files are read-only here).`;
 						return;
 					}
 					busy.add(row.id);
 					refresh();
 					try {
 						if (row.installed) {
-							uninstallPlugin(oneCodeRoot, row.id);
+							uninstallPlugin(productRoot, row.id);
 						} else {
 							const snapshot = snapshots.get(row.marketplace);
 							const entry = snapshot?.manifest?.plugins.find((p) => p.name === row.name);
 							if (!snapshot || !entry) throw new Error(`${row.marketplace} has no entry named ${row.name}`);
-							await installPlugin(oneCodeRoot, row.marketplace, entry, snapshot.contentRoot);
+							await installPlugin(productRoot, row.marketplace, entry, snapshot.contentRoot);
 						}
 						state.restartNeeded = true;
 						rediscover();
@@ -381,25 +382,25 @@ function pluginsExtension(pi: ExtensionAPI) {
 							void guarded(installToggle(effect.row));
 							return;
 						case "setPluginEnabled": {
-							if (effect.origin === "product") setInstalledEnabled(oneCodeRoot, effect.id, effect.enabled);
-							else setOverride(oneCodeRoot, effect.id, effect.enabled);
+							if (effect.origin === "product") setInstalledEnabled(productRoot, effect.id, effect.enabled);
+							else setOverride(productRoot, effect.id, effect.enabled);
 							state.restartNeeded = true;
 							rediscover();
 							return;
 						}
 						case "uninstall": {
-							uninstallPlugin(oneCodeRoot, effect.id);
+							uninstallPlugin(productRoot, effect.id);
 							state.detail = undefined;
 							state.restartNeeded = true;
 							rediscover();
 							return;
 						}
 						case "setSkillEnabled":
-							setSkillOverride(oneCodeRoot, effect.overrideKey, effect.enabled);
+							setSkillOverride(productRoot, effect.overrideKey, effect.enabled);
 							rediscover();
 							return;
 						case "toggleFavorite":
-							toggleFavorite(oneCodeRoot, effect.target === "plugin" ? "plugin" : "skill", effect.key);
+							toggleFavorite(productRoot, effect.target === "plugin" ? "plugin" : "skill", effect.key);
 							return;
 						case "addMarketplace": {
 							const parsed = parseMarketplaceInput(effect.input, ctx.cwd);
@@ -407,13 +408,13 @@ function pluginsExtension(pi: ExtensionAPI) {
 								state.notice = parsed.error;
 								return;
 							}
-							const name = availableMarketplaceName(oneCodeRoot, parsed.suggestedName);
+							const name = availableMarketplaceName(productRoot, parsed.suggestedName);
 							const entry: KnownMarketplace = {
 								source: parsed.source,
-								installLocation: installLocationFor(oneCodeRoot, name, parsed.source),
+								installLocation: installLocationFor(productRoot, name, parsed.source),
 								lastUpdated: new Date(0).toISOString(),
 							};
-							writeKnownMarketplace(oneCodeRoot, name, entry);
+							writeKnownMarketplace(productRoot, name, entry);
 							known = { ...known, [name]: entry };
 							void guarded(syncOne(name, entry, false));
 							state.tab = "marketplaces";
@@ -423,12 +424,12 @@ function pluginsExtension(pi: ExtensionAPI) {
 							if (effect.name === OFFICIAL_MARKETPLACE_NAME) {
 								state.notice = "The official marketplace re-registers on next open; remove individual plugins instead.";
 							}
-							removeKnownMarketplace(oneCodeRoot, effect.name);
+							removeKnownMarketplace(productRoot, effect.name);
 							snapshots.delete(effect.name);
 							// Cached content lives under OUR marketplaces dir only — a
 							// file/directory source's user-owned path is never touched, and
 							// a name that would escape the cache dir deletes nothing.
-							const cacheBase = marketplaceCacheDir(oneCodeRoot);
+							const cacheBase = marketplaceCacheDir(productRoot);
 							if (pathWithinBase(cacheBase, effect.name)) {
 								rmSync(join(cacheBase, effect.name), { recursive: true, force: true });
 								rmSync(join(cacheBase, `${effect.name}.json`), { force: true });
@@ -500,7 +501,7 @@ function pluginsExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "plugins", {
-		description: "Browse, install, and manage Claude Code-compatible plugins and marketplaces",
+		description: "Browse, install, and manage plugins and marketplaces",
 		handler: async (args, ctx) => {
 			if (canShowCustomUi(ctx)) {
 				await openPanel(ctx);

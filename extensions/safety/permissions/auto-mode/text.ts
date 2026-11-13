@@ -146,6 +146,8 @@ export interface ClassifierRuleset {
 
 /** The classifier's prompt: the ruleset and the additions the base appends to stage 2 when their case holds. */
 export interface ClassifierText extends ClassifierRuleset {
+	/** Whose ruleset it is, as a possessive, for the two notes that tell the user the built-in rules are fixed: "Claude Code's". Absent: the notes name no one. */
+	rulesetOwner?: string;
 	/** Always after `stage2Final`: a block cleared on the user's intent must quote the user, which the base checks against the transcript. */
 	stage2IntentAddendum: string;
 	/** After it, when the transcript holds a permission-rule denial: a rule outranks the user's stated intent. */
