@@ -13,11 +13,13 @@ import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
-import { type EnglishPhrases, type NamedText, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
+import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: EnglishPhrases = {
 	edit: [/about to edit \(an edit needs a read first\)/, /a shell edit/, /edit that file/, /write or edit any files/, /allowed to edit/, /the only file you can edit/],
+	// The PowerShell description compares its syntax with the bash language.
+	bash: [/work like bash/, /works similarly to bash/, /or bash `export`/],
 	monitor: [/monitor for regressions/],
 	skill: [/a skill or slash command/],
 	workflow: [/through this workflow/],
@@ -43,7 +45,7 @@ function texts(live: LiveTools): NamedText[] {
 	const t = profile.text({ live });
 	const { systemPrompt, planMode, askUser, subagents, toolStyle, shell, workflow, artifacts, toolSearch, permissions: autoMode, background } = t as Required<typeof t>;
 	const out: NamedText[] = [];
-	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
+	const push = (label: string, owner: string | undefined, text: string, tool?: string) => out.push([label, owner, text, tool]);
 	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
 			push(`systemPrompt ${tier}${taskTools ? "" : " no task tools"}`, undefined, systemPrompt.lead({ tier, taskTools: taskTools && live.has("task_create"), tools: undefined }).join("\n\n"));
@@ -51,24 +53,24 @@ function texts(live: LiveTools): NamedText[] {
 		push(`systemPrompt tail ${tier}`, undefined, systemPrompt.tail({ tier, taskTools: live.has("task_create"), tools: undefined }).join("\n\n"));
 	}
 	for (const form of FORMS) {
-		push(`enter_plan_mode ${form}`, "plan-mode", planMode.descriptions.enter_plan_mode(form));
-		push(`ask_user_question ${form}`, "ask-user", askUser.description(form));
-		push(`Agent ${form}`, "subagents", subagents.agentDescription({ form, configDir: ".claude" }));
+		push(`enter_plan_mode ${form}`, "plan-mode", planMode.descriptions.enter_plan_mode(form), "enter_plan_mode");
+		push(`ask_user_question ${form}`, "ask-user", askUser.description(form), "ask_user_question");
+		push(`Agent ${form}`, "subagents", subagents.agentDescription({ form, configDir: ".claude" }), "Agent");
 		push(`write ${form}`, undefined, toolStyle.writeDescription(form));
 		for (const autoModeOn of [true, false]) {
-			for (const searchTools of [true, false]) push(`bash ${form}`, "bash", shell.bashDescription({ form, autoMode: autoModeOn, searchTools }));
+			for (const searchTools of [true, false]) push(`bash ${form}`, "bash", shell.bashDescription({ form, autoMode: autoModeOn, searchTools }), "bash");
 		}
 	}
-	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode);
-	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }));
-	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })));
-	push("artifact", "artifacts", artifacts.description);
+	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode, "exit_plan_mode");
+	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }), "workflow");
+	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })), "workflow");
+	push("artifact", "artifacts", artifacts.description, "artifact");
 	push("tool_search", "tool-search", toolSearch.description);
-	push("monitor", "background", background.monitor.description);
-	push("task_output", "background", background.tasks.outputDescription);
+	push("monitor", "background", background.monitor.description, "monitor");
+	push("task_output", "background", background.tasks.outputDescription, "task_output");
 	for (const firm of [true, false]) push(`auto-mode note${firm ? " firm" : ""}`, undefined, autoMode.autoModeNote({ firm }));
 
-	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }));
+	for (const edition of ["core", "desktop", "unknown"] as const) push(`powershell ${edition}`, "bash", shell.powershellDescription({ edition }), "powershell");
 	for (const planExists of [true, false]) push("plan mode reminder", "plan-mode", planMode.reminder({ planFile: "/p.md", planExists }));
 	return out;
 }
@@ -76,6 +78,10 @@ function texts(live: LiveTools): NamedText[] {
 describe("text naming another tool", () => {
 	it("leaves out the tools of each optional feature that is off, and edit", () => {
 		expect(toolLeaks(texts, ENGLISH)).toEqual([]);
+	});
+
+	it("has every passage its tables cut", () => {
+		expect(stalePassages(texts)).toEqual([]);
 	});
 
 	it("leaves ask_user_question out of the /doctor fix prompt when it is off", () => {

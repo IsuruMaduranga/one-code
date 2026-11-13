@@ -16,6 +16,8 @@ export const background: BackgroundText = { cron, wakeup, monitor, tasks, loop }
 /** Per tool, the passages of the monitor and task_output descriptions that name it. */
 const DESCRIPTION_PASSAGES: ToolPassages = {
 	bash: ["; for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own", ["(monitor, background subagent, or background bash)", "(monitor or background subagent)"]],
+	// After bash's: with both off, its replacement leaves the second form.
+	monitor: [["(monitor, background subagent, or background bash)", "(background subagent or background bash)"], ["(monitor or background subagent)", "(background subagent)"]],
 };
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */

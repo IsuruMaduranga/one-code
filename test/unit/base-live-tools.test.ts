@@ -16,7 +16,7 @@ import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
 import { profile } from "../../profile/index.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
-import { type EnglishPhrases, type NamedText, toolLeaks } from "./helpers/tool-mentions.ts";
+import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "./helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: EnglishPhrases = { edit: [/write or edit any files/] };
@@ -29,7 +29,7 @@ function texts(live: LiveTools): NamedText[] {
 	const notifications = notificationText(live, t.notifications);
 	const subagents = subagentResultWords(live, t.subagents!);
 	const out: NamedText[] = [];
-	const push = (label: string, owner: string | undefined, text: string) => out.push([label, owner, text]);
+	const push = (label: string, owner: string | undefined, text: string, tool?: string) => out.push([label, owner, text, tool]);
 	push("one-shot note", undefined, notifications.oneShotSession);
 	push("model menu", undefined, subagentModels.menu({ lines: [], notes: [] }));
 	push("refused model", undefined, subagentModels.refused({ model: "a/b" }));
@@ -56,12 +56,19 @@ function texts(live: LiveTools): NamedText[] {
 	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));
 	push("web_fetch failed", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "httpStatus", status: 500, statusText: "x" } }));
+	push("web_fetch binary", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "binary", mime: "application/zip" } }));
+	push("web_fetch too large", "web-fetch", webFetchResultWords(live).failed({ url: "u", failure: { kind: "tooLarge", limitMiB: 10 } }));
+	push("web_fetch local host", "web-fetch", webFetchResultWords(live).urlRejected({ kind: "noDot" }), "web_fetch");
 	return out;
 }
 
 describe("the base's words naming another tool", () => {
 	it("leave out the tools of each optional feature that is off, and edit", () => {
 		expect(toolLeaks(texts, ENGLISH)).toEqual([]);
+	});
+
+	it("have every passage their tables cut", () => {
+		expect(stalePassages(texts)).toEqual([]);
 	});
 
 	it("name the tools when every one is on", () => {

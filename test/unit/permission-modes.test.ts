@@ -27,6 +27,9 @@ import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 describe("nextMode", () => {
 	it("cycles manual → acceptEdits → plan → manual", () => {
 		expect(nextMode("default", { bypassInCycle: false, autoInCycle: false })).toBe("acceptEdits");
+		// A product without plan mode: the cycle skips it.
+		expect(nextMode("acceptEdits", { bypassInCycle: false, autoInCycle: true, planInCycle: false })).toBe("auto");
+		expect(nextMode("acceptEdits", { bypassInCycle: false, autoInCycle: false, planInCycle: false })).toBe("default");
 		expect(nextMode("acceptEdits", { bypassInCycle: false, autoInCycle: false })).toBe("plan");
 		expect(nextMode("plan", { bypassInCycle: false, autoInCycle: false })).toBe("default");
 	});

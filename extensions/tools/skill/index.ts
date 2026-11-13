@@ -55,8 +55,8 @@ import {
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
-import { BUNDLED_SKILL_FEATURES } from "../../lib/profile/features.ts";
-import { featureEnabled, requireText } from "../../lib/profile/profile.ts";
+import { BUNDLED_SKILL_FEATURES, BUNDLED_SKILL_TOOLS } from "../../lib/profile/features.ts";
+import { featureEnabled, requireText, toolLive } from "../../lib/profile/profile.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { listableSkillNames } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
@@ -99,10 +99,11 @@ const BUNDLED_ROOT = resolve(BUNDLED_SKILLS_DIR);
 
 /** A skill in One Code's own catalog, like one built into Claude Code: listed last, kept whole over budget, no folder named. */
 const isBundled = (path: string): boolean => resolve(path).startsWith(BUNDLED_ROOT + sep);
-/** A bundled skill whose feature is off (BUNDLED_SKILL_FEATURES): its body drives tools the session does not have. */
+/** A bundled skill whose feature is off (BUNDLED_SKILL_FEATURES) or that lacks a tool it calls (BUNDLED_SKILL_TOOLS): its body drives tools the session does not have. */
 function bundledSkillOff(skill: { name: string; path?: string }): boolean {
+	if (!skill.path || !isBundled(skill.path)) return false;
 	const feature = BUNDLED_SKILL_FEATURES[skill.name];
-	return feature !== undefined && !!skill.path && isBundled(skill.path) && !featureEnabled(feature);
+	return (feature !== undefined && !featureEnabled(feature)) || (BUNDLED_SKILL_TOOLS[skill.name] ?? []).some((tool) => !toolLive(tool));
 }
 const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
 const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");

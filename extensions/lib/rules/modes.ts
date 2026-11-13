@@ -33,6 +33,8 @@ const CYCLE: readonly PermissionMode[] = ["default", "acceptEdits", "plan"];
 export interface CycleOptions {
 	bypassInCycle: boolean;
 	autoInCycle: boolean;
+	/** False when the product has no plan mode (its feature is off): the cycle skips it. */
+	planInCycle?: boolean;
 }
 
 /** Strip a trailing release-date stamp (`-20250601`), noise in a model id. */
@@ -163,7 +165,7 @@ export function permissionModeDisplay(status: PermissionStatus): string {
  * cycle's start rather than being unreachable-from.
  */
 export function nextMode(current: PermissionMode, opts: CycleOptions): PermissionMode {
-	const cycle: PermissionMode[] = [...CYCLE];
+	const cycle: PermissionMode[] = opts.planInCycle === false ? CYCLE.filter((mode) => mode !== "plan") : [...CYCLE];
 	if (opts.bypassInCycle) cycle.push("bypassPermissions");
 	if (opts.autoInCycle) cycle.push("auto");
 	const index = cycle.indexOf(current);

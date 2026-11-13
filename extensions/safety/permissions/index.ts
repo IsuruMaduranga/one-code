@@ -18,6 +18,7 @@
  */
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
 import { join } from "node:path";
@@ -1220,7 +1221,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		description: "Cycle permission mode",
 		handler: (ctx) => {
 			badgeCtx = ctx;
-			setMode(nextMode(mode, { bypassInCycle, autoInCycle }));
+			setMode(nextMode(mode, { bypassInCycle, autoInCycle, planInCycle: featureEnabled("plan-mode") }));
 		},
 	});
 

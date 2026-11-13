@@ -23,7 +23,7 @@ import { join, relative, resolve } from "node:path";
 import { isRelativeInside } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
@@ -224,7 +224,8 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * names an unknown feature, misspells a base tool, marks one autoAllow, turns
  * off or defers a pinned tool, names a child extension that is missing or
  * outside the profile's extensions folder, declares a provider entry the
- * base cannot read, or leaves out a text group a feature that is on reads.
+ * base cannot read, turns off a tool its feature or another live tool
+ * cannot do without, or leaves out a text group a feature that is on reads.
  */
 export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
@@ -260,6 +261,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		const feature = TOOL_FEATURES[name];
 		if (feature !== undefined && !features.has(feature)) disabledTools.add(name);
 	}
+	const toolProblems = toolSetProblems(features, disabledTools);
+	if (toolProblems.length > 0) throw new Error(`Invalid profile: ${toolProblems.join("; ")}.`);
 	const live: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
