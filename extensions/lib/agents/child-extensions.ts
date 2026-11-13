@@ -32,8 +32,12 @@
 
 import { join } from "node:path";
 import { EXTENSIONS_DIR } from "../core/package-root.ts";
-import { featureOfEntry } from "../profile/features.ts";
-import { activeProfile } from "../profile/profile.ts";
+import { memoOn } from "../core/text-spans.ts";
+import { featureOfEntry, TOOL_FEATURES } from "../profile/features.ts";
+import type { LiveTools } from "../profile/live-tools.ts";
+import { activeProfile, type ResolvedProfile } from "../profile/profile.ts";
+import type { ProfileText } from "../profile/profile-contract.ts";
+import { type ShellResultText, shellResultWords } from "../shell-run/shell-text.ts";
 
 // Entry files under `extensions/`. A `child.ts` entry is child-specific:
 // `tool-call-corruption/child.ts` blocks damaged OpenRouter calls like the main session's, before the hook and
@@ -70,3 +74,39 @@ export function childExtensionPaths(): string[] {
 	}).map(entryPath);
 	return [...base, ...profile.childExtensionPaths, entryPath(LAST_CHILD_EXTENSION)];
 }
+
+/** The features a child session loads an entry of. */
+const CHILD_FEATURES = new Set(CHILD_EXTENSIONS.map(featureOfEntry));
+
+/** The tools the subagent runtime hands a child itself: the nested Agent, and SendMessage to its caller (agents/subagents/index.ts). */
+const HANDED_TO_CHILDREN: ReadonlySet<string> = new Set(["Agent", "SendMessage"]);
+
+const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; text: ProfileText; shellWords: ShellResultText } => {
+	const live: LiveTools = {
+		has: (name) => {
+			const feature = TOOL_FEATURES[name];
+			return profile.live.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
+		},
+	};
+	return { live, text: profile.textFor(live), shellWords: shellResultWords(live) };
+});
+
+/**
+ * Which tools a child session can have: a tool the profile leaves on whose
+ * feature a child loads (no background, task, plan-mode, ask-user or
+ * workflow tools), and the two a subagent is handed. A workflow agent has
+ * neither of those two; the shell text names them only to forbid one, which
+ * a subagent must still hear. A resident's cron proxies count as absent: no
+ * text of a child's own tools names them.
+ */
+export const childLive = (): LiveTools => childView(activeProfile()).live;
+
+/**
+ * The profile's text for a child session's tools (`childLive`), for the
+ * tools a child registers itself. A fork still sends the parent's tool
+ * definitions, from the parent's captured request (agents/subagents/fork-cache.ts).
+ */
+export const childText = (): ProfileText => childView(activeProfile()).text;
+
+/** The shell tools' results and refusals for a child session's tools (`childLive`). */
+export const childShellWords = (): ShellResultText => childView(activeProfile()).shellWords;

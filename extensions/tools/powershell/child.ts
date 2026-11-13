@@ -4,7 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { powershellTool } from "./index.ts";
 
 function childPowershellExtension(pi: ExtensionAPI) {
-	powershellTool(pi, { announce: false });
+	powershellTool(pi, { announce: false, child: true });
 }
 
 export default feature("powershell", childPowershellExtension);

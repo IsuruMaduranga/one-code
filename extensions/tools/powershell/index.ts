@@ -29,6 +29,7 @@ import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
 import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
 import { requireText } from "../../lib/profile/profile.ts";
+import { childShellWords, childText } from "../../lib/agents/child-extensions.ts";
 import { powershellGuardReason } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 
@@ -49,7 +50,9 @@ function powershellExtension(pi: ExtensionAPI) {
 }
 
 /** The tool itself; `announce: false` is the in-process child's shape (tools/powershell/child.ts), which prints no notices. */
-export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boolean }) {
+export function powershellTool(pi: ExtensionAPI, { announce, child = false }: { announce: boolean; child?: boolean }) {
+	// A child's words name only the tools every child has (lib/agents/child-extensions.ts).
+	const text = child ? (childText().shell ?? requireText("shell")) : requireText("shell");
 	const spec = powerShellSpawn();
 	const operations = createPowerShellOperations(() => spec);
 	const base = createPowerShellToolDefinition(process.cwd(), { operations });
@@ -60,7 +63,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 	registerShellTool(pi, {
 		name: "powershell",
 		ccLabel: "PowerShell",
-		description: requireText("shell").powershellDescription({ edition: powerShellEdition(spec) }),
+		description: text.powershellDescription({ edition: powerShellEdition(spec) }),
 		parameters: powerShellParams(),
 		base,
 		// The guideline joins the system prompt's tool guidelines at registration
@@ -70,11 +73,12 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		promptGuidelines: [
 			...(base.promptGuidelines ?? []),
 			...(startupPolicy.primary === "powershell"
-				? [requireText("shell").powershellPrimary]
+				? [text.powershellPrimary]
 				: []),
 		],
 		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations })),
 		guard: powershellGuardReason,
+		...(child ? { words: childShellWords } : {}),
 		backgroundShell: () => spec,
 		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
 		wrapBackgroundCommand: (command) => `${POWERSHELL_TOOL_PREFIX}${command}`,

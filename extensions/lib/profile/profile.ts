@@ -177,6 +177,8 @@ export interface ResolvedProfile {
 	childExtensionPaths: readonly string[];
 	/** The profile's model-facing text, built for `live`. */
 	text: ProfileText;
+	/** The profile's text for another tool set: a child session's, which loads fewer tools (lib/agents/child-extensions.ts). */
+	textFor(live: LiveTools): ProfileText;
 	/** The absolute path of the module exporting the profile's source provider (lib/profile/sources.ts), if it has one. */
 	sourcesModule?: string;
 	/** The user's global AGENTS.md files besides pi's own, `~/` unexpanded. */
@@ -281,6 +283,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		live,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
 		text,
+		textFor: (other) => profile.text({ live: other }),
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
 		globalAgentsFiles: profile.globalAgentsFiles ?? [],
 		providers: new Map(Object.entries(profile.providers ?? {})),

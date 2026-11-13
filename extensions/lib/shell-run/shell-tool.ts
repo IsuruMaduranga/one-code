@@ -21,7 +21,7 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, typ
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
-import type { ShellEnd } from "./shell-text.ts";
+import type { ShellEnd, ShellResultText } from "./shell-text.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -81,8 +81,10 @@ export interface ShellToolSpec<P extends TObject> {
 	promptGuidelines?: readonly string[];
 	/** The per-cwd foreground executor (pi's definition takes seconds). */
 	foreground: (cwd: string) => ShellToolExecutor;
-	/** Pre-execution guard on the model's ORIGINAL command; a string refuses the call. */
-	guard: (command: string, opts: { background: boolean }) => string | undefined;
+	/** Pre-execution guard on the model's ORIGINAL command; a string refuses the call. `words` are this session's (`ShellToolSpec.words`). */
+	guard: (command: string, opts: { background: boolean; words: ShellResultText }) => string | undefined;
+	/** The result and refusal words: a child session's are built for its own tools. Default: the main session's. */
+	words?: () => ShellResultText;
 	/** The spawn for a background run, or undefined when the shell is unavailable. */
 	backgroundShell: () => ShellSpawn | undefined;
 	/** Rewrites the command for a background spawn (PowerShell prepends its UTF-8 prefix). Default: identity. */
@@ -128,6 +130,7 @@ export function taskLogPath(ctx: ExtensionContext, taskId: string): string | und
  * the original-command tracker, execute — is built once.
  */
 export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): (description: string) => void {
+	const words = spec.words ?? shellResultText;
 	// A completion whose output task_output just returned is withdrawn (CC's
 	// delivered_as_tool_result) — the model already has it.
 	const notifyTask = createTaskNotifier(pi, { withdrawOnDelivery: true });
@@ -176,7 +179,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// Guards check the model's original command — a worktree session rewrites
 			// input.command to `cd '<wt>' && (…)`, which would hide the real lead.
 			const originalCommand = commandToEvaluate(originalCommands, toolCallId, params.command);
-			const guardReason = spec.guard(originalCommand, { background: params.run_in_background === true });
+			const guardReason = spec.guard(originalCommand, { background: params.run_in_background === true, words: words() });
 			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
 			// pi's executor takes seconds; the model-facing unit is milliseconds
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
@@ -203,7 +206,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const shell = spec.backgroundShell();
 			if (!shell) {
 				return {
-					content: [{ type: "text" as const, text: shellResultText().noBackgroundShell({ label: spec.ccLabel }) }],
+					content: [{ type: "text" as const, text: words().noBackgroundShell({ label: spec.ccLabel }) }],
 					isError: true,
 					details: {},
 				};
@@ -223,7 +226,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// server started this way hung the run forever. A detached shell below
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
-				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: shellResultText() }, signal);
+				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: words() }, signal);
 				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
@@ -232,7 +235,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					content: [
 						{
 							type: "text" as const,
-							text: shellResultText().ranToEnd({
+							text: words().ranToEnd({
 								label: spec.ccLabel,
 								id,
 								description,
@@ -258,7 +261,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// exactly 10 minutes. The one-shot path above keeps the timeout
 			// because there the command holds the turn.
 			const task = startBackgroundBash({
-				text: shellResultText(),
+				text: words(),
 				id,
 				command,
 				description,
@@ -278,7 +281,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, shellResultText().earlierTruncated).trim() || undefined,
+							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim() || undefined,
 						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath },
 					);
@@ -292,7 +295,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: shellResultText().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
+						text: words().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
 					},
 				],
 				details: { taskId: id, logPath },
