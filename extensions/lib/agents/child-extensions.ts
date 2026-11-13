@@ -49,7 +49,7 @@ import type { ProfileText } from "../profile/profile-contract.ts";
 // child starts outlives it (Claude Code kills an agent's shells as it exits).
 export const CHILD_EXTENSIONS = [
 	"request/kept-thinking/index.ts", "request/ledger/index.ts", "request/system-reminder/index.ts", "request/tool-search/index.ts", "request/context-management/index.ts", "context/compaction/index.ts", "request/ledger/wire.ts", "request/cache-marks/index.ts", "context/instructions/index.ts", "request/tool-call-corruption/child.ts",
-	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
+	"safety/file-tracker/index.ts", "tools/search-tools/index.ts", "tools/tool-style/child.ts", "tools/skill/index.ts", "tools/bash/child.ts", "tools/powershell/child.ts", "tools/web/index.ts", "tools/web-fetch/index.ts", "tools/notebook/index.ts",
 ];
 
 /** Loaded after everything else a child loads, a product's own child extensions included: its `tool_result` handler redacts what theirs return (safety/secret-values). */

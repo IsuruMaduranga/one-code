@@ -297,7 +297,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (feature !== undefined && !features.has(feature)) disabledTools.add(name);
 	}
 	const toolProblems = toolSetProblems(features, disabledTools);
-	// pi's own tools take a description only where an extension registers them again (tools/tool-style);
+	// pi's own tools take a description only where an extension registers them again (tools/tool-style, and its child entry);
 	// wording that could reach no tool is refused, not dropped.
 	if (user && !features.has("tool-style")) {
 		for (const name of user.toolWording.keys()) {

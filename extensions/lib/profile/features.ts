@@ -36,7 +36,7 @@ export const FEATURES = {
 	hooks: { entries: ["safety/hooks/index.ts"], guard: true },
 	"tool-search": { entries: ["request/tool-search/index.ts"], required: true },
 	"search-tools": { entries: ["tools/search-tools/index.ts"] },
-	"tool-style": { entries: ["tools/tool-style/index.ts"] },
+	"tool-style": { entries: ["tools/tool-style/index.ts", "tools/tool-style/child.ts"] },
 	// A guard: plugin discovery supplies the hooks of installed plugins (safety/hooks/plugin-hooks.ts).
 	plugins: { entries: ["tools/plugins/index.ts"], guard: true },
 	worktree: { entries: ["safety/worktree/index.ts"] },
