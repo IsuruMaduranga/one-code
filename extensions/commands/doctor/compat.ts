@@ -161,7 +161,7 @@ function knownKeys(file: SettingsFile, family: readonly SettingsFile[]): Readonl
 	if (family.includes(file) && file.scope === "local") keys.add("disabledMcpjsonServers");
 	return keys;
 }
-/** The keys the report counts as read from `file` of the ladder `files`: held to the loaders by profile/test/doctor-settings-keys.test.ts. */
+/** The keys the report counts as read from `file` of the ladder `files`: held to the loaders by test/unit/doctor-settings-keys.test.ts. */
 export function keysReadFrom(file: SettingsFile, files: readonly SettingsFile[]): ReadonlySet<string> {
 	return knownKeys(file, primaryFamily(files));
 }
