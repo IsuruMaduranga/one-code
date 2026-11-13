@@ -43,6 +43,7 @@ import { modelSpec } from "../../lib/models/model-policy.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { productProjectSettingsPath, productSettingsPath, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
+import { profileRow } from "./profile-row.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
@@ -112,6 +113,7 @@ function doctorExtension(pi: ExtensionAPI) {
 		if (!readCatalogRefreshEnabled(productSettingsPath(home))) return;
 		const outcome = await refreshModelCatalog({
 			stateDir: productStateDir(process.env, home),
+			...profileRow(home),
 			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
 			signal: refreshAbort.signal,
 		});
@@ -155,6 +157,7 @@ function doctorExtension(pi: ExtensionAPI) {
 				home,
 				agentDir: getAgentDir(),
 				stateDir: productStateDir(process.env, home),
+			...profileRow(home),
 				sources: sourceSwitchStatus(home),
 				env: process.env,
 				platform: process.platform,

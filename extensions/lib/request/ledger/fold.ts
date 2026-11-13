@@ -249,7 +249,9 @@ export function foldBranch(branch: readonly EntryLike[], identity?: RequestIdent
 				? "auth"
 				: b.effortMarkers !== live.effortMarkers
 					? "effort"
-					: undefined;
+					: b.profile !== live.profile
+						? "profile"
+						: undefined;
 	// A compaction with no settled request before it (the only request failed, a
 	// session recorded before the ledger) still opens the compaction's epoch.
 	const cause: EpochCause | undefined = resetSinceBase ?? (!base ? "first" : identity ? changed(base.identity, identity) : undefined);

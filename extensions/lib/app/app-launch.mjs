@@ -19,7 +19,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { brand, envName } from "../profile/brand.mjs";
+import { brand, envName, productBrand } from "../profile/brand.mjs";
 
 /** The app-only override for the app's pi agent directory. */
 export const APP_AGENT_DIR_VAR = envName("AGENT_DIR");
@@ -32,9 +32,13 @@ export const INSTALL_METHOD_VAR = envName("INSTALL_METHOD");
 export const VERSION_VAR = envName("VERSION");
 export const LAUNCHER_VARS = ["PI_CODING_AGENT_DIR", "PI_SKIP_VERSION_CHECK", VERSION_VAR, INSTALL_METHOD_VAR];
 
-/** The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`. */
+/**
+ * The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`.
+ * It sits in the product's own folder whichever profile runs, so every
+ * profile of a product shares one sign-in, model list and session store.
+ */
 export function appAgentDir(env = process.env, home = homedir()) {
-	return env[APP_AGENT_DIR_VAR] || join(home, brand.stateDir, "agent");
+	return env[APP_AGENT_DIR_VAR] || join(home, productBrand.stateDir, "agent");
 }
 
 /**

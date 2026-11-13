@@ -50,10 +50,12 @@ export interface RequestIdentity {
 	auth: string;
 	/** Whether pi-ai puts its per-message effort markers in the list; absent on a model without them. */
 	effortMarkers?: boolean;
+	/** The profile the request was built under (lib/profile/profile.ts `profileKey`); absent on the default profile alone. */
+	profile?: string;
 }
 
 export const sameIdentity = (a: RequestIdentity, b: RequestIdentity): boolean =>
-	a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth && a.effortMarkers === b.effortMarkers;
+	a.api === b.api && a.provider === b.provider && a.model === b.model && a.auth === b.auth && a.effortMarkers === b.effortMarkers && a.profile === b.profile;
 
 /**
  * Which of the session's context messages a request covers: the first `count`
@@ -152,9 +154,9 @@ export interface FileVersion {
 	mtimeMs?: number;
 }
 
-const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "effort", "fold", "coverage", "empty"] as const;
+const EPOCH_CAUSES = ["first", "compaction", "model", "auth", "effort", "profile", "fold", "coverage", "empty"] as const;
 
-/** Why an epoch opened: no request yet, a compaction, a model or auth switch, thinking turned off or on where pi marks effort per message, a history fold, a base that cannot be extended, or nothing new since it. */
+/** Why an epoch opened: no request yet, a compaction, a model or auth switch, thinking turned off or on where pi marks effort per message, a session resumed under another profile, a history fold, a base that cannot be extended, or nothing new since it. */
 export type EpochCause = (typeof EPOCH_CAUSES)[number];
 
 export interface EpochRecordData extends RecordBase {
@@ -228,6 +230,7 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		isString(d.identity.model) &&
 		isString(d.identity.auth) &&
 		(d.identity.effortMarkers === undefined || typeof d.identity.effortMarkers === "boolean") &&
+		(d.identity.profile === undefined || isString(d.identity.profile)) &&
 		Number.isInteger(d.keep) &&
 		(d.keep as number) >= 0 &&
 		isStrings(d.append) &&

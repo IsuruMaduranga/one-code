@@ -15,7 +15,7 @@
  * turn), so a root missing here is a skill with no `/name` command at startup.
  */
 
-import { featureEnabled, PROFILE_DIR } from "../profile/profile.ts";
+import { catalogDir, featureEnabled } from "../profile/profile.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { PluginSkill } from "./plugins.ts";
@@ -25,7 +25,7 @@ import { isPathAtOrUnder, tryRealpath } from "../profile/paths.ts";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
 
 /** The profile's skill catalog, `<package>/profile/skills` (One Code's: Claude Code's self-contained built-in skills). */
-export const BUNDLED_SKILLS_DIR = join(PROFILE_DIR, "skills");
+export const BUNDLED_SKILLS_DIR = catalogDir("skills");
 
 export interface ScannedSkill {
 	name: string;

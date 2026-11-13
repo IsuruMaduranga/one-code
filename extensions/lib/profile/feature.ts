@@ -8,7 +8,8 @@
  * - **Tool registration.** The factory gets a view of `pi` that never
  *   registers a tool the profile turns off and drops such a tool from every
  *   `setActiveTools` list. Tools registered later (MCP servers, plugin LSP
- *   tools) pass through the same view.
+ *   tools) pass through the same view. A tool the user's own profile words
+ *   (lib/profile/user-profile.ts) is registered with that description.
  * - **Fail closed.** An invalid profile (a required feature off, an unknown
  *   feature, a pinned tool off) stops the process with the reason, so the
  *   harness never runs without its safety core.
@@ -25,15 +26,19 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { FeatureId } from "./features.ts";
 import { activeProfile, failClosed, featureEnabled, isToolDisabled } from "./profile.ts";
+import { wordedByUser } from "./user-profile.ts";
 
 /** `pi` as the profile lets an extension register tools: see the header. */
 export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
-	if (activeProfile().disabledTools.size === 0) return pi;
+	const user = activeProfile().user;
+	if (activeProfile().disabledTools.size === 0 && !user?.toolWording.size) return pi;
 	return new Proxy(pi, {
 		get(target, key) {
 			if (key === "registerTool") {
 				return (tool: Parameters<ExtensionAPI["registerTool"]>[0]) => {
-					if (!isToolDisabled(tool.name)) target.registerTool(tool);
+					if (isToolDisabled(tool.name)) return;
+					const description = wordedByUser(user, tool.name, tool.description);
+					target.registerTool(description === tool.description ? tool : { ...tool, description });
 				};
 			}
 			if (key === "setActiveTools") {

@@ -63,6 +63,7 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 	lines.push({ text: `Node ${env.nodeVersion} · ${env.platform}-${env.arch}`, level: "dim" });
 	lines.push({ text: `pi agent dir: ${shortenHome(env.agentDir, env.home)} (auth, models, sessions, pi settings)`, level: "dim" });
 	lines.push({ text: `${brand.name} state: ${shortenHome(env.stateDir, env.home)} (own settings, plans)`, level: "dim" });
+	if (env.profile) lines.push({ text: `Profile: ${env.profile}`, level: "dim" });
 	if (env.sources) {
 		lines.push({ text: `${env.sources.title}: ${env.sources.label} (switch in /memory)`, level: "dim" });
 		lines.push({ text: env.sources.detail, level: "dim" });

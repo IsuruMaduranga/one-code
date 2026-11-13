@@ -128,7 +128,36 @@ declare module "*/brand.mjs" {
 			readonly app: PackageInfo;
 			readonly extension: PackageInfo;
 		};
+		/** The ids of the product's other profiles, each a folder `profile/profiles/<id>/`; `--<id>` in any case launches one. */
+		readonly profiles?: readonly string[];
 	}
+	/** What the launch chose (`--profile <name>`, `--<id>`, `<envPrefix>_PROFILE`). */
+	export interface ProfileSelection {
+		/** A product profile's id, as the brand's `profiles` list spells it. */
+		readonly productProfile?: string;
+		/** A user's own profile's name (lib/profile/user-profile.ts). */
+		readonly userProfile?: string;
+	}
+	export interface ResolvedBrand {
+		brand: Brand;
+		product: Brand;
+		selection: ProfileSelection;
+		profileDir: string;
+	}
+	export const PROFILE_NAME: RegExp;
+	export const PROFILE_BRAND_FIELDS: readonly string[];
+	export function selectedProfileName(product: Pick<Brand, "envPrefix" | "profiles">, argv?: readonly string[], env?: Record<string, string | undefined>): string | undefined;
+	/** `args` without the launch's choice of profile (`--profile <name>`, `--<id>`). */
+	export function withoutProfileFlags(args: readonly string[], product: Pick<Brand, "profiles">): string[];
+	export function resolveBrand(data: unknown, options: { name: string | undefined; profileRoot: string; sharedStateDir: string; read?: (path: string) => unknown }): ResolvedBrand;
+	/** The product's own brand, before the chosen profile's names. */
+	export const productBrand: Brand;
+	export const profileSelection: ProfileSelection;
+	/** The chosen profile's folder, relative to the package root. */
+	export const profileDirName: string;
+	/** The folder every profile of the product shares: the app's pi agent directory and the users' profiles. */
+	export function sharedStateDir(env?: Record<string, string | undefined>, home?: string): string;
+	export function userProfilesDir(env?: Record<string, string | undefined>, home?: string): string;
 	export interface PackageInfo {
 		readonly description: string;
 		readonly keywords: readonly string[];

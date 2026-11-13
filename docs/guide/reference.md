@@ -154,6 +154,7 @@ extension install, use `pi` in place of `onecode`.
 | `-e <source>` | Load an extra extension. |
 | `--offline` | Skip network checks, including the update check. |
 | `--append-system-prompt <text>` | Append to the system prompt. |
+| `--profile <name>` | Run under one of your own profiles: see [Profiles](#profiles). `ONECODE_PROFILE=<name>` does the same. |
 | `--verbose` | Show the full startup listing. |
 
 ## Environment variables
@@ -228,6 +229,32 @@ mode. When both spellings are set, One Code's wins.
 
 Variables One Code sets for hooks and children: `CLAUDE_PROJECT_DIR` in a
 hook's environment, `ONECODE_PERMISSION_MODE` for child tool gates.
+
+## Profiles
+
+A profile is a saved set of choices you start One Code with: which tools it has, and what the
+model is told. It's a folder of your own, `~/.onecode/profiles/<name>/`, and every file in it is
+optional:
+
+| File | Effect |
+|---|---|
+| `profile.json` | The switches. `{"tools": {"off": ["web_fetch"], "deferred": ["notebook_edit"], "eager": ["lsp_diagnostics"]}, "features": {"off": ["artifacts"]}}` turns tools and optional features off, moves a tool behind `tool_search`, or loads one up front. |
+| `system-prompt.md` | Replaces the system prompt. |
+| `append-system-prompt.md` | Is added after the system prompt. |
+| `tools/<tool>.md` | Replaces that tool's description. |
+| `tools/<tool>.append.md` | Is added after that tool's description. |
+
+Start it with `onecode --profile <name>`. `/doctor` shows the profile in force and what it changes.
+
+A few things to know:
+
+- Adding to a description is safer than replacing it. A replacement stays as you wrote it when a
+  release rewords the tool.
+- A profile can't turn off the permission checks, the hooks or the tools One Code needs to run
+  (`tool_search`, for one). A profile that tries stops the launch and says what to fix.
+- Profiles are read only from your own folder, never from a project.
+- A session remembers the profile it ran under. Resume it under another one and One Code sends
+  the system prompt and tools again, so the first reply after that reads no prompt cache.
 
 ## Files and directories
 

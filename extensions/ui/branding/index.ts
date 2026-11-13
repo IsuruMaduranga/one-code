@@ -17,7 +17,7 @@ import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { knobValue } from "../../lib/profile/knobs.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
-import { PROFILE_DIR } from "../../lib/profile/profile.ts";
+import { PRODUCT_DIR } from "../../lib/profile/profile.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../../lib/ui/argument-hints.ts";
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
@@ -497,7 +497,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// Use pi's effective settings, including project overrides, so the two
 		// listings agree on whether quiet startup is enabled.
 		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
-			? collectStartupSections(ctx.cwd, home, join(PROFILE_DIR, "themes"), agentDir)
+			? collectStartupSections(ctx.cwd, home, join(PRODUCT_DIR, "themes"), agentDir)
 			: undefined;
 
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {

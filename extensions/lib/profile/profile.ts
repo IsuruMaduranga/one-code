@@ -1,7 +1,9 @@
 /**
  * The profile in force: `profile/index.ts` at the repo root (One Code's, or a
- * product's in its place), resolved and checked once per module instance
- * (pure, apart from reading the environment and the profile module).
+ * product's in its place), or the product profile the launch chose
+ * (`profile/profiles/<id>/index.ts`, lib/profile/brand.mjs), resolved and
+ * checked once per module instance (pure, apart from reading the environment
+ * and the profile module).
  *
  * Two environment variables can only turn things OFF, never on, so they can't
  * weaken the safety core: `ONECODE_FEATURES_OFF` (feature ids, never a guard
@@ -17,7 +19,8 @@
  * in each of the extensions' copies cost about a third of a second at startup.
  */
 
-import { brandedId, envName } from "./brand.mjs";
+import { brandedId, envName, productBrand, profileDirName, profileSelection, userProfilesDir } from "./brand.mjs";
+import { describeUserProfile, loadUserProfile, type UserProfile } from "./user-profile.ts";
 import { existsSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { isRelativeInside } from "./paths.ts";
@@ -33,7 +36,21 @@ import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
 
-export const PROFILE_DIR = join(PACKAGE_ROOT, "profile");
+/** The product's folder: the default profile, and what every profile of the product shares (`extensions/`, `themes/`). */
+export const PRODUCT_DIR = join(PACKAGE_ROOT, "profile");
+
+/** The folder of the profile in force: `PRODUCT_DIR`, or the chosen product profile's folder under it. */
+export const PROFILE_DIR = join(PACKAGE_ROOT, ...profileDirName.split("/"));
+
+/**
+ * A catalog folder of the profile in force (`agents`, `skills`): the chosen
+ * product profile's own when it has one, else the product's, so profiles
+ * share a catalog unless one brings its own.
+ */
+export function catalogDir(name: string): string {
+	const own = join(PROFILE_DIR, name);
+	return PROFILE_DIR === PRODUCT_DIR || existsSync(own) ? own : join(PRODUCT_DIR, name);
+}
 
 /**
  * Tools a profile may neither turn off nor defer: the harness's own plumbing.
@@ -191,6 +208,8 @@ export interface ResolvedProfile {
 	readOnlyCommands: ReadonlyMap<string, ReadonlyMap<string, OptionSpec>>;
 	/** The profile's language servers, `${PROFILE_DIR}` filled in (lib/profile/language-servers.ts). */
 	languageServers: readonly ResolvedLanguageServer[];
+	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
+	user?: UserProfile;
 }
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
@@ -228,14 +247,26 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * outside the profile's extensions folder, declares a provider entry the
  * base cannot read, turns off a tool its feature or another live tool
  * cannot do without, or leaves out a text group a feature that is on reads.
+ * `extensionsRoot` is the folder child extension entries are relative to: the
+ * product's, which every product profile shares (default: `profileDir`).
+ * `user` is the user's own profile over it: its switches join the
+ * environment's, under the same limits.
  */
-export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string): ResolvedProfile {
+export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	const envOff = envList(env, envName("FEATURES_OFF"));
-	for (const id of envOff) featureMap[id] = false;
+	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
-	for (const name of envList(env, envName("TOOLS_OFF"))) tools.set(name, { ...tools.get(name), enabled: false });
+	for (const name of [...envList(env, envName("TOOLS_OFF")), ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
+	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
+	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
 	const problems = featureProblems(featureMap);
+	if (user) {
+		// The user's own lists: name the profile, since the fix is theirs to make.
+		const where = `the profile "${user.name}" (${user.dir})`;
+		for (const id of user.featuresOff.filter(isGuardFeature)) problems.push(`${where} cannot turn off "${id}": it guards tool calls`);
+		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
+	}
 	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
 	const envTools = envList(env, envName("TOOLS_OFF"));
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
@@ -248,7 +279,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
-	problems.push(...childExtensionProblems(profile.childExtensions, profileDir));
+	problems.push(...childExtensionProblems(profile.childExtensions, extensionsRoot));
 	problems.push(...providerProblems(profile.providers ?? {}));
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
@@ -281,7 +312,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools,
 		live,
-		childExtensionPaths: profile.childExtensions.map((entry) => resolve(profileDir, entry)),
+		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,
 		textFor: (other) => profile.text({ live: other }),
 		...(profile.sources ? { sourcesModule: resolve(profileDir, profile.sources) } : {}),
@@ -290,7 +321,36 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
 		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 		languageServers: resolveLanguageServers(profile.languageServers ?? {}, profileDir),
+		...(user ? { user } : {}),
 	};
+}
+
+/** The user's own profile the launch chose, read from its folder; throws, naming every problem, when it cannot be used. */
+function chosenUserProfile(): UserProfile | undefined {
+	const name = profileSelection.userProfile;
+	if (name === undefined) return undefined;
+	const { profile, problems } = loadUserProfile(name, join(userProfilesDir(), name), productBrand.profiles ?? []);
+	if (!profile) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
+	return profile;
+}
+
+/**
+ * What a session records of the profile it runs under: the product profile's
+ * id and the user's profile with its content hash, or undefined on the
+ * default profile alone. A session resumed under another one renders its
+ * system prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch).
+ */
+export function profileKey(): string | undefined {
+	const user = activeProfile().user;
+	if (profileSelection.productProfile === undefined && !user) return undefined;
+	return [profileSelection.productProfile ?? "", ...(user ? [user.name, user.hash] : [])].join(":");
+}
+
+/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder and what it changes. Undefined on the default profile alone. */
+export function profileSummary(shorten: (path: string) => string = (path) => path): string | undefined {
+	const user = activeProfile().user;
+	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${shorten(user.dir)}): ${describeUserProfile(user)}`] : [])];
+	return parts.length > 0 ? parts.join(", with your own profile ") : undefined;
 }
 
 /** The slot the evaluated profile module is shared under (lib/profile/shared-module.ts). */
@@ -317,7 +377,7 @@ let active: ResolvedProfile | undefined;
 
 /** The shipped profile, resolved against this process's environment on first use. Throws when it is invalid. */
 export function activeProfile(): ResolvedProfile {
-	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR);
+	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile());
 	return active;
 }
 
@@ -355,7 +415,7 @@ export function profileText(): ProfileText {
 /** Stop the process: an invalid profile must never run degraded or without its gate. */
 export function failClosed(error: unknown): never {
 	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in profile/, or an environment switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
+	process.stderr.write(`\nThe profile in ${profileDirName}/, or a switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
 	process.exit(1);
 }
 

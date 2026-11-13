@@ -10,9 +10,21 @@
  *
  * Everything here is fixed for the process: ids and environment names are
  * module-scope constants in their owners, so the prefix is known at import.
+ *
+ * A product may ship several profiles (working-docs/decisions/bi-fork.md,
+ * "Profiles are chosen at launch"): `profile/` is the default one, and each
+ * id in the brand's `profiles` list names a folder `profile/profiles/<id>/`
+ * with its own `index.ts` and a `brand.json` holding only the names that
+ * differ (`PROFILE_BRAND_FIELDS`). The launch chooses one: `--profile <name>`,
+ * `--<id>` or `<envPrefix>_PROFILE`. A name that is no product profile is a
+ * user's own profile (lib/profile/user-profile.ts), which may name the
+ * product profile it sits on. The choice is read here, before any module
+ * reads a name, because the state folder's name is one of them.
  */
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import data from "../../../profile/brand.json" with { type: "json" };
 
 const REQUIRED = ["name", "idPrefix", "bin", "envPrefix", "stateDir", "productFile", "theme", "homepage", "subtitle"];
@@ -45,9 +57,110 @@ export function checkBrand(value) {
 	if (typeof value.idPrefix === "string" && !/^[a-z][a-z0-9-]*$/.test(value.idPrefix)) problems.push(`"idPrefix" must be lower-case letters, digits and hyphens`);
 	// Path checks compare case-folded paths on macOS and Windows (lib/profile/paths.ts comparablePath) against patterns built from this name.
 	// The leading dot is required: the name is a protected path segment at any depth (lib/rules/protected-paths.ts), and a plain word such as "agent" would guard every folder of that name.
-	if (typeof value.stateDir === "string" && !/^\.[a-z0-9][a-z0-9._-]*$/.test(value.stateDir)) problems.push(`"stateDir" must be one lower-case folder name starting with "." (letters, digits, ".", "_", "-")`);
+	if (typeof value.stateDir === "string" && !STATE_DIR_NAME.test(value.stateDir)) problems.push(`"stateDir" must be one lower-case folder name starting with "." (letters, digits, ".", "_", "-")`);
+	if (value.profiles !== undefined) {
+		if (!Array.isArray(value.profiles) || value.profiles.some((id) => typeof id !== "string" || !PROFILE_NAME.test(id))) problems.push(`"profiles" must be an array of profile ids (letters, digits, ".", "_", "-")`);
+		else if (new Set(value.profiles.map((id) => id.toLowerCase())).size !== value.profiles.length) problems.push(`"profiles" names an id twice (ids compare without case)`);
+		else if (value.profiles.some((id) => RESERVED_FLAGS.has(id.toLowerCase()))) problems.push(`"profiles" must not use the id "profile": \`--profile\` takes a name`);
+	}
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
 	return value;
+}
+
+const STATE_DIR_NAME = /^\.[a-z0-9][a-z0-9._-]*$/;
+/** A profile's name, a product's or a user's: it is a folder name and a launch flag. */
+export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const RESERVED_FLAGS = new Set(["profile"]);
+
+/** The names a product profile's own `brand.json` may set; every other name is the product's. */
+export const PROFILE_BRAND_FIELDS = ["name", "stateDir", "productFile", "theme", "subtitle", "wordmark", "spinnerVerbs"];
+
+/**
+ * The profile the launch names, or undefined: `<envPrefix>_PROFILE`, else
+ * `--profile <name>` or `--profile=<name>`, else `--<id>` for a product
+ * profile's id in any case (`--BI`). Arguments after a bare `--` are not read.
+ */
+export function selectedProfileName(product, argv = process.argv, env = process.env) {
+	const fromEnv = env[`${product.envPrefix}_PROFILE`];
+	if (fromEnv) return fromEnv;
+	const ids = new Set((product.profiles ?? []).map((id) => id.toLowerCase()));
+	for (let i = 2; i < argv.length; i++) {
+		const arg = argv[i];
+		if (arg === "--") break;
+		if (arg === "--profile") return argv[i + 1] || undefined;
+		if (arg.startsWith("--profile=")) return arg.slice("--profile=".length) || undefined;
+		if (arg.startsWith("--") && ids.has(arg.slice(2).toLowerCase())) return arg.slice(2);
+	}
+	return undefined;
+}
+
+/**
+ * `args` (the arguments after the command) without the launch's choice of
+ * profile, for the bundled app, which reads the choice itself: pi would take
+ * the word after `--BI` as that flag's value and lose a prompt given there.
+ */
+export function withoutProfileFlags(args, product) {
+	const ids = new Set((product.profiles ?? []).map((id) => id.toLowerCase()));
+	const kept = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === "--") return [...kept, ...args.slice(i)];
+		if (arg === "--profile") i++;
+		else if (!arg.startsWith("--profile=") && !(arg.startsWith("--") && ids.has(arg.slice(2).toLowerCase()))) kept.push(arg);
+	}
+	return kept;
+}
+
+function readJson(path) {
+	return JSON.parse(readFileSync(path, "utf8"));
+}
+
+/**
+ * The brand in force for a launch: the product's `data`, with the chosen
+ * product profile's names over it. `name` is what the launch asked for
+ * (`selectedProfileName`); `read` reads a JSON file (a test passes its own).
+ * A name that is no product profile is a user's: its `profile.json` in
+ * `<shared state dir>/profiles/<name>/` may name the product profile it sits
+ * on (`base`). A user profile that is missing or unreadable resolves to the
+ * default product profile here; lib/profile/user-profile.ts reports it.
+ */
+export function resolveBrand(data, { name, profileRoot, sharedStateDir, read = readJson }) {
+	const product = checkBrand(structuredClone(data));
+	const byId = new Map((product.profiles ?? []).map((id) => [id.toLowerCase(), id]));
+	let productProfile = name === undefined ? undefined : byId.get(name.toLowerCase());
+	let userProfile;
+	if (name !== undefined && productProfile === undefined) {
+		userProfile = name;
+		if (PROFILE_NAME.test(name)) {
+			try {
+				const base = read(join(sharedStateDir, "profiles", name, "profile.json")).base;
+				if (typeof base === "string") productProfile = byId.get(base.toLowerCase());
+			} catch {}
+		}
+	}
+	const merged = { ...product };
+	if (productProfile !== undefined) {
+		const file = join(profileRoot, "profiles", productProfile, "brand.json");
+		let own;
+		try {
+			own = read(file);
+		} catch (error) {
+			throw new Error(`profile "${productProfile}": cannot read ${file} (${error instanceof Error ? error.message : error})`);
+		}
+		if (typeof own !== "object" || own === null || Array.isArray(own)) throw new Error(`${file}: not a JSON object`);
+		const unknown = Object.keys(own).filter((key) => !PROFILE_BRAND_FIELDS.includes(key));
+		if (unknown.length > 0) throw new Error(`${file}: a profile's brand may set only ${PROFILE_BRAND_FIELDS.join(", ")} (found ${unknown.join(", ")})`);
+		Object.assign(merged, own);
+		checkBrand(merged);
+	}
+	return {
+		brand: merged,
+		/** The product's own names, whichever profile runs: the folder the profiles share (sign-in, sessions, users' profiles) is named by its `stateDir`. */
+		product,
+		selection: { ...(productProfile !== undefined ? { productProfile } : {}), ...(userProfile !== undefined ? { userProfile } : {}) },
+		/** The profile's folder, relative to the package root, forward-slashed. */
+		profileDir: productProfile === undefined ? "profile" : `profile/profiles/${productProfile}`,
+	};
 }
 
 /** `value` and everything under it, frozen in place. */
@@ -64,7 +177,33 @@ function deepFreeze(value) {
  * object, which a loader may still extend (jiti adds `default` to it on a later
  * import).
  */
-export const brand = deepFreeze(checkBrand(structuredClone(data)));
+const PROFILE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "profile");
+
+/**
+ * The folder a product's profiles share, whichever one runs: the app's pi
+ * agent directory (sign-in, model list, sessions) and the users' own
+ * profiles. `<envPrefix>_STATE_DIR`, else `~/<the product's stateDir>`.
+ */
+function sharedDir(product, env, home) {
+	return env[`${product.envPrefix}_STATE_DIR`] || join(home, product.stateDir);
+}
+
+const resolved = resolveBrand(data, {
+	name: selectedProfileName(checkBrand(structuredClone(data))),
+	profileRoot: PROFILE_ROOT,
+	sharedStateDir: sharedDir(data, process.env, homedir()),
+});
+
+export const brand = deepFreeze(resolved.brand);
+
+/** The product's own brand, before the chosen profile's names: equal to `brand` on the default profile. */
+export const productBrand = deepFreeze(resolved.product);
+
+/** The launch's choice: a product profile's id, a user's profile's name, both (a user profile on a product profile) or neither. */
+export const profileSelection = Object.freeze(resolved.selection);
+
+/** The chosen profile's folder, relative to the package root: `profile`, or `profile/profiles/<id>`. */
+export const profileDirName = resolved.profileDir;
 
 /**
  * The product's user guide, relative to the package root: the brand's
@@ -89,7 +228,17 @@ export function envName(suffix) {
  */
 export const stateDirPattern = brand.stateDir.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 
-/** The product's state directory: `<envPrefix>_STATE_DIR`, else `~/<stateDir>`. */
+/** The product's state directory: `<envPrefix>_STATE_DIR`, else `~/<stateDir>` (the chosen profile's name for it). */
 export function productStateDir(env = process.env, home = homedir()) {
 	return env[envName("STATE_DIR")] || join(home, brand.stateDir);
+}
+
+/** The folder every profile of the product shares (see `sharedDir`): `productStateDir` on the default profile. */
+export function sharedStateDir(env = process.env, home = homedir()) {
+	return sharedDir(productBrand, env, home);
+}
+
+/** Where a user's own profiles live: one folder each, by name. */
+export function userProfilesDir(env = process.env, home = homedir()) {
+	return join(sharedStateDir(env, home), "profiles");
 }
