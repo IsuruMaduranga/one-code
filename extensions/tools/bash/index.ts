@@ -32,7 +32,7 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rule
 import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { shellResultText } from "../../lib/shell-run/shell-text.ts";
-import { bashGuardReason } from "../../lib/shell/bash-guards.ts";
+import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
 
 /** The tool's parameters, described in the profile's words. */
 const bashParams = (d: ShellParams) =>
@@ -94,7 +94,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		parameters: bashParams(text.bashParams),
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
-		guard: bashGuardReason,
+		guard: bashGuardBlock,
 		words: () => shellResultText(view.live),
 		backgroundShell: () => bash.spawn,
 	});

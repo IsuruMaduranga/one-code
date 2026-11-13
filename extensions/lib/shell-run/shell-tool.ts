@@ -21,7 +21,7 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, typ
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
-import type { ShellEnd, ShellResultText } from "./shell-text.ts";
+import type { ShellBlock, ShellEnd, ShellResultText } from "./shell-text.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -81,8 +81,8 @@ export interface ShellToolSpec<P extends TObject> {
 	promptGuidelines?: readonly string[];
 	/** The per-cwd foreground executor (pi's definition takes seconds). */
 	foreground: (cwd: string) => ShellToolExecutor;
-	/** Pre-execution guard on the model's ORIGINAL command; a string refuses the call. `words` are this session's (`ShellToolSpec.words`). */
-	guard: (command: string, opts: { background: boolean; words: ShellResultText }) => string | undefined;
+	/** Pre-execution guard on the model's ORIGINAL command; a block refuses the call, worded with this session's `words`. */
+	guard: (command: string, opts: { background: boolean }) => ShellBlock | undefined;
 	/** The result and refusal words: a child session's are built for its own tools. Default: the main session's. */
 	words?: () => ShellResultText;
 	/** The spawn for a background run, or undefined when the shell is unavailable. */
@@ -179,8 +179,8 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// Guards check the model's original command — a worktree session rewrites
 			// input.command to `cd '<wt>' && (…)`, which would hide the real lead.
 			const originalCommand = commandToEvaluate(originalCommands, toolCallId, params.command);
-			const guardReason = spec.guard(originalCommand, { background: params.run_in_background === true, words: words() });
-			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
+			const block = spec.guard(originalCommand, { background: params.run_in_background === true });
+			if (block) return { content: [{ type: "text" as const, text: words().blocked(block) }], isError: true, details: {} };
 			// pi's executor takes seconds; the model-facing unit is milliseconds
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
 			// 33 hours (review T11). A command that names none gets Claude Code's

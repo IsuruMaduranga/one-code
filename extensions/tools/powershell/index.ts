@@ -30,7 +30,7 @@ import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShe
 import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { shellResultText, type ShellText } from "../../lib/shell-run/shell-text.ts";
-import { powershellGuardReason } from "./guards.ts";
+import { powershellGuardBlock } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 
 /** Claude Code's PowerShell schema (captured), minus `dangerouslyDisableSandbox` — One Code has no sandbox to disable. */
@@ -77,7 +77,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 				: []),
 		],
 		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations })),
-		guard: powershellGuardReason,
+		guard: powershellGuardBlock,
 		words: () => shellResultText(view.live),
 		backgroundShell: () => spec,
 		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
