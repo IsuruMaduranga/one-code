@@ -50,7 +50,8 @@ export function profileSessionDir(env = process.env, home = homedir()) {
 /**
  * The app's pi agent directory: `ONECODE_AGENT_DIR`, else `~/.onecode/agent`. Never `PI_CODING_AGENT_DIR`.
  * It sits in the product's own folder whichever profile runs, so every
- * profile of a product shares one sign-in, model list and session store.
+ * profile of a product shares one sign-in and model list. A product profile
+ * with its own state folder keeps its transcripts there (`OWN_SESSIONS`).
  */
 export function appAgentDir(env = process.env, home = homedir()) {
 	return env[APP_AGENT_DIR_VAR] || join(home, productBrand.stateDir, "agent");

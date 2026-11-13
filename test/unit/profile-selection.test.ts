@@ -34,8 +34,9 @@ describe("the profile a launch names", () => {
 		expect(selectedProfileName(product, argv("-p", "hi"), {})).toBeUndefined();
 	});
 
-	it("prefers the environment, and reads nothing after a bare --", () => {
-		expect(selectedProfileName(product, argv("--bi"), { X_PROFILE: "lean" })).toBe("lean");
+	it("prefers the command line to the environment, and reads nothing after a bare --", () => {
+		expect(selectedProfileName(product, argv("--bi"), { X_PROFILE: "lean" })).toBe("bi");
+		expect(selectedProfileName(product, argv("-p", "hi"), { X_PROFILE: "lean" })).toBe("lean");
 		expect(selectedProfileName(product, argv("--", "--bi"), {})).toBeUndefined();
 	});
 
@@ -95,6 +96,7 @@ describe("a product profile's brand", () => {
 	it("refuses a profiles list with a repeated id or the id \"profile\"", () => {
 		expect(() => resolveBrand({ ...data, profiles: ["bi", "BI"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/twice/);
 		expect(() => resolveBrand({ ...data, profiles: ["profile"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/--profile/);
+		expect(() => resolveBrand({ ...data, profiles: ["BI", "Resume"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/must not use "Resume": `--Resume` is already a launch flag/);
 	});
 
 	// The product in this checkout: One Code ships one profile, the fixture product two.
@@ -192,7 +194,7 @@ describe("the profile resolved with a user's own over it", () => {
 	});
 
 	it("refuses a guard feature, a pinned tool and a misspelled tool, naming the profile", () => {
-		expect(() => resolveProfile(empty, {}, "/p", "/p", user({ featuresOff: ["hooks"] }))).toThrow(/the profile "lean" \(\/u\/lean\) cannot turn off "hooks"/);
+		expect(() => resolveProfile(empty, {}, "/p", "/p", user({ featuresOff: ["hooks"] }))).toThrow(/the profile "lean" \(.*lean\) cannot turn off "hooks"/);
 		expect(() => resolveProfile(empty, {}, "/p", "/p", user({ toolsOff: ["tool_search"] }))).toThrow(/"tool_search" cannot be turned off/);
 		expect(() => resolveProfile(empty, {}, "/p", "/p", user({ toolWording: new Map([["Bash", { append: "x" }]]) }))).toThrow(/the profile "lean".*spelled "bash"/);
 	});

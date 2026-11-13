@@ -997,7 +997,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const modeFlag = normalizePermissionMode(pi.getFlag("permission-mode"));
 		const fromBranch = branchMode ?? carried;
 		const restored = fromBranch === "bypassPermissions" ? undefined : fromBranch;
-		const startup = resolveStartupMode(launching ? [bypassFlag, modeFlag, restored, settings.defaultMode] : [restored, bypassFlag, modeFlag, settings.defaultMode], settings);
+		// Plan mode needs the plan-mode feature (the model leaves it through exit_plan_mode): with the
+		// feature off it is not a mode a flag, a setting or a recorded branch can start the session in.
+		const planOff = !featureEnabled("plan-mode");
+		const candidates = launching ? [bypassFlag, modeFlag, restored, settings.defaultMode] : [restored, bypassFlag, modeFlag, settings.defaultMode];
+		const startup = resolveStartupMode(planOff ? candidates.map((candidate) => (candidate === "plan" ? undefined : candidate)) : candidates, settings);
+		if (planOff && candidates.find((candidate) => candidate !== undefined) === "plan" && ctx.hasUI) ctx.ui.notify("Plan mode is turned off in this profile, so the session starts in another mode", "warning");
 		if (startup.mode) mode = startup.mode;
 		if (startup.bypassRefused && ctx.hasUI) ctx.ui.notify("Bypass permissions mode was disabled by settings", "warning");
 		bypassInCycle = mode === "bypassPermissions";

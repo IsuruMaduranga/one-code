@@ -61,7 +61,10 @@ export function checkBrand(value) {
 	if (value.profiles !== undefined) {
 		if (!Array.isArray(value.profiles) || value.profiles.some((id) => typeof id !== "string" || !PROFILE_NAME.test(id))) problems.push(`"profiles" must be an array of profile ids (letters, digits, ".", "_", "-")`);
 		else if (new Set(value.profiles.map((id) => id.toLowerCase())).size !== value.profiles.length) problems.push(`"profiles" names an id twice (ids compare without case)`);
-		else if (value.profiles.some((id) => id.toLowerCase() === "profile")) problems.push(`"profiles" must not use the id "profile": \`--profile\` takes a name`);
+		else {
+			const taken = value.profiles.filter((id) => RESERVED_FLAGS.has(id.toLowerCase()));
+			if (taken.length > 0) problems.push(`"profiles" must not use ${taken.map((id) => `"${id}"`).join(", ")}: \`--${taken[0]}\` is already a launch flag`);
+		}
 	}
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
 	return value;
@@ -70,6 +73,18 @@ export function checkBrand(value) {
 const STATE_DIR_NAME = /^\.[a-z0-9][a-z0-9._-]*$/;
 /** A profile's name, a product's or a user's: it is a folder name and a launch flag. */
 export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Launch flags a product profile's id must not take: `--<id>` chooses the
+ * profile and is taken out of the arguments, so an id spelled like one of
+ * pi's or the harness's own flags would hide that flag.
+ */
+const RESERVED_FLAGS = new Set([
+	"profile", "help", "version", "print", "mode", "continue", "resume", "session", "session-dir", "fork", "no-session",
+	"model", "models", "provider", "api-key", "thinking", "tools", "no-tools", "extension", "no-extensions", "skill", "no-skills",
+	"theme", "no-themes", "prompt-template", "no-prompt-templates", "system-prompt", "append-system-prompt", "export", "list-models",
+	"offline", "verbose", "approve", "no-approve", "tui-mode", "permission-mode", "add-dir", "dangerously-skip-permissions",
+]);
 
 /** The names a product profile's own `brand.json` may set; every other name is the product's. */
 export const PROFILE_BRAND_FIELDS = ["name", "stateDir", "productFile", "theme", "subtitle", "wordmark", "spinnerVerbs"];
@@ -100,9 +115,9 @@ function splitProfileFlags(args, product) {
 	return { name, rest };
 }
 
-/** The profile the launch names, or undefined: `<envPrefix>_PROFILE`, else the command line's choice (`splitProfileFlags`). */
+/** The profile the launch names, or undefined: the command line's choice (`splitProfileFlags`), else `<envPrefix>_PROFILE`. */
 export function selectedProfileName(product, argv = process.argv, env = process.env) {
-	return env[`${product.envPrefix}_PROFILE`] || splitProfileFlags(argv.slice(2), product).name;
+	return splitProfileFlags(argv.slice(2), product).name ?? (env[`${product.envPrefix}_PROFILE`] || undefined);
 }
 
 /**
@@ -186,7 +201,11 @@ function deepFreeze(value) {
  */
 const PROFILE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "profile");
 
-/** The state folder a brand names: `<envPrefix>_STATE_DIR`, else `~/<its stateDir>`. */
+/**
+ * The state folder a brand names: `<envPrefix>_STATE_DIR`, else `~/<its stateDir>`.
+ * The variable names one folder for a run, so with it set every profile of
+ * the product keeps its state there.
+ */
 function stateDirOf(named, env, home) {
 	return env[`${named.envPrefix}_STATE_DIR`] || join(home, named.stateDir);
 }

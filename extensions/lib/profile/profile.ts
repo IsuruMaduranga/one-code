@@ -22,6 +22,7 @@
 import { brandedId, envName, productBrand, profileDirName, profileSelection, userProfilesDir } from "./brand.mjs";
 import { describeUserProfile, loadUserProfile, type UserProfile } from "./user-profile.ts";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { isRelativeInside, tildify } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
@@ -265,7 +266,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const problems = featureProblems(featureMap);
 	if (user) {
 		// The user's own lists: name the profile, since the fix is theirs to make.
-		const where = `the profile "${user.name}" (${user.dir})`;
+		const where = `the profile "${user.name}" (${tildify(user.dir, homedir())})`;
 		for (const id of user.featuresOff.filter(isGuardFeature)) problems.push(`${where} cannot turn off "${id}": it guards tool calls`);
 		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
 	}
@@ -332,7 +333,8 @@ function chosenUserProfile(): UserProfile | undefined {
 	if (name === undefined) return undefined;
 	// Read once per process: each extension has its own copy of this module, and all of them must see one content hash.
 	const { profile, problems } = processState("profile:user", () => loadUserProfile(name, join(userProfilesDir(), name), productBrand.profiles ?? []));
-	if (!profile) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
+	// The loader names each file by its full path; a message shows it from the home folder.
+	if (!profile) throw new Error(`Invalid profile: ${problems.map((problem) => problem.replaceAll(userProfilesDir(), tildify(userProfilesDir(), homedir()))).join("; ")}.`);
 	return profile;
 }
 

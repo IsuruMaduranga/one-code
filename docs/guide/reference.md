@@ -239,12 +239,12 @@ optional:
 | File | Effect |
 |---|---|
 | `profile.json` | The switches. `{"tools": {"off": ["web_fetch"], "deferred": ["notebook_edit"], "eager": ["lsp_diagnostics"]}, "features": {"off": ["artifacts"]}}` turns tools and optional features off, moves a tool behind `tool_search`, or loads one up front. |
-| `system-prompt.md` | Replaces the system prompt. |
+| `system-prompt.md` | Replaces the whole system prompt, including the tool guidance One Code writes. The first message still tells the model its working directory, platform and model. |
 | `append-system-prompt.md` | Is added after the system prompt. |
 | `tools/<tool>.md` | Replaces that tool's description. |
 | `tools/<tool>.append.md` | Is added after that tool's description. |
 
-Start it with `onecode --profile <name>`. `/doctor` shows the profile in force and what it changes.
+Start it with `onecode --profile <name>`. The flag wins over `ONECODE_PROFILE`. `/doctor` shows the profile in force and what it changes.
 
 A few things to know:
 
