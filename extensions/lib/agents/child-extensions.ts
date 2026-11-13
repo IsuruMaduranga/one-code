@@ -35,9 +35,9 @@ import { EXTENSIONS_DIR } from "../core/package-root.ts";
 import { memoOn } from "../core/text-spans.ts";
 import { featureOfEntry, TOOL_FEATURES } from "../profile/features.ts";
 import type { LiveTools } from "../profile/live-tools.ts";
-import { activeProfile, type ResolvedProfile } from "../profile/profile.ts";
+import { brandedId } from "../profile/brand.mjs";
+import { activeProfile, requireText, type ResolvedProfile } from "../profile/profile.ts";
 import type { ProfileText } from "../profile/profile-contract.ts";
-import { type ShellResultText, shellResultWords } from "../shell-run/shell-text.ts";
 
 // Entry files under `extensions/`. A `child.ts` entry is child-specific:
 // `tool-call-corruption/child.ts` blocks damaged OpenRouter calls like the main session's, before the hook and
@@ -81,15 +81,53 @@ const CHILD_FEATURES = new Set(CHILD_EXTENSIONS.map(featureOfEntry));
 /** The tools the subagent runtime hands a child itself: the nested Agent, and SendMessage to its caller (agents/subagents/index.ts). */
 const HANDED_TO_CHILDREN: ReadonlySet<string> = new Set(["Agent", "SendMessage"]);
 
-const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; text: ProfileText; shellWords: ShellResultText } => {
+const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; text: ProfileText } => {
 	const live: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
 			return profile.live.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
 		},
 	};
-	return { live, text: profile.textFor(live), shellWords: shellResultWords(live) };
+	return { live, text: profile.textFor(live) };
 });
+
+/** The channel a session's extensions ask "is this a child session?" on; only a child loader's event bus answers. */
+const CHILD_PROBE_CHANNEL = brandedId("child-session-probe");
+
+/**
+ * Make `bus` a child session's: it answers the probe. The loader of every
+ * in-process child session passes such a bus (lib/agents/agent-loader.ts).
+ */
+export function markChildBus<B extends { on(channel: string, handler: (data: unknown) => void): unknown }>(bus: B): B {
+	bus.on(CHILD_PROBE_CHANNEL, (data) => {
+		(data as { child: boolean }).child = true;
+	});
+	return bus;
+}
+
+/**
+ * What a session's extension reads the profile through: the tools the
+ * session can have and the profile's text built for them. A child session
+ * loads the same module copies as the main one (pi caches an entry's
+ * factory per directory), so nothing at module scope can tell the two
+ * apart; the session's own event bus can. Every entry a child loads reads
+ * the profile through this (`child-session-view.test.ts`), never through
+ * `toolLive` or `requireText`, which answer for the main session.
+ */
+export interface SessionView {
+	child: boolean;
+	live: LiveTools;
+	/** The profile's text group for this session's tools; stops the process when the profile lacks it, as `requireText` does. */
+	text<K extends keyof ProfileText>(group: K): NonNullable<ProfileText[K]>;
+}
+
+export function sessionView(pi: { events: { emit(channel: string, data: unknown): void } }): SessionView {
+	const probe = { child: false };
+	pi.events.emit(CHILD_PROBE_CHANNEL, probe);
+	if (!probe.child) return { child: false, live: activeProfile().live, text: requireText };
+	const view = childView(activeProfile());
+	return { child: true, live: view.live, text: (group) => view.text[group] ?? requireText(group) };
+}
 
 /**
  * Which tools a child session can have: a tool the profile leaves on whose
@@ -107,6 +145,3 @@ export const childLive = (): LiveTools => childView(activeProfile()).live;
  * definitions, from the parent's captured request (agents/subagents/fork-cache.ts).
  */
 export const childText = (): ProfileText => childView(activeProfile()).text;
-
-/** The shell tools' results and refusals for a child session's tools (`childLive`). */
-export const childShellWords = (): ShellResultText => childView(activeProfile()).shellWords;

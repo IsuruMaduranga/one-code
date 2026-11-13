@@ -26,7 +26,8 @@
  * and pi's event bus only delivers to listeners already registered.
  */
 
-import { activeProfile, requireText, toolSwitch } from "../../lib/profile/profile.ts";
+import { sessionView } from "../../lib/agents/child-extensions.ts";
+import { activeProfile, toolSwitch } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -83,7 +84,7 @@ type SessionLike = { getBranch?: () => unknown[] };
 const branchOf = (session: SessionLike | undefined) => (session?.getBranch?.() ?? []) as EntryLike[];
 
 function toolSearchExtension(pi: ExtensionAPI) {
-	const words = requireText("toolSearch");
+	const words = sessionView(pi).text("toolSearch");
 	// Owned here (see lib/request/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
 	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct

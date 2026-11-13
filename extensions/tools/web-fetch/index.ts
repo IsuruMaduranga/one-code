@@ -16,6 +16,7 @@
  * answer from a successful fetch.
  */
 
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
@@ -30,7 +31,6 @@ import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } 
 import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
 import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../../lib/request/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
@@ -149,8 +149,9 @@ async function answerFromPage(
 }
 
 function webFetchExtension(pi: ExtensionAPI) {
-	const text = requireText("webFetch");
-	const nativeWords = requireText("nativeWeb");
+	const view = sessionView(pi);
+	const text = view.text("webFetch");
+	const nativeWords = view.text("nativeWeb");
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
 	const cache = new Map<string, CacheEntry>();
@@ -247,7 +248,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 			const normalized = normalizeUrl(params.url);
 			if ("problem" in normalized) {
 				return {
-					content: [{ type: "text", text: webFetchResultText().urlRejected(normalized.problem) }],
+					content: [{ type: "text", text: webFetchResultText(view.live).urlRejected(normalized.problem) }],
 					details: {} as FetchDetails,
 					isError: true,
 				};
@@ -256,10 +257,10 @@ function webFetchExtension(pi: ExtensionAPI) {
 			const upgraded = normalized.upgraded === true;
 			/** Why Anthropic's server-side fetch did not answer `prompt`, when it was asked and fell back. */
 			let nativeFallback: string | undefined;
-			const cancelled = () => ({ content: [{ type: "text" as const, text: webFetchResultText().cancelled(target) }], details: { url: target }, isError: true });
+			const cancelled = () => ({ content: [{ type: "text" as const, text: webFetchResultText(view.live).cancelled(target) }], details: { url: target }, isError: true });
 			/** The header and the framed page, bounded for the model. */
 			const resultText = (answer: FetchAnswer, page: { body: string; title?: string }, noArticle = false) =>
-				persistIfLarge(`${webFetchResultText().header({ url: target, upgraded, nativeFallback, noArticle, answer })}\n\n${pageContent(webFetchResultText().page, page.body, page.title)}`, {
+				persistIfLarge(`${webFetchResultText(view.live).header({ url: target, upgraded, nativeFallback, noArticle, answer })}\n\n${pageContent(webFetchResultText(view.live).page, page.body, page.title)}`, {
 					dir: sessionResultsDir(ctx),
 					id: toolCallId,
 				});
@@ -338,7 +339,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// name alone. Unpack all three so the model sees what actually failed
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
-					const redirect = webFetchResultText().redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
+					const redirect = webFetchResultText(view.live).redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
 					return { content: [{ type: "text", text: redirect }], details: { url: target } };
 				}
 				const err = error as Error & { cause?: unknown };
@@ -350,7 +351,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 						: aborted
 							? ({ kind: "timedOut", seconds: FETCH_TIMEOUT_MS / 1000 } as const)
 							: ({ kind: "network", osMessage: err.cause instanceof Error ? `${err.message}: ${err.cause.message}` : err.message } as const);
-				return { content: [{ type: "text", text: webFetchResultText().failed({ url: target, failure }) }], details: { url: target }, isError: true };
+				return { content: [{ type: "text", text: webFetchResultText(view.live).failed({ url: target, failure }) }], details: { url: target }, isError: true };
 			}
 		},
 	});

@@ -35,6 +35,7 @@
  * summary style, never a broken compaction. Turning the `compaction` feature off opts out.
  */
 
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { knobValue } from "../../lib/profile/knobs.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -66,7 +67,6 @@ import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { withoutThinking } from "../../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import { compactionResultText } from "./text.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
@@ -75,7 +75,7 @@ const COMPACTION_TIMEOUT_MS = 120_000;
 type Preparation = Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">;
 
 function compactionExtension(pi: ExtensionAPI) {
-	const words = requireText("compaction");
+	const words = sessionView(pi).text("compaction");
 	const hookInstructions = new WeakMap<AbortSignal, string>();
 	pi.events.on(PRECOMPACT_INSTRUCTIONS_CHANNEL, (data) => {
 		const { signal, instructions } = data as PreCompactInstructions;

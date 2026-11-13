@@ -28,6 +28,7 @@
  * WebFetch lives in `extensions/tools/web-fetch` (our own); this file only owns search.
  */
 
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
@@ -38,7 +39,6 @@ import { getWebSearchModel } from "pi-web-search/src/utils.ts";
 import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
 import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../../lib/request/anthropic-server-tools.ts";
 import { DeadlineError } from "../../lib/side-calls/operation-deadline.ts";
-import { requireText } from "../../lib/profile/profile.ts";
 import { readJsonFile } from "../../lib/core/atomic-write.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
@@ -79,8 +79,9 @@ interface SearchDetails {
 }
 
 function webExtension(pi: ExtensionAPI) {
-	const text = requireText("webSearch");
-	const nativeWords = requireText("nativeWeb");
+	const view = sessionView(pi);
+	const text = view.text("webSearch");
+	const nativeWords = view.text("nativeWeb");
 	// url_context + its active-tools sync, and the vendor web_search we override below.
 	webSearchPackage(pi);
 

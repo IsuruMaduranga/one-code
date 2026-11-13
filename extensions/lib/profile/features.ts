@@ -155,20 +155,17 @@ export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
 	exit_worktree: "worktree",
 };
 
-/** The feature a bundled skill serves (its body drives that feature's tools); the skill is hidden when the feature is off. */
-export const BUNDLED_SKILL_FEATURES: Readonly<Record<string, FeatureId>> = {
-	"artifact-design": "artifacts",
-	loop: "background",
-	"workflow-authoring": "workflow",
-};
-
 /**
  * The tools a bundled skill's body tells the model to call: the skill is
- * hidden unless every one is live. /loop schedules with the cron tools or
- * `schedule_wakeup`, arms a monitor and stops what it armed.
+ * hidden unless the session has every one, so it goes with a feature that is
+ * off, a tool turned off alone, and a child session that loads neither.
+ * /loop schedules with the cron tools or `schedule_wakeup`, arms a monitor
+ * and stops what it armed.
  */
 export const BUNDLED_SKILL_TOOLS: Readonly<Record<string, readonly string[]>> = {
+	"artifact-design": ["artifact"],
 	loop: ["cron_create", "cron_delete", "schedule_wakeup", "monitor", "task_output", "task_stop"],
+	"workflow-authoring": ["workflow"],
 };
 
 /** The feature an entry file belongs to (`tools/bash/child.ts` → `bash`), or undefined. */

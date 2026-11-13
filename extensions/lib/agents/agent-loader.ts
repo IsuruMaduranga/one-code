@@ -17,6 +17,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import {
+	createEventBus,
 	type AgentSession,
 	type CreateAgentSessionOptions,
 	createAgentSession,
@@ -29,6 +30,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { HookBridge } from "./hook-bridge.ts";
 import type { PermissionBridge } from "./subagent-gate.ts";
 import { withShortCacheRetention } from "../request/cache-retention.ts";
+import { markChildBus } from "./child-extensions.ts";
 import { hookGateFactory } from "./hook-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import { releaseSideCalls } from "../side-calls/side-call-run.ts";
@@ -122,6 +124,8 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 	const loader = new DefaultResourceLoader({
 		cwd: options.cwd,
 		agentDir: options.agentDir,
+		// A bus that tells the session's extensions they run in a child (lib/agents/child-extensions.ts sessionView).
+		eventBus: markChildBus(createEventBus()),
 		noExtensions: true,
 		...(options.noContextFiles ? { noContextFiles: true } : {}),
 		extensionFactories: [

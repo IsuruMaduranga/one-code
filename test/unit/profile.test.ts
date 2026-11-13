@@ -130,7 +130,7 @@ describe("resolveProfile", () => {
 		const libReads: string[] = [];
 		for (const entry of sourceFiles(root, root)) {
 			const [area, folder] = entry.split("/");
-			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/(?:requireText|wordsInForce)\("(\w+)"/g)) {
+			for (const [, group] of readFileSync(join(root, entry), "utf8").matchAll(/(?:requireText|wordsInForce|\.text)\("(\w+)"/g)) {
 				const readers: readonly string[] | undefined = (TEXT_GROUP_READERS as Record<string, readonly string[]>)[group];
 				if (readers === undefined) continue; // a required group
 				if (area === "lib") {

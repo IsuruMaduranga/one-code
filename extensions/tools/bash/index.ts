@@ -30,8 +30,8 @@ import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
-import { requireText } from "../../lib/profile/profile.ts";
-import { childShellWords, childText } from "../../lib/agents/child-extensions.ts";
+import { sessionView } from "../../lib/agents/child-extensions.ts";
+import { shellResultText } from "../../lib/shell-run/shell-text.ts";
 import { bashGuardReason } from "../../lib/shell/bash-guards.ts";
 
 /** The tool's parameters, described in the profile's words. */
@@ -52,7 +52,7 @@ function bashExtension(pi: ExtensionAPI) {
  * (tools/bash/child.ts): the same tool, but a child has no terminal of its own
  * (stderr is the parent's TUI), so it prints nothing.
  */
-export function bashTool(pi: ExtensionAPI, { announce, child = false }: { announce: boolean; child?: boolean }) {
+export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) {
 	// The session's bash, resolved once (lib/shell-run/shell-spawn.ts). An ignored
 	// CLAUDE_CODE_GIT_BASH_PATH is reported once, at the first session start.
 	const bash = bashSpawn();
@@ -84,7 +84,8 @@ export function bashTool(pi: ExtensionAPI, { announce, child = false }: { announ
 	let searchTools = false;
 	let autoMode = false;
 	// A child's words name only the tools every child has (lib/agents/child-extensions.ts).
-	const text = child ? (childText().shell ?? requireText("shell")) : requireText("shell");
+	const view = sessionView(pi);
+	const text = view.text("shell");
 	const describe = () => text.bashDescription({ form, autoMode, searchTools });
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
@@ -94,7 +95,7 @@ export function bashTool(pi: ExtensionAPI, { announce, child = false }: { announ
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardReason,
-		...(child ? { words: childShellWords } : {}),
+		words: () => shellResultText(view.live),
 		backgroundShell: () => bash.spawn,
 	});
 	followDescriptionForm(pi, (next, tier) => {
