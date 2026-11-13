@@ -17,7 +17,7 @@
  */
 
 import { brand } from "../../lib/profile/brand.mjs";
-import { sourceName } from "../../lib/profile/sources.ts";
+import { otherToolName } from "../../lib/profile/sources.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
@@ -349,7 +349,7 @@ function pluginsExtension(pi: ExtensionAPI) {
 				const installToggle = async (row: DiscoverRow) => {
 					const plugin = discovered.plugins.find((p) => p.id === row.id);
 					if (row.installed && plugin?.originRoot === "claude") {
-						state.notice = `${row.name} was installed by ${sourceName() ?? "another tool"} — uninstall it there (files are read-only here).`;
+						state.notice = `${row.name} was installed by ${otherToolName()} — uninstall it there (files are read-only here).`;
 						return;
 					}
 					busy.add(row.id);

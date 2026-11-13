@@ -220,6 +220,21 @@ export function sourceName(home: string = os.homedir()): string | undefined {
 	return openSources(home).name;
 }
 
+/**
+ * How interface text names the tool whose files a row or a notice is about,
+ * for the lines that show only where such files exist: the provider's name,
+ * or one neutral phrase when a provider gives none.
+ */
+export function otherToolName(home: string = os.homedir()): string {
+	return sourceName(home) ?? "another tool";
+}
+
+/** "<name> settings", as `otherToolName` names the tool: "Claude Code settings", or "another tool's settings". */
+export function otherToolSettings(home: string = os.homedir()): string {
+	const name = sourceName(home);
+	return name ? `${name} settings` : "another tool's settings";
+}
+
 /** The config folders for `home`: the provider's, else the product's own state dir and `.onecode`. */
 export function configDirs(home: string = os.homedir()): ConfigDirs {
 	return openSources(home).configDirs ?? { user: productStateDir(process.env, home), project: brand.stateDir };
