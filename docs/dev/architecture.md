@@ -85,7 +85,7 @@ flowchart LR
     subgraph ctx["Prompt and context"]
         c1["system-prompt<br/>instructions · memory"]
         c2["system-reminder<br/>context-budget"]
-        c3["tool-search · cache-marks<br/>search-tools"]
+        c3["tool-search · cache-marks<br/>search-tools · ledger"]
         c4["compaction · idle-compact<br/>kept-thinking · context-management"]
     end
 
@@ -124,7 +124,7 @@ flowchart LR
 
 | Role | What the group does |
 |---|---|
-| Prompt and context | Builds the system prompt per model tier, loads project instructions and memory into the first message, steers the model through `<system-reminder>` blocks, defers rarely used tools behind `tool_search`, and compacts long sessions. |
+| Prompt and context | Builds the system prompt per model tier, loads project instructions and memory into the first message, steers the model through `<system-reminder>` blocks, defers rarely used tools behind `tool_search`, records each request so the next one only appends to it (`ledger`), and compacts long sessions. |
 | Safety | Decides whether each tool call runs (rules, modes, the auto-mode classifier), runs user hooks, guards against stale edits, confines work to a Git worktree, stops calls from damaged provider streams, and redacts a product's secret values from tool results. |
 | Tools | The tools the model calls, beyond pi's built-in `read`, `edit` and `write`. |
 | Agents | Background subagents with two-way messaging, and JavaScript workflow scripts that fan work out across many agents. |
