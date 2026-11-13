@@ -77,7 +77,8 @@ function definedInMcpjson(server: McpServer): boolean {
 function configLabel(server: McpServer): string {
 	if (definedInLocalSettings(server)) return `${basename(dirname(server.source))}/${basename(server.source)}`;
 	// pi's project file is `<dir>/<pi's config dir>/mcp.json`, `.pi/mcp.json` unless pi is rebranded.
-	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : ".mcp.json";
+	// Any other gated file by its own name: `.mcp.json`, or what a source provider calls its project file.
+	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : basename(server.source);
 }
 
 /** "a and b" for the distinct config files of `servers`. */
