@@ -452,7 +452,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
-							deps.state.cacheHistoryEnd = history.length - 1;
+							// A review's history ends in the subagent's calls, which the next gate
+							// call's transcript does not hold, so it leaves the session's boundary.
+							if (!deps.reviewOnly) deps.state.cacheHistoryEnd = history.length - 1;
 						},
 					} : {}),
 					...(reasoning ? { reasoning } : {}),
