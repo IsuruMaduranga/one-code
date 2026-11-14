@@ -525,9 +525,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
-				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
-				// without a readable severity, one retry with headroom recovers it.
-				// Stage 2's 4096 is CC's too, with one retry at 8192.
+				// STAGE 1 — harm only, at Claude Code's budget; a reply that overruns it
+				// without a readable severity gets one retry with headroom. Stage 2
+				// likewise (the budgets are prompt.ts's STAGE*_MAX_TOKENS).
 				const s1 = await call(stage1Text, STAGE1_MAX_TOKENS, STAGE1_RETRY_MAX_TOKENS, 1);
 				const sev1 = parseSeverity(s1);
 				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {

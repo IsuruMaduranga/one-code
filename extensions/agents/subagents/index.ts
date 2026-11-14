@@ -1711,32 +1711,24 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const { request, record, agentDef } = prepared;
 		// The session's working directory: the entered worktree, if any.
 		const base = workCwd(ctx);
+		const ids = { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task };
+		/** A run that failed before the child did anything (`extra`: a worktree it left behind). */
+		const failedRun = (kind: "failed" | "worktree", osMessage: string, extra: Partial<TaskResult> = {}): RunOutcome => ({
+			result: { ...ids, output: subagentResultText().failure({ kind, osMessage }), toolCalls: 0, usage: emptyUsage(), failed: true, ...extra },
+			actions: [],
+		});
 
 		// Before anything marks the run as running: a failed build must not leave
 		// the task id in runningIds, where SendMessage would call it "still running".
 		const runtime = await runtimeOrError(ctx);
-		if (typeof runtime === "string") {
-			return { result: { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentResultText().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true }, actions: [] };
-		}
+		if (typeof runtime === "string") return failedRun("failed", runtime);
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
 				worktree = await isolateInWorktree(base, record, request.name);
 			} catch (error) {
-				return {
-					result: {
-						agent: request.agent,
-						name: request.name,
-						taskId: record.taskId,
-						task: request.task,
-						output: subagentResultText().failure({ kind: "worktree", osMessage: (error as Error).message }),
-						toolCalls: 0,
-						usage: emptyUsage(),
-						failed: true,
-					},
-					actions: [],
-				};
+				return failedRun("worktree", (error as Error).message);
 			}
 		}
 
@@ -1778,10 +1770,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}
 			return {
 				result: {
-					agent: request.agent,
-					name: request.name,
-					taskId: record.taskId,
-					task: request.task,
+					...ids,
 					...outcome,
 					worktreePath: worktreeKept ? worktree?.path : undefined,
 					worktreeBranch: worktreeKept ? worktree?.branch : undefined,
@@ -1794,22 +1783,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// A failed run can still have committed or edited in its worktree:
 			// a kept one is reported like a finished run's.
 			const worktreeKept = worktree ? !(await cleanupWorktree(base, worktree)) : undefined;
-			return {
-				result: {
-					agent: request.agent,
-					name: request.name,
-					taskId: record.taskId,
-					task: request.task,
-					output: subagentResultText().failure({ kind: "failed", osMessage: (error as Error).message }),
-					toolCalls: 0,
-					usage: emptyUsage(),
-					failed: true,
-					worktreePath: worktreeKept ? worktree?.path : undefined,
-					worktreeBranch: worktreeKept ? worktree?.branch : undefined,
-					worktreeKept,
-				},
-				actions: [],
-			};
+			return failedRun("failed", (error as Error).message, {
+				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+				worktreeKept,
+			});
 		} finally {
 			runningIds.delete(record.taskId);
 		}
