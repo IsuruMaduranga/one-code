@@ -49,14 +49,18 @@ const SESSION = "session";
 
 /**
  * How far below the session model, in Intelligence Index points, a pick may
- * score. The bars keep the strictness the table had on the earlier index
- * (15 at maximum effort, 7 at low effort): on the same pairs of models, v5
- * gaps are about 1.98 times the earlier ones at maximum effort (median of 28
- * pairs) and about 1.22 times at low effort (median of 9 pairs, mean 1.33).
+ * score. The table was built on 15 (subagent, maximum effort) and 7
+ * (classifier, low effort) on the earlier index; on the same pairs of
+ * models, v5 gaps are about 1.98 times the earlier ones at maximum effort
+ * (median of 28 pairs) and about 1.22 times at low effort (median of 9
+ * pairs, mean 1.33). The classifier bars are rescaled to keep their
+ * strictness:
  * - `classifierLow`: 7 × 1.22 to 1.33, rounded up to 10.
  * - `classifierMax`: the classifier's 7, measured at maximum effort where a
  *   low-effort score is missing, so 7 × 1.98, rounded to 14.
- * - `subagent`: 15 at maximum effort, so far unchanged.
+ * - `subagent`: kept at 15, not rescaled. A subagent does real work, and a
+ *   pick two tiers below the session returns results that need checking
+ *   again; the product warns about such a pick when it is made by hand.
  */
 export const PAIRING_BARS = { subagent: 15, classifierLow: 10, classifierMax: 14 } as const;
 

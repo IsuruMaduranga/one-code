@@ -264,6 +264,7 @@ describe("PAIRING_TABLE against its scores", () => {
 		// Subagent at maximum effort: exactly the bar qualifies, a tenth more does not.
 		expect(derivedPick("v/session", "subagent", noneTiny, onBar(null, null, PAIRING_BARS.subagent))).toBe("v/pick");
 		expect(derivedPick("v/session", "subagent", noneTiny, onBar(null, null, PAIRING_BARS.subagent + 0.1))).toBe("session");
+		expect(PAIRING_BARS.subagent).toBe(15);
 		expect(PAIRING_BARS.classifierLow).toBe(10);
 		expect(PAIRING_BARS.classifierMax).toBe(14);
 	});
