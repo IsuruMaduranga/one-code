@@ -175,21 +175,21 @@ describe("resolveProfile", () => {
 	it("resolves child extensions against the profile folder, after the base's", () => {
 		const dir = mkdtempSync(join(tmpdir(), "profile-child-"));
 		try {
-			mkdirSync(join(dir, "extensions", "ballerina"), { recursive: true });
-			writeFileSync(join(dir, "extensions", "ballerina", "child.ts"), "");
-			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/child.ts"] }, {}, dir));
+			mkdirSync(join(dir, "extensions", "sample"), { recursive: true });
+			writeFileSync(join(dir, "extensions", "sample", "child.ts"), "");
+			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/sample/child.ts"] }, {}, dir));
 			const paths = childExtensionPaths();
 			// Before the secret redaction, which loads last of all (secrets.test.ts).
-			expect(paths.at(-2)).toBe(join(dir, "extensions", "ballerina", "child.ts"));
+			expect(paths.at(-2)).toBe(join(dir, "extensions", "sample", "child.ts"));
 			expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
-			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/ballerina/chlid.ts"] }, {}, dir)).toThrow(/child extension "extensions\/ballerina\/chlid.ts" does not exist/);
+			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/sample/chlid.ts"] }, {}, dir)).toThrow(/child extension "extensions\/sample\/chlid.ts" does not exist/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
 	it("refuses a child extension outside the profile's extensions folder", () => {
-		for (const entry of ["ballerina/index.ts", "extensions/../index.ts", "../extensions/x/index.ts", "extensions"]) {
+		for (const entry of ["sample/index.ts", "extensions/../index.ts", "../extensions/x/index.ts", "extensions"]) {
 			expect(() => resolveProfile({ ...empty, childExtensions: [entry] }, {}, "/p"), entry).toThrow(/must be a file under extensions\/ in the profile folder/);
 		}
 	});
@@ -291,14 +291,14 @@ describe("permission gate and tool switches", () => {
 	});
 
 	it("matches a switch by the tool's registered name, whatever its case", () => {
-		use({ tools: { BallerinaReference: { autoAllow: true }, NotebookTool: { enabled: false } } });
-		expect(decide({ ...base, mode: "default", toolName: "BallerinaReference" }).decision).toBe("allow");
+		use({ tools: { SampleReference: { autoAllow: true }, NotebookTool: { enabled: false } } });
+		expect(decide({ ...base, mode: "default", toolName: "SampleReference" }).decision).toBe("allow");
 		expect(decide({ ...base, mode: "default", toolName: "NotebookTool" })).toEqual({ decision: "deny", cause: "profile-disabled" });
 	});
 
 	it("keeps plan mode's rules for a profile's auto-allowed tool", () => {
-		use({ tools: { ballerina_build: { autoAllow: true } } });
-		expect(decide({ ...base, mode: "plan", toolName: "ballerina_build" }).decision).not.toBe("allow");
+		use({ tools: { sample_build: { autoAllow: true } } });
+		expect(decide({ ...base, mode: "plan", toolName: "sample_build" }).decision).not.toBe("allow");
 		expect(decide({ ...base, mode: "plan", toolName: "tool_search" }).decision).toBe("allow");
 	});
 
@@ -320,10 +320,10 @@ describe("permission gate and tool switches", () => {
 	});
 
 	it("allows a tool the profile marks autoAllow without a prompt", () => {
-		use({ tools: { ballerina_reference: { autoAllow: true } } });
-		expect(decide({ ...base, mode: "default", toolName: "ballerina_reference" }).decision).toBe("allow");
+		use({ tools: { sample_reference: { autoAllow: true } } });
+		expect(decide({ ...base, mode: "default", toolName: "sample_reference" }).decision).toBe("allow");
 		setActiveProfileForTest(undefined);
-		expect(decide({ ...base, mode: "default", toolName: "ballerina_reference" }).decision).not.toBe("allow");
+		expect(decide({ ...base, mode: "default", toolName: "sample_reference" }).decision).not.toBe("allow");
 	});
 });
 

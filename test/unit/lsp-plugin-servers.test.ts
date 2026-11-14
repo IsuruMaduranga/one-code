@@ -96,12 +96,12 @@ describe("resolveServerConfig", () => {
 	});
 
 	it("normalizes extension keys to lowercase with a leading dot", () => {
-		const { server } = resolveOne(baseConfig({ extensionToLanguage: { BAL: "ballerina", ".XML": "xml" } }));
-		expect(server?.languageByExtension).toEqual({ ".bal": "ballerina", ".xml": "xml" });
+		const { server } = resolveOne(baseConfig({ extensionToLanguage: { SMP: "sample", ".XML": "xml" } }));
+		expect(server?.languageByExtension).toEqual({ ".smp": "sample", ".xml": "xml" });
 	});
 
 	it("rejects a command with spaces unless it starts with /", () => {
-		expect(resolveOne(baseConfig({ command: "bal start-language-server" })).server).toBeUndefined();
+		expect(resolveOne(baseConfig({ command: "samplectl start-language-server" })).server).toBeUndefined();
 		expect(resolveOne(baseConfig({ command: "/usr/local/my tool/ls" })).server).toBeDefined();
 	});
 
