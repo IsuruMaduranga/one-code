@@ -40,7 +40,7 @@ export interface ChildOutcome {
 	usage: UsageTotals;
 	failed?: boolean;
 	/**
-	 * What the child actually did, names and short subjects only. Auto mode
+	 * What the child actually did: each call's name and whole input. Auto mode
 	 * reviews this when the child returns, to catch a sequence whose individual
 	 * steps each passed. Never carries tool output — see lib/rules/auto-mode-actions.ts.
 	 */

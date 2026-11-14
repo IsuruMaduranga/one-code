@@ -220,7 +220,7 @@ describe("the classifier reads the instructions the agent reads (R3-M26)", () =>
 		const s = await session([], "startup", "auto", { hasUI: false });
 		s.fake.events.emit(WORKTREE_CHANNEL, { path: worktree, sharedRoot: cwd });
 
-		s.fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", report: "done", actions: [{ toolName: "bash", subject: "git push" }] } satisfies SubagentActionsPayload);
+		s.fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", report: "done", actions: [{ toolName: "bash", input: { command: "git push" } }] } satisfies SubagentActionsPayload);
 		await s.fake.fireOne("tool_result", { toolCallId: "spawn-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, s.ctx);
 		const review = vi.mocked(classify).mock.calls.findIndex(([input]) => (input as { toolName: string }).toolName === "subagent-review");
 		expect(review).toBeGreaterThanOrEqual(0);

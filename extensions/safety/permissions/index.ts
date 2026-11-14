@@ -2261,10 +2261,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// child's report (transcript.ts says why it must be last). reviewOnly runs
 		// a single stage-2 full-eval — there is no harm floor to short-circuit for
 		// a run that already happened.
-		const childEntries: TranscriptEntry[] = run.actions.map((action) => {
-			const tool = normalizeToolName(action.toolName);
-			return { kind: "tool", tool, input: isShellTool(tool) ? { command: action.subject } : { subject: action.subject } };
-		});
+		const childEntries: TranscriptEntry[] = run.actions.map((action) => ({ kind: "tool", tool: normalizeToolName(action.toolName), input: action.input }));
 		childEntries.push({ kind: "hand-back", report: run.report });
 		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(

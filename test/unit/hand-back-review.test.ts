@@ -4,7 +4,7 @@ import { withReview } from "../../extensions/lib/notify/notifications.ts";
 import { awaitHandBackReview, handBackReviewTimeoutVerdict } from "../../extensions/agents/subagents/hand-back-review.ts";
 
 const run = { taskId: "t1", name: "worker" };
-const actions = [{ toolName: "bash", subject: "rm -rf build" }];
+const actions = [{ toolName: "bash", input: { command: "rm -rf build" } }];
 
 function capturingEvents() {
 	const emitted: Array<{ channel: string; payload: SubagentActionsPayload }> = [];
