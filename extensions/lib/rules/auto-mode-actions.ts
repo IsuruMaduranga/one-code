@@ -12,14 +12,16 @@
  * while the sequence is what matters. That is only visible once the child is
  * done, which is what this records.
  *
- * The log holds each call's input whole, as Claude Code sends it, with no cap
- * on the number of calls: a clipped command hid its tail from the review, and
- * a count cap hid everything after it. It never holds tool output: output is
- * untrusted content, and feeding it to the classifier is the injection path
- * auto mode exists to close. A run too large for the classifier is not
- * judged, as Claude Code's is not (the review reports it unavailable). The child's final report travels beside it,
- * because the report is what reaches the parent: the review judges it as the
- * hand-back, framed as untrusted agent output, as Claude Code does (findings §17.2).
+ * The log holds each call's input whole, as Claude Code sends it, with no
+ * cap on the number of calls: a clipped command hid its tail from the
+ * review, and a count cap hid everything after it. It never holds tool
+ * output: output is untrusted content, and feeding it to the classifier is
+ * the injection path auto mode exists to close. A run too large for the
+ * classifier is not judged, as Claude Code's is not (the review reports it
+ * unavailable). The child's final report travels beside the log, because
+ * the report is what reaches the parent: the review judges it as the
+ * hand-back, framed as untrusted agent output, as Claude Code does
+ * (findings §17.2).
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -66,6 +68,5 @@ export interface SubagentActionsPayload {
 
 /** Record one call the child started: its name and a copy of its input. */
 export function recordAction(log: ChildAction[], toolName: string, input: unknown): void {
-	const args = input !== null && typeof input === "object" && !Array.isArray(input) ? { ...(input as Record<string, unknown>) } : {};
-	log.push({ toolName, input: args });
+	log.push({ toolName, input: input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {} });
 }

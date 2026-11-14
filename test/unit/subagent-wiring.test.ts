@@ -658,6 +658,20 @@ describe("subagent reports past the cap", () => {
 		expect(persistedText(text)).toBe(longReport);
 	});
 
+	it("sends a one-shot run's actions to the review, not into the saved tool result", async () => {
+		const actions = [{ toolName: "write", input: { path: "big.txt", content: "x".repeat(10_000) } }];
+		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({
+			run: () => ({ result: Promise.resolve({ ...longOutcome(), actions }), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }),
+		} as unknown as SubagentRuntime);
+		const h = await mount([], session, "print");
+		const reviews: SubagentActionsPayload[] = [];
+		h.fake.events.on(SUBAGENT_ACTIONS_CHANNEL, (payload) => reviews.push(payload as SubagentActionsPayload));
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Write it" })) as { details: { results: Array<{ actions?: unknown }> } };
+		expect(reviews[0].actions).toEqual(actions);
+		expect(result.details.results[0].actions).toBeUndefined();
+		expect(JSON.stringify(result.details)).not.toContain("x".repeat(100));
+	});
+
 	it("persists a resident's hand-back report", async () => {
 		const runtime = fakeResident();
 		const h = await mount();

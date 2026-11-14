@@ -2347,7 +2347,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${bounded(result.output, `${prepared[0].record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}\n\n(${stats})`,
 						},
 					],
-					details: { results: [result], agentRuns: records },
+					// The actions go to the review on the channel above, not into the
+					// session file: they hold every call's whole input.
+					details: { results: [{ ...result, actions: undefined }], agentRuns: records },
 					isError: result.failed ?? false,
 				};
 			}
