@@ -21,7 +21,7 @@ import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { productSettingsPath } from "../../lib/profile/product-settings.ts";
-import { launchOpener, noDisplayReason, openerPlan } from "../../lib/ui/open-browser.ts";
+import { openInBrowser } from "../../lib/ui/open-browser.ts";
 import { tildify } from "../../lib/profile/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../../lib/ui/terminal-text.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
@@ -71,10 +71,8 @@ function autoOpenEnabled(): boolean {
 }
 
 /** Open a page the store built: why it was not opened, or undefined when it was. */
-async function showInBrowser(path: string): Promise<NoBrowser | undefined> {
-	const reason = noDisplayReason();
-	if (reason) return reason;
-	return (await launchOpener(openerPlan(fileUrl(path)))) ? undefined : "launchFailed";
+function showInBrowser(path: string): Promise<NoBrowser | undefined> {
+	return openInBrowser(fileUrl(path));
 }
 
 /** The /artifacts status line after opening `path`. */

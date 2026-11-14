@@ -24,6 +24,13 @@
  * - `setSecretValues`: register the secret values the product knows, so the
  *   base redacts them from every tool result and task notification.
  *
+ * Two helpers keep a product extension from copying base code:
+ * `productStateDir` is the product's state folder (the state-dir variable
+ * when set, else the home folder's entry for the profile in force), and
+ * `openInBrowser` hands a URL to the desktop's browser, returning why none
+ * opened (an SSH session, no display, no opener) so the caller can show the
+ * URL instead.
+ *
  * A product tool registers through pi like any tool. Two helpers keep it in
  * line with the base's own tools: `persistIfLarge` bounds a large text result
  * (the full text goes to a file the model can read back; never truncate),
@@ -40,3 +47,5 @@ export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/pro
 export { type LspFileChange, type LspFilesChanged, lspFilesChanged, type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";
 export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
 export { toolRenderers } from "../lib/ui/tui-render.ts";
+export { productStateDir } from "../lib/profile/paths.ts";
+export { type NoBrowserReason, openInBrowser } from "../lib/ui/open-browser.ts";

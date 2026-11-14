@@ -3,7 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DOWNLOAD_GLOBAL, renderDownloadPayload, renderGallery } from "../../extensions/tools/artifacts/gallery.ts";
 import {
 	type ArtifactMeta,
@@ -28,7 +28,7 @@ import {
 	withLock,
 } from "../../extensions/tools/artifacts/store.ts";
 import { renderViewer } from "../../extensions/tools/artifacts/viewer.ts";
-import { noDisplayReason, openerPlan } from "../../extensions/lib/ui/open-browser.ts";
+import { noDisplayReason, openerPlan, openInBrowser } from "../../extensions/lib/ui/open-browser.ts";
 
 let base: string;
 let root: string;
@@ -426,5 +426,14 @@ describe("open-browser", () => {
 		expect(noDisplayReason("linux", { DISPLAY: ":0" })).toBeUndefined();
 		expect(noDisplayReason("linux", { WAYLAND_DISPLAY: "wayland-0" })).toBeUndefined();
 		expect(noDisplayReason("win32", {})).toBeUndefined();
+	});
+
+	it("opens nothing where no desktop is reachable, and says why", async () => {
+		vi.stubEnv("SSH_CONNECTION", "1.2.3.4 5 6.7.8.9 22");
+		try {
+			await expect(openInBrowser("file:///a.html")).resolves.toBe("ssh");
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 });
