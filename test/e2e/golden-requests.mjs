@@ -517,12 +517,13 @@ function requestKind(request) {
 	if (Array.isArray(body.tools) && body.tools.length > 0) return "main";
 	// The last user message only: on Chat Completions the system prompt is a
 	// message too, and the ruleset in it names both tags.
-	const last = JSON.stringify((body.messages ?? []).findLast((message) => message?.role === "user") ?? "");
+	// The Responses API carries the messages as `input`.
+	const last = JSON.stringify((body.messages ?? body.input ?? []).findLast?.((message) => message?.role === "user") ?? "");
 	if (!last.includes("<transcript>")) return "side call";
 	if (last.includes("<subagent_hand_back>")) return "subagent review";
 	// classifier.ts asks stage 2 for 4,096 tokens; stage 1 for 64, or 1,024 on
 	// a retry, plus the same forced-thinking padding as stage 2.
-	return (body.max_tokens ?? body.max_completion_tokens ?? 0) < 4096 ? "classifier stage 1" : "classifier stage 2";
+	return (body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens ?? 0) < 4096 ? "classifier stage 1" : "classifier stage 2";
 }
 
 /** The changed requests of one scenario: by position, and as a multiset of whole requests, each with its kind. */
