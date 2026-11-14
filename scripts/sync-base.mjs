@@ -35,7 +35,7 @@
  * a sync does, the stamping included.
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,12 +96,23 @@ export function fetchBase(source, ref) {
 /** The paths a product owns: the fixed ones and those its sync record adds. */
 const ownPaths = (record) => [...PRODUCT_PATHS, ...(record?.own ?? [])];
 
-/** Every regular file under `dir` (links left out), as forward-slashed relative paths. */
-function filesUnder(dir) {
-	return readdirSync(dir, { recursive: true, withFileTypes: true })
-		.filter((entry) => entry.isFile())
-		.map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/"))
-		.sort();
+/** Every regular file under `dir`, as forward-slashed relative paths; `links` collects the symbolic links. */
+function filesUnder(dir, links = []) {
+	const files = [];
+	for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+		const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/");
+		if (entry.isFile()) files.push(path);
+		else if (entry.isSymbolicLink()) links.push(path);
+	}
+	return files.sort();
+}
+
+/** Removes `file`'s parent folders that are left empty, up to `root`. */
+function pruneEmptyParents(root, file) {
+	for (let dir = dirname(join(root, file)); dir !== root && dir.startsWith(root); dir = dirname(dir)) {
+		if (readdirSync(dir).length > 0) return;
+		rmdirSync(dir);
+	}
 }
 
 /**
@@ -114,22 +125,39 @@ export function applyBase(product, base, record) {
 	const own = ownPaths(previous);
 	const version = previous && existsSync(join(product, "package.json")) ? readJson(join(product, "package.json")).version : FIRST_VERSION;
 
-	const baseFiles = filesUnder(base).filter((file) => !isProductPath(file, own));
+	const links = [];
+	const baseFiles = filesUnder(base, links).filter((file) => !isProductPath(file, own));
+	const baseLinks = links.filter((file) => !isProductPath(file, own));
+	if (baseLinks.length > 0) throw new Error(`the base holds symbolic links, which a sync does not copy:\n  ${baseLinks.join("\n  ")}`);
 	const wanted = new Set(baseFiles);
-	const stale = checkoutFiles(product).filter((file) => !isProductPath(file, own) && !wanted.has(file));
+	const present = checkoutFiles(product);
+	const stale = present.filter((file) => !isProductPath(file, own) && !wanted.has(file));
 	const tracked = new Set(lines(git(product, "ls-files", "-z")));
-	const lost = stale.filter((file) => !tracked.has(file));
+	// Nothing git could not bring back is deleted or overwritten: an untracked
+	// file the base no longer has, or one at a path the base now writes with
+	// other bytes, stops the sync before anything changes.
+	const lost = [
+		...stale.filter((file) => !tracked.has(file)),
+		...present.filter((file) => wanted.has(file) && !STAMPED.includes(file) && !tracked.has(file) && !readFileSync(join(base, file)).equals(readFileSync(join(product, file)))),
+	];
 	if (lost.length > 0) {
 		throw new Error(`these files are not the base's and sit outside the product's paths:\n  ${lost.join("\n  ")}\nMove each under profile/, list it in "own" in ${SYNC_FILE}, or delete it.`);
 	}
-	for (const file of stale) rmSync(join(product, file));
+	for (const file of stale) {
+		rmSync(join(product, file));
+		pruneEmptyParents(product, file);
+	}
 
 	const written = [];
 	for (const file of baseFiles) {
 		const from = join(base, file);
 		const to = join(product, file);
 		const bytes = readFileSync(from);
-		if (!existsSync(to) || !bytes.equals(readFileSync(to))) {
+		const current = lstatSync(to, { throwIfNoEntry: false });
+		// A sync never writes through a link: the base's file replaces it.
+		if (current?.isSymbolicLink()) rmSync(to);
+		else if (current?.isDirectory()) throw new Error(`${file}: the base has a file where the product has a folder; move the folder's files away first`);
+		if (!current || current.isSymbolicLink() || !bytes.equals(readFileSync(to))) {
 			mkdirSync(dirname(to), { recursive: true });
 			writeFileSync(to, bytes);
 			written.push(file);
@@ -171,7 +199,13 @@ export function checkBase(product, base) {
 		applyBase(copy, base, record);
 		const expected = filesUnder(copy).filter((file) => !file.startsWith(".git/") && !isProductPath(file, own));
 		const actual = new Set(files.filter((file) => !isProductPath(file, own)));
-		const differing = expected.filter((file) => !actual.has(file) || !readFileSync(join(copy, file)).equals(readFileSync(join(product, file))));
+		const executable = (path) => (statSync(path).mode & 0o111) !== 0;
+		const differing = expected.filter(
+			(file) =>
+				!actual.has(file) ||
+				!readFileSync(join(copy, file)).equals(readFileSync(join(product, file))) ||
+				(process.platform !== "win32" && executable(join(copy, file)) !== executable(join(product, file))),
+		);
 		const expectedSet = new Set(expected);
 		const extra = [...actual].filter((file) => !expectedSet.has(file));
 		return [...differing.map((file) => `${file}: differs from the base`), ...extra.map((file) => `${file}: not in the base`)];

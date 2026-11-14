@@ -276,7 +276,7 @@ describe("child sessions and the tool switches", () => {
 		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit", "web_fetch"]);
 		setActiveProfileForTest(undefined);
 		// The shipped profile's own switches, whatever the product turns off.
-		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual(["edit", ...activeProfile().disabledTools]);
+		expect(agentToolOptions({ excludeTools: ["edit"] } as never).excludeTools).toEqual([...new Set(["edit", ...activeProfile().disabledTools])]);
 	});
 });
 
