@@ -4,12 +4,19 @@
  * from measured data, not from tiers or price alone: Artificial Analysis's
  * Intelligence Index (maximum effort for subagents; low effort for the
  * classifier, which runs with thinking off) and list prices, with OpenRouter's
- * usage rankings choosing which models get a row. The snapshot and the numbers
- * behind every row are in `working-docs/decisions/model-policy.md` ("Model
- * pairing table").
+ * usage rankings and the vendors' flagships choosing which models get a row.
+ * The snapshot and the numbers behind every row are in
+ * `working-docs/decisions/model-policy.md` ("Model pairing table"); the scores
+ * are also in `test/unit/fixtures/pairing-scores.json`, from which the tests
+ * derive every row.
  *
  * A pick is the cheapest same-vendor model within 15 points at maximum effort
- * (subagent) or 7 points at low effort (classifier); `"session"` keeps the
+ * (subagent) or 7 points at low effort (classifier). The bars apply to scores
+ * rounded to one decimal, as Artificial Analysis publishes them, and include
+ * the bar itself (a gap of exactly 7.0 qualifies). Where the session model or
+ * a candidate has no low-effort score, the classifier bar compares their
+ * maximum-effort scores instead. A deprecated or unscored model is never a
+ * pick, and an unscored session model gets no row. `"session"` keeps the
  * session's own model, which also overrides the cost algorithm. A model the
  * table does not name goes to the cost algorithm (`model-tier.ts`
  * `sameTierContainedCandidates`).
@@ -35,52 +42,48 @@ interface PairingRow {
 	classifier: string;
 }
 
-/** The data date: Artificial Analysis and OpenRouter rankings, 2026-10-13. */
-export const PAIRINGS_AS_OF = "2026-10-13";
+/** The data date: Artificial Analysis (Intelligence Index v5.0.1) and OpenRouter rankings, 2026-11-15. */
+export const PAIRINGS_AS_OF = "2026-11-15";
 
 const SESSION = "session";
 
 export const PAIRING_TABLE: readonly PairingRow[] = [
-	// Anthropic. Sonnet 5.5 is within 2 points of Opus 5.5 at half the price and above Fable 5.1.
-	{
-		sessions: ["anthropic/claude-opus-5-5", "anthropic/claude-opus-5", "anthropic/claude-opus-4-8", "anthropic/claude-fable-5", "anthropic/claude-fable-5-1"],
-		subagent: "anthropic/claude-sonnet-5-5",
-		classifier: "anthropic/claude-sonnet-5-5",
-	},
-	{ sessions: ["anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-haiku-5-5" },
+	// Anthropic. Sonnet 5.5 is 10.1 points below Fable 5.2 and 4.6 below Opus 5.5; nothing cheaper is within 7 of either at low effort.
+	{ sessions: ["anthropic/claude-fable-5-2", "anthropic/claude-opus-5-5"], subagent: "anthropic/claude-sonnet-5-5", classifier: SESSION },
+	{ sessions: ["anthropic/claude-fable-5-1"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-opus-5-5" },
+	{ sessions: ["anthropic/claude-opus-5"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-sonnet-5-5" },
+	// Haiku 5.5 is exactly 7.0 below Sonnet 5.5 at low effort, inside the bar.
+	{ sessions: ["anthropic/claude-sonnet-5-5"], subagent: SESSION, classifier: "anthropic/claude-haiku-5-5" },
 	{ sessions: ["anthropic/claude-haiku-5-5"], subagent: SESSION, classifier: SESSION },
-	// OpenAI. GPT-6.1 Sol is within a point of Astra at a fifth of the price; Luna drops 20 points at low effort.
-	{ sessions: ["openai/gpt-6-astra"], subagent: "openai/gpt-6.1-sol", classifier: "openai/gpt-6.1-sol" },
-	{ sessions: ["openai/gpt-6.1-sol", "openai/gpt-6-sol"], subagent: "openai/gpt-6-luna", classifier: SESSION },
-	{ sessions: ["openai/gpt-5.6-sol"], subagent: "openai/gpt-6.1-sol", classifier: "openai/gpt-6.1-sol" },
+	// OpenAI. GPT-6.1 Terra is 5.6 points below Astra at a tenth of the price; Astra's nearest at low effort is 8.5 below.
+	{ sessions: ["openai/gpt-6-astra"], subagent: "openai/gpt-6.1-terra", classifier: SESSION },
+	{ sessions: ["openai/gpt-6.1-sol", "openai/gpt-6-sol"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.1-terra" },
 	{ sessions: ["openai/gpt-5.6-terra", "openai/gpt-5.6-luna"], subagent: "openai/gpt-6-luna", classifier: "openai/gpt-6-luna" },
-	{ sessions: ["openai/gpt-6-luna"], subagent: SESSION, classifier: SESSION },
-	// Google. Gemini 3.8 Flash outscores 3.1 Pro; Argon's classifier pick is the user's call (2026-10-13).
-	{
-		sessions: ["google/gemini-4-argon", "google/gemini-3.1-pro-preview", "google/gemini-3.7-flash", "google/gemini-3.6-flash", "google/gemini-3.5-flash"],
-		subagent: "google/gemini-3.8-flash",
-		classifier: "google/gemini-3.8-flash",
-	},
+	{ sessions: ["openai/gpt-6.1-terra", "openai/gpt-6-luna"], subagent: SESSION, classifier: SESSION },
+	// Google. Gemini 4 Hydrogen is 6.1 below Carbon and above Argon at a lower price; Argon's classifier is the user's call (2026-11-15).
+	{ sessions: ["google/gemini-4-carbon"], subagent: "google/gemini-4-hydrogen", classifier: SESSION },
+	{ sessions: ["google/gemini-4-argon"], subagent: "google/gemini-4-hydrogen", classifier: "google/gemini-3.8-flash" },
+	{ sessions: ["google/gemini-4-hydrogen"], subagent: SESSION, classifier: "google/gemini-3.8-flash" },
 	{ sessions: ["google/gemini-3.8-flash"], subagent: SESSION, classifier: SESSION },
-	// DeepSeek. V4.1 Flash outscores V4 Pro at under a quarter of its price.
-	{
-		sessions: ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813", "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash-0731"],
-		subagent: "deepseek/deepseek-v4.1-flash",
-		classifier: "deepseek/deepseek-v4.1-flash",
-	},
-	{ sessions: ["deepseek/deepseek-v4.1-flash"], subagent: SESSION, classifier: SESSION },
-	// Z.ai, Xiaomi, Qwen: each vendor's flash model.
+	// DeepSeek. V4.1 Flash 1017 outscores V4 Pro by 9.5 points at under a quarter of its price.
+	{ sessions: ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813"], subagent: "deepseek/deepseek-v4.1-flash-1017", classifier: "deepseek/deepseek-v4.1-flash-1017" },
+	{ sessions: ["deepseek/deepseek-v4.1-flash-1017"], subagent: SESSION, classifier: SESSION },
+	// Z.ai, Xiaomi, MiniMax, Meta: each vendor's flash model, within 4 points of its larger one or above it.
 	{ sessions: ["zhipuai/glm-5.3"], subagent: "zhipuai/glm-5.3-flash", classifier: "zhipuai/glm-5.3-flash" },
 	{ sessions: ["zhipuai/glm-5.3-flash"], subagent: SESSION, classifier: SESSION },
-	{ sessions: ["xiaomi/mimo-v2.6-pro"], subagent: "xiaomi/mimo-v2.6-flash", classifier: SESSION },
+	{ sessions: ["xiaomi/mimo-v2.6-pro"], subagent: "xiaomi/mimo-v2.6-flash", classifier: "xiaomi/mimo-v2.6-flash" },
 	{ sessions: ["xiaomi/mimo-v2.6-flash"], subagent: SESSION, classifier: SESSION },
-	{ sessions: ["alibaba/qwen3.8-max", "alibaba/qwen3.8-max-0902"], subagent: "alibaba/qwen3.8-flash", classifier: "alibaba/qwen3.8-flash" },
-	{ sessions: ["alibaba/qwen3.8-flash"], subagent: SESSION, classifier: SESSION },
-	// No same-vendor model within 15 points: the session model serves both roles.
-	{ sessions: ["moonshotai/kimi-k3"], subagent: SESSION, classifier: SESSION },
+	{ sessions: ["minimax/MiniMax-M3"], subagent: "minimax/MiniMax-M3.1-Flash", classifier: "minimax/MiniMax-M3.1-Flash" },
+	{ sessions: ["minimax/MiniMax-M3.1-Flash"], subagent: SESSION, classifier: SESSION },
+	{ sessions: ["meta/muse-spark-1.3", "meta/muse-spark-open"], subagent: "meta/muse-ember-1.0", classifier: "meta/muse-ember-1.0" },
+	// Muse Ember is 7.6 below Muse Wonder; the deprecated Muse Spark 1.3 is never a pick.
+	{ sessions: ["meta/muse-wonder-1.0"], subagent: "meta/muse-ember-1.0", classifier: SESSION },
+	{ sessions: ["meta/muse-ember-1.0"], subagent: SESSION, classifier: SESSION },
+	// No scored same-vendor model within 15 points: the session model serves both roles.
+	{ sessions: ["alibaba/qwen3.8-max-0902"], subagent: SESSION, classifier: SESSION },
+	{ sessions: ["moonshotai/kimi-k3.1-pro"], subagent: SESSION, classifier: SESSION },
+	{ sessions: ["tencent/hy4"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["xai/grok-4.7"], subagent: SESSION, classifier: SESSION },
-	{ sessions: ["meta/muse-spark-1.3"], subagent: SESSION, classifier: SESSION },
-	{ sessions: ["minimax/MiniMax-M3"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["stepfun/step-5-preview"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["mistral/mistral-large-4"], subagent: SESSION, classifier: SESSION },
 ];

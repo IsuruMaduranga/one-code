@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
@@ -14,7 +17,7 @@ const ANTHROPIC: FixtureModel[] = [
 	{ id: "anthropic/claude-haiku-5-5", released: "2026-10-07", price: [0.1, 0.5] },
 ];
 const KIMI: FixtureModel[] = [
-	{ id: "moonshotai/kimi-k3", released: "2026-07-15", price: [3, 15] },
+	{ id: "moonshotai/kimi-k3.1-pro", released: "2026-10-23", price: [2, 10] },
 	{ id: "moonshotai/kimi-k2.7-code", released: "2026-06-12", price: [0.95, 4] },
 ];
 
@@ -25,19 +28,20 @@ const haiku = model("anthropic", "claude-haiku-5-5", 0.1);
 afterEach(() => setCatalogSourcesForTest(undefined));
 
 describe("pairedModel", () => {
-	it("hands an Opus session's subagents and classifier to Sonnet 5.5", () => {
+	it("hands an Opus session's subagents to Sonnet 5.5 and a Sonnet 5.5 session's classifier to Haiku 5.5", () => {
 		pinCatalog(ANTHROPIC);
 		const pool = [opus, sonnet, haiku];
 		expect(pairedModel("subagent", pool, opus)).toEqual({ kind: "model", model: sonnet });
-		expect(pairedModel("classifier", pool, opus)).toEqual({ kind: "model", model: sonnet });
-		expect(pairedModel("subagent", pool, sonnet)).toEqual({ kind: "model", model: haiku });
+		expect(pairedModel("classifier", pool, opus)).toEqual({ kind: "session" });
+		expect(pairedModel("subagent", pool, sonnet)).toEqual({ kind: "session" });
+		expect(pairedModel("classifier", pool, sonnet)).toEqual({ kind: "model", model: haiku });
 	});
 
 	it("keeps the session model where the row says so, overriding a cheaper candidate", () => {
 		pinCatalog([...ANTHROPIC, ...KIMI]);
 		expect(pairedModel("classifier", [opus, sonnet, haiku], haiku)).toEqual({ kind: "session" });
-		const k3 = model("moonshotai", "kimi-k3", 3);
-		expect(pairedModel("subagent", [k3, model("moonshotai", "kimi-k2.7-code", 0.95)], k3)).toEqual({ kind: "session" });
+		const k31 = model("moonshotai", "kimi-k3.1-pro", 2);
+		expect(pairedModel("subagent", [k31, model("moonshotai", "kimi-k2.7-code", 0.95)], k31)).toEqual({ kind: "session" });
 	});
 
 	it("leaves a session model the table does not name to the cost algorithm", () => {
@@ -65,7 +69,7 @@ describe("pairedModel", () => {
 	it("falls through when the pick is not served or fails the caller's gate", () => {
 		pinCatalog(ANTHROPIC);
 		expect(pairedModel("subagent", [opus, haiku], opus)).toBeUndefined();
-		expect(pairedModel("classifier", [opus, sonnet, haiku], opus, { accept: (m) => m.id !== sonnet.id })).toBeUndefined();
+		expect(pairedModel("classifier", [opus, sonnet, haiku], sonnet, { accept: (m) => m.id !== haiku.id })).toBeUndefined();
 	});
 
 	it("resolves a pick on a gateway to the same gateway's row, never its batch variant", () => {
@@ -87,9 +91,9 @@ describe("pairedModel", () => {
 		pinCatalog(ANTHROPIC);
 		// A route can price an older model below its successor.
 		const dearHaiku = model("anthropic", "claude-haiku-5-5", 3);
-		expect(pairedModel("subagent", [opus, sonnet, dearHaiku], sonnet)).toBeUndefined();
+		expect(pairedModel("classifier", [opus, sonnet, dearHaiku], sonnet)).toBeUndefined();
 		const sameHaiku = model("anthropic", "claude-haiku-5-5", 2);
-		expect(pairedModel("subagent", [opus, sonnet, sameHaiku], sonnet)).toEqual({ kind: "model", model: sameHaiku });
+		expect(pairedModel("classifier", [opus, sonnet, sameHaiku], sonnet)).toEqual({ kind: "model", model: sameHaiku });
 	});
 
 	it("drops a pick that fails the image gate", () => {
@@ -111,11 +115,10 @@ describe("PAIRING_TABLE", () => {
 		expect(Number.isNaN(Date.parse(PAIRINGS_AS_OF))).toBe(false);
 	});
 
-	it("names only models the bundled catalog knows (Gemini 4 Argon is not listed yet)", () => {
+	it("names only models the bundled catalog knows", () => {
 		setCatalogSourcesForTest(bundledSources());
 		const known = currentCatalog().models;
-		const ids = [...new Set(PAIRING_TABLE.flatMap((row) => [...row.sessions, row.subagent, row.classifier]))].filter((id) => id !== "session");
-		expect(ids.filter((id) => !known.has(id) && id !== "google/gemini-4-argon")).toEqual([]);
+		expect(tableIds().filter((id) => !known.has(id))).toEqual([]);
 	});
 
 	it("never picks a tiny model, which automatic selection never lands on", () => {
@@ -123,5 +126,114 @@ describe("PAIRING_TABLE", () => {
 		const known = currentCatalog().models;
 		const picks = [...new Set(PAIRING_TABLE.flatMap((row) => [row.subagent, row.classifier]))].filter((id) => id !== "session");
 		expect(picks.filter((id) => known.get(id)?.tier === "tiny")).toEqual([]);
+	});
+});
+
+// The scores the table was built from (Artificial Analysis Intelligence Index v5.0.1, one decimal).
+interface ScoredModel {
+	id: string;
+	max: number | null;
+	low: number | null;
+	price: [number, number] | null;
+	deprecated: boolean;
+}
+interface Override {
+	session: string;
+	role: "subagent" | "classifier";
+	pick: string;
+}
+const SCORES: { asOf: string; overrides: Override[]; models: ScoredModel[] } = JSON.parse(
+	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "pairing-scores.json"), "utf8"),
+);
+const SCORED = new Map(SCORES.models.map((entry) => [entry.id, entry]));
+const BAR = { subagent: 15, classifier: 7 } as const;
+const tableIds = () => [...new Set(PAIRING_TABLE.flatMap((row) => [...row.sessions, row.subagent, row.classifier]))].filter((id) => id !== "session");
+const vendorOf = (id: string) => id.slice(0, id.indexOf("/"));
+/** Scores are compared as published, to one decimal: 25.6 - 18.6 is 7.0, not 7.000000000000002. */
+const gap = (session: number, candidate: number) => Math.round((session - candidate) * 10) / 10;
+/** List price blended 3 input to 1 output, the catalog's blend. */
+const blended = (entry: ScoredModel) => (entry.price ? (3 * entry.price[0] + entry.price[1]) / 4 : Number.POSITIVE_INFINITY);
+
+/** The rule in the module header: the cheapest scored, current, non-tiny same-vendor model within the bar, else the session. */
+function derivedPick(sessionId: string, role: "subagent" | "classifier", isTiny: (id: string) => boolean): string {
+	const session = SCORED.get(sessionId);
+	if (!session || session.max === null) throw new Error(`${sessionId} has no score`);
+	const within = (candidate: ScoredModel) => {
+		if (candidate.max === null) return false;
+		if (role === "subagent") return gap(session.max as number, candidate.max) <= BAR.subagent;
+		// No low-effort score on either side: the classifier bar compares maximum-effort scores.
+		if (session.low === null || candidate.low === null) return gap(session.max as number, candidate.max) <= BAR.classifier;
+		return gap(session.low, candidate.low) <= BAR.classifier;
+	};
+	const candidates = SCORES.models
+		.filter((candidate) => candidate.id !== sessionId && vendorOf(candidate.id) === vendorOf(sessionId))
+		.filter((candidate) => !candidate.deprecated && !isTiny(candidate.id) && within(candidate))
+		.sort((a, b) => blended(a) - blended(b));
+	const cheapest = candidates[0];
+	return cheapest && blended(cheapest) < blended(session) ? cheapest.id : "session";
+}
+
+describe("PAIRING_TABLE against its scores", () => {
+	const tinyInBundledCatalog = () => {
+		setCatalogSourcesForTest(bundledSources());
+		const known = currentCatalog().models;
+		return (id: string) => known.get(id)?.tier === "tiny";
+	};
+
+	it("is dated with its scores", () => {
+		expect(PAIRINGS_AS_OF).toBe(SCORES.asOf);
+	});
+
+	it("derives every row from the scores by the rule, the listed overrides aside", () => {
+		const isTiny = tinyInBundledCatalog();
+		const mismatches: string[] = [];
+		for (const row of PAIRING_TABLE) {
+			for (const session of row.sessions) {
+				for (const role of ["subagent", "classifier"] as const) {
+					const override = SCORES.overrides.find((entry) => entry.session === session && entry.role === role);
+					const expected = override ? override.pick : derivedPick(session, role, isTiny);
+					if (row[role] !== expected) mismatches.push(`${session} ${role}: table ${row[role]}, rule ${expected}`);
+				}
+			}
+		}
+		expect(mismatches).toEqual([]);
+	});
+
+	it("names only scored models, and gives an unscored model no row", () => {
+		expect(tableIds().filter((id) => SCORED.get(id)?.max == null)).toEqual([]);
+		const unscored = SCORES.models.filter((entry) => entry.max === null).map((entry) => entry.id);
+		expect(unscored).toEqual(expect.arrayContaining(["anthropic/claude-fable-5", "anthropic/claude-opus-4-8", "anthropic/claude-sonnet-5", "deepseek/deepseek-v4-flash"]));
+		const sessions = new Set(PAIRING_TABLE.flatMap((row) => row.sessions));
+		expect(unscored.filter((id) => sessions.has(id))).toEqual([]);
+	});
+
+	it("never picks a deprecated model", () => {
+		const picks = [...new Set(PAIRING_TABLE.flatMap((row) => [row.subagent, row.classifier]))].filter((id) => id !== "session");
+		expect(picks.filter((id) => SCORED.get(id)?.deprecated)).toEqual([]);
+		// Muse Spark 1.3 sits exactly 7.0 below Muse Wonder, inside the bar, but is deprecated: Wonder screens itself.
+		expect(gap(43.6, 36.6)).toBe(7);
+		expect(PAIRING_TABLE.find((row) => row.sessions.includes("meta/muse-wonder-1.0"))?.classifier).toBe("session");
+	});
+
+	it("counts a gap of exactly the bar, rounded to one decimal, as within it", () => {
+		const isTiny = tinyInBundledCatalog();
+		// Sonnet 5.5 25.6 and Haiku 5.5 18.6 at low effort: 7.0 apart.
+		expect(gap(25.6, 18.6)).toBe(BAR.classifier);
+		expect(derivedPick("anthropic/claude-sonnet-5-5", "classifier", isTiny)).toBe("anthropic/claude-haiku-5-5");
+	});
+
+	it("compares maximum-effort scores for the classifier where a side has no low-effort score", () => {
+		const isTiny = tinyInBundledCatalog();
+		// Opus 5 (44.2, no low score): Haiku 5.5 is 7.7 below and fails; Sonnet 5.5 is above it.
+		expect(derivedPick("anthropic/claude-opus-5", "classifier", isTiny)).toBe("anthropic/claude-sonnet-5-5");
+		// DeepSeek publishes no low-effort scores: V4.1 Flash 1017 (32.6) is above V4 Pro (23.1).
+		expect(derivedPick("deepseek/deepseek-v4-pro-0813", "classifier", isTiny)).toBe("deepseek/deepseek-v4.1-flash-1017");
+	});
+
+	it("screens Gemini 4 Argon with Gemini 3.8 Flash, the user's call over the rule's Hydrogen", () => {
+		const isTiny = tinyInBundledCatalog();
+		expect(derivedPick("google/gemini-4-argon", "classifier", isTiny)).toBe("google/gemini-4-hydrogen");
+		expect(SCORES.overrides).toEqual([expect.objectContaining({ session: "google/gemini-4-argon", role: "classifier", pick: "google/gemini-3.8-flash" })]);
+		expect(PAIRING_TABLE.find((row) => row.sessions.includes("google/gemini-4-argon"))?.classifier).toBe("google/gemini-3.8-flash");
 	});
 });

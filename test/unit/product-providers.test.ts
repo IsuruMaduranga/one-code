@@ -72,13 +72,13 @@ describe("a provider the profile declares", () => {
 		const [opus, sonnet, haiku] = [row("claude-opus-5-5", 4), row("claude-sonnet-5-5", 2), row("claude-haiku-5-5", 0.1)];
 		// Undeclared, the provider's ids match nothing and the table does not speak.
 		expect(catalogModelFor(opus)).toBeUndefined();
-		expect(pairedModel("classifier", [opus, sonnet, haiku], opus)).toBeUndefined();
+		expect(pairedModel("subagent", [opus, sonnet, haiku], opus)).toBeUndefined();
 		use({ acme: { serves: "anthropic" } });
 		expect(catalogModelFor(opus)?.id).toBe("anthropic/claude-opus-5-5");
-		expect(pairedModel("classifier", [opus, sonnet, haiku], opus)).toEqual({ kind: "model", model: sonnet });
+		expect(pairedModel("subagent", [opus, sonnet, haiku], opus)).toEqual({ kind: "model", model: sonnet });
 		// Containment: a pick never leaves the session's provider for Anthropic's own.
 		const direct = { ...sonnet, provider: "anthropic" } as Model<Api>;
-		expect(pairedModel("classifier", [opus, direct, haiku], opus)).not.toEqual({ kind: "model", model: direct });
+		expect(pairedModel("subagent", [opus, direct, haiku], opus)).not.toEqual({ kind: "model", model: direct });
 	});
 
 	it("does not vouch for another vendor's ids on that provider", () => {
