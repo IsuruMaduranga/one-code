@@ -101,7 +101,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -1244,12 +1244,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// A message is addressed from the agent's task id; its headline names the
 	// agent, from the live registry or the message's own details (a resumed
 	// session has no live runs).
+	const clicked = new ClickToggles();
 	for (const customType of ["subagent-message", "subagent-result"]) {
 		pi.registerMessageRenderer(customType, (message, options, theme) => {
 			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
 			const agentName = (from: string): string | undefined =>
 				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
-			return notificationComponent(theme, customMessageText(message.content), options.expanded, { agentName, hint: expandHintFor(options) });
+			return clickToExpand(clicked, message, options.expanded, (expanded) =>
+				notificationComponent(theme, customMessageText(message.content), expanded, { agentName, hint: expandHintFor(options) }),
+			);
 		});
 	}
 

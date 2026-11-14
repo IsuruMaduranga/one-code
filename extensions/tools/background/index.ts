@@ -27,7 +27,7 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../../lib/shell-run/shell-spawn.ts";
-import { toolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -265,8 +265,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 	// instead (ctrl+o expands). One registration covers every emitter of
 	// `task-notification` (bash uses it too). A fired wakeup or loop tick is the
 	// prompt verbatim, shown behind Claude Code's "Running scheduled task" line.
+	const clicked = new ClickToggles();
 	pi.registerMessageRenderer("task-notification", (message, options, theme) =>
-		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
+		clickToExpand(clicked, message, options.expanded, (expanded) => notificationComponent(theme, customMessageText(message.content), expanded, { hint: expandHintFor(options) })),
 	);
 	for (const customType of ["wakeup", "cron"]) {
 		// Claude Code: "Claude resuming /loop wakeup (…)" for a wakeup; the model here may not be Claude.

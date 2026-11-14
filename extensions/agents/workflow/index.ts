@@ -55,6 +55,8 @@ import {
 	toolRenderers,
 	customMessageText,
 	expandHintFor,
+	ClickToggles,
+	clickToExpand,
 	notificationComponent,
 	safeThemeBold,
 	safeThemePaint,
@@ -161,8 +163,9 @@ function workflowExtension(pi: ExtensionAPI) {
 		);
 	};
 
+	const clicked = new ClickToggles();
 	pi.registerMessageRenderer(WORKFLOW_RESULT_TYPE, (message, options, theme) =>
-		notificationComponent(theme, customMessageText(message.content), options.expanded, { hint: expandHintFor(options) }),
+		clickToExpand(clicked, message, options.expanded, (expanded) => notificationComponent(theme, customMessageText(message.content), expanded, { hint: expandHintFor(options) })),
 	);
 
 	// The description carries the session's size guideline (description.ts);
