@@ -90,8 +90,8 @@ Two options change how a subagent runs:
 
 Subagents and workflow agents can run on a different model or provider
 from the main session. The default is chosen for you. For the models people
-use most, a pairing table picks it: an Opus session delegates to Sonnet 5.5,
-a Sonnet 5.5 session to Haiku 5.5, GPT-6.1 Sol to GPT-6 Luna. For other
+use most, a pairing table picks it: an Opus 5.5 session delegates to Sonnet
+5.5, an Opus 5 session to Haiku 5.5, GPT-6.1 Sol to GPT-6.1 Terra. For other
 models, it's the cheapest model on your provider in your main model's tier or
 above, and cheaper than it; if none costs less, subagents run on your main
 model. See

@@ -93,35 +93,44 @@ role has its own rule, built on the model tiers that
   models people use most. Each pair comes from measured scores and prices,
   so a pick is the cheapest model of the same vendor that comes close enough
   to your main model. Subagents get a looser bar than the classifier, which
-  judges your tool calls with thinking off:
+  judges your tool calls with thinking off. The scores are from November 15,
+  2026:
 
   | Main model | Subagents | Classifier |
   |---|---|---|
-  | Opus 5.5, Opus 5, Opus 4.8, Fable 5 and 5.1 | Sonnet 5.5 | Sonnet 5.5 |
-  | Sonnet 5.5, Sonnet 5 | Haiku 5.5 | Haiku 5.5 |
-  | GPT-6 Astra, GPT-5.6 Sol | GPT-6.1 Sol | GPT-6.1 Sol |
-  | GPT-6.1 Sol, GPT-6 Sol | GPT-6 Luna | main model |
+  | Fable 5.2, Opus 5.5 | Sonnet 5.5 | main model |
+  | Fable 5.1 | Haiku 5.5 | Opus 5.5 |
+  | Opus 5 | Haiku 5.5 | Sonnet 5.5 |
+  | Sonnet 5.5 | main model | Haiku 5.5 |
+  | GPT-6 Astra | GPT-6.1 Terra | main model |
+  | GPT-6.1 Sol, GPT-6 Sol | GPT-6.1 Terra | GPT-6.1 Terra |
   | GPT-5.6 Terra, GPT-5.6 Luna | GPT-6 Luna | GPT-6 Luna |
-  | Gemini 4 Argon, Gemini 3.1 Pro, Gemini 3.5 to 3.7 Flash | Gemini 3.8 Flash | Gemini 3.8 Flash |
-  | DeepSeek V4 Pro, DeepSeek V4 Flash | DeepSeek V4.1 Flash | DeepSeek V4.1 Flash |
+  | Gemini 4 Carbon | Gemini 4 Hydrogen | main model |
+  | Gemini 4 Argon | Gemini 4 Hydrogen | Gemini 3.8 Flash |
+  | Gemini 4 Hydrogen | main model | Gemini 3.8 Flash |
+  | DeepSeek V4 Pro | DeepSeek V4.1 Flash 1017 | DeepSeek V4.1 Flash 1017 |
   | GLM-5.3 | GLM-5.3 Flash | GLM-5.3 Flash |
-  | MiMo V2.6 Pro | MiMo V2.6 Flash | main model |
-  | Qwen3.8 Max | Qwen3.8 Flash | Qwen3.8 Flash |
+  | MiMo V2.6 Pro | MiMo V2.6 Flash | MiMo V2.6 Flash |
+  | MiniMax M3 | MiniMax M3.1 Flash | MiniMax M3.1 Flash |
+  | Muse Spark 1.3, Muse Spark Open | Muse Ember | Muse Ember |
+  | Muse Wonder | Muse Ember | main model |
 
-  Haiku 5.5, GPT-6 Luna, Gemini 3.8 Flash, DeepSeek V4.1 Flash, GLM-5.3
-  Flash, MiMo V2.6 Flash, Qwen3.8 Flash, Kimi K3, Grok 4.7, Muse Spark 1.3,
-  MiniMax M3, Step 5 and Mistral Large 4 keep their own model for both: no
-  smaller model of theirs comes close enough. The paired model has to be on
-  your provider and can't cost more there than your main model; the
-  classifier's pick must also fit your session's context window.
+  Haiku 5.5, GPT-6.1 Terra, GPT-6 Luna, Gemini 3.8 Flash, DeepSeek V4.1
+  Flash 1017, GLM-5.3 Flash, MiMo V2.6 Flash, MiniMax M3.1 Flash, Muse
+  Ember, Qwen3.8 Max (0902), Kimi K3.1 Pro, Tencent Hy4, Grok 4.7, Step 5
+  and Mistral Large 4 keep their own model for both: no cheaper model of
+  theirs comes close enough. A model with no published score gets no row
+  and is never a pick. The paired model has to be on your provider and
+  can't cost more there than your main model; the classifier's pick must
+  also fit your session's context window.
 - **Everything else** takes the cheapest model in your session's tier or
   above that's cheaper than your main model. That covers a model the table
-  doesn't name, a pair your provider doesn't serve, and a vendor that has
-  shipped a model newer than the table: the table steps aside for that
-  vendor until it's updated. A cheap-tier session never gets upgraded. The
-  classifier's pick also has to fit your session's whole context window and
-  is never an experimental build (a `-exp` model). If nothing qualifies,
-  your own model does the job. The pick is redone when you switch models.
+  doesn't name, a pair your provider doesn't serve, and any vendor once your
+  provider serves one of its models released after November 15, 2026: the
+  table steps aside for that vendor until it's updated. A cheap-tier session
+  never gets upgraded. The classifier's pick also has to fit your session's
+  whole context window and is never an experimental build (a `-exp`
+  model). If nothing qualifies, your own model does the job. The pick is redone when you switch models.
 - **The reader** (web fetch answers, recaps) uses the cheapest model that
   isn't tiny.
 
