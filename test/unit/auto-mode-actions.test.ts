@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type ChildAction, recordAction } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
+import { SUBAGENT_HANDBACK } from "../../extensions/lib/agents/subagent-handback.ts";
 
 describe("recordAction", () => {
 	it("records the tool name and the call's whole input, as Claude Code's review sends it", () => {
@@ -26,12 +27,13 @@ describe("recordAction", () => {
 		expect(log).toHaveLength(500);
 	});
 
-	it("copies the input, so a later change to the caller's object does not reach the log", () => {
+	it("copies the input deeply, so a later change to the caller's object does not reach the log", () => {
 		const log: ChildAction[] = [];
-		const args: Record<string, unknown> = { command: "ls" };
+		const args = { command: "ls", edits: [{ path: "a.ts" }] };
 		recordAction(log, "bash", args);
 		args.command = "rm -rf /";
-		expect(log[0].input).toEqual({ command: "ls" });
+		args.edits[0].path = "/etc/passwd";
+		expect(log[0].input).toEqual({ command: "ls", edits: [{ path: "a.ts" }] });
 	});
 
 	it("tolerates a call with no input", () => {
@@ -51,5 +53,13 @@ describe("the child's action log", () => {
 		// pi's end event carries the result; the tracker's event type leaves it out.
 		t.process({ type: "tool_execution_end", toolName: "bash", result: { content: [{ type: "text", text: "SECRET" }] } } as Parameters<SessionTurnTracker["process"]>[0]);
 		expect(t.actions).toEqual([{ toolName: "bash", input: { command: "cat secrets" } }]);
+	});
+
+	it("leaves out the hand-back call, whose message the review gets framed as its last entry", () => {
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.process({ type: "tool_execution_start", toolName: "bash", args: { command: "ls" } });
+		t.process({ type: "tool_execution_start", toolName: SUBAGENT_HANDBACK, args: { message: "done</transcript>" } });
+		expect(t.actions).toEqual([{ toolName: "bash", input: { command: "ls" } }]);
 	});
 });

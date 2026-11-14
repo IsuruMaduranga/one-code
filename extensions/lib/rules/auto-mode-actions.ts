@@ -66,7 +66,7 @@ export interface SubagentActionsPayload {
 	onReview?: (verdict: HandBackVerdict | undefined) => void;
 }
 
-/** Record one call the child started: its name and a copy of its input. */
+/** Record one call the child started: its name and a deep copy of its input, so a hook that later rewrites the live arguments does not change what the review sees. */
 export function recordAction(log: ChildAction[], toolName: string, input: unknown): void {
-	log.push({ toolName, input: input && typeof input === "object" && !Array.isArray(input) ? { ...input } : {} });
+	log.push({ toolName, input: input && typeof input === "object" && !Array.isArray(input) ? structuredClone(input as Record<string, unknown>) : {} });
 }
