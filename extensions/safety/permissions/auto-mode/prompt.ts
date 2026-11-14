@@ -121,6 +121,16 @@ function parseTag(text: string, tag: string): string | undefined {
 /** The threshold: below is allow, at/above is block (CC's Output Format). */
 export const SEVERITY_THRESHOLD = 50;
 
+/**
+ * Each stage's output budget, and the budget of its one retry after a reply
+ * cut off at the first: Claude Code's 64 and 4,096. A model that cannot turn
+ * thinking off gets classifier.ts FORCED_THINKING_PADDING on top of both.
+ */
+export const STAGE1_MAX_TOKENS = 64;
+export const STAGE1_RETRY_MAX_TOKENS = 1024;
+export const STAGE2_MAX_TOKENS = 4096;
+export const STAGE2_RETRY_MAX_TOKENS = 8192;
+
 /** A quote shorter than this proves nothing — a stray word matches any transcript. */
 const INTENT_MIN_CHARS = 8;
 

@@ -37,6 +37,10 @@ import {
 	parseSeverity,
 	parseStage2,
 	SEVERITY_THRESHOLD,
+	STAGE1_MAX_TOKENS,
+	STAGE1_RETRY_MAX_TOKENS,
+	STAGE2_MAX_TOKENS,
+	STAGE2_RETRY_MAX_TOKENS,
 	stage1User,
 	stage2User,
 } from "./prompt.ts";
@@ -517,14 +521,14 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			if (deps.reviewOnly) {
 				// A finished run has no harm floor to short-circuit: go straight to the
 				// full stage-2 evaluation of the transcript's hand-back entry (transcript.ts).
-				const text = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
+				const text = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
 				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
 				// without a readable severity, one retry with headroom recovers it.
 				// Stage 2's 4096 is CC's too, with one retry at 8192.
-				const s1 = await call(stage1Text, 64, 1024, 1);
+				const s1 = await call(stage1Text, STAGE1_MAX_TOKENS, STAGE1_RETRY_MAX_TOKENS, 1);
 				const sev1 = parseSeverity(s1);
 				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {
 					verdict = { decision: "allow", reason: "", tier: "allow" };
@@ -533,7 +537,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
-					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without quoting the

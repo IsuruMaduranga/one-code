@@ -48,6 +48,7 @@ import { withCompactionKeepBackfilled } from "../../extensions/lib/app/compactio
 import { FEATURE_IDS, FEATURES, isGuardFeature, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import { projectSlug } from "../../extensions/lib/context/memory.ts";
 import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-builtins.mjs";
+import { STAGE2_MAX_TOKENS } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 
 const { values: opts } = parseArgs({
 	options: {
@@ -521,9 +522,9 @@ function requestKind(request) {
 	const last = JSON.stringify((body.messages ?? body.input ?? []).findLast?.((message) => message?.role === "user") ?? "");
 	if (!last.includes("<transcript>")) return "side call";
 	if (last.includes("<subagent_hand_back>")) return "subagent review";
-	// classifier.ts asks stage 2 for 4,096 tokens; stage 1 for 64, or 1,024 on
-	// a retry, plus the same forced-thinking padding as stage 2.
-	return (body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens ?? 0) < 4096 ? "classifier stage 1" : "classifier stage 2";
+	// Stage 1's budget, even on its retry, stays below stage 2's; any
+	// forced-thinking padding is added to both alike.
+	return (body.max_tokens ?? body.max_completion_tokens ?? body.max_output_tokens ?? 0) < STAGE2_MAX_TOKENS ? "classifier stage 1" : "classifier stage 2";
 }
 
 /** The changed requests of one scenario: by position, and as a multiset of whole requests, each with its kind. */
