@@ -178,7 +178,8 @@ describe("sync-base", () => {
 		expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("my draft");
 	});
 
-	it("reports a base file whose executable bit the product lost", () => {
+	// Windows has no executable bit, so the check compares bytes alone there.
+	it.skipIf(process.platform === "win32")("reports a base file whose executable bit the product lost", () => {
 		const { base, product } = synced();
 		const next = nextBase(base, () => {
 			write(base, { "scripts/run.sh": "echo hi" });
