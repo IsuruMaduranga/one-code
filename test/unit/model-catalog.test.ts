@@ -454,3 +454,34 @@ describe("isDatedDuplicate against the catalog", () => {
 		expect(isDatedDuplicate(pool[1], pool, sameDay)).toBe(true);
 	});
 });
+
+describe("a gateway row models.dev leaves unlinked", () => {
+	const sources = () => {
+		const built = catalogSources([
+			{ id: "meta/muse-ember-1.0", released: "2026-11-09", price: [0.1, 0.5] },
+			{ id: "meta/muse-wonder-1.0", released: "2026-10-12", price: [4, 20] },
+			{ id: "openai/gpt-3.5-turbo", released: "2023-03-01", price: [0.5, 1.5] },
+		]);
+		const gateway = (provider: string, id: string, released: string) => {
+			(built.modelsDev.payload[provider] ??= { models: {} }).models[id] = { release_date: released };
+		};
+		gateway("openrouter", "meta/muse-ember", "2026-11-09");
+		gateway("openrouter", "meta/muse-wonder", "2026-10-12");
+		gateway("vercel", "meta/muse-ember", "2026-11-09");
+		gateway("openrouter", "openai/gpt-3.5-turbo-0613", "2024-01-25");
+		return built;
+	};
+
+	it("is its vendor's model when the ids differ only by a version tag and the release dates match", () => {
+		const index = buildCatalogIndex(sources());
+		expect(catalogModelFor({ provider: "openrouter", id: "meta/muse-ember" }, index)?.id).toBe("meta/muse-ember-1.0");
+		expect(catalogModelFor({ provider: "openrouter", id: "meta/muse-wonder" }, index)?.id).toBe("meta/muse-wonder-1.0");
+		expect(catalogModelFor({ provider: "vercel-ai-gateway", id: "meta/muse-ember" }, index)?.id).toBe("meta/muse-ember-1.0");
+		expect(index.models.has("meta/muse-ember")).toBe(false);
+	});
+
+	it("keeps its own id when the release dates differ", () => {
+		const index = buildCatalogIndex(sources());
+		expect(catalogModelFor({ provider: "openrouter", id: "openai/gpt-3.5-turbo-0613" }, index)?.id).toBe("openai/gpt-3.5-turbo-0613");
+	});
+});

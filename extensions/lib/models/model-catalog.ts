@@ -92,6 +92,8 @@ export interface CatalogModel {
 }
 
 const TIER_RANK: Record<CatalogTier, number> = { workhorse: 0, cheap: 1, tiny: 2 };
+/** A trailing version tag (`-1.0`, `-v2`): what a gateway's id may add or drop from its vendor's. */
+const VERSION_TAG = /^-v?\d+(?:\.\d+)*$/;
 const SMALL_WORD = /(?:^|[-/.])(?:nano|micro|lite|tiny)(?:[-/.:]|$)/i;
 /** Any size tag: `27b`, `1.5b`, Gemma's effective-size `e2b`, and an MoE's active `17b`. */
 const ANY_SIZE_TAG = /(?:^|[-/.])e?(\d+(?:\.\d+)?)b(?=[-/.:]|$)/i;
@@ -183,9 +185,24 @@ export function buildCatalogIndex(sources: CatalogSources): CatalogIndex {
 			.filter(([, policy]) => policy.kind === "gateway")
 			.map(([provider]) => MODELS_DEV_PROVIDER[provider] ?? provider),
 	);
+	// A gateway row models.dev leaves unlinked whose vendor lists the same
+	// model under the id plus or minus a version tag, released the same day
+	// (OpenRouter's `meta/muse-ember` for Meta's `muse-ember-1.0`), is that
+	// model, not a gateway-only one.
+	const vendorTwin = (id: string, row: ModelsDevModel): string | undefined => {
+		const [vendor, rest] = id.split("/");
+		const own = modelsDev[vendor]?.models;
+		if (!own || own[rest] || !row.release_date) return undefined;
+		const versioned = (longer: string, shorter: string) => longer.startsWith(`${shorter}-`) && VERSION_TAG.test(longer.slice(shorter.length));
+		const twins = Object.entries(own).filter(([other, ownRow]) => ownRow.release_date === row.release_date && (versioned(other, rest) || versioned(rest, other)));
+		if (twins.length !== 1) return undefined;
+		const [other, ownRow] = twins[0];
+		return ownRow.canonical_model_id ?? `${vendor}/${other}`;
+	};
 	const canonicalOf = (provider: string, id: string, row: ModelsDevModel): string | undefined => {
 		const canonical =
-			row.canonical_model_id ?? (vendors.has(provider) ? `${provider}/${id}` : gateways.has(provider) && id.split("/").length === 2 ? id : undefined);
+			row.canonical_model_id ??
+			(vendors.has(provider) ? `${provider}/${id}` : gateways.has(provider) && id.split("/").length === 2 ? (vendorTwin(id, row) ?? id) : undefined);
 		return canonical && canonical.indexOf("/") === canonical.lastIndexOf("/") ? canonical : undefined;
 	};
 

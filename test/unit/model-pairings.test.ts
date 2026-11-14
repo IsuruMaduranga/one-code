@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { currentCatalog } from "../../extensions/lib/models/model-catalog.ts";
 import { PAIRING_TABLE, PAIRINGS_AS_OF, pairedModel } from "../../extensions/lib/models/model-pairings.ts";
-import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
+import { catalogSources, type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input: number, extra: Partial<Model<Api>> = {}) =>
 	({ provider, id, name: id, contextWindow: 1_000_000, maxTokens: 64_000, input: ["text", "image"], cost: { input, output: input * 5 }, ...extra }) as unknown as Model<Api>;
@@ -108,6 +108,26 @@ describe("pairedModel", () => {
 		const pool = [session, older, flash1017];
 		expect(pairedModel("subagent", pool, session)).toEqual({ kind: "model", model: flash1017 });
 		expect(pairedModel("classifier", pool, session)).toEqual({ kind: "model", model: flash1017 });
+	});
+
+	it("reads a gateway's unversioned id as the vendor's versioned model, for picks and sessions alike", () => {
+		const sources = catalogSources([
+			{ id: "meta/muse-spark-1.3", released: "2026-09-02", price: [1.25, 4.25], servedAs: ["openrouter/meta/muse-spark-1.3"] },
+			{ id: "meta/muse-ember-1.0", released: "2026-11-09", price: [0.1, 0.5] },
+			{ id: "meta/muse-wonder-1.0", released: "2026-10-12", price: [4, 20] },
+		]);
+		const openrouter = (sources.modelsDev.payload.openrouter ??= { models: {} }).models;
+		openrouter["meta/muse-ember"] = { release_date: "2026-11-09" };
+		openrouter["meta/muse-wonder"] = { release_date: "2026-10-12" };
+		setCatalogSourcesForTest(sources);
+		const spark = model("openrouter", "meta/muse-spark-1.3", 1.25);
+		const ember = model("openrouter", "meta/muse-ember", 0.1);
+		const wonder = model("openrouter", "meta/muse-wonder", 4);
+		const pool = [spark, ember, wonder];
+		expect(pairedModel("subagent", pool, spark)).toEqual({ kind: "model", model: ember });
+		expect(pairedModel("classifier", pool, spark)).toEqual({ kind: "model", model: ember });
+		expect(pairedModel("subagent", pool, wonder)).toEqual({ kind: "model", model: ember });
+		expect(pairedModel("classifier", pool, wonder)).toEqual({ kind: "session" });
 	});
 
 	it("drops a pick that fails the image gate", () => {
