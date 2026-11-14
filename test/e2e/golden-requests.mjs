@@ -514,51 +514,45 @@ function firstDifference(a, b, path = "$") {
  */
 function requestKind(request) {
 	const body = request?.body ?? {};
-	if (body.tools) return "main";
+	if (Array.isArray(body.tools) && body.tools.length > 0) return "main";
 	// The last user message only: on Chat Completions the system prompt is a
 	// message too, and the ruleset in it names both tags.
 	const last = JSON.stringify((body.messages ?? []).findLast((message) => message?.role === "user") ?? "");
 	if (!last.includes("<transcript>")) return "side call";
 	if (last.includes("<subagent_hand_back>")) return "subagent review";
+	// classifier.ts asks stage 2 for 4,096 tokens; stage 1 for 64, or 1,024 on
+	// a retry, plus the same forced-thinking padding as stage 2.
 	return (body.max_tokens ?? body.max_completion_tokens ?? 0) < 4096 ? "classifier stage 1" : "classifier stage 2";
-}
-
-/** Count each kind in a list of requests: "30 classifier stage 1, 1 subagent review". */
-function countKinds(requests) {
-	const counts = new Map();
-	for (const request of requests) counts.set(requestKind(request), (counts.get(requestKind(request)) ?? 0) + 1);
-	return [...counts].map(([kind, n]) => `${n} ${kind}`).join(", ") || "none";
 }
 
 /** The changed requests of one scenario: by position, and as a multiset of whole requests, each with its kind. */
 function summarizeRequests(actual, expected) {
-	const lines = [`  requests: ${expected.requests.length} in the snapshot, ${actual.requests.length} in this run`];
+	const run = actual.requests.map((request) => JSON.stringify(request));
+	const snapshot = expected.requests.map((request) => JSON.stringify(request));
+	const lines = [`  requests: ${snapshot.length} in the snapshot, ${run.length} in this run`];
 	const changed = [];
-	for (let i = 0; i < Math.max(actual.requests.length, expected.requests.length); i++) {
-		if (JSON.stringify(actual.requests[i]) !== JSON.stringify(expected.requests[i])) changed.push(`${i} (${requestKind(actual.requests[i] ?? expected.requests[i])})`);
+	for (let i = 0; i < Math.max(run.length, snapshot.length); i++) {
+		if (run[i] !== snapshot[i]) changed.push(`${i} (${requestKind(actual.requests[i] ?? expected.requests[i])})`);
 	}
 	const shown = changed.slice(0, 20).join(", ");
 	lines.push(`  differ at the same position: ${changed.length ? `${shown}${changed.length > 20 ? `, and ${changed.length - 20} more` : ""}` : "none"}`);
-	// Whole requests present on one side only: a dropped or added request shifts
-	// every position after it, and this still names what moved.
-	const left = new Map();
-	for (const request of expected.requests) {
-		const key = JSON.stringify(request);
-		left.set(key, (left.get(key) ?? 0) + 1);
-	}
-	const onlyActual = [];
-	for (const request of actual.requests) {
-		const key = JSON.stringify(request);
-		if (left.get(key)) left.set(key, left.get(key) - 1);
-		else onlyActual.push(request);
-	}
-	const onlyExpected = expected.requests.filter((request) => {
-		const key = JSON.stringify(request);
-		if (!left.get(key)) return false;
-		left.set(key, left.get(key) - 1);
-		return true;
-	});
-	lines.push(`  only in the snapshot: ${countKinds(onlyExpected)}; only in this run: ${countKinds(onlyActual)}`);
+	// Whole requests on one side only (a signed count per request): a dropped
+	// or added request shifts every position after it, and this still names
+	// what moved.
+	const net = new Map();
+	const tally = (key, request, step) => {
+		const entry = net.get(key) ?? { kind: requestKind(request), n: 0 };
+		entry.n += step;
+		net.set(key, entry);
+	};
+	snapshot.forEach((key, i) => tally(key, expected.requests[i], 1));
+	run.forEach((key, i) => tally(key, actual.requests[i], -1));
+	const countKinds = (side) => {
+		const counts = new Map();
+		for (const { kind, n } of net.values()) if (side * n > 0) counts.set(kind, (counts.get(kind) ?? 0) + Math.abs(n));
+		return [...counts].map(([kind, n]) => `${n} ${kind}`).join(", ") || "none";
+	};
+	lines.push(`  only in the snapshot: ${countKinds(1)}; only in this run: ${countKinds(-1)}`);
 	if (JSON.stringify(actual.dialogs) !== JSON.stringify(expected.dialogs)) lines.push("  dialogs differ");
 	return lines.join("\n");
 }
@@ -593,7 +587,7 @@ async function pool(items, task) {
 }
 
 const toolNames = (body) => (body?.tools ?? []).map((t) => t.name ?? t.function?.name);
-const mainBody = (requests) => (requests.find((r) => Array.isArray(r.body.tools) && r.body.tools.length > 0) ?? requests[0])?.body;
+const mainBody = (requests) => (requests.find((r) => requestKind(r) === "main") ?? requests[0])?.body;
 
 /** --sweep: see the header. Exits the process with the outcome. */
 /**
