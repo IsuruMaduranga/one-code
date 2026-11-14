@@ -208,4 +208,6 @@ declare module "*/sync-base.mjs" {
 	export function applyBase(product: string, base: string, record: { source?: string; ref?: string; commit?: string }): { written: string[]; deleted: string[]; stamped: boolean };
 	/** The base paths where `product` differs from a fresh sync of its recorded commit. */
 	export function checkBase(product: string, base: string): string[];
+	/** The source and ref a run syncs from: the arguments, else the recorded ones; a local source absolute. */
+	export function syncTarget(args: readonly string[], recorded: { source?: string; ref?: string } | undefined): { source: string; ref: string };
 }

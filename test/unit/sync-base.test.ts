@@ -3,11 +3,11 @@
  * outside its own paths, and only a sync writes it.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { applyBase, checkBase, fetchBase, isProductPath, PRODUCT_PATHS, SYNC_FILE } from "../../scripts/sync-base.mjs";
+import { applyBase, checkBase, fetchBase, isProductPath, PRODUCT_PATHS, SYNC_FILE, syncTarget } from "../../scripts/sync-base.mjs";
 
 const made: string[] = [];
 afterEach(() => {
@@ -102,5 +102,47 @@ describe("sync-base", () => {
 		expect(existsSync(join(product, "notes/todo.md"))).toBe(true);
 		expect(JSON.parse(readFileSync(join(product, SYNC_FILE), "utf8")).own).toEqual(["notes/"]);
 		expect(checkBase(product, first.dir)).toEqual([]);
+	});
+
+	it("gives the lockfile the stamped package's name and version, so an install changes no base file", () => {
+		const base = repo({ ...baseFiles, "package-lock.json": JSON.stringify({ name: "ext", version: "3.0.0", lockfileVersion: 3, packages: { "": { name: "ext", version: "3.0.0" }, "node_modules/x": { version: "1.0.0" } } }) });
+		const product = repo({ "profile/index.ts": "mine" });
+		const first = fetchBase(base, "HEAD");
+		made.push(first.dir);
+		applyBase(product, first.dir, { source: base, ref: "HEAD", commit: first.commit });
+		const lock = JSON.parse(readFileSync(join(product, "package-lock.json"), "utf8"));
+		expect(lock).toMatchObject({ name: "ext", version: "0.1.0", packages: { "": { name: "ext", version: "0.1.0" }, "node_modules/x": { version: "1.0.0" } } });
+		expect(checkBase(product, first.dir)).toEqual([]);
+	});
+
+	it("checks a file the product tracks although .gitignore matches it", () => {
+		const { product, first } = synced();
+		write(product, { ".gitignore": "*.log\n", "extensions/debug.log": "x" });
+		git(product, "add", "-A");
+		git(product, "add", "-f", "extensions/debug.log");
+		expect(checkBase(product, first.dir)).toContain("extensions/debug.log: not in the base");
+	});
+
+	it("fails on a ref the base does not have and leaves no folder behind", () => {
+		const base = repo(baseFiles);
+		const before = readdirSync(tmpdir()).filter((name) => name.startsWith("base-sync-")).length;
+		expect(() => fetchBase(base, "no-such-ref")).toThrow();
+		expect(readdirSync(tmpdir()).filter((name) => name.startsWith("base-sync-")).length).toBe(before);
+	});
+
+	it("reuses the recorded source and ref when given no arguments, and records a local source absolute", () => {
+		const base = repo(baseFiles);
+		expect(syncTarget([], { source: base, ref: "dev" })).toEqual({ source: base, ref: "dev" });
+		expect(syncTarget([base], { source: base, ref: "dev" })).toEqual({ source: base, ref: "HEAD" });
+		expect(syncTarget([base, "v1"], undefined)).toEqual({ source: base, ref: "v1" });
+		expect(syncTarget(["https://example.com/base.git"], undefined)).toEqual({ source: "https://example.com/base.git", ref: "HEAD" });
+		const cwd = process.cwd();
+		try {
+			process.chdir(dirname(base));
+			expect(realpathSync(syncTarget([basename(base)], undefined).source)).toBe(realpathSync(base));
+		} finally {
+			process.chdir(cwd);
+		}
+		expect(() => syncTarget([], undefined)).toThrow(/usage/);
 	});
 });

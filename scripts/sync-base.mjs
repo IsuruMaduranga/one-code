@@ -22,9 +22,12 @@
  * - deletes the files the base no longer has. A file outside the product's
  *   paths that git does not track in the product stops the sync instead,
  *   since nothing could bring it back;
- * - keeps the product's version in both package.json files, and stamps them
- *   from the product's brand (scripts/apply-brand.mjs);
- * - records the source and the commit in `.base-sync.json`.
+ * - keeps the product's version in both package.json files, stamps them
+ *   from the product's brand (scripts/apply-brand.mjs), and gives the root
+ *   package-lock.json the stamped package's name and version, as npm would;
+ * - records the source (a local path made absolute), the ref and the commit
+ *   in `.base-sync.json`; a later run with no arguments reuses the source and
+ *   the ref.
  *
  * The sync runs the script of the commit it copies, so a change to these
  * rules arrives with the base that needs it. `--check` repeats the recorded
@@ -32,15 +35,15 @@
  * a sync does, the stamping included.
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const SYNC_FILE = ".base-sync.json";
 /** The paths of this repository that belong to the product built on it. A folder ends with a slash. */
 export const PRODUCT_PATHS = ["profile/", "docs/", "demo/", ".github/", "README.md", "app/README.md", "install.ps1", "AGENTS.md", "CLAUDE.md", ".coderabbit.yaml", SYNC_FILE];
-const STAMPED = ["package.json", "app/package.json"];
+const STAMPED = ["package.json", "app/package.json", "package-lock.json"];
 const FIRST_VERSION = "0.1.0";
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 28 });
@@ -59,32 +62,46 @@ function checkoutFiles(dir) {
 	return lines(git(dir, "ls-files", "-z", "--cached", "--others", "--exclude-standard")).filter((file) => existsSync(join(dir, file)));
 }
 
-/** The base at `ref` of `source`, exported into a new folder: `{ dir, commit }`. */
+/**
+ * The base at `ref` of `source`, exported into a new folder: `{ dir, commit }`.
+ * No shell: git writes the archive to a file and tar reads it, so a failure
+ * in either is an error, never a partial tree.
+ */
 export function fetchBase(source, ref) {
 	const dir = mkdtempSync(join(tmpdir(), "base-sync-"));
-	if (existsSync(source)) {
-		const commit = git(source, "rev-parse", "--verify", `${ref}^{commit}`).trim();
-		execFileSync("sh", ["-c", 'git -C "$1" archive "$2" | tar -x -C "$3"', "sh", resolve(source), commit, dir]);
+	try {
+		if (existsSync(source)) {
+			const commit = git(source, "rev-parse", "--verify", `${ref}^{commit}`).trim();
+			const archive = `${dir}.tar`;
+			try {
+				git(resolve(source), "archive", "-o", archive, commit);
+				execFileSync("tar", ["-x", "-f", archive, "-C", dir]);
+			} finally {
+				rmSync(archive, { force: true });
+			}
+			return { dir, commit };
+		}
+		git(dir, "init", "-q");
+		git(dir, "fetch", "-q", "--depth", "1", source, ref);
+		git(dir, "checkout", "-q", "FETCH_HEAD");
+		const commit = git(dir, "rev-parse", "HEAD").trim();
+		rmSync(join(dir, ".git"), { recursive: true, force: true });
 		return { dir, commit };
+	} catch (error) {
+		rmSync(dir, { recursive: true, force: true });
+		throw error;
 	}
-	git(dir, "init", "-q");
-	git(dir, "fetch", "-q", "--depth", "1", source, ref);
-	git(dir, "checkout", "-q", "FETCH_HEAD");
-	const commit = git(dir, "rev-parse", "HEAD").trim();
-	rmSync(join(dir, ".git"), { recursive: true, force: true });
-	return { dir, commit };
 }
 
 /** The paths a product owns: the fixed ones and those its sync record adds. */
 const ownPaths = (record) => [...PRODUCT_PATHS, ...(record?.own ?? [])];
 
-/** Every file under `dir`, as forward-slashed relative paths. */
+/** Every regular file under `dir` (links left out), as forward-slashed relative paths. */
 function filesUnder(dir) {
-	const found = [];
-	for (const entry of execFileSync("find", [".", "-type", "f", "-print0"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 28 }).split("\0")) {
-		if (entry) found.push(entry.replace(/^\.\//, ""));
-	}
-	return found.sort();
+	return readdirSync(dir, { recursive: true, withFileTypes: true })
+		.filter((entry) => entry.isFile())
+		.map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/"))
+		.sort();
 }
 
 /**
@@ -126,6 +143,15 @@ export function applyBase(product, base, record) {
 	writeJson(join(product, "app/package.json"), { ...app, version, dependencies: { ...app.dependencies, [app.productExtension]: version } });
 	const stamped = existsSync(join(product, "profile/brand.json"));
 	if (stamped) execFileSync(process.execPath, ["scripts/apply-brand.mjs"], { cwd: product, stdio: "inherit" });
+	// The lockfile names the root package as npm would after an install, so
+	// an install does not change a base file and fail --check.
+	const lockPath = join(product, "package-lock.json");
+	if (existsSync(lockPath)) {
+		const { name, version: stampedVersion } = readJson(join(product, "package.json"));
+		const lock = readJson(lockPath);
+		const root = lock.packages?.[""];
+		writeJson(lockPath, { ...lock, name, version: stampedVersion, ...(root ? { packages: { ...lock.packages, "": { ...root, name, version: stampedVersion } } } : {}) });
+	}
 
 	writeJson(syncPath, { ...previous, ...record });
 	return { written: written.filter((file) => !STAMPED.includes(file)), deleted: stale, stamped };
@@ -138,7 +164,8 @@ export function checkBase(product, base) {
 		const files = checkoutFiles(product);
 		for (const file of files) cpSync(join(product, file), join(copy, file));
 		git(copy, "init", "-q");
-		git(copy, "add", "-A");
+		// -f: a file the product tracks although it matches .gitignore is in the copy too.
+		git(copy, "add", "-A", "-f");
 		const record = readJson(join(product, SYNC_FILE));
 		const own = ownPaths(record);
 		applyBase(copy, base, record);
@@ -151,6 +178,19 @@ export function checkBase(product, base) {
 	} finally {
 		rmSync(copy, { recursive: true, force: true });
 	}
+}
+
+/**
+ * The source and ref a run syncs from: the arguments, else the recorded ones.
+ * With no arguments the recorded ref applies too, not whatever the base has
+ * checked out. A local source comes back absolute, so the record still finds
+ * it from the product's folder.
+ */
+export function syncTarget(args, recorded) {
+	const given = args[0] ?? recorded?.source;
+	if (!given) throw new Error("usage: node scripts/sync-base.mjs <source> [ref]   (or --check [source])");
+	const ref = args[1] ?? (args[0] === undefined ? recorded?.ref : undefined) ?? "HEAD";
+	return { source: existsSync(given) ? resolve(given) : given, ref };
 }
 
 function main(argv) {
@@ -170,8 +210,7 @@ function main(argv) {
 	};
 	const check = has("--check");
 	const recorded = existsSync(join(product, SYNC_FILE)) ? readJson(join(product, SYNC_FILE)) : undefined;
-	const source = args[0] ?? recorded?.source;
-	if (!source) throw new Error("usage: node scripts/sync-base.mjs <source> [ref]   (or --check [source])");
+	const { source, ref } = syncTarget(args, recorded);
 
 	if (check) {
 		if (!recorded?.commit) throw new Error(`${SYNC_FILE} records no commit: run a sync first`);
@@ -187,7 +226,6 @@ function main(argv) {
 		return;
 	}
 
-	const ref = args[1] ?? "HEAD";
 	if (!staged) {
 		// Hand over to the script of the commit being copied, so its rules apply.
 		const base = fetchBase(source, ref);
