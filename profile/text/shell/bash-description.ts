@@ -10,7 +10,7 @@
  * and the working-directory sentence says what this tool does, since each
  * command starts in the session's working directory and a `cd` does not carry
  * over (lib/shell-run/shell-tool.ts), where Claude Code tracks the directory between
- * calls. The parameter texts are Claude Code's. When the session has the
+ * calls. When the session has the
  * dedicated grep, find and ls tools (the base says so: `searchTools`), the
  * long form's two shell-`find` bullets give way to a pointer at those tools.
  * One Code turns the three off, so its sessions keep the shell-`find` bullets.

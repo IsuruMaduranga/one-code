@@ -114,7 +114,7 @@ describe("the hand-back entry", () => {
 		expect(sent("one\n\ntwo")).toBe(`${classifierText().handBackReview}\n\n<subagent_hand_back>\n  one\n  \n  two\n</subagent_hand_back>`);
 	});
 
-	it("folds every line break Claude Code folds", () => {
+	it("folds every kind of line break", () => {
 		expect(inside("a\r\nb\rc d\u0085e\ff")).toBe("  a\n  b\n  c\n  d\n  e\n  f");
 	});
 

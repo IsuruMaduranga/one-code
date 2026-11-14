@@ -55,8 +55,8 @@ export type TranscriptEntry =
 	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] }
 	/**
 	 * The last entry of a finished subagent's review: the profile's note, then
-	 * the child's final report in `<subagent_hand_back>`, rendered as Claude
-	 * Code's `{"user":…}` hand-back line. The ruleset judges "the final entry",
+	 * the child's final report in `<subagent_hand_back>`, rendered as a
+	 * `{"user":…}` hand-back line. The ruleset judges "the final entry",
 	 * and its SUBAGENT HAND-BACK rule names this entry as that action, so the
 	 * model reviews the run and its report rather than the child's last call.
 	 * Never the user's words: it never enters `userMessages`, so an intent
@@ -67,9 +67,8 @@ export type TranscriptEntry =
 /**
  * One tool call as the classifier sees it, for every path that shows one: the
  * main gate's pending call, a child's gated call, the session's history and a
- * finished subagent's review. Our counterpart of Claude Code's per-tool
- * `toAutoClassifierInput`, so one call never reaches the classifier in two
- * shapes. A shell call is its command as the model wrote it: `asWritten` when
+ * finished subagent's review. One builder, so one call never reaches the
+ * classifier in two shapes. A shell call is its command as the model wrote it: `asWritten` when
  * the harness has since wrapped the call's own command (a worktree's `cd`
  * wrapper), so the classifier judges what the model asked for and the wrapper
  * does not escalate every call (PERMISSIONS-REVIEW-2026-09-05 L3). Every other
@@ -87,20 +86,19 @@ export function clip(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max)}… [truncated, ${value.length} chars]`;
 }
 
-/** Line breaks Claude Code folds to `\n` before indenting a report. */
+/** The line breaks a report's lines are split on: CR LF, CR, and the separators that render as one. */
 const LINE_BREAKS = /\r\n?|[\u001c-\u001e\u2028\u2029\u0085\v\f]/g;
 /** Invisible format characters, dropped so they cannot hide inside a tag name. */
 const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 /**
  * An opening bracket that starts one of the classifier's own tags, however
  * spaced or slashed: it becomes `[`, so a report cannot close the
- * `<transcript>` and write entries of its own. Claude Code does the same
- * for these three names; its bracket set also covers a long table of
- * lookalikes, of which this keeps the ASCII and the common ones.
+ * `<transcript>` and write entries of its own. The ASCII bracket and its
+ * common lookalikes are covered.
  */
 const TRANSCRIPT_TAG = /[<\uFF1C\uFE64\u2039\u3008\u27E8\u02C2]([\s/\uFF0F\u2215\u2044]*(?:transcript|forwarded_user_turns|forwarded_turn)\b)/giu;
 
-/** The child's report as Claude Code frames it inside `<subagent_hand_back>`: line breaks folded, the classifier's tags defused, every line indented two spaces. */
+/** The child's report as it sits inside `<subagent_hand_back>`: line breaks folded, the classifier's tags defused, every line indented two spaces. */
 function handBackReport(report: string): string {
 	return indentReport(report.replace(LINE_BREAKS, "\n").replace(INVISIBLE, "").replace(TRANSCRIPT_TAG, "[$1"));
 }

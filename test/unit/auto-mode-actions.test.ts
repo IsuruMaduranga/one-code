@@ -4,7 +4,7 @@ import { SessionTurnTracker } from "../../extensions/agents/subagents/session-tu
 import { SUBAGENT_HANDBACK } from "../../extensions/lib/agents/subagent-handback.ts";
 
 describe("recordAction", () => {
-	it("records the tool name and the call's whole input, as Claude Code's review sends it", () => {
+	it("records the tool name and the call's whole input", () => {
 		const log: ChildAction[] = [];
 		recordAction(log, "bash", { command: "npm test" });
 		recordAction(log, "write", { path: "/repo/src/a.ts", content: "export const a = 1;\n" });

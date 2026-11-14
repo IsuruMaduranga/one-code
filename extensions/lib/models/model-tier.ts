@@ -14,7 +14,7 @@
  * `extensions/request/system-prompt` picks the prompt text from the tier;
  * `extensions/tools/search-tools` activates grep/find/ls only for `tiny`, unless
  * the profile turns those tools off (`searchToolsEnabled`). Frontier is a
- * version-gated first-party allowlist (Claude Code's own rule); below it the
+ * version-gated first-party allowlist; below it the
  * tier comes from the public catalogs (`model-catalog.ts`: release date, price
  * and size against the same vendor's current models), with no model names,
  * dollar floors or benchmark scores in the code. Rationale + rejected

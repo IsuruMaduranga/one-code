@@ -4,7 +4,7 @@
  * leaf module.
  */
 
-/** Indent every line two spaces, blanks included: Claude Code's hand-back report framing, which a line at column zero cannot forge. */
+/** Indent every line two spaces, blanks included: the hand-back report framing, which a line at column zero cannot forge. */
 export function indentReport(text: string): string {
 	return text
 		.split("\n")
