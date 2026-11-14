@@ -53,6 +53,7 @@ import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLin
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { paintedUserMarker, userMessageMarkdown } from "./user-marker.ts";
+import { TitleAnimation } from "./title-animation.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
 
@@ -356,20 +357,53 @@ function brandingExtension(pi: ExtensionAPI) {
 	// (a second /clear inside the 0 ms window); pi's stale-ctx guard throws, and a
 	// throw inside a timer is uncaught — so the write is inert after shutdown.
 	let live = false;
-	const retitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle(title: string): void } }) => {
+	type TitleCtx = { hasUI: boolean; cwd: string; mode?: string; ui: { setTitle(title: string): void } };
+	// The ctx the title animation writes through, dropped at session_shutdown.
+	let titleCtx: TitleCtx | undefined;
+	// Claude Code's leading glyph: ✳ at rest, ⠂/⠐ while a turn runs, held on ✳
+	// while a prompt waits for the user (title-animation.ts).
+	const titleGlyph = new TitleAnimation({
+		every: (ms, tick) => {
+			const timer = setInterval(tick, ms);
+			timer.unref?.();
+			return () => clearInterval(timer);
+		},
+		write: () => {
+			try {
+				if (titleCtx) retitle(titleCtx);
+			} catch {
+				// A ctx pi has already retired: session_shutdown stops the timer next.
+			}
+		},
+	});
+	const retitle = (ctx: TitleCtx) => {
 		if (!live || !ctx.hasUI) return;
 		const name = pi.getSessionName?.()?.trim();
 		// pi writes the title inside its OSC 0 and strips only CR and LF; a BEL or
 		// ESC in the session name (any source) or the directory would end it early.
-		const title = sanitizeTitle(name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME);
+		const title = sanitizeTitle(`${titleGlyph.glyph} ${name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME}`);
 		if (title === lastTitle) return; // agent_start fires every turn; write only on change
 		lastTitle = title;
 		ctx.ui.setTitle(title);
 	};
-	pi.on("session_info_changed", (_event, ctx) => retitle(ctx));
-	pi.on("agent_start", (_event, ctx) => retitle(ctx));
+	pi.on("session_info_changed", (_event, ctx) => {
+		titleCtx = ctx;
+		retitle(ctx);
+	});
+	pi.on("agent_start", (_event, ctx) => {
+		titleCtx = ctx;
+		// The animation rewrites the title every frame: only the TUI shows it
+		// (an RPC client would get a setTitle request per frame).
+		if (ctx.mode === "tui") titleGlyph.start();
+		else retitle(ctx);
+	});
+	pi.on("agent_settled", () => titleGlyph.settle());
+	pi.on("ui_prompt_start", () => titleGlyph.promptOpened());
+	pi.on("ui_prompt_end", () => titleGlyph.promptClosed());
 	pi.on("session_shutdown", () => {
 		live = false;
+		titleGlyph.stop();
+		titleCtx = undefined;
 	});
 
 	// Commands' argument placeholders (lib/ui/argument-hints.ts), drawn by the prompt editor.

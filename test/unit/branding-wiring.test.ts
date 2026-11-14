@@ -34,6 +34,55 @@ function fakePi() {
 	return { pi, fire, transformers };
 }
 
+describe("branding's terminal title", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.unstubAllEnvs();
+	});
+
+	it("leads with ✳, animates during a turn in the TUI, holds for a prompt, and goes quiet after shutdown", () => {
+		vi.useFakeTimers();
+		vi.stubEnv(envName("NO_BANNER"), "1");
+		const { pi, fire } = fakePi();
+		brandingExtension(pi as never);
+		const titles: string[] = [];
+		const ctx = { hasUI: true, mode: "tui", cwd: "/work/proj", ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify: () => {}, setTitle: (t: string) => titles.push(t) } };
+		fire("session_start", ctx, { reason: "startup" });
+		vi.advanceTimersByTime(1);
+		expect(titles.at(-1)).toBe(`✳ ${brand.name}`);
+		fire("agent_start", ctx);
+		expect(titles.at(-1)).toBe(`⠂ ${brand.name}`);
+		vi.advanceTimersByTime(960);
+		expect(titles.at(-1)).toBe(`⠐ ${brand.name}`);
+		fire("ui_prompt_start", ctx);
+		expect(titles.at(-1)).toBe(`✳ ${brand.name}`);
+		const held = titles.length;
+		vi.advanceTimersByTime(3000);
+		expect(titles).toHaveLength(held);
+		fire("ui_prompt_end", ctx);
+		fire("agent_settled", ctx);
+		expect(titles.at(-1)).toBe(`✳ ${brand.name}`);
+		fire("agent_start", ctx);
+		fire("session_shutdown", ctx);
+		const final = titles.length;
+		vi.advanceTimersByTime(5000);
+		expect(titles).toHaveLength(final);
+	});
+
+	it("does not animate outside the TUI", () => {
+		vi.useFakeTimers();
+		vi.stubEnv(envName("NO_BANNER"), "1");
+		const { pi, fire } = fakePi();
+		brandingExtension(pi as never);
+		const titles: string[] = [];
+		const ctx = { hasUI: true, mode: "rpc", cwd: "/work/proj", ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify: () => {}, setTitle: (t: string) => titles.push(t) } };
+		fire("session_start", ctx, { reason: "startup" });
+		fire("agent_start", ctx);
+		vi.advanceTimersByTime(5000);
+		expect(new Set(titles)).toEqual(new Set([`✳ ${brand.name}`]));
+	});
+});
+
 describe("branding's transcript transformer", () => {
 	afterEach(() => vi.unstubAllEnvs());
 
