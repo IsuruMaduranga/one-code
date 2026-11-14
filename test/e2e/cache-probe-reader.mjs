@@ -56,9 +56,14 @@ function toolFailures(events, short) {
 		const args = start.event.args ?? {};
 		if (args.url !== expectedUrl) failures.push(`web_fetch call ${call + 1} used ${JSON.stringify(args.url)}, not ${JSON.stringify(expectedUrl)}`);
 		if (args.prompt !== READER_PROBE_QUESTION) failures.push(`web_fetch call ${call + 1} changed the reader question`);
-		// A call's result is the first one with its id after its start: some providers
-		// (DeepSeek through OpenRouter) give two calls of one session the same id.
-		const resultOf = (begin) => ends.find(({ event, index }) => index > begin.index && event.toolCallId === begin.event.toolCallId);
+		// A call's result is the first one with its id after its start and before
+		// the next start with that id: some providers (DeepSeek through OpenRouter)
+		// give two calls of one session the same id, and a call that never
+		// finished must not borrow the next one's result.
+		const resultOf = (begin) => {
+			const next = starts.find(({ event, index }) => index > begin.index && event.toolCallId === begin.event.toolCallId);
+			return ends.find(({ event, index }) => index > begin.index && (!next || index < next.index) && event.toolCallId === begin.event.toolCallId);
+		};
 		const end = resultOf(start);
 		if (!end) {
 			failures.push(`web_fetch call ${call + 1} has no matching result`);
