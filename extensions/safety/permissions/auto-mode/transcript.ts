@@ -93,10 +93,10 @@ const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
 /**
  * An opening bracket that starts one of the classifier's own tags, however
  * spaced or slashed: it becomes `[`, so a report cannot close the
- * `<transcript>` and write entries of its own. The ASCII bracket and its
+ * `<transcript>` or its own `<subagent_hand_back>` and write text of its own. The ASCII bracket and its
  * common lookalikes are covered.
  */
-const TRANSCRIPT_TAG = /[<\uFF1C\uFE64\u2039\u3008\u27E8\u02C2]([\s/\uFF0F\u2215\u2044]*(?:transcript|forwarded_user_turns|forwarded_turn)\b)/giu;
+const TRANSCRIPT_TAG = /[<\uFF1C\uFE64\u2039\u3008\u27E8\u02C2]([\s/\uFF0F\u2215\u2044]*(?:transcript|forwarded_user_turns|forwarded_turn|subagent_hand_back)\b)/giu;
 
 /** The child's report as it sits inside `<subagent_hand_back>`: line breaks folded, the classifier's tags defused, every line indented two spaces. */
 function handBackReport(report: string): string {
