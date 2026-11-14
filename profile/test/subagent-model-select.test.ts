@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { applicableSubagentDefault, loadSubagentDefault } from "../../extensions/lib/models/subagent-default.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
+import { resolveSubagentModel } from "../../extensions/lib/models/subagent-model.ts";
 import { subagentModels as subagentModelsPart } from "../text/subagent-models/index.ts";
 import { ALL_LIVE } from "../../test/unit/helpers/live.ts";
 import { tempHome } from "../../test/unit/helpers/temp-home.ts";
@@ -49,6 +50,24 @@ describe("loadSubagentDefault: Claude Code's knob", () => {
 		const result = loadSubagentDefault(home, {});
 		expect(result?.spec).toBe("anthropic/claude-haiku-4-5");
 		expect(result?.source).toBe("subagentModel setting");
+	});
+
+	it("lets a subagentModel of auto hide CLAUDE_CODE_SUBAGENT_MODEL, so a Claude session picks automatically", () => {
+		const own = productSettingsPath(home);
+		mkdirSync(join(own, ".."), { recursive: true });
+		writeFileSync(own, JSON.stringify({ subagentModel: "auto" }));
+		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "opus" } }));
+		const configured = loadSubagentDefault(home, { CLAUDE_CODE_SUBAGENT_MODEL: "opus" });
+		expect(configured).toEqual({ spec: "auto", source: "subagentModel setting" });
+		const opus = model("anthropic", "claude-opus-4-8", 5);
+		const available = [opus, model("anthropic", "claude-sonnet-5-5", 3), model("anthropic", "claude-haiku-4-5", 1)];
+		const auto = resolveSubagentModel({ configuredDefault: applicableSubagentDefault(configured, opus), sessionModel: opus, available });
+		expect(auto).toEqual(resolveSubagentModel({ sessionModel: opus, available }));
+		expect(auto.source).not.toBe("default");
+		// Without the setting, the variable names Opus for a Claude session.
+		writeFileSync(own, JSON.stringify({}));
+		const fromVariable = loadSubagentDefault(home, { CLAUDE_CODE_SUBAGENT_MODEL: "opus" });
+		expect(resolveSubagentModel({ configuredDefault: applicableSubagentDefault(fromVariable, opus), sessionModel: opus, available })).toMatchObject({ source: "default", model: { id: "claude-opus-4-8" } });
 	});
 
 	it("ignores a stale subagentModel left in ~/.claude by an older build", () => {

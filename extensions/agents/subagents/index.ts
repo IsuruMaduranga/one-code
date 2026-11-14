@@ -39,7 +39,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib
 import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../../lib/agents/agent-catalog.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../../lib/models/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../../lib/models/model-unusable.ts";
-import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
+import { applicableSubagentDefault, AUTO_SUBAGENT_MODEL, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -2945,6 +2945,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	/** "X and Y are not applied": the environment knobs a `subagentModel: "auto"` setting hides. */
+	const knobsNotApplied = () => {
+		const names = knobNames(SUBAGENT_MODEL_KNOB);
+		return `${names.join(" and ")} ${names.length > 1 ? "are" : "is"} not applied`;
+	};
+
 	const showSubagentModelStatus = (ctx: ExtensionContext) => {
 		const configured = loadSubagentDefault(os.homedir());
 		const applicable = applicableSubagentDefault(configured, ctx.model);
@@ -2961,22 +2967,25 @@ function subagentsExtension(pi: ExtensionAPI) {
 					? configured.source === "env"
 						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
 							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}`)
-						: `subagentModel: ${configured.spec} (from the subagentModel setting)`
+						: configured.spec.toLowerCase() === AUTO_SUBAGENT_MODEL
+							? `subagentModel: auto (from the subagentModel setting): chosen automatically on every provider; ${knobsNotApplied()}`
+							: `subagentModel: ${configured.spec} (from the subagentModel setting)`
 					: "subagentModel: (not set)",
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
 				...(resolution.source === "default" && resolution.model
 					? chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) }).map((warning) => `! ${warning.text} ${warning.fix}`)
 					: []),
-				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
+				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit|auto>, or clear with /subagent clear.",
 			].join("\n"),
 			"info",
 		);
 	};
 
 	/**
-	 * Persist a chosen subagent default. `inherit` is literal (session model,
-	 * no auth needed); any other spec is validated against the registry and its
+	 * Persist a chosen subagent default. `inherit` (session model) and `auto`
+	 * (the automatic pick on every provider, hiding an inherited variable) are
+	 * literal, no auth needed; any other spec is validated against the registry and its
 	 * auth checked before saving — a default with no credentials would fail
 	 * every subagent spawn. The value is saved as the literal spec, so an alias
 	 * like `sonnet` keeps per-session alias semantics (see model-select.ts).
@@ -2991,6 +3000,20 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}
 			emitModelStatus(ctx);
 			ctx.ui.notify(`Subagent default set to the session model ("inherit", saved to ${SETTINGS_DISPLAY}).`, "info");
+			return;
+		}
+		if (spec === AUTO_SUBAGENT_MODEL) {
+			try {
+				persistSubagentModel(AUTO_SUBAGENT_MODEL, os.homedir());
+			} catch (error) {
+				ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+				return;
+			}
+			emitModelStatus(ctx);
+			ctx.ui.notify(
+				`Subagent default set to automatic selection on every provider ("auto", saved to ${SETTINGS_DISPLAY}); ${knobsNotApplied()}.`,
+				"info",
+			);
 			return;
 		}
 
@@ -3053,9 +3076,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "subagent", {
-		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
-		argumentHint: "[provider/model-id|inherit|status|clear]",
-		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", "status", "clear"].map((value) => ({ value, label: value }))),
+		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|auto|status|clear]",
+		argumentHint: "[provider/model-id|inherit|auto|status|clear]",
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", AUTO_SUBAGENT_MODEL, "status", "clear"].map((value) => ({ value, label: value }))),
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed === "clear") {
@@ -3072,8 +3095,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (typed === "inherit") {
-				await applySubagentModelChoice("inherit", ctx);
+			if (typed === "inherit" || typed === AUTO_SUBAGENT_MODEL) {
+				await applySubagentModelChoice(typed, ctx);
 				return;
 			}
 			if (typed === "status") {

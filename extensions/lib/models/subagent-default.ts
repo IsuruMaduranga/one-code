@@ -27,14 +27,25 @@
  * it is ignored; One Code's automatic same-provider role profile then chooses the
  * default unless the user overrides it with `subagentModel`.
  *
- * The value is a spec, not a model: "sonnet", "inherit", or "provider/id" all
- * pass through to resolveSubagentModel, which owns the semantics.
+ * The value is a spec, not a model: "sonnet", "inherit", "auto" or
+ * "provider/id" all pass through to resolveSubagentModel, which owns the
+ * semantics. "auto" (`AUTO_SUBAGENT_MODEL`) is a value like any other here, so
+ * as the setting it hides the environment knob below it, which is its point.
  */
 
 import { type Knob, knobAppliesTo, readKnob } from "../profile/knobs.ts";
 import { isBorrowedUserFile, readSettingsFile } from "../profile/settings-files.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../profile/product-settings.ts";
 import { autoModeSettingsFiles } from "../rules/auto-mode-config.ts";
+
+/**
+ * The default that chooses automatically on every provider: the automatic
+ * same-provider pick, as if nothing were configured, but set, so an inherited
+ * default (the `SUBAGENT_MODEL` knob, another tool's spelling of it, a settings
+ * `env` block) no longer applies. A per-call model and an agent file's model
+ * still come first.
+ */
+export const AUTO_SUBAGENT_MODEL = "auto";
 
 /** The environment knob for the subagent default (lib/profile/knobs.ts). */
 export const SUBAGENT_MODEL_KNOB = "SUBAGENT_MODEL";
@@ -144,7 +155,7 @@ export function applicableSubagentDefault(
  * `setForContainment` stamps the containment identity of the session the model
  * was chosen on (modelIdentity().containment), so a later session on a different
  * provider/vendor can treat the setting as stale. Pass it for a concrete model;
- * it is cleared for `inherit` (never cross-provider) and on removal.
+ * it is cleared for `inherit` and `auto` (never cross-provider) and on removal.
  */
 export function persistSubagentModel(spec: string | undefined, home: string, setForContainment?: string): void {
 	const path = productSettingsPath(home);
@@ -154,7 +165,7 @@ export function persistSubagentModel(spec: string | undefined, home: string, set
 		delete file.subagentModelSetFor;
 	} else {
 		file.subagentModel = spec;
-		if (setForContainment && spec !== "inherit") file.subagentModelSetFor = setForContainment;
+		if (setForContainment && spec !== "inherit" && spec !== AUTO_SUBAGENT_MODEL) file.subagentModelSetFor = setForContainment;
 		else delete file.subagentModelSetFor;
 	}
 	writeSettings(path, file);
