@@ -9,6 +9,10 @@
  * out of the public repo; record it with `--update` before a change.
  *
  *   node test/e2e/golden-requests.mjs           compare; exit 1 on any difference
+ *   node test/e2e/golden-requests.mjs --summary compare, and for a scenario that
+ *       differs list which requests changed and what kind each is (main,
+ *       classifier stage 1 or 2, subagent review, side call), so an intended
+ *       change can be told from a stray one in one run
  *   node test/e2e/golden-requests.mjs --update  rewrite the snapshot files
  *   node test/e2e/golden-requests.mjs --only anthropic-tiny
  *   node test/e2e/golden-requests.mjs --dir /tmp/golden
@@ -48,6 +52,7 @@ import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-built
 const { values: opts } = parseArgs({
 	options: {
 		update: { type: "boolean", default: false },
+		summary: { type: "boolean", default: false },
 		sweep: { type: "boolean", default: false },
 		only: { type: "string" },
 		dir: { type: "string" },
@@ -499,6 +504,65 @@ function firstDifference(a, b, path = "$") {
 	return a === b ? undefined : { path, expected: b, actual: a };
 }
 
+/**
+ * What one recorded request is, read from the base's own bytes, never a
+ * profile's words: a request with tools is the agent's own turn; one whose
+ * last user message holds a `<transcript>` is the auto-mode classifier (a
+ * `<subagent_hand_back>` there makes it a subagent review; below
+ * 4,096 output tokens it is stage 1, which asks for 64 plus any forced
+ * thinking); anything else is a side call.
+ */
+function requestKind(request) {
+	const body = request?.body ?? {};
+	if (body.tools) return "main";
+	// The last user message only: on Chat Completions the system prompt is a
+	// message too, and the ruleset in it names both tags.
+	const last = JSON.stringify((body.messages ?? []).findLast((message) => message?.role === "user") ?? "");
+	if (!last.includes("<transcript>")) return "side call";
+	if (last.includes("<subagent_hand_back>")) return "subagent review";
+	return (body.max_tokens ?? body.max_completion_tokens ?? 0) < 4096 ? "classifier stage 1" : "classifier stage 2";
+}
+
+/** Count each kind in a list of requests: "30 classifier stage 1, 1 subagent review". */
+function countKinds(requests) {
+	const counts = new Map();
+	for (const request of requests) counts.set(requestKind(request), (counts.get(requestKind(request)) ?? 0) + 1);
+	return [...counts].map(([kind, n]) => `${n} ${kind}`).join(", ") || "none";
+}
+
+/** The changed requests of one scenario: by position, and as a multiset of whole requests, each with its kind. */
+function summarizeRequests(actual, expected) {
+	const lines = [`  requests: ${expected.requests.length} in the snapshot, ${actual.requests.length} in this run`];
+	const changed = [];
+	for (let i = 0; i < Math.max(actual.requests.length, expected.requests.length); i++) {
+		if (JSON.stringify(actual.requests[i]) !== JSON.stringify(expected.requests[i])) changed.push(`${i} (${requestKind(actual.requests[i] ?? expected.requests[i])})`);
+	}
+	const shown = changed.slice(0, 20).join(", ");
+	lines.push(`  differ at the same position: ${changed.length ? `${shown}${changed.length > 20 ? `, and ${changed.length - 20} more` : ""}` : "none"}`);
+	// Whole requests present on one side only: a dropped or added request shifts
+	// every position after it, and this still names what moved.
+	const left = new Map();
+	for (const request of expected.requests) {
+		const key = JSON.stringify(request);
+		left.set(key, (left.get(key) ?? 0) + 1);
+	}
+	const onlyActual = [];
+	for (const request of actual.requests) {
+		const key = JSON.stringify(request);
+		if (left.get(key)) left.set(key, left.get(key) - 1);
+		else onlyActual.push(request);
+	}
+	const onlyExpected = expected.requests.filter((request) => {
+		const key = JSON.stringify(request);
+		if (!left.get(key)) return false;
+		left.set(key, left.get(key) - 1);
+		return true;
+	});
+	lines.push(`  only in the snapshot: ${countKinds(onlyExpected)}; only in this run: ${countKinds(onlyActual)}`);
+	if (JSON.stringify(actual.dialogs) !== JSON.stringify(expected.dialogs)) lines.push("  dialogs differ");
+	return lines.join("\n");
+}
+
 /** Both sides of a difference, cut to the text around the first character that differs. */
 function showSides(expected, actual) {
 	const e = typeof expected === "string" ? expected : JSON.stringify(expected);
@@ -642,11 +706,13 @@ outcomes.forEach((outcome, index) => {
 		failed = true;
 		return;
 	}
-	const diff = firstDifference(actual, JSON.parse(readFileSync(file, "utf8")));
+	const expected = JSON.parse(readFileSync(file, "utf8"));
+	const diff = firstDifference(actual, expected);
 	if (diff) {
 		failed = true;
 		const { e, a } = showSides(diff.expected, diff.actual);
 		console.log(`${config.name}: DIFFERS at ${diff.path}\n  expected: ${e}\n  actual:   ${a}`);
+		if (opts.summary) console.log(summarizeRequests(actual, expected));
 	} else {
 		console.log(`${config.name}: identical (${actual.requests.length} request(s), ${actual.dialogs.length} dialog(s))`);
 	}
