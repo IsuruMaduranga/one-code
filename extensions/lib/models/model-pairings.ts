@@ -10,13 +10,13 @@
  * are also in `test/unit/fixtures/pairing-scores.json`, from which the tests
  * derive every row.
  *
- * A pick is the cheapest same-vendor model within 15 points at maximum effort
- * (subagent) or 7 points at low effort (classifier). The bars apply to scores
- * rounded to one decimal, as Artificial Analysis publishes them, and include
- * the bar itself (a gap of exactly 7.0 qualifies). Where the session model or
- * a candidate has no low-effort score, the classifier bar compares their
- * maximum-effort scores instead. A deprecated or unscored model is never a
- * pick, and an unscored session model gets no row. `"session"` keeps the
+ * A pick is the cheapest same-vendor model within PAIRING_BARS of the session
+ * model: at maximum effort for subagents, at low effort for the classifier,
+ * and at maximum effort for the classifier where the session model or the
+ * candidate has no low-effort score. The bars apply to scores rounded to one
+ * decimal, as Artificial Analysis publishes them, and include the bar itself.
+ * A deprecated or unscored model is never a pick, and an unscored session
+ * model gets no row. `"session"` keeps the
  * session's own model, which also overrides the cost algorithm. A model the
  * table does not name goes to the cost algorithm (`model-tier.ts`
  * `sameTierContainedCandidates`).
@@ -47,16 +47,30 @@ export const PAIRINGS_AS_OF = "2026-11-15";
 
 const SESSION = "session";
 
+/**
+ * How far below the session model, in Intelligence Index points, a pick may
+ * score. The bars keep the strictness the table had on the earlier index
+ * (15 at maximum effort, 7 at low effort): on the same pairs of models, v5
+ * gaps are about 1.98 times the earlier ones at maximum effort (median of 28
+ * pairs) and about 1.22 times at low effort (median of 9 pairs, mean 1.33).
+ * - `classifierLow`: 7 × 1.22 to 1.33, rounded up to 10.
+ * - `classifierMax`: the classifier's 7, measured at maximum effort where a
+ *   low-effort score is missing, so 7 × 1.98, rounded to 14.
+ * - `subagent`: 15 at maximum effort, so far unchanged.
+ */
+export const PAIRING_BARS = { subagent: 15, classifierLow: 10, classifierMax: 14 } as const;
+
 export const PAIRING_TABLE: readonly PairingRow[] = [
-	// Anthropic. Sonnet 5.5 is 10.1 points below Fable 5.2 and 4.6 below Opus 5.5; nothing cheaper is within 7 of either at low effort.
-	{ sessions: ["anthropic/claude-fable-5-2", "anthropic/claude-opus-5-5"], subagent: "anthropic/claude-sonnet-5-5", classifier: SESSION },
+	// Anthropic. Sonnet 5.5 is 10.1 points below Fable 5.2 and 4.6 below Opus 5.5; at low effort it is 9.2 below Opus 5.5,
+	// while Fable 5.2's nearest, Opus 5.5, is 19.1 below.
+	{ sessions: ["anthropic/claude-fable-5-2"], subagent: "anthropic/claude-sonnet-5-5", classifier: SESSION },
+	{ sessions: ["anthropic/claude-opus-5-5"], subagent: "anthropic/claude-sonnet-5-5", classifier: "anthropic/claude-sonnet-5-5" },
 	{ sessions: ["anthropic/claude-fable-5-1"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-opus-5-5" },
-	{ sessions: ["anthropic/claude-opus-5"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-sonnet-5-5" },
-	// Haiku 5.5 is exactly 7.0 below Sonnet 5.5 at low effort, inside the bar.
+	{ sessions: ["anthropic/claude-opus-5"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-haiku-5-5" },
 	{ sessions: ["anthropic/claude-sonnet-5-5"], subagent: SESSION, classifier: "anthropic/claude-haiku-5-5" },
 	{ sessions: ["anthropic/claude-haiku-5-5"], subagent: SESSION, classifier: SESSION },
-	// OpenAI. GPT-6.1 Terra is 5.6 points below Astra at a tenth of the price; Astra's nearest at low effort is 8.5 below.
-	{ sessions: ["openai/gpt-6-astra"], subagent: "openai/gpt-6.1-terra", classifier: SESSION },
+	// OpenAI. GPT-6.1 Terra is 5.6 points below Astra at a tenth of the price; GPT-6.1 Sol is 8.5 below it at low effort.
+	{ sessions: ["openai/gpt-6-astra"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.1-sol" },
 	{ sessions: ["openai/gpt-6.1-sol", "openai/gpt-6-sol"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.1-terra" },
 	{ sessions: ["openai/gpt-5.6-terra", "openai/gpt-5.6-luna"], subagent: "openai/gpt-6-luna", classifier: "openai/gpt-6-luna" },
 	{ sessions: ["openai/gpt-6.1-terra", "openai/gpt-6-luna"], subagent: SESSION, classifier: SESSION },
@@ -77,7 +91,7 @@ export const PAIRING_TABLE: readonly PairingRow[] = [
 	{ sessions: ["minimax/MiniMax-M3.1-Flash"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["meta/muse-spark-1.3", "meta/muse-spark-open"], subagent: "meta/muse-ember-1.0", classifier: "meta/muse-ember-1.0" },
 	// Muse Ember is 7.6 below Muse Wonder; the deprecated Muse Spark 1.3 is never a pick.
-	{ sessions: ["meta/muse-wonder-1.0"], subagent: "meta/muse-ember-1.0", classifier: SESSION },
+	{ sessions: ["meta/muse-wonder-1.0"], subagent: "meta/muse-ember-1.0", classifier: "meta/muse-ember-1.0" },
 	{ sessions: ["meta/muse-ember-1.0"], subagent: SESSION, classifier: SESSION },
 	// No scored same-vendor model within 15 points: the session model serves both roles.
 	{ sessions: ["alibaba/qwen3.8-max-0902"], subagent: SESSION, classifier: SESSION },

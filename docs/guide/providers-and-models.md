@@ -98,11 +98,12 @@ role has its own rule, built on the model tiers that
 
   | Main model | Subagents | Classifier |
   |---|---|---|
-  | Fable 5.2, Opus 5.5 | Sonnet 5.5 | main model |
+  | Fable 5.2 | Sonnet 5.5 | main model |
+  | Opus 5.5 | Sonnet 5.5 | Sonnet 5.5 |
   | Fable 5.1 | Haiku 5.5 | Opus 5.5 |
-  | Opus 5 | Haiku 5.5 | Sonnet 5.5 |
+  | Opus 5 | Haiku 5.5 | Haiku 5.5 |
   | Sonnet 5.5 | main model | Haiku 5.5 |
-  | GPT-6 Astra | GPT-6.1 Terra | main model |
+  | GPT-6 Astra | GPT-6.1 Terra | GPT-6.1 Sol |
   | GPT-6.1 Sol, GPT-6 Sol | GPT-6.1 Terra | GPT-6.1 Terra |
   | GPT-5.6 Terra, GPT-5.6 Luna | GPT-6 Luna | GPT-6 Luna |
   | Gemini 4 Carbon | Gemini 4 Hydrogen | main model |
@@ -113,7 +114,7 @@ role has its own rule, built on the model tiers that
   | MiMo V2.6 Pro | MiMo V2.6 Flash | MiMo V2.6 Flash |
   | MiniMax M3 | MiniMax M3.1 Flash | MiniMax M3.1 Flash |
   | Muse Spark 1.3, Muse Spark Open | Muse Ember | Muse Ember |
-  | Muse Wonder | Muse Ember | main model |
+  | Muse Wonder | Muse Ember | Muse Ember |
 
   Haiku 5.5, GPT-6.1 Terra, GPT-6 Luna, Gemini 3.8 Flash, DeepSeek V4.1
   Flash 1017, GLM-5.3 Flash, MiMo V2.6 Flash, MiniMax M3.1 Flash, Muse

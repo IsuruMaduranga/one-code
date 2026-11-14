@@ -108,8 +108,7 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 			{ model: sonnet, source: "economical" },
 			{ model: fable, source: "session" },
 		]);
-		// Where the table keeps the session, it screens alone: no cheaper model comes close enough.
-		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: opus, source: "session" }]);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "paired" }, { model: opus, source: "session" }]);
 	});
 
 	it("screens a frontier session the table does not name with the cheapest frontier model, never a lower tier", () => {

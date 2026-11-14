@@ -5,7 +5,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { currentCatalog } from "../../extensions/lib/models/model-catalog.ts";
-import { PAIRING_TABLE, PAIRINGS_AS_OF, pairedModel } from "../../extensions/lib/models/model-pairings.ts";
+import { PAIRING_BARS, PAIRING_TABLE, PAIRINGS_AS_OF, pairedModel } from "../../extensions/lib/models/model-pairings.ts";
 import { catalogSources, type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input: number, extra: Partial<Model<Api>> = {}) =>
@@ -28,11 +28,11 @@ const haiku = model("anthropic", "claude-haiku-5-5", 0.1);
 afterEach(() => setCatalogSourcesForTest(undefined));
 
 describe("pairedModel", () => {
-	it("hands an Opus session's subagents to Sonnet 5.5 and a Sonnet 5.5 session's classifier to Haiku 5.5", () => {
+	it("hands an Opus session's subagents and classifier to Sonnet 5.5 and a Sonnet 5.5 session's classifier to Haiku 5.5", () => {
 		pinCatalog(ANTHROPIC);
 		const pool = [opus, sonnet, haiku];
 		expect(pairedModel("subagent", pool, opus)).toEqual({ kind: "model", model: sonnet });
-		expect(pairedModel("classifier", pool, opus)).toEqual({ kind: "session" });
+		expect(pairedModel("classifier", pool, opus)).toEqual({ kind: "model", model: sonnet });
 		expect(pairedModel("subagent", pool, sonnet)).toEqual({ kind: "session" });
 		expect(pairedModel("classifier", pool, sonnet)).toEqual({ kind: "model", model: haiku });
 	});
@@ -127,7 +127,7 @@ describe("pairedModel", () => {
 		expect(pairedModel("subagent", pool, spark)).toEqual({ kind: "model", model: ember });
 		expect(pairedModel("classifier", pool, spark)).toEqual({ kind: "model", model: ember });
 		expect(pairedModel("subagent", pool, wonder)).toEqual({ kind: "model", model: ember });
-		expect(pairedModel("classifier", pool, wonder)).toEqual({ kind: "session" });
+		expect(pairedModel("classifier", pool, wonder)).toEqual({ kind: "model", model: ember });
 	});
 
 	it("drops a pick that fails the image gate", () => {
@@ -180,7 +180,6 @@ const SCORES: { asOf: string; overrides: Override[]; models: ScoredModel[] } = J
 	readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "pairing-scores.json"), "utf8"),
 );
 const SCORED = new Map(SCORES.models.map((entry) => [entry.id, entry]));
-const BAR = { subagent: 15, classifier: 7 } as const;
 const tableIds = () => [...new Set(PAIRING_TABLE.flatMap((row) => [...row.sessions, row.subagent, row.classifier]))].filter((id) => id !== "session");
 const vendorOf = (id: string) => id.slice(0, id.indexOf("/"));
 /** Scores are compared as published, to one decimal: 25.6 - 18.6 is 7.0, not 7.000000000000002. */
@@ -189,17 +188,17 @@ const gap = (session: number, candidate: number) => Math.round((session - candid
 const blended = (entry: ScoredModel) => (entry.price ? (3 * entry.price[0] + entry.price[1]) / 4 : Number.POSITIVE_INFINITY);
 
 /** The rule in the module header: the cheapest scored, current, non-tiny same-vendor model within the bar, else the session. */
-function derivedPick(sessionId: string, role: "subagent" | "classifier", isTiny: (id: string) => boolean): string {
-	const session = SCORED.get(sessionId);
+function derivedPick(sessionId: string, role: "subagent" | "classifier", isTiny: (id: string) => boolean, models: ScoredModel[] = SCORES.models): string {
+	const session = models.find((entry) => entry.id === sessionId);
 	if (!session || session.max === null) throw new Error(`${sessionId} has no score`);
 	const within = (candidate: ScoredModel) => {
 		if (candidate.max === null) return false;
-		if (role === "subagent") return gap(session.max as number, candidate.max) <= BAR.subagent;
+		if (role === "subagent") return gap(session.max as number, candidate.max) <= PAIRING_BARS.subagent;
 		// No low-effort score on either side: the classifier bar compares maximum-effort scores.
-		if (session.low === null || candidate.low === null) return gap(session.max as number, candidate.max) <= BAR.classifier;
-		return gap(session.low, candidate.low) <= BAR.classifier;
+		if (session.low === null || candidate.low === null) return gap(session.max as number, candidate.max) <= PAIRING_BARS.classifierMax;
+		return gap(session.low, candidate.low) <= PAIRING_BARS.classifierLow;
 	};
-	const candidates = SCORES.models
+	const candidates = models
 		.filter((candidate) => candidate.id !== sessionId && vendorOf(candidate.id) === vendorOf(sessionId))
 		.filter((candidate) => !candidate.deprecated && !isTiny(candidate.id) && within(candidate))
 		.sort((a, b) => blended(a) - blended(b));
@@ -213,6 +212,8 @@ describe("PAIRING_TABLE against its scores", () => {
 		const known = currentCatalog().models;
 		return (id: string) => known.get(id)?.tier === "tiny";
 	};
+	const noneTiny = () => false;
+	const scored = (id: string, max: number, low: number | null, input: number, deprecated = false): ScoredModel => ({ id, max, low, price: [input, input * 5], deprecated });
 
 	it("is dated with its scores", () => {
 		expect(PAIRINGS_AS_OF).toBe(SCORES.asOf);
@@ -241,27 +242,41 @@ describe("PAIRING_TABLE against its scores", () => {
 		expect(unscored.filter((id) => sessions.has(id))).toEqual([]);
 	});
 
-	it("never picks a deprecated model", () => {
+	it("never picks a deprecated model, however close and cheap", () => {
 		const picks = [...new Set(PAIRING_TABLE.flatMap((row) => [row.subagent, row.classifier]))].filter((id) => id !== "session");
 		expect(picks.filter((id) => SCORED.get(id)?.deprecated)).toEqual([]);
-		// Muse Spark 1.3 sits exactly 7.0 below Muse Wonder, inside the bar, but is deprecated: Wonder screens itself.
-		expect(gap(43.6, 36.6)).toBe(7);
-		expect(PAIRING_TABLE.find((row) => row.sessions.includes("meta/muse-wonder-1.0"))?.classifier).toBe("session");
+		const models = [scored("v/big", 50, 40, 4), scored("v/old", 49, 39, 0.1, true), scored("v/mid", 45, 35, 1)];
+		expect(derivedPick("v/big", "classifier", noneTiny, models)).toBe("v/mid");
+		expect(derivedPick("v/big", "subagent", noneTiny, models)).toBe("v/mid");
 	});
 
-	it("counts a gap of exactly the bar, rounded to one decimal, as within it", () => {
-		const isTiny = tinyInBundledCatalog();
-		// Sonnet 5.5 25.6 and Haiku 5.5 18.6 at low effort: 7.0 apart.
-		expect(gap(25.6, 18.6)).toBe(BAR.classifier);
-		expect(derivedPick("anthropic/claude-sonnet-5-5", "classifier", isTiny)).toBe("anthropic/claude-haiku-5-5");
+	it("counts a gap of exactly each bar, rounded to one decimal, as within it", () => {
+		const onBar = (sessionLow: number | null, candidateLow: number | null, maxGap: number) => [
+			scored("v/session", 60.3, sessionLow, 4),
+			scored("v/pick", Math.round((60.3 - maxGap) * 10) / 10, candidateLow, 1),
+		];
+		// Classifier at low effort: 10.0 below qualifies, 10.1 does not.
+		expect(derivedPick("v/session", "classifier", noneTiny, onBar(35.3, 25.3, 30))).toBe("v/pick");
+		expect(derivedPick("v/session", "classifier", noneTiny, onBar(35.3, 25.2, 0))).toBe("session");
+		// Classifier on maximum-effort scores (no low-effort score): 14.0 qualifies, 14.1 does not.
+		expect(derivedPick("v/session", "classifier", noneTiny, onBar(null, null, 14))).toBe("v/pick");
+		expect(derivedPick("v/session", "classifier", noneTiny, onBar(null, 20, 14.1))).toBe("session");
+		// Subagent at maximum effort: exactly the bar qualifies, a tenth more does not.
+		expect(derivedPick("v/session", "subagent", noneTiny, onBar(null, null, PAIRING_BARS.subagent))).toBe("v/pick");
+		expect(derivedPick("v/session", "subagent", noneTiny, onBar(null, null, PAIRING_BARS.subagent + 0.1))).toBe("session");
+		expect(PAIRING_BARS.classifierLow).toBe(10);
+		expect(PAIRING_BARS.classifierMax).toBe(14);
 	});
 
 	it("compares maximum-effort scores for the classifier where a side has no low-effort score", () => {
 		const isTiny = tinyInBundledCatalog();
-		// Opus 5 (44.2, no low score): Haiku 5.5 is 7.7 below and fails; Sonnet 5.5 is above it.
-		expect(derivedPick("anthropic/claude-opus-5", "classifier", isTiny)).toBe("anthropic/claude-sonnet-5-5");
+		// Opus 5 (44.2, no low score): Haiku 5.5 is 7.7 below at maximum effort, within 14.
+		expect(derivedPick("anthropic/claude-opus-5", "classifier", isTiny)).toBe("anthropic/claude-haiku-5-5");
 		// DeepSeek publishes no low-effort scores: V4.1 Flash 1017 (32.6) is above V4 Pro (23.1).
 		expect(derivedPick("deepseek/deepseek-v4-pro-0813", "classifier", isTiny)).toBe("deepseek/deepseek-v4.1-flash-1017");
+		// Fable 5.2 has a low-effort score, and its nearest current model there, Opus 5.5, is 19.1 below: it screens itself.
+		expect(gap(53.9, 34.8)).toBe(19.1);
+		expect(derivedPick("anthropic/claude-fable-5-2", "classifier", isTiny)).toBe("session");
 	});
 
 	it("screens Gemini 4 Argon with Gemini 3.8 Flash, the user's call over the rule's Hydrogen", () => {

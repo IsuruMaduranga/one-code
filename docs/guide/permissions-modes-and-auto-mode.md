@@ -532,9 +532,9 @@ Session grants from the approval prompt don't apply in auto mode either.
 
 The classifier stays on your session's provider unless you choose otherwise.
 For the models people use most, a pairing table built from measured scores
-picks it: a Fable 5.1 session screens with Opus 5.5, a Sonnet 5.5 session with
-Haiku 5.5, and GPT-6.1 Sol with GPT-6.1 Terra. Where no cheaper model of the
-same vendor comes close enough, like Opus 5.5 or GPT-6 Astra, your own model
+picks it: an Opus 5.5 session screens with Sonnet 5.5, a Sonnet 5.5 session
+with Haiku 5.5, and GPT-6 Astra with GPT-6.1 Sol. Where no cheaper model of the
+same vendor comes close enough, like Fable 5.2 or GPT-6.1 Terra, your own model
 screens. For any
 other model, it runs on the cheapest model in your session's tier or above that
 costs less than your own: there's no point screening a model with a weaker or
