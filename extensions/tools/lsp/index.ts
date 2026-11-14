@@ -307,7 +307,7 @@ function lspExtension(pi: ExtensionAPI) {
 	const forceDeltaScan = () => {
 		lastPublishTally = -1;
 	};
-	/** Open files re-sent from disk count as edited: their delivered-sets reset, as after `edit`. */
+	/** Open files re-sent from disk, or closed because they are gone, count as edited: their delivered-sets reset, as after `edit`. */
 	const markChanged = (uris: readonly string[]) => {
 		if (uris.length === 0) return;
 		for (const uri of uris) tracker.clear(uri);

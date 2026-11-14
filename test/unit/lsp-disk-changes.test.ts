@@ -12,7 +12,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient, pathToUri } from "../../extensions/tools/lsp/client.ts";
 
-/** Answers `initialize` with what the client advertised, and `test/received` with the notifications since the last ask. */
+/**
+ * Answers `initialize` with what the client advertised, and `test/received`
+ * with the notifications since the last ask. After each `didOpen` or
+ * `didChange` it publishes one diagnostic carrying the document's text; it
+ * publishes nothing on `didClose`, as a server that leaves a closed file's
+ * diagnostics standing does.
+ */
 const RECORDING_SERVER = `
 let buffer = Buffer.alloc(0);
 let received = [];
@@ -34,7 +40,11 @@ process.stdin.on("data", (chunk) => {
 		else if (message.method === "test/received") { send({ id: message.id, result: { received, capabilities: init.capabilities } }); received = []; }
 		else if (message.method === "shutdown") send({ id: message.id, result: null });
 		else if (message.method === "exit") process.exit(0);
-		else if (message.id === undefined && message.method !== "initialized") received.push({ method: message.method, params: message.params });
+		else if (message.id === undefined && message.method !== "initialized") {
+			received.push({ method: message.method, params: message.params });
+			const text = message.params?.textDocument?.text ?? message.params?.contentChanges?.[0]?.text;
+			if (text !== undefined) send({ method: "textDocument/publishDiagnostics", params: { uri: message.params.textDocument.uri, diagnostics: [{ range: { start: { line: 0, character: 0 } }, message: text }] } });
+		}
 	}
 });
 `;
@@ -104,7 +114,7 @@ describe("files changed on disk", () => {
 		await received();
 		unlinkSync(gone);
 
-		expect(client.applyDiskChanges([{ path: kept }, { path: gone, type: "deleted" }])).toEqual([]);
+		expect(client.applyDiskChanges([{ path: kept }, { path: gone, type: "deleted" }])).toEqual([pathToUri(gone)]);
 		const { received: sent } = await received();
 		expect(sent).toEqual([
 			{ method: "textDocument/didClose", params: { textDocument: { uri: pathToUri(gone) } } },
@@ -115,6 +125,38 @@ describe("files changed on disk", () => {
 		write(gone, "back");
 		client.syncFile(gone, "src");
 		expect((await received()).received.map((message) => message.method)).toEqual(["textDocument/didOpen"]);
+	});
+
+	const messages = (list: Array<{ message: string }>) => list.map((diagnostic) => diagnostic.message);
+
+	it("forgets a deleted open file's diagnostics when it closes it", async () => {
+		const file = join(dir, "dead.src");
+		write(file, "old error");
+		expect(messages(await client.getDiagnostics(file, "src", 2000))).toEqual(["old error"]);
+		unlinkSync(file);
+
+		expect(client.applyDiskChanges([{ path: file }])).toEqual([pathToUri(file)]);
+		// The server published nothing on close: a read of the dead path, or the watcher's look, must not show the old list.
+		expect(client.allDiagnostics().has(pathToUri(file))).toBe(false);
+		await expect(client.getDiagnostics(file, "src", 50)).resolves.toEqual([]);
+	});
+
+	it("waits for a new publish when a deleted file comes back with new text", async () => {
+		const seen = join(dir, "seen.src");
+		const unseen = join(dir, "unseen.src");
+		for (const file of [seen, unseen]) {
+			write(file, "old error");
+			await client.getDiagnostics(file, "src", 2000);
+		}
+		// The deletion was reported, then the file came back: a fresh didOpen.
+		unlinkSync(seen);
+		client.applyDiskChanges([{ path: seen }]);
+		write(seen, "new error", 5);
+		expect(messages(await client.getDiagnostics(seen, "src", 2000))).toEqual(["new error"]);
+		// Deleted and written again between two looks: the open copy changes.
+		unlinkSync(unseen);
+		write(unseen, "new error", 5);
+		expect(messages(await client.getDiagnostics(unseen, "src", 2000))).toEqual(["new error"]);
 	});
 
 	it("refreshes only the open files whose stat moved, skipping the one the caller syncs itself", async () => {

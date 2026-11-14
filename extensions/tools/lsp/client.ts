@@ -323,7 +323,7 @@ export class LspClient {
 	 * wins over the disk on the server, so nothing else reaches it), or
 	 * `didClose` when it is gone; every other file goes in one
 	 * `workspace/didChangeWatchedFiles`. Returns the uris whose open copy
-	 * changed.
+	 * changed or closed.
 	 */
 	applyDiskChanges(changes: readonly DiskChange[]): string[] {
 		const updated: string[] = [];
@@ -337,7 +337,11 @@ export class LspClient {
 					if (this.push(document.path, document.languageId)) updated.push(uri);
 					continue;
 				}
+				// Its diagnostics go with it: a server need not publish an empty
+				// list on close, and a read of the dead path must not answer from them.
 				this.open.delete(uri);
+				this.diagnostics.delete(uri);
+				updated.push(uri);
 				this.notify("textDocument/didClose", { textDocument: { uri } });
 			}
 			const type = gone ? "deleted" : change.type === "created" ? "created" : "changed";
