@@ -55,7 +55,7 @@ import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch 
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
 import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "./auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
 import { describeCandidate } from "../../lib/models/classifier-model.ts";
@@ -1540,7 +1540,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					// worktree it runs in (the classifier transcript already holds it).
 					{
 						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
-						appendEntry: toolCallEntry(normalizedTool, event.input, original?.command),
+						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command),
 					},
 				);
 				if (outcome.decision === "allow") {

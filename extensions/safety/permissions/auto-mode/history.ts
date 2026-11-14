@@ -18,6 +18,25 @@ function record(value: unknown): Record<string, any> {
 }
 
 /**
+ * A pending call's arguments as the model wrote them: its toolCall block on
+ * the branch (the latest with that id, since some providers repeat ids). The
+ * gate shows the call this way because the history will show it this way on
+ * the next call, so the classifier's transcript only grows and its cache
+ * holds. The tool_call hook's own input has been through the tool's argument
+ * preparation (the Agent tool adds `task` beside a model's `prompt`).
+ */
+export function writtenArguments(branch: readonly unknown[], toolCallId: string): unknown {
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = record(branch[i]);
+		const message = record(entry.message);
+		if (entry.type !== "message" || message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		const block = message.content.map(record).find((candidate) => candidate.type === "toolCall" && candidate.id === toolCallId);
+		if (block) return block.arguments;
+	}
+	return undefined;
+}
+
+/**
  * A user message's identity in the provenance entries: its timestamp and a
  * digest of its text. Provenance only has to recognise the message, so the
  * text itself is not stored a second time.

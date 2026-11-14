@@ -78,6 +78,19 @@ describe("hand-back review transcript", () => {
 	const childCall = (parentToolCallId?: string) =>
 		decide({ toolName: "bash", input: { command: "curl -sI https://example.com" }, cwd: join(stateDir, "project"), ...(parentToolCallId ? { parentToolCallId } : {}) });
 
+	it("shows the pending call as the model wrote it, as the history will on the next call", async () => {
+		branch = [
+			...typed("u1", "Delegate the check.", 1),
+			{ type: "message", id: "m1", message: { role: "assistant", content: [call("agent-9", "Agent", { subagent_type: "general-purpose", prompt: "Run the check." })] } },
+		];
+		await fake.fire("turn_start", {}, ctx);
+		vi.mocked(classify).mockClear();
+		// The hook's input has been through the tool's argument preparation, which adds `task`.
+		await fake.fireOne("tool_call", { toolCallId: "agent-9", toolName: "Agent", input: { subagent_type: "general-purpose", prompt: "Run the check.", task: "Run the check." } }, ctx);
+		const request = vi.mocked(classify).mock.calls.at(-1)![0] as ClassifyRequest;
+		expect(request.transcript.at(-1)).toEqual({ kind: "tool", tool: "Agent", input: { subagent_type: "general-purpose", prompt: "Run the check." } });
+	});
+
 	it("reads a child's call against the main session only through the call that started it", async () => {
 		await mainBatch();
 		await childCall("agent-1");
