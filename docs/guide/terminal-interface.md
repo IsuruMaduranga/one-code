@@ -160,8 +160,10 @@ in full-screen mode too; on an older pi it's opt-in. See
 
 ## Themes
 
-Two themes ship: `onecode` (dark, the bundled app's default) and
-`onecode-light`. Any other pi theme also works. See
+Two themes ship: `onecode` (dark) and `onecode-light`. The bundled app
+picks the one that matches your terminal's background, and switches when
+your terminal does (for example, when macOS changes between light and
+dark). Any other pi theme also works. See
 [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes)
 for how to select one.
 
