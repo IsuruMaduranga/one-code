@@ -207,6 +207,19 @@ describe("sync-base", () => {
 		expect(readFileSync(join(outside, "target.ts"), "utf8")).toBe("outside");
 	});
 
+	it("leaves a linked sync record's target alone during a check", () => {
+		const { product, first } = synced();
+		const outside = mkdtempSync(join(tmpdir(), "sync-base-outside-"));
+		made.push(outside);
+		const recordText = readFileSync(join(product, SYNC_FILE), "utf8");
+		writeFileSync(join(outside, "record.json"), recordText);
+		rmSync(join(product, SYNC_FILE));
+		symlinkSync(join(outside, "record.json"), join(product, SYNC_FILE));
+		checkBase(product, first.dir);
+		expect(readFileSync(join(outside, "record.json"), "utf8")).toBe(recordText);
+		expect(lstatSync(join(product, SYNC_FILE)).isSymbolicLink()).toBe(true);
+	});
+
 	it("refuses a base that holds a symbolic link", () => {
 		const { base, product } = synced();
 		const next = nextBase(base, () => symlinkSync("a.ts", join(base, "extensions/link.ts")));

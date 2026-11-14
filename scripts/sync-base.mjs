@@ -35,7 +35,7 @@
  * a sync does, the stamping included.
  */
 import { execFileSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -190,7 +190,13 @@ export function checkBase(product, base) {
 	const copy = mkdtempSync(join(tmpdir(), "base-check-"));
 	try {
 		const files = checkoutFiles(product);
-		for (const file of files) cpSync(join(product, file), join(copy, file));
+		// The copy holds files, never links, so nothing the check writes in it reaches the product.
+		for (const file of files) {
+			const to = join(copy, file);
+			mkdirSync(dirname(to), { recursive: true });
+			writeFileSync(to, readFileSync(join(product, file)));
+			chmodSync(to, statSync(join(product, file)).mode & 0o777);
+		}
 		git(copy, "init", "-q");
 		// -f: a file the product tracks although it matches .gitignore is in the copy too.
 		git(copy, "add", "-A", "-f");
