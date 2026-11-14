@@ -25,7 +25,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import { hasReviewableWork, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
 import { guideDocsDirs } from "../../lib/agents/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { handBackWarning, type HandBackVerdict } from "../../lib/notify/notifications.ts";
@@ -2329,7 +2329,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const respond = payload.onReview;
 		if (!respond) return; // every background emitter supplies the callback (hand-back-review.ts)
 		const ctx = lastReviewCtx;
-		if (mode !== "auto" || payload.actions.length === 0 || !ctx) {
+		if (mode !== "auto" || !hasReviewableWork(payload) || !ctx) {
 			respond(undefined);
 			return;
 		}
@@ -2350,7 +2350,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const run = childActions.get(event.toolCallId);
 		if (run) childActions.delete(event.toolCallId);
 		// Reviewed while paused too, as the background path above is.
-		if (mode !== "auto" || !run?.actions.length) return undefined;
+		if (mode !== "auto" || !run || !hasReviewableWork(run)) return undefined;
 		// The spawning call is this tool result's own: the run happened inside it.
 		const verdict = await reviewCompletedRun(run, ctx, "completed run", ctx.signal, event.toolCallId);
 		if (!verdict) return undefined;

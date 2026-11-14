@@ -66,6 +66,15 @@ export interface SubagentActionsPayload {
 }
 
 /** Record one call the child started: its name and a deep copy of its input, so a hook that later rewrites the live arguments does not change what the review sees. */
+/**
+ * Whether a finished turn has anything to review: a call it made, or a report
+ * it hands back. A turn whose only call was the hand-back has no actions but
+ * still a report the parent will act on.
+ */
+export function hasReviewableWork(run: { actions: readonly ChildAction[]; report: string }): boolean {
+	return run.actions.length > 0 || run.report.trim() !== "";
+}
+
 export function recordAction(log: ChildAction[], toolName: string, input: unknown): void {
 	log.push({ toolName, input: isPlainObject(input) ? structuredClone(input) : {} });
 }

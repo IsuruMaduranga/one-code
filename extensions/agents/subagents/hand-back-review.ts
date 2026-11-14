@@ -14,7 +14,7 @@
  * slow or absent reviewer degrades to "report plus a note", never to a report
  * that waits forever.
  */
-import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import { hasReviewableWork, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
 import type { ChildOutcome } from "./outcome.ts";
 import type { HandBackVerdict } from "../../lib/notify/notifications.ts";
 
@@ -49,7 +49,7 @@ export function awaitHandBackReview(
 ): Promise<HandBackVerdict | undefined> {
 	const { timeoutMs = HAND_BACK_REVIEW_TIMEOUT_MS, startedBy } = options;
 	const actions = turn.actions;
-	if (!actions.length) return Promise.resolve(undefined);
+	if (!hasReviewableWork({ actions, report: turn.output })) return Promise.resolve(undefined);
 	return new Promise((resolve) => {
 		let settled = false;
 		const finish = (verdict: HandBackVerdict | undefined) => {
