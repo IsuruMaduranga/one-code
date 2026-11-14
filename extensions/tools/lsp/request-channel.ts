@@ -34,7 +34,11 @@ export interface LspRequestEvent extends LspRequest {
 	reply(answer: Promise<unknown>): void;
 }
 
-/** Send `request` to the server and resolve with its result; rejects when no server can answer. */
+/**
+ * Send `request` to the server and resolve with its result; rejects when no
+ * server can answer. When the server refuses the request, the rejection
+ * carries its JSON-RPC code and data: read them with `lspErrorDetail`.
+ */
 export function lspRequest(events: { emit(channel: string, data: unknown): void }, request: LspRequest): Promise<unknown> {
 	let answer: Promise<unknown> | undefined;
 	events.emit(LSP_REQUEST_CHANNEL, { ...request, reply: (promise) => (answer = promise) } satisfies LspRequestEvent);

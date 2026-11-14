@@ -21,7 +21,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync, type Stats, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { LspFailureError } from "./failure.ts";
+import { LspFailureError, LspResponseError } from "./failure.ts";
 import type { LspDiagnostic } from "./format.ts";
 import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../../lib/app/app-launch.mjs";
@@ -98,7 +98,7 @@ export class LspClient {
 	private child?: ChildProcess;
 	private reader = createReaderState();
 	private nextId = 1;
-	private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+	private pending = new Map<number, { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void }>();
 	private diagnostics = new Map<string, LspDiagnostic[]>();
 	private waiters = new Map<string, Array<() => void>>();
 	private open = new Map<string, OpenDocument>();
@@ -230,7 +230,7 @@ export class LspClient {
 			const entry = this.pending.get(Number(message.id));
 			if (!entry) return;
 			this.pending.delete(Number(message.id));
-			if (message.error) entry.reject(new Error(message.error.message));
+			if (message.error) entry.reject(new LspResponseError(entry.method, message.error.code, message.error.message, message.error.data));
 			else entry.resolve(message.result);
 		}
 	}
@@ -252,6 +252,7 @@ export class LspClient {
 			}, timeoutMs);
 			timer.unref?.();
 			this.pending.set(id, {
+				method,
 				resolve: (value) => {
 					clearTimeout(timer);
 					resolve(value);

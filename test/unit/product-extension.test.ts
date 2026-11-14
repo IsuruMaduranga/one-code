@@ -9,8 +9,9 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CHILD_EXTENSIONS, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
 import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
@@ -55,6 +56,26 @@ describe("a product's own extensions", () => {
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});
 		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
+	});
+
+	it.skipIf(!existsSync(probe))("the fixture's probe writes into the product's state folder and opens it, or says why not", async () => {
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_COMMAND: string };
+		const fake = createFakePi();
+		module.default(fake.pi as never);
+		const state = mkdtempSync(join(tmpdir(), "probe-state-"));
+		// The state-dir variable moves the folder; an SSH session means no browser is started.
+		vi.stubEnv(envName("STATE_DIR"), state);
+		vi.stubEnv("SSH_CONNECTION", "10.0.0.1 1 10.0.0.2 22");
+		try {
+			const notices: Array<[string, string]> = [];
+			await fake.commands.get(module.PROBE_COMMAND)!.handler("", createFakeCtx({ ui: { notify: (text: string, level: string) => notices.push([text, level]) } }));
+			const page = join(state, "fixture-probe", "page.html");
+			expect(readFileSync(page, "utf8")).toBe("<p>[fixture:probe-page]</p>\n");
+			expect(notices).toEqual([[`[fixture:no-browser:ssh] ${page}`, "warning"]]);
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(state, { recursive: true, force: true });
+		}
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reports the file its tool writes to the language server", async () => {

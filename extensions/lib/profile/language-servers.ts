@@ -12,7 +12,7 @@
 export interface ProductLanguageServer {
 	command: string;
 	args?: readonly string[];
-	/** File extension (`.bal`) to LSP language id (`ballerina`). */
+	/** File extension (`.smp`) to LSP language id (`sample`). */
 	extensions: Readonly<Record<string, string>>;
 	/** Files that mark a project root, nearest ancestor first; the session's directory when none is found. */
 	rootMarkers?: readonly string[];

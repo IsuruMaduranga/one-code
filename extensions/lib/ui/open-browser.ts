@@ -1,8 +1,9 @@
 /**
  * Hand a URL to the desktop's default handler (no dependency, a platform
  * command). Shared by the MCP sign-in flow (`tools/mcp/oauth/browser.ts`, which also
- * screens the URL it is given) and the artifact viewer (`extensions/tools/artifacts`,
- * which only ever opens `file:` URLs it built itself).
+ * screens the URL it is given), the artifact viewer (`extensions/tools/artifacts`,
+ * which only ever opens `file:` URLs it built itself) and a product's own
+ * extensions (`openInBrowser`, on `extensions/sdk/extension.ts`).
  *
  * The child is detached and unref'd once it starts, so the caller never
  * blocks on the browser process. A launch failure resolves to false: a box
@@ -61,4 +62,19 @@ export function launchOpener(plan: OpenerPlan): Promise<boolean> {
 			resolve(true);
 		});
 	});
+}
+
+/** Why no browser was opened: no desktop reachable from here (`noDisplayReason`), or the opener did not start. */
+export type NoBrowserReason = "ssh" | "noDisplay" | "launchFailed";
+
+/**
+ * Open `url` with the desktop's default handler: why no browser opened, or
+ * undefined when the opener started. The URL is handed over as given, so a
+ * caller opening a URL it did not build screens its scheme first (as the
+ * sign-in flow does).
+ */
+export async function openInBrowser(url: string): Promise<NoBrowserReason | undefined> {
+	const reason = noDisplayReason();
+	if (reason) return reason;
+	return (await launchOpener(openerPlan(url))) ? undefined : "launchFailed";
 }

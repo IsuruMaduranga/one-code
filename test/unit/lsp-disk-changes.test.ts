@@ -2,52 +2,15 @@
  * The client's side of files changed on disk (tools/lsp/client.ts
  * `applyDiskChanges`, `refreshOpenFiles`): what a server receives when a
  * file it holds open, or one it never opened, changes outside the session's
- * edit tools. The server is a real child process (a few lines of node that
- * record every notification and hand them back on a request), so the bytes
- * on the pipe are what is checked.
+ * edit tools. The server is a real child process (helpers/recording-lsp-server.ts),
+ * so the bytes on the pipe are what is checked.
  */
 import { mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient, pathToUri } from "../../extensions/tools/lsp/client.ts";
-
-/**
- * Answers `initialize` with what the client advertised, and `test/received`
- * with the notifications since the last ask. After each `didOpen` or
- * `didChange` it publishes one diagnostic carrying the document's text; it
- * publishes nothing on `didClose`, as a server that leaves a closed file's
- * diagnostics standing does.
- */
-const RECORDING_SERVER = `
-let buffer = Buffer.alloc(0);
-let received = [];
-let init;
-const send = (message) => {
-	const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }));
-	process.stdout.write(Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]));
-};
-process.stdin.on("data", (chunk) => {
-	buffer = Buffer.concat([buffer, chunk]);
-	for (;;) {
-		const end = buffer.indexOf("\\r\\n\\r\\n");
-		if (end < 0) return;
-		const length = Number(/Content-Length: (\\d+)/i.exec(buffer.subarray(0, end).toString())[1]);
-		if (buffer.length < end + 4 + length) return;
-		const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString());
-		buffer = buffer.subarray(end + 4 + length);
-		if (message.method === "initialize") { init = message.params; send({ id: message.id, result: { capabilities: {} } }); }
-		else if (message.method === "test/received") { send({ id: message.id, result: { received, capabilities: init.capabilities } }); received = []; }
-		else if (message.method === "shutdown") send({ id: message.id, result: null });
-		else if (message.method === "exit") process.exit(0);
-		else if (message.id === undefined && message.method !== "initialized") {
-			received.push({ method: message.method, params: message.params });
-			const text = message.params?.textDocument?.text ?? message.params?.contentChanges?.[0]?.text;
-			if (text !== undefined) send({ method: "textDocument/publishDiagnostics", params: { uri: message.params.textDocument.uri, diagnostics: [{ range: { start: { line: 0, character: 0 } }, message: text }] } });
-		}
-	}
-});
-`;
+import { RECORDING_SERVER } from "./helpers/recording-lsp-server.ts";
 
 interface Recorded {
 	received: Array<{ method: string; params: { textDocument?: { uri: string; version?: number; text?: string }; contentChanges?: Array<{ text: string }>; changes?: Array<{ uri: string; type: number }> } }>;
