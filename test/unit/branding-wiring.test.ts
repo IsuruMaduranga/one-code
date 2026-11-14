@@ -16,7 +16,9 @@ import { stubHome } from "./helpers/home.ts";
 function fakePi() {
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => void)[]>();
 	const listeners = new Map<string, ((data: unknown) => void)[]>();
+	const transformers: ((markdown: string, context: { messageType: string }) => string)[] = [];
 	const pi = {
+		registerMarkdownTransformer: (fn: (markdown: string, context: { messageType: string }) => string) => transformers.push(fn),
 		on: (event: string, fn: (event: unknown, ctx: unknown) => void) => handlers.set(event, [...(handlers.get(event) ?? []), fn]),
 		events: {
 			on: (channel: string, fn: (data: unknown) => void) => listeners.set(channel, [...(listeners.get(channel) ?? []), fn]),
@@ -29,8 +31,24 @@ function fakePi() {
 	const fire = (event: string, ctx: unknown, payload: unknown = {}) => {
 		for (const fn of handlers.get(event) ?? []) fn(payload, ctx);
 	};
-	return { pi, fire };
+	return { pi, fire, transformers };
 }
+
+describe("branding's transcript transformer", () => {
+	afterEach(() => vi.unstubAllEnvs());
+
+	it("is the one user-message rewrite: the command line, marked; the assistant bullet; thinking untouched", () => {
+		vi.stubEnv(envName("NO_BANNER"), "1");
+		const { pi, transformers } = fakePi();
+		brandingExtension(pi as never);
+		expect(transformers).toHaveLength(1);
+		const [transform] = transformers;
+		expect(transform("<command-message>init</command-message>\n<command-name>/init</command-name>\nPlease analyze", { messageType: "user" })).toBe("❯ /init");
+		expect(transform("hello", { messageType: "user" })).toBe("❯ hello");
+		expect(transform("Done.", { messageType: "assistant" })).toBe("● Done.");
+		expect(transform("hmm", { messageType: "assistant-thinking" })).toBe("hmm");
+	});
+});
 
 describe("branding session_start", () => {
 	const dirs: string[] = [];

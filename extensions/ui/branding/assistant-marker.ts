@@ -28,7 +28,7 @@ export const ASSISTANT_MARKER = "●";
  * at column 0. Matched against the first line only; the string is assumed already
  * trimmed of leading whitespace (pi trims assistant text before rendering).
  */
-const BLOCK_START = [
+export const BLOCK_START = [
 	/^#{1,6}\s/, // ATX heading
 	/^[-*+]\s/, // unordered list item
 	/^\d+[.)]\s/, // ordered list item

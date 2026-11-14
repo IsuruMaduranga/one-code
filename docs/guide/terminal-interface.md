@@ -35,7 +35,9 @@ Set `ONECODE_NO_BANNER=1` to keep pi's own header.
 ## Prompt and transcript markers
 
 Your input line starts with a `❯` marker and the model's replies with a `●`
-bullet, as in Claude Code. Tool calls render as `● Tool(arguments)` with
+bullet, as in Claude Code. Your messages in the transcript carry the same
+`❯`, and a slash command you typed shows as the command line, not the prompt
+it expands to. Tool calls render as `● Tool(arguments)` with
 the result on an indented `⎿` line. Thinking is collapsed behind
 `✻ Thinking… (ctrl+t to expand)`.
 

@@ -52,6 +52,7 @@ import {
 import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
+import { paintedUserMarker, userMessageMarkdown } from "./user-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
 
@@ -217,20 +218,6 @@ export function bannerLines(
  * chevron (U+276F), one column wide so the two-column gutter still aligns. */
 const PROMPT_GLYPH = "❯";
 
-/**
- * `pi.registerMarkdownTransformer` typed locally: the runtime (pi ≥ 0.84) exposes
- * it, but the pinned 0.83 type declarations do not, so we cast and feature-detect
- * — the same "older pi may lack the hook" handling as the prompt marker.
- */
-interface MarkdownTransformerHost {
-	registerMarkdownTransformer?: (
-		transformer: (
-			markdown: string,
-			context: { messageType: "user" | "assistant" | "assistant-thinking"; isStreaming: boolean; availableWidth: number },
-		) => string,
-	) => void;
-}
-
 /** The slice of the UI context the prompt marker needs (older pi may lack the hook). */
 interface BrandingEditorUI {
 	setEditorComponent?: (factory: (tui: unknown, theme: unknown, keybindings: unknown) => unknown) => void;
@@ -343,16 +330,19 @@ function brandingExtension(pi: ExtensionAPI) {
 
 	applyThinkingDefault();
 	applyOutputPadDefault();
-	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
-	// assistant text is transformed (not thinking or user turns); the transformer
-	// runs in markdown rendering, so print/rpc output is untouched.
-	// *_NO_ASSISTANT_MARKER=1 opts out, mirroring *_NO_INPUT_MARKER.
-	const transformerHost = pi as unknown as MarkdownTransformerHost;
-	if (knobValue("NO_ASSISTANT_MARKER") !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
-		transformerHost.registerMarkdownTransformer((markdown, context) =>
-			context.messageType === "assistant" ? markAssistantMarkdown(markdown) : markdown,
-		);
-	}
+	// Mark each block of assistant prose with Claude Code's "●" bullet and each
+	// user prompt with its "❯" pointer. The transformer runs in markdown
+	// rendering, so print/rpc output, stored entries and requests are untouched.
+	// It is the only rewrite of a user message (user-marker.ts says why).
+	// *_NO_ASSISTANT_MARKER=1 drops the bullet, mirroring *_NO_INPUT_MARKER.
+	// The pointer is painted from the live theme, captured at session_start.
+	const assistantMarker = knobValue("NO_ASSISTANT_MARKER") !== "1";
+	let transcriptTheme: unknown;
+	pi.registerMarkdownTransformer((markdown, context) => {
+		if (context.messageType === "user") return userMessageMarkdown(markdown, paintedUserMarker(transcriptTheme));
+		if (context.messageType === "assistant" && assistantMarker) return markAssistantMarkdown(markdown);
+		return markdown;
+	});
 	// The label and prompt marker apply in every session; *_NO_BANNER only
 	// disables the header.
 	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
@@ -431,6 +421,7 @@ function brandingExtension(pi: ExtensionAPI) {
 		// sticks; a new session may carry a name (resume), so forget the last.
 		lastTitle = undefined;
 		live = true;
+		transcriptTheme = ctx.ui.theme;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
 		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);

@@ -44,7 +44,6 @@ import { readUsage, recordUsage, usageKey } from "../../lib/plugins/usage-tracke
 import { boundedDockHeight, toolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import {
 	bareSkillMatches,
-	commandDisplayLine,
 	parseSkillCommand,
 	resolveSkill,
 	SKILL_INVOCATION_TYPE,
@@ -113,11 +112,6 @@ function skillExtension(pi: ExtensionAPI) {
 	const view = sessionView(pi);
 	const text = view.text("skill");
 	const requestTier = sessionModelTier(pi);
-	// pi draws a user message as markdown, so a typed skill, `/init` and
-	// `/doctor` showed their whole expanded prompt; show the command line.
-	pi.registerMarkdownTransformer((markdown, context) =>
-		context.messageType === "user" ? (commandDisplayLine(markdown) ?? markdown) : markdown,
-	);
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
 	let piSkills: IndexedSkill[] = [];
 	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
