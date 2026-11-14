@@ -8,6 +8,14 @@
 #
 #   test/e2e/cache-probe-matrix.sh
 #
+# Every leg loads only this checkout's extensions (cache-probe.sh --repo-only),
+# so the matrix tests the tree it runs from, never a copy registered with pi
+# (a user package in ~/.pi, which may be another worktree or branch).
+# CACHE_PROBE_REGISTERED=1 drops --repo-only from the per-provider legs and
+# loads what pi's settings register instead. CACHE_PROBE_ONLY=<text> runs only
+# the legs whose summary line contains <text> (e.g. `openrouter/deepseek`,
+# `login`).
+#
 # The Anthropic run's late-tool phase takes the deferred-tool addendum (Sonnet 5
 # rejects tool changes), so one more late-tool probe runs on a model that takes
 # Claude Code's `tool_addition` and requires that form (findings §55 P1).
@@ -22,7 +30,7 @@
 # subagents to the probe model, and fails unless every request was a bearer
 # request on that model. With no login it prints SKIP (CI has none);
 # CACHE_PROBE_REQUIRE_LOGIN=1 turns that into a failure, and
-# CACHE_PROBE_LOGIN_ONLY=1 runs this leg alone.
+# CACHE_PROBE_ONLY=login runs this leg alone.
 #
 # Override a model with CACHE_PROBE_ANTHROPIC, CACHE_PROBE_OPENAI,
 # CACHE_PROBE_CODEX, CACHE_PROBE_OPENROUTER, CACHE_PROBE_OPENROUTER_CLAUDE,
@@ -47,13 +55,17 @@ RUNS=(
 
 summary=()
 failed=0
-[ "${CACHE_PROBE_LOGIN_ONLY:-0}" = 1 ] && RUNS=()
-for run in ${RUNS[@]+"${RUNS[@]}"}; do
+REPO_ONLY=(--repo-only)
+[ "${CACHE_PROBE_REGISTERED:-0}" = 1 ] && REPO_ONLY=()
+# Whether the leg whose summary line is "$1" runs (CACHE_PROBE_ONLY).
+selected() { [ -z "${CACHE_PROBE_ONLY:-}" ] || [[ "$1" == *"$CACHE_PROBE_ONLY"* ]]; }
+for run in "${RUNS[@]}"; do
 	model="${run%%|*}"
 	flags="${run#*|}"
+	selected "$model" || continue
 	echo "=== $model ${flags}"
 	# shellcheck disable=SC2086
-	if bash "$REPO/test/e2e/cache-probe.sh" "$model" $flags; then
+	if bash "$REPO/test/e2e/cache-probe.sh" "$model" $flags ${REPO_ONLY[@]+"${REPO_ONLY[@]}"}; then
 		summary+=("PASS  $model")
 	else
 		summary+=("FAIL  $model")
@@ -62,7 +74,8 @@ for run in ${RUNS[@]+"${RUNS[@]}"}; do
 	echo
 done
 addition_model="${CACHE_PROBE_TOOL_ADDITION:-anthropic/claude-sonnet-5-5}"
-if [ "${CACHE_PROBE_LOGIN_ONLY:-0}" != 1 ]; then
+# cache-probe-late-tool.sh loads only this checkout's extensions itself.
+if selected "$addition_model late tool"; then
 	echo "=== $addition_model late tool (tool_addition)"
 	if bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$addition_model" --form tool_addition; then
 		summary+=("PASS  $addition_model late tool")
@@ -87,8 +100,10 @@ login_agent_dir() {
 	return 1
 }
 login_model="${CACHE_PROBE_LOGIN:-anthropic/claude-haiku-5-5}"
-echo "=== $login_model on the Anthropic login"
-if login_dir="$(login_agent_dir)"; then
+if ! selected "$login_model on the Anthropic login"; then
+	: # not selected
+elif login_dir="$(login_agent_dir)"; then
+	echo "=== $login_model on the Anthropic login"
 	echo "login:   $login_dir/auth.json (anthropic login)"
 	if env -u ANTHROPIC_API_KEY -u ANTHROPIC_OAUTH_TOKEN -u CLAUDE_CODE_SUBAGENT_MODEL \
 		PI_CODING_AGENT_DIR="$login_dir" ONECODE_SUBAGENT_MODEL="$login_model" \
@@ -99,6 +114,7 @@ if login_dir="$(login_agent_dir)"; then
 		failed=1
 	fi
 else
+	echo "=== $login_model on the Anthropic login"
 	echo "!!! SKIP: no Anthropic login found (looked in CACHE_PROBE_LOGIN_AGENT_DIR, PI_CODING_AGENT_DIR"
 	echo "!!! and ${ONECODE_STATE_DIR:-$HOME/.onecode}/agent). The login path was NOT checked."
 	summary+=("SKIP  $login_model on the Anthropic login: no login found, NOT checked")
@@ -106,5 +122,5 @@ else
 fi
 echo
 echo "=== summary"
-printf '%s\n' "${summary[@]}"
+printf '%s\n' ${summary[@]+"${summary[@]}"}
 exit $failed
