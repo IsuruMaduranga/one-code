@@ -93,7 +93,7 @@ export const PROFILE_BRAND_FIELDS = ["name", "stateDir", "productFile", "theme",
 /**
  * The launch's choice of profile in `args` (the arguments after the command),
  * and the arguments without it: `--profile <name>`, `--profile=<name>`, or
- * `--<id>` for a product profile's id in any case (`--BI`). The first one
+ * `--<id>` for a product profile's id in any case (`--QA`). The first one
  * names the profile; arguments after a bare `--` are not read. `--profile`
  * with no name after it names the empty profile, which no folder can be, so
  * the launch stops and says so (lib/profile/user-profile.ts).
@@ -126,7 +126,7 @@ export function selectedProfileName(product, argv = process.argv, env = process.
 /**
  * `args` (the arguments after the command) without the launch's choice of
  * profile, for the bundled app, which reads the choice itself: pi would take
- * the word after `--BI` as that flag's value and lose a prompt given there.
+ * the word after `--QA` as that flag's value and lose a prompt given there.
  */
 export function withoutProfileFlags(args, product) {
 	return splitProfileFlags(args, product).rest;
