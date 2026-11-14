@@ -57,6 +57,7 @@
 			"extensions/ui/footer/index.ts",
 			"extensions/ui/turn-duration/index.ts",
 			"extensions/ui/interrupted/index.ts",
+			"extensions/ui/desktop-notify/index.ts",
 			"extensions/ui/send-now/index.ts",
 			"extensions/agents/recap/index.ts",
 			"extensions/agents/btw/index.ts",

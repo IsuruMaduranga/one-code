@@ -88,10 +88,10 @@ reference. See
 
 ## Hooks
 
-Eight events are supported: `PreToolUse`, `PostToolUse`,
-`UserPromptSubmit`, `Stop`, `SessionStart`, `SessionEnd`, `PreCompact`, and
-`PostCompact`. `Notification`, `SubagentStop`, and `PermissionRequest` are
-not. Hook types other than `command` are skipped. A hook can block an
+Nine events are supported: `PreToolUse`, `PostToolUse`,
+`UserPromptSubmit`, `Stop`, `SessionStart`, `SessionEnd`, `PreCompact`,
+`PostCompact`, and `Notification`. `SubagentStop` and `PermissionRequest`
+are not. Hook types other than `command` are skipped. A hook can block an
 action but never pre-approve one. See [Hooks](hooks.md).
 
 ## Settings keys that are ignored

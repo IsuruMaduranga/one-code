@@ -29,7 +29,8 @@ export type CcHookEvent =
 	| "Stop"
 	| "SessionEnd"
 	| "PreCompact"
-	| "PostCompact";
+	| "PostCompact"
+	| "Notification";
 
 export const CC_HOOK_EVENTS: readonly CcHookEvent[] = [
 	"PreToolUse",
@@ -40,6 +41,7 @@ export const CC_HOOK_EVENTS: readonly CcHookEvent[] = [
 	"SessionEnd",
 	"PreCompact",
 	"PostCompact",
+	"Notification",
 ];
 
 /** What a hook command reads from stdin — Claude Code's field names exactly. */
@@ -66,6 +68,10 @@ export interface HookStdinPayload {
 	source?: string;
 	/** SessionEnd: why the session ended — clear | logout | prompt_input_exit | other (Claude Code's values). */
 	reason?: string;
+	/** Notification: what the user is told, its title when it has one, and its kind (`permission_prompt`, `idle_prompt`), which the matcher reads. */
+	message?: string;
+	title?: string;
+	notification_type?: string;
 	/** Set when the call is a subagent's (Claude Code: hooks tell a child's call from the main thread's by its presence). */
 	agent_id?: string;
 	agent_type?: string;

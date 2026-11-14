@@ -77,6 +77,7 @@ appear in `projects/<slug>/settings.json`.
 | Key | Type | Set by | Effect |
 |---|---|---|---|
 | `subagentModel` | string | `/subagent` | Default model for subagents and workflow agents: `provider/model-id`, a short alias, or `inherit`. |
+| `preferredNotifChannel` | string | By hand | How a desktop notification reaches you: `auto` (the default: iTerm2, kitty or Ghostty, picked from the terminal), `iterm2`, `iterm2_with_bell`, `kitty`, `ghostty`, `terminal_bell`, or `notifications_disabled`. See [Desktop notifications](terminal-interface.md#desktop-notifications). |
 | `suggestNewerModels` | boolean | By hand | Suggest a newer model in the same line at a similar or lower price. Defaults to `true`; `false` turns off notices and the `/doctor` suggestion. |
 | `modelTiers` | object | By hand (user settings only) | Your own tier for a model, keyed by `provider/id` or by the provider's model id alone: `frontier`, `workhorse`, `cheap` or `tiny`. See [Prompting adapts to the model](providers-and-models.md#prompting-adapts-to-the-model). |
 | `refreshModelCatalog` | boolean | By hand | `false` stops the daily refresh of the model catalogs behind the tiers; the copy on disk stays in use. Defaults to `true`. |

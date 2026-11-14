@@ -50,6 +50,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import { randomUUID } from "node:crypto";
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { DESKTOP_NOTIFICATION_CHANNEL, type DesktopNotification } from "../../lib/notify/desktop.ts";
 import { RunOutcomeLatch } from "../../lib/notify/interrupt.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { defaultDiscoverRoots } from "../../lib/plugins/plugins.ts";
@@ -506,6 +507,24 @@ function hooksExtension(pi: ExtensionAPI) {
 		// await attaches — the real error still surfaces there.
 		sessionStartPending = dispatchSessionStart(ctx, reason === "new" ? "clear" : reason, gen);
 		sessionStartPending.catch(() => {});
+	});
+
+	// ---- Notification ---------------------------------------------------------
+	// Claude Code runs the Notification hooks with every desktop notification
+	// (a prompt waiting, the session idle), matched on notification_type. The
+	// desktop-notify extension announces each one; it sends none after
+	// session_shutdown, and a notification from an ended session is dropped here.
+	pi.events.on(DESKTOP_NOTIFICATION_CHANNEL, (data) => {
+		const notification = data as Partial<DesktopNotification> | undefined;
+		const ctx = lastCtx;
+		if (!ctx || sessionAbort.signal.aborted || typeof notification?.message !== "string" || typeof notification.notificationType !== "string") return;
+		const payload: HookStdinPayload = {
+			...basePayload(ctx, "Notification"),
+			message: notification.message,
+			...(notification.title !== undefined ? { title: notification.title } : {}),
+			notification_type: notification.notificationType,
+		};
+		void dispatch(ctx, "Notification", { candidates: [notification.notificationType] }, payload);
 	});
 
 	// ---- Subagent bridge ----------------------------------------------------

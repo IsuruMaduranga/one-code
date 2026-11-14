@@ -57,6 +57,7 @@ export const FEATURES = {
 	footer: { entries: ["ui/footer/index.ts"] },
 	"turn-duration": { entries: ["ui/turn-duration/index.ts"] },
 	interrupted: { entries: ["ui/interrupted/index.ts"] },
+	"desktop-notify": { entries: ["ui/desktop-notify/index.ts"] },
 	"send-now": { entries: ["ui/send-now/index.ts"] },
 	recap: { entries: ["agents/recap/index.ts"] },
 	btw: { entries: ["agents/btw/index.ts"] },
