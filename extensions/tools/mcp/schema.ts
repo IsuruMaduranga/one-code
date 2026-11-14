@@ -36,6 +36,16 @@ export function parseNamespacedToolName(name: string): { server: string; tool: s
 	return { server: rest.slice(0, separator), tool: rest.slice(separator + 2) };
 }
 
+/**
+ * The row label of an MCP tool known only by its name: `server: tool`, the
+ * label a connected server's tool gets, from the namespaced name (whose
+ * server part is the sanitized one). `undefined` for any other name.
+ */
+export function namespacedToolLabel(name: string): string | undefined {
+	const parsed = parseNamespacedToolName(name);
+	return parsed && parsed.server && parsed.tool ? `${parsed.server}: ${parsed.tool}` : undefined;
+}
+
 interface JsonSchema {
 	type?: string | string[];
 	description?: string;

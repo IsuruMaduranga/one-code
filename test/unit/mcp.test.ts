@@ -9,6 +9,7 @@ import {
 	describeResourceContents,
 	jsonSchemaToTypeBox,
 	namespacedToolName,
+	namespacedToolLabel,
 	parseNamespacedToolName,
 	pluginServerName,
 	validateImageData,
@@ -136,6 +137,13 @@ describe("tool naming", () => {
 	it("returns undefined for names that are not namespaced", () => {
 		expect(parseNamespacedToolName("read")).toBeUndefined();
 		expect(parseNamespacedToolName("mcp__noseparator")).toBeUndefined();
+	});
+
+	it("labels a namespaced name the way a connected tool's row reads", () => {
+		expect(namespacedToolLabel("mcp__github__get_issue")).toBe("github: get_issue");
+		expect(namespacedToolLabel("mcp__plugin_context7_context7__query-docs")).toBe("plugin_context7_context7: query-docs");
+		expect(namespacedToolLabel("mcp____x")).toBeUndefined();
+		expect(namespacedToolLabel("bash")).toBeUndefined();
 	});
 });
 

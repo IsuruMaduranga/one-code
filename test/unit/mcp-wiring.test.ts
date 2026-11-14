@@ -123,6 +123,22 @@ describe("mcp wiring", () => {
 		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
 	};
 
+	it("draws an MCP call whose server has not connected as the connected tool's row", () => {
+		mcpExtension(fake.pi as never);
+		expect(fake.toolRendererResolvers).toHaveLength(1);
+		const [resolve] = fake.toolRendererResolvers;
+		const rows = resolve("mcp__golden__echo", () => undefined) as { renderShell?: string; renderCall?: unknown } | undefined;
+		expect(rows?.renderShell).toBe("self");
+		expect(typeof rows?.renderCall).toBe("function");
+		// One set per name, so pi's components see stable renderers.
+		expect(resolve("mcp__golden__echo", () => undefined)).toBe(rows);
+		// A registered tool's own renderers win; other names are left to pi.
+		const own = { renderShell: "self" };
+		expect(resolve("mcp__golden__echo", () => own)).toBe(own);
+		expect(resolve("bash", () => undefined)).toBeUndefined();
+		expect(resolve("mcp__nounderscore", () => undefined)).toBeUndefined();
+	});
+
 	it("records MCP dialog dismissal after the panel closes", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		await boot();
