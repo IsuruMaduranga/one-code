@@ -1,20 +1,25 @@
 /**
- * A minimal product extension for the base's own tests: it uses every seam
+ * A minimal product extension for the base's own tests: it uses the seams
  * `extensions/sdk/extension.ts` offers (a prompt section, a reminder, a
- * deferred tool of its own, a secret value) the way a product's extension would. The base
+ * deferred tool of its own, a secret value, a report of a file it wrote to
+ * the profile's language server) the way a product's extension would. The base
  * suite copies this profile into place, so the manifest's product entry loads
  * it there (`product-extension.test.ts`).
  */
 
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL, type DeferRequest, REMINDER_CHANNEL, type ReminderPayload, setSecretValues, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, toolRenderers } from "../../../extensions/sdk/extension.ts";
+import { DEFER_CHANNEL, type DeferRequest, lspFilesChanged, REMINDER_CHANNEL, type ReminderPayload, setSecretValues, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, toolRenderers } from "../../../extensions/sdk/extension.ts";
 
 export const PROBE_TOOL = "fixture_probe";
 export const PROBE_SECTION = "[fixture:product-section]";
 export const PROBE_REMINDER = "[fixture:product-reminder]";
 /** A value the probe registers as secret; a tool result that carries it shows `[secret:fixture]` instead. */
 export const PROBE_SECRET = "fixture-secret-value";
+/** The file the probe's tool writes in the session's directory, a file the fixture's language server serves. */
+export const PROBE_FILE = "probe.fixturelang";
 
 export default function probe(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -23,7 +28,14 @@ export default function probe(pi: ExtensionAPI) {
 		description: "[fixture:product-tool]",
 		parameters: Type.Object({}),
 		...toolRenderers("Fixture probe"),
-		execute: async () => ({ content: [{ type: "text", text: "[fixture:product-tool-result]" }], details: undefined }),
+		// A tool that writes a file reports it, so a running server drops its old
+		// copy; the base's own edit tools need no report.
+		execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
+			const path = join(ctx.cwd, PROBE_FILE);
+			writeFileSync(path, "[fixture:probe-file]\n");
+			await lspFilesChanged(pi.events, { server: "fixture", changes: [{ path, type: "created" }] });
+			return { content: [{ type: "text", text: "[fixture:product-tool-result]" }], details: undefined };
+		},
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: PROBE_TOOL } satisfies DeferRequest);
 	pi.events.emit(SYSTEM_PROMPT_SECTION_CHANNEL, { id: "fixture-probe", place: "tail", render: () => PROBE_SECTION } satisfies SystemPromptSection);
