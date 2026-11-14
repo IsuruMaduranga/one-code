@@ -1947,7 +1947,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const stopped = stoppedTaskIds.has(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
-				void awaitHandBackReview(pi.events, p.record, outcome.actions, undefined, mainCallOf(p.record.taskId)).then((review) => {
+				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
 					resident.reviewing--;
 					if (handler) {
 						handler(outcome, review, stopped);
@@ -2326,6 +2326,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 					toolCallId,
 					actions: result.actions ?? [],
+					report: result.output,
 				} satisfies SubagentActionsPayload);
 				const stats = formatStats(result.toolCalls, result.usage);
 				const worktreeNote = result.worktreePath ? `\n\n${keptWorktreeNote(result.worktreePath, result.worktreeBranch)}` : "";
@@ -2626,7 +2627,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			runningIds.delete(record.taskId);
 			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
-			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions, report: outcome.output } satisfies SubagentActionsPayload);
 			return {
 				content: [
 					{
@@ -2664,7 +2665,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// does for a resident's turn; a resumed turn once skipped it
 			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
 			// review, so task_output never returns the reply ahead of its verdict.
-			const review = await awaitHandBackReview(pi.events, record, outcome.actions, undefined, mainCallOf(record.taskId));
+			const review = await awaitHandBackReview(pi.events, record, outcome, { startedBy: mainCallOf(record.taskId) });
 			// The outcome includes SubagentHandback and startup/abort errors;
 			// the live snapshot only contains assistant text, not the final report.
 			settledOutput = `${relocationNote}${outcome.output}`;

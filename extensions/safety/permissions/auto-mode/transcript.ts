@@ -18,6 +18,7 @@
 import { ccToolName } from "../../../lib/rules/hook-matcher.ts";
 // The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-run/shell-tools.ts is the one list).
 import { SHELL_TOOLS } from "../../../lib/shell-run/shell-tools.ts";
+import { indentReport } from "../../../lib/core/text-spans.ts";
 import type { GitStatusMeta } from "./git-status-meta.ts";
 import { classifierText } from "./classifier-prompt.ts";
 import type { ResolvedPathFact } from "./resolved-paths-meta.ts";
@@ -50,11 +51,39 @@ export type TranscriptEntry =
 	 * the working directory which resolves outside it through a symlink
 	 * (safety/permissions/auto-mode/resolved-paths-meta.ts). Not a Claude Code line.
 	 */
-	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] };
+	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] }
+	/**
+	 * The last entry of a finished subagent's review: the profile's note, then
+	 * the child's final report in `<subagent_hand_back>`, rendered as Claude
+	 * Code's `{"user":…}` hand-back line. The ruleset judges "the final entry",
+	 * and its SUBAGENT HAND-BACK rule names this entry as that action, so the
+	 * model reviews the run and its report rather than the child's last call.
+	 * Never the user's words: it never enters `userMessages`, so an intent
+	 * quote taken from it fails verification.
+	 */
+	| { kind: "hand-back"; report: string };
 
 /** Clip a diagnostic field; classifier transcript entries are never clipped. */
 export function clip(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max)}… [truncated, ${value.length} chars]`;
+}
+
+/** Line breaks Claude Code folds to `\n` before indenting a report. */
+const LINE_BREAKS = /\r\n?|[\u001c-\u001e\u2028\u2029\u0085\v\f]/g;
+/** Invisible format characters, dropped so they cannot hide inside a tag name. */
+const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+/**
+ * An opening bracket that starts one of the classifier's own tags, however
+ * spaced or slashed: it becomes `[`, so a report cannot close the
+ * `<transcript>` and write entries of its own. Claude Code does the same
+ * for these three names; its bracket set also covers a long table of
+ * lookalikes, of which this keeps the ASCII and the common ones.
+ */
+const TRANSCRIPT_TAG = /[<\uFF1C\uFE64\u2039\u3008\u27E8\u02C2]([\s/\uFF0F\u2215\u2044]*(?:transcript|forwarded_user_turns|forwarded_turn)\b)/giu;
+
+/** The child's report as Claude Code frames it inside `<subagent_hand_back>`: line breaks folded, the classifier's tags defused, every line indented two spaces. */
+function handBackReport(report: string): string {
+	return indentReport(report.replace(LINE_BREAKS, "\n").replace(INVISIBLE, "").replace(TRANSCRIPT_TAG, "[$1"));
 }
 
 /**
@@ -65,6 +94,9 @@ export function clip(value: string, max: number): string {
  */
 function renderEntry(entry: TranscriptEntry): string {
 	if (entry.kind === "user") return JSON.stringify({ user: entry.text });
+	if (entry.kind === "hand-back") {
+		return JSON.stringify({ user: `${classifierText().handBackReview}\n\n<subagent_hand_back>\n${handBackReport(entry.report)}\n</subagent_hand_back>` });
+	}
 	if (entry.kind === "summary") return JSON.stringify({ summary: entry.text });
 	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
 	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: classifierText().resolvedPathsNote } });

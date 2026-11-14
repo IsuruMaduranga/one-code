@@ -25,7 +25,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
-import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
 import { guideDocsDirs } from "../../lib/agents/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { handBackWarning, type HandBackVerdict } from "../../lib/notify/notifications.ts";
@@ -2241,13 +2241,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const reviewFlagged = (verdict: HandBackVerdict) => `<system-reminder>\n${handBackWarning(verdict)}\n</system-reminder>`;
 
-	// Classify a finished run's action sequence as a whole. Returns the verdict to
-	// surface, or undefined when the sequence is fine. Shared by the foreground
+	// Review a finished run: its actions and its report. Returns the verdict to
+	// surface, or undefined when the run is fine. Shared by the foreground
 	// (tool_result) and background (channel) paths. A review that reached no
 	// verdict (an unreadable reply, a transcript past the limit, a timeout) is an
 	// unreviewed run, not a finding.
 	const reviewCompletedRun = async (
-		actions: ChildAction[],
+		run: Pick<SubagentActionsPayload, "actions" | "report">,
 		ctx: ExtensionContext,
 		subject: string,
 		signal: AbortSignal | undefined,
@@ -2257,12 +2257,15 @@ function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		// Present the child's actions as tool entries appended to the session
 		// transcript, so the reviewer judges the sequence with the parent's context
-		// in view (SESSION LINKING). reviewOnly runs a single stage-2 full-eval —
-		// there is no harm floor to short-circuit for a run that already happened.
-		const childEntries: TranscriptEntry[] = actions.map((action) => {
+		// in view (SESSION LINKING), and end with the hand-back entry carrying the
+		// child's report (transcript.ts says why it must be last). reviewOnly runs
+		// a single stage-2 full-eval — there is no harm floor to short-circuit for
+		// a run that already happened.
+		const childEntries: TranscriptEntry[] = run.actions.map((action) => {
 			const tool = normalizeToolName(action.toolName);
 			return { kind: "tool", tool, input: isShellTool(tool) ? { command: action.subject } : { subject: action.subject } };
 		});
+		childEntries.push({ kind: "hand-back", report: run.report });
 		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(
 			{
@@ -2309,13 +2312,16 @@ function permissionsExtension(pi: ExtensionAPI) {
 		return { kind: unavailable ? "unavailable" : "blocked", reason: verdict.reason };
 	};
 
-	const childActions = new Map<string, ChildAction[]>();
+	const childActions = new Map<string, SubagentActionsPayload>();
 	pi.events.on(SUBAGENT_ACTIONS_CHANNEL, (data) => {
-		const payload = data as SubagentActionsPayload | undefined;
-		if (!payload || !Array.isArray(payload.actions)) return;
+		const raw = data as SubagentActionsPayload | undefined;
+		if (!raw || !Array.isArray(raw.actions)) return;
+		// The bus is untyped across extensions: an emitter built against the older
+		// payload has no report, and the review must still run, not throw.
+		const payload: SubagentActionsPayload = typeof raw.report === "string" ? raw : { ...raw, report: "" };
 		if (!payload.background) {
 			// Foreground: hold the actions until the spawning call's tool_result.
-			if (payload.toolCallId) childActions.set(payload.toolCallId, payload.actions);
+			if (payload.toolCallId) childActions.set(payload.toolCallId, payload);
 			return;
 		}
 		// Background/resident: the spawning call already returned, so there is no
@@ -2341,19 +2347,19 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const respondIfCurrent = (verdict: HandBackVerdict | undefined) => {
 			if (epoch === sessionEpoch) respond(verdict);
 		};
-		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
+		reviewCompletedRun(payload, ctx, label, new AbortController().signal, payload.startedBy)
 			.then(respondIfCurrent)
 			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: permissionText().reviewFailed({ osMessage: (error as Error).message }) }));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
 		lastReviewCtx = ctx;
-		const actions = childActions.get(event.toolCallId);
-		if (actions) childActions.delete(event.toolCallId);
+		const run = childActions.get(event.toolCallId);
+		if (run) childActions.delete(event.toolCallId);
 		// Reviewed while paused too, as the background path above is.
-		if (mode !== "auto" || !actions?.length) return undefined;
+		if (mode !== "auto" || !run?.actions.length) return undefined;
 		// The spawning call is this tool result's own: the run happened inside it.
-		const verdict = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal, event.toolCallId);
+		const verdict = await reviewCompletedRun(run, ctx, "completed run", ctx.signal, event.toolCallId);
 		if (!verdict) return undefined;
 		return { content: [{ type: "text" as const, text: reviewFlagged(verdict) }, ...event.content] };
 	});

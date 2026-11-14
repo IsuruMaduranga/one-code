@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 const fakePi = `
 import { appendFileSync } from 'node:fs';
 if (process.argv.includes('--version')) { console.log('offline-probe-cli'); }
-else { appendFileSync(process.env.PROBE_INVOCATIONS, JSON.stringify({args:process.argv.slice(2),log:process.env.ONECODE_SIDE_CALL_LOG})+'\\n'); }
+else { appendFileSync(process.env.PROBE_INVOCATIONS, JSON.stringify({args:process.argv.slice(2),log:process.env.ONECODE_SIDE_CALL_LOG,autoModeLog:process.env.ONECODE_AUTO_MODE_LOG})+'\\n'); }
 `;
 
 describe("cache-probe reader phase wiring (offline CLI)", () => {
@@ -19,7 +19,7 @@ describe("cache-probe reader phase wiring (offline CLI)", () => {
 			const cli = join(root, "fake-pi.mjs");
 			const invocations = join(root, "invocations.jsonl");
 			writeFileSync(cli, fakePi);
-			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--no-classifier", "--no-late-tool", ...(skip ? ["--no-reader"] : [])], {
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--no-classifier", "--no-review", "--no-late-tool", ...(skip ? ["--no-reader"] : [])], {
 				encoding: "utf8", timeout: 20_000,
 				env: { ...process.env, PI_BIN: cli, CACHE_PROBE_WORK_DIR: join(root, "probe"), PROBE_INVOCATIONS: invocations },
 			});
@@ -52,7 +52,7 @@ describe("cache-probe late-tool phase wiring (offline CLI)", () => {
 			const cli = join(root, "fake-pi.mjs");
 			const invocations = join(root, "invocations.jsonl");
 			writeFileSync(cli, fakePi);
-			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), model, "--no-classifier", "--no-reader", ...flags], {
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), model, "--no-classifier", "--no-review", "--no-reader", ...flags], {
 				encoding: "utf8", timeout: 20_000,
 				env: { ...process.env, PI_BIN: cli, CACHE_PROBE_WORK_DIR: join(root, "probe"), PROBE_INVOCATIONS: invocations },
 			});
@@ -66,6 +66,33 @@ describe("cache-probe late-tool phase wiring (offline CLI)", () => {
 				expect(calls[1].args.some((arg: string) => arg.replaceAll("\\", "/").endsWith("/test/e2e/late-tool-fixture.ts"))).toBe(true);
 				expect(calls[1].args).toContain(model);
 				expect(result.stdout).toContain("late_echo never reached a request's tools");
+			}
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("cache-probe review phase wiring (offline CLI)", () => {
+	it.each([true, false])("runs the review phase by default, opt-out=%s", (skip) => {
+		const root = mkdtempSync(join(tmpdir(), "cache-probe-phases-"));
+		try {
+			const cli = join(root, "fake-pi.mjs");
+			const invocations = join(root, "invocations.jsonl");
+			writeFileSync(cli, fakePi);
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--no-classifier", "--no-reader", "--no-late-tool", ...(skip ? ["--no-review"] : [])], {
+				encoding: "utf8", timeout: 20_000,
+				env: { ...process.env, PI_BIN: cli, CACHE_PROBE_WORK_DIR: join(root, "probe"), PROBE_INVOCATIONS: invocations },
+			});
+			expect(result.error).toBeUndefined();
+			expect(result.status).toBe(1);
+			const calls = readFileSync(invocations, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+			expect(calls).toHaveLength(skip ? 1 : 2);
+			expect(result.stdout.includes("--- review phase")).toBe(!skip);
+			if (!skip) {
+				expect(resolve(calls[1].autoModeLog)).toBe(join(root, "probe", "review.jsonl"));
+				expect(calls[1].args).toEqual(expect.arrayContaining(["--permission-mode", "auto"]));
+				expect(result.stdout).toContain("no hand-back review was recorded");
 			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });

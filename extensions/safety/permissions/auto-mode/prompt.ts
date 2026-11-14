@@ -94,12 +94,6 @@ export function stage2User(userPrefix: string, afterRuleDenial = false): string 
 	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${text.stage2IntentAddendum}${afterRuleDenial ? text.stage2DenialAddendum : ""}`;
 }
 
-/** The completed-run review message: shared prefix + full-eval final + the profile's review reframing (judge the finished run as a whole). */
-export function reviewUser(userPrefix: string): string {
-	const text = classifierText();
-	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${text.reviewAddendum}`;
-}
-
 /**
  * The whole number inside the last `<severity>…` tag (closing tag optional),
  * or null. The body must be the number and nothing else: a model answering on

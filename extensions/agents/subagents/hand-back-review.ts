@@ -3,7 +3,7 @@
  * travels WITH the completion report instead of trailing it.
  *
  * A resident's spawning call has already returned when its turn ends, so there
- * is no tool_result for the auto-mode gate to attach its holistic review to.
+ * is no tool_result for the auto-mode gate to attach its review to.
  * Emitting the actions and sending the report immediately (the previous
  * shape) let the "flagged" notice land one or more tool boundaries after the
  * report — the model could act on an agent's output before hearing that auto
@@ -14,7 +14,8 @@
  * slow or absent reviewer degrades to "report plus a note", never to a report
  * that waits forever.
  */
-import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
+import type { ChildOutcome } from "./outcome.ts";
 import type { HandBackVerdict } from "../../lib/notify/notifications.ts";
 
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -38,12 +39,17 @@ export interface ActionsEmitter {
 export function awaitHandBackReview(
 	events: ActionsEmitter,
 	run: { taskId: string; name: string },
-	actions: ChildAction[] | undefined,
-	timeoutMs = HAND_BACK_REVIEW_TIMEOUT_MS,
-	/** The main-session call that started the turn (SubagentActionsPayload.startedBy). */
-	startedBy?: string,
+	/** The finished turn: what the child did, and the report it handed back. */
+	turn: Pick<ChildOutcome, "actions" | "output">,
+	options: {
+		timeoutMs?: number;
+		/** The main-session call that started the turn (SubagentActionsPayload.startedBy). */
+		startedBy?: string;
+	} = {},
 ): Promise<HandBackVerdict | undefined> {
-	if (!actions?.length) return Promise.resolve(undefined);
+	const { timeoutMs = HAND_BACK_REVIEW_TIMEOUT_MS, startedBy } = options;
+	const actions = turn.actions;
+	if (!actions.length) return Promise.resolve(undefined);
 	return new Promise((resolve) => {
 		let settled = false;
 		const finish = (verdict: HandBackVerdict | undefined) => {
@@ -57,6 +63,7 @@ export function awaitHandBackReview(
 		events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 			toolCallId: run.taskId,
 			actions,
+			report: turn.output,
 			background: true,
 			agentName: run.name,
 			...(startedBy ? { startedBy } : {}),

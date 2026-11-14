@@ -6,7 +6,7 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
-import { buildPayload, type ClassifyRequest, stage1User, stage2User, reviewUser } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { buildPayload, type ClassifyRequest, stage1User, stage2User } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
 import { classifierText, instructionsFraming } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { transcriptBlocks, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
@@ -92,11 +92,21 @@ describe("classifier transcript cache", () => {
 		expect(blocks(payloads[1]).length).toBeGreaterThan(1);
 	});
 
-	it("uses the same cache boundary for the retrospective review", async () => {
-		await classify(request, { ...deps(), reviewOnly: true });
-		expect(text(payloads[0])).toBe(reviewUser(buildPayload(request).userPrefix));
-		expect(cachedPrefix(payloads[0])).not.toContain("RETROSPECTIVE");
-		expect(cachedPrefix(payloads[0])).toContain('{"user":"Check the public sites."}');
+	it("reviews a finished run under the gate's own system prompt, the hand-back last and uncached", async () => {
+		await classify(request, deps());
+		const review: ClassifyRequest = {
+			...request,
+			toolName: "subagent-review",
+			transcript: [...request.transcript, { kind: "hand-back", report: "Checked both sites." }],
+		};
+		await classify(review, { ...deps(), reviewOnly: true });
+		const [gate, reviewed] = [payloads[0], payloads.at(-1)!];
+		expect(reviewed.system).toEqual(gate.system);
+		expect(text(reviewed)).toBe(stage2User(buildPayload(review).userPrefix));
+		expect(cachedPrefix(reviewed)).toContain('{"user":"Check the public sites."}');
+		expect(cachedPrefix(reviewed)).toContain("curl -sI");
+		expect(cachedPrefix(reviewed)).not.toContain("Checked both sites.");
+		expect(text(reviewed)).toContain("Checked both sites.");
 	});
 
 	it("keeps earlier history at identical block boundaries across calls", async () => {
@@ -210,7 +220,7 @@ describe("classifier text preservation", () => {
 		const built = buildPayload({ ...request, claudeMd, transcript: mixed });
 		const prefix = [instructionsFraming(claudeMd), mixedText].filter(Boolean).join("\n\n");
 		expect(built.userPrefix).toBe(prefix);
-		for (const render of [stage1User, (value: string) => stage2User(value), (value: string) => stage2User(value, true), reviewUser]) {
+		for (const render of [stage1User, (value: string) => stage2User(value), (value: string) => stage2User(value, true)]) {
 			const expected = render(prefix);
 			const parts = [...built.history, built.tail, render(built.userPrefix).slice(built.userPrefix.length)];
 			const wire = { messages: [{ role: "user", content: [{ type: "text" as const, text: expected, cache_control: cacheControl }] }] };

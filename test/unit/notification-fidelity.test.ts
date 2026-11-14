@@ -8,6 +8,7 @@
  * profile/test/notification-fidelity-wording.test.ts.
  */
 import { describe, expect, it } from "vitest";
+import { indentReport } from "../../extensions/lib/core/text-spans.ts";
 import {
 	agentMessage,
 	agentSummary,
@@ -15,7 +16,6 @@ import {
 	frameForDelivery,
 	handBackPointer,
 	handBackWarning,
-	indentReport,
 	monitorEndedSummary,
 	monitorEventSummary,
 	shellSummary,

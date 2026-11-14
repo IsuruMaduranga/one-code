@@ -14,7 +14,9 @@
  *
  * The log deliberately holds names and short subjects rather than tool output:
  * output is untrusted content, and feeding it to the classifier is the injection
- * path auto mode exists to close.
+ * path auto mode exists to close. The child's final report travels beside it,
+ * because the report is what reaches the parent: the review judges it as the
+ * hand-back, framed as untrusted agent output, as Claude Code does (findings §17.2).
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -32,9 +34,11 @@ export interface SubagentActionsPayload {
 	/** The parent's tool call id, so a foreground review attaches to the right result. */
 	toolCallId: string;
 	actions: ChildAction[];
+	/** The child's final report, whole (the parent may get a bounded preview of it): the review's last transcript entry. */
+	report: string;
 	/**
 	 * True for a background/resident run: the spawning call has already returned, so
-	 * there is no pending tool_result to attach the holistic review to. The gate
+	 * there is no pending tool_result to attach the hand-back review to. The gate
 	 * reviews on receipt and surfaces any concern as its own notification instead.
 	 */
 	background?: boolean;

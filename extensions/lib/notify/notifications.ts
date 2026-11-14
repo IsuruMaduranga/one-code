@@ -42,7 +42,7 @@ import { isUserRun, PROMPT_OPTIONS_CHANNEL } from "../ui/prompt-options.ts";
 import { wrapReminder } from "../request/reminders.ts";
 import { HAND_BACK_POINTER_PREFIX, type NotificationWords, type OneShotWork } from "./notifications-text.ts";
 import { notificationWords } from "./notification-words.ts";
-import { escapeRegExp, memoOn } from "../core/text-spans.ts";
+import { escapeRegExp, indentReport, memoOn } from "../core/text-spans.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
 type ExtensionMode = ExtensionContext["mode"];
@@ -50,14 +50,6 @@ type ExtensionMode = ExtensionContext["mode"];
 // ---------------------------------------------------------------------------
 // The inter-agent message channel (CC's `agent-message` type)
 // ---------------------------------------------------------------------------
-
-/** Indent every line of a report two spaces, blanks included; that is the anti-forgery invariant the preamble promises. */
-export function indentReport(text: string): string {
-	return text
-		.split("\n")
-		.map((line) => `  ${line}`)
-		.join("\n");
-}
 
 export interface AgentMessageFields {
 	/** The sender's address — the value SendMessage reaches it by (its task id). */

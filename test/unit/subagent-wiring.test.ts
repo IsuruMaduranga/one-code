@@ -511,7 +511,7 @@ describe("subagent resumed turns", () => {
 		expect(result.content[0].text).toContain("The follow-up answer");
 		expect(result.content[0].text).not.toContain("task notification");
 		expect(result.isError).toBe(false);
-		expect(reviews).toEqual([{ toolCallId: "call", actions: risky }]);
+		expect(reviews).toEqual([{ toolCallId: "call", actions: risky, report: "The follow-up answer" }]);
 		expect(h.tasks.size).toBe(0);
 	});
 });

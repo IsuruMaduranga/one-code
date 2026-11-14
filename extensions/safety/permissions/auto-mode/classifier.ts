@@ -36,7 +36,6 @@ import {
 	type ClassifyVerdict,
 	parseSeverity,
 	parseStage2,
-	reviewUser,
 	SEVERITY_THRESHOLD,
 	stage1User,
 	stage2User,
@@ -240,9 +239,10 @@ export interface ClassifierDeps {
 	 */
 	onModelUnusable?: (model: string, reason: string) => void;
 	/**
-	 * Completed-run subagent review: evaluate the sequence with a single stage-2
-	 * style full-eval call instead of the two-stage gate (there is no harm floor
-	 * to short-circuit, and the whole point is the intent/ALLOW judgment).
+	 * Completed-run subagent review: one stage-2 call instead of the two-stage
+	 * gate (there is no harm floor to short-circuit for work already done). The
+	 * transcript ends with the hand-back entry (transcript.ts), which frames
+	 * what to judge; the stage instruction is the gate's own.
 	 */
 	reviewOnly?: boolean;
 }
@@ -358,8 +358,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	const { system, userPrefix, history, tail, index } = buildPayload(request);
 	const previousHistoryEnd = deps.state.cacheHistoryEnd;
 	const stage1Text = stage1User(userPrefix);
-	// A permission rule refused something this turn, so stage 2 gets the extra
-	// instruction that the user's intent does not excuse an equivalent-effect
+	// A permission rule refused something in the transcript, so stage 2 gets the
+	// extra instruction that the user's intent does not excuse an equivalent-effect
 	// retry (the profile's `stage2DenialAddendum`). Stage 1 grades harm only and is
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
@@ -467,7 +467,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
-						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
 					} catch {
 						// A probe log that cannot be written must not fail the gate.
 					}
@@ -515,9 +515,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			let stageInfo: string;
 
 			if (deps.reviewOnly) {
-				// A finished run has no harm floor to short-circuit — go straight to the
-				// full stage-2 evaluation, reframed to judge the whole sequence.
-				const text = await call(reviewUser(userPrefix), 4096, 8192, 2);
+				// A finished run has no harm floor to short-circuit: go straight to the
+				// full stage-2 evaluation of the transcript's hand-back entry (transcript.ts).
+				const text = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {

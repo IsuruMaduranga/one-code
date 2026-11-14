@@ -73,6 +73,7 @@ describe("hand-back review while auto mode is paused", () => {
 			fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 				toolCallId: "agent-1",
 				actions,
+				report: "done",
 				background: true,
 				agentName: "worker",
 				onReview: resolve,
@@ -82,7 +83,7 @@ describe("hand-back review while auto mode is paused", () => {
 	});
 
 	it("reviews a foreground run at its tool result", async () => {
-		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", actions } satisfies SubagentActionsPayload);
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-1", actions, report: "done" } satisfies SubagentActionsPayload);
 		const result = await fake.fireOne<{ content: Array<{ text: string }> }>(
 			"tool_result",
 			{ toolCallId: "spawn-1", toolName: "Agent", content: [{ type: "text", text: "report" }] },
@@ -96,7 +97,7 @@ describe("hand-back review while auto mode is paused", () => {
 	// a finding. It is an unreviewed run, worded as the background path words it.
 	it("words a review that reached no verdict as unreviewed, not as a concern", async () => {
 		vi.mocked(classify).mockResolvedValueOnce({ decision: "block", reason: "The approval classifier's reply carried no severity, so the verdict could not be read.", tier: "unmatched", noVerdict: true });
-		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-2", actions } satisfies SubagentActionsPayload);
+		fake.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId: "spawn-2", actions, report: "done" } satisfies SubagentActionsPayload);
 		const result = await fake.fireOne<{ content: Array<{ text: string }> }>(
 			"tool_result",
 			{ toolCallId: "spawn-2", toolName: "Agent", content: [{ type: "text", text: "report" }] },
