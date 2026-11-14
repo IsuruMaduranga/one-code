@@ -84,7 +84,8 @@ function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly str
 function withCap(payload: Record<string, unknown>, path: readonly string[], value: number): Record<string, unknown> {
 	const [head, ...rest] = path;
 	if (rest.length === 0) return { ...payload, [head]: value };
-	const inner = isPlainObject(payload[head]) ? (payload[head] as Record<string, unknown>) : {};
+	const current = payload[head];
+	const inner = isPlainObject(current) ? current : {};
 	return { ...payload, [head]: withCap(inner, rest, value) };
 }
 

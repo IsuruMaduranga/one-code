@@ -59,7 +59,6 @@ const FIELDS = new Set(["description", "base", "tools", "features"]);
 const TOOL_LISTS = ["off", "deferred", "eager"] as const;
 const APPEND_SUFFIX = ".append.md";
 
-
 /** The names of `value[key]`, a list of strings; a problem when it is anything else. */
 function names(value: unknown, where: string, problems: string[]): string[] {
 	if (value === undefined) return [];

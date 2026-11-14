@@ -34,6 +34,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { readJsonFile } from "../core/atomic-write.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 import { readEnabledPlugins } from "../profile/settings-files.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
@@ -147,7 +148,7 @@ export function loadInstalledPlugins(pluginsDir: string, cwd?: string): Installe
 	for (const [key, entries] of Object.entries(registry.plugins)) {
 		if (!Array.isArray(entries) || entries.length === 0) continue;
 		const entry = entries.find((e) =>
-			e && typeof e === "object" && !Array.isArray(e) &&
+			isPlainObject(e) &&
 			typeof e.installPath === "string" && e.installPath.length > 0 &&
 			(e.projectPath === undefined || typeof e.projectPath === "string") &&
 			existsSync(e.installPath) && entryAppliesToCwd(e, cwd),
