@@ -15,6 +15,7 @@ import { languageServerProblems, resolveLanguageServers } from "../../extensions
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import lspExtension from "../../extensions/tools/lsp/index.ts";
 import { pathToUri } from "../../extensions/tools/lsp/client.ts";
+import { lspErrorDetail } from "../../extensions/sdk/extension.ts";
 import { lspFilesChanged, lspRequest } from "../../extensions/tools/lsp/request-channel.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -47,6 +48,7 @@ vi.mock("node:os", async (importOriginal) => {
 
 vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../extensions/tools/lsp/client.ts")>();
+	const { LspResponseError } = await import("../../extensions/tools/lsp/failure.ts");
 	class FakeLspClient {
 		requests: Array<[string, unknown, number | undefined]> = [];
 		calls: unknown[] = [];
@@ -72,6 +74,7 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 		async request(method: string, params: unknown, timeoutMs?: number) {
 			this.requests.push([method, params, timeoutMs]);
 			this.calls.push(["request", method]);
+			if (method === "x/refused") throw new LspResponseError(method, -32601, "Internal error.", { detail: "no such method" });
 			return { echoed: method };
 		}
 		refreshOpenFiles(skip?: string) {
@@ -170,6 +173,12 @@ describe("a profile's language server", () => {
 		// One server instance: the request reused the one the edit started.
 		expect(state.instances).toHaveLength(1);
 		expect(state.instances[0].requests).toEqual([["sample/projectInfo", { projectPath: dir }, 5_000]]);
+	});
+
+	it("hands a server's refusal to the product with its code and data", async () => {
+		await run("session_start", {}, createFakeCtx({ cwd: dir }));
+		const error = await lspRequest(fake.events, { server: "sample", file: "main.smp", method: "x/refused" }).catch((rejection: unknown) => rejection);
+		expect(lspErrorDetail(error)).toEqual({ method: "x/refused", code: -32601, message: "Internal error.", data: { detail: "no such method" } });
 	});
 
 	it("starts the server for a request that comes before any edit", async () => {

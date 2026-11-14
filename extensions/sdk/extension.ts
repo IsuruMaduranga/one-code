@@ -16,7 +16,9 @@
  * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
  * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
  * - `lspRequest`: a request on a language server the profile declares, on the
- *   connection the base already keeps for diagnostics.
+ *   connection the base already keeps for diagnostics. When the server
+ *   refuses it, `lspErrorDetail(error)` gives the JSON-RPC code, message and
+ *   data (`instanceof` cannot work: each extension has its own module copy).
  * - `lspFilesChanged`: files that changed on disk outside the session's
  *   `edit` and `write` tools (the shell, a build tool, the user's editor),
  *   reported to that server so its answers and diagnostics follow the disk.
@@ -45,6 +47,7 @@ export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "
 export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
 export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";
 export { type LspFileChange, type LspFilesChanged, lspFilesChanged, type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";
+export { type LspErrorDetail, lspErrorDetail } from "../tools/lsp/failure.ts";
 export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
 export { toolRenderers } from "../lib/ui/tui-render.ts";
 export { productStateDir } from "../lib/profile/paths.ts";

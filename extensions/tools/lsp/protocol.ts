@@ -12,7 +12,7 @@ export interface JsonRpcMessage {
 	method?: string;
 	params?: unknown;
 	result?: unknown;
-	error?: { code: number; message: string };
+	error?: { code: number; message: string; data?: unknown };
 }
 
 export function encodeMessage(message: Record<string, unknown>): Buffer {
