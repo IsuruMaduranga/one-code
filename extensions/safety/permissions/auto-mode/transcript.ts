@@ -19,6 +19,7 @@ import { ccToolName } from "../../../lib/rules/hook-matcher.ts";
 // The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-run/shell-tools.ts is the one list).
 import { SHELL_TOOLS } from "../../../lib/shell-run/shell-tools.ts";
 import { indentReport } from "../../../lib/core/text-spans.ts";
+import { isPlainObject } from "../../../lib/core/plain-object.ts";
 import type { GitStatusMeta } from "./git-status-meta.ts";
 import { classifierText } from "./classifier-prompt.ts";
 import type { ResolvedPathFact } from "./resolved-paths-meta.ts";
@@ -62,6 +63,22 @@ export type TranscriptEntry =
 	 * quote taken from it fails verification.
 	 */
 	| { kind: "hand-back"; report: string };
+
+/**
+ * One tool call as the classifier sees it, for every path that shows one: the
+ * main gate's pending call, a child's gated call, the session's history and a
+ * finished subagent's review. Our counterpart of Claude Code's per-tool
+ * `toAutoClassifierInput`, so one call never reaches the classifier in two
+ * shapes. A shell call is its command: `runs` when the harness rewrote what
+ * actually runs (a worktree wrapper), else the call's own. Every other tool
+ * is its whole input.
+ */
+export function toolCallEntry(tool: string, input: unknown, runs?: string): TranscriptEntry {
+	if (runs !== undefined) return { kind: "tool", tool, input: { command: runs } };
+	const args = isPlainObject(input) ? input : {};
+	if (SHELL_TOOLS.has(tool) && typeof args.command === "string") return { kind: "tool", tool, input: { command: args.command } };
+	return { kind: "tool", tool, input: args };
+}
 
 /** Clip a diagnostic field; classifier transcript entries are never clipped. */
 export function clip(value: string, max: number): string {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { classifierText } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
-import { actionLength, ccToolName, MAX_ACTION_CHARS, renderTranscript, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
+import { actionLength, ccToolName, toolCallEntry, MAX_ACTION_CHARS, renderTranscript, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
 describe("ccToolName", () => {
 	it("maps native snake_case names to Claude Code's PascalCase", () => {
@@ -126,5 +126,26 @@ describe("the hand-back entry", () => {
 
 	it("leaves other tags and look-alike words alone", () => {
 		expect(inside("<b>bold</b> <transcripts> <subagent_hand_back>")).toBe("  <b>bold</b> <transcripts> <subagent_hand_back>");
+	});
+});
+
+describe("toolCallEntry", () => {
+	it("shows a shell call by its command, whatever else the call carries", () => {
+		expect(toolCallEntry("bash", { command: "npm test", description: "Run tests", timeout: 60 })).toEqual({ kind: "tool", tool: "bash", input: { command: "npm test" } });
+	});
+
+	it("shows the command the harness really runs when it rewrote the call", () => {
+		expect(toolCallEntry("bash", { command: "npm test" }, "cd /wt && npm test")).toEqual({ kind: "tool", tool: "bash", input: { command: "cd /wt && npm test" } });
+	});
+
+	it("shows every other tool by its whole input", () => {
+		const input = { path: "a.ts", content: "x", _host: "container" };
+		expect(toolCallEntry("write", input)).toEqual({ kind: "tool", tool: "write", input });
+	});
+
+	it("renders a missing or malformed input as empty, never throws", () => {
+		expect(toolCallEntry("read", undefined)).toEqual({ kind: "tool", tool: "read", input: {} });
+		expect(toolCallEntry("read", ["a"])).toEqual({ kind: "tool", tool: "read", input: {} });
+		expect(() => renderTranscript([toolCallEntry("bash", null)])).not.toThrow();
 	});
 });

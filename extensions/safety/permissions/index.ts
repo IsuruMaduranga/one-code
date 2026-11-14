@@ -54,7 +54,7 @@ import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/prod
 import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
-import type { TranscriptEntry } from "./auto-mode/transcript.ts";
+import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "./auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
@@ -1540,7 +1540,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					// worktree it runs in (the classifier transcript already holds it).
 					{
 						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
-						appendEntry: { kind: "tool", tool: normalizedTool, input: original !== undefined ? { command: original.command } : event.input as Record<string, unknown> },
+						appendEntry: toolCallEntry(normalizedTool, event.input, original?.command),
 					},
 				);
 				if (outcome.decision === "allow") {
@@ -1768,14 +1768,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// user, and child work must not continue through it unattended.
 		if (result.decision === "classify" && !pauseTracker.isPaused()) {
 			if (!ctx) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
-			const appendEntry: TranscriptEntry = {
-				kind: "tool",
-				tool: normalizedTool,
-				input: isShellTool(normalizedTool) ? { command: subject } : input,
-			};
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
-				appendEntry,
+				appendEntry: toolCallEntry(normalizedTool, input),
 				// The main session as far as the call that started this child's turn.
 				history: childCursor(call.parentToolCallId),
 				// The child's own turn signal, so an aborted child turn cancels the
@@ -2261,8 +2256,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// child's report (transcript.ts says why it must be last). reviewOnly runs
 		// a single stage-2 full-eval — there is no harm floor to short-circuit for
 		// a run that already happened.
-		// An emitter built against the older payload sends no input; render it empty rather than throw.
-		const childEntries: TranscriptEntry[] = run.actions.map((action) => ({ kind: "tool", tool: normalizeToolName(action.toolName), input: action.input ?? {} }));
+		// toolCallEntry renders an emitter's missing input (an older payload) as empty rather than throw.
+		const childEntries = run.actions.map((action) => toolCallEntry(normalizeToolName(action.toolName), action.input));
 		childEntries.push({ kind: "hand-back", report: run.report });
 		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(
