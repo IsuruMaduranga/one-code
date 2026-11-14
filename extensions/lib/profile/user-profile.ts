@@ -27,6 +27,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { productProfileId, PROFILE_NAME, userProfileFile } from "./brand.mjs";
 import { dirname } from "node:path";
+import { isPlainObject } from "../core/plain-object.ts";
 
 /** A user's wording for one tool: its description replaced, added to, or both. */
 export interface ToolWording {
@@ -58,9 +59,6 @@ const FIELDS = new Set(["description", "base", "tools", "features"]);
 const TOOL_LISTS = ["off", "deferred", "eager"] as const;
 const APPEND_SUFFIX = ".append.md";
 
-function isObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /** The names of `value[key]`, a list of strings; a problem when it is anything else. */
 function names(value: unknown, where: string, problems: string[]): string[] {
@@ -102,7 +100,7 @@ export function loadUserProfile(name: string, dir: string, productProfiles: read
 	if (existsSync(file)) {
 		try {
 			const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-			if (!isObject(parsed)) problems.push(`${file} must hold a JSON object`);
+			if (!isPlainObject(parsed)) problems.push(`${file} must hold a JSON object`);
 			else data = parsed;
 		} catch (error) {
 			problems.push(`${file} is not valid JSON (${error instanceof Error ? error.message : String(error)})`);
@@ -118,7 +116,7 @@ export function loadUserProfile(name: string, dir: string, productProfiles: read
 	}
 	const tools = data.tools ?? {};
 	const lists: Record<(typeof TOOL_LISTS)[number], string[]> = { off: [], deferred: [], eager: [] };
-	if (!isObject(tools)) problems.push(`${file}: "tools" must be an object with ${TOOL_LISTS.join(", ")}`);
+	if (!isPlainObject(tools)) problems.push(`${file}: "tools" must be an object with ${TOOL_LISTS.join(", ")}`);
 	else {
 		for (const key of Object.keys(tools)) if (!(TOOL_LISTS as readonly string[]).includes(key)) problems.push(`${file}: unknown field "tools.${key}" (known: ${TOOL_LISTS.join(", ")})`);
 		for (const key of TOOL_LISTS) lists[key] = names(tools[key], `${file}: "tools.${key}"`, problems);
@@ -126,7 +124,7 @@ export function loadUserProfile(name: string, dir: string, productProfiles: read
 	}
 	const features = data.features ?? {};
 	let featuresOff: string[] = [];
-	if (!isObject(features)) problems.push(`${file}: "features" must be an object with "off"`);
+	if (!isPlainObject(features)) problems.push(`${file}: "features" must be an object with "off"`);
 	else {
 		for (const key of Object.keys(features)) if (key !== "off") problems.push(`${file}: unknown field "features.${key}" (a user's profile can only turn features off)`);
 		featuresOff = names(features.off, `${file}: "features.off"`, problems);

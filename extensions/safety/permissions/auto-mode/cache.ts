@@ -1,6 +1,7 @@
 /** Classifier cache breakpoints on the wire. Never changes classifier text or verdict behavior. */
 
 import { MAX_SIDE_CALL_CACHE_MARKERS } from "../../../lib/side-calls/side-call-cache.ts";
+import { isPlainObject } from "../../../lib/core/plain-object.ts";
 
 type WireRecord = Record<string, unknown>;
 
@@ -37,13 +38,13 @@ export const CLASSIFIER_CACHE_APIS: ReadonlySet<string> = new Set(["anthropic-me
  * - one `{ text }` block then a `{ cachePoint }` block (Bedrock Converse).
  */
 export function cacheClassifierHistory(payload: unknown, parts: readonly string[], historyEnd: number, previousEnd?: number): void {
-	if (!isRecord(payload) || !Array.isArray(payload.messages)) return;
+	if (!isPlainObject(payload) || !Array.isArray(payload.messages)) return;
 	const messages = payload.messages;
-	const userIndex = messages.findIndex((message) => isRecord(message) && message.role === "user");
-	if (userIndex === -1 || messages.some((message, i) => i !== userIndex && !(isRecord(message) && (message.role === "system" || message.role === "developer")))) return;
+	const userIndex = messages.findIndex((message) => isPlainObject(message) && message.role === "user");
+	if (userIndex === -1 || messages.some((message, i) => i !== userIndex && !(isPlainObject(message) && (message.role === "system" || message.role === "developer")))) return;
 	const message = messages[userIndex] as WireRecord;
 	const content = message.content;
-	if (!Array.isArray(content) || !content.every(isRecord)) return;
+	if (!Array.isArray(content) || !content.every(isPlainObject)) return;
 	const text = parts.join("");
 	const marker = anthropicMarker(content, text);
 	const point = marker === undefined ? bedrockCachePoint(content, text, parts) : undefined;
@@ -77,12 +78,9 @@ function bedrockCachePoint(content: WireRecord[], text: string, parts: readonly 
 
 /** Breakpoints elsewhere in the request: the tools, the system prompt and any instruction message. */
 function markersOutside(payload: WireRecord, message: WireRecord): number {
-	const count = (value: unknown) => (Array.isArray(value) ? value.filter((block) => isRecord(block) && (block.cache_control !== undefined || block.cachePoint !== undefined)).length : 0);
-	const toolConfig = isRecord(payload.toolConfig) ? payload.toolConfig.tools : undefined;
+	const count = (value: unknown) => (Array.isArray(value) ? value.filter((block) => isPlainObject(block) && (block.cache_control !== undefined || block.cachePoint !== undefined)).length : 0);
+	const toolConfig = isPlainObject(payload.toolConfig) ? payload.toolConfig.tools : undefined;
 	const others = (payload.messages as unknown[]).filter((entry) => entry !== message);
-	return count(payload.tools) + count(toolConfig) + count(payload.system) + others.reduce<number>((sum, entry) => sum + (isRecord(entry) ? count(entry.content) : 0), 0);
+	return count(payload.tools) + count(toolConfig) + count(payload.system) + others.reduce<number>((sum, entry) => sum + (isPlainObject(entry) ? count(entry.content) : 0), 0);
 }
 
-function isRecord(value: unknown): value is WireRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}

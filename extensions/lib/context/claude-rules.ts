@@ -5,6 +5,7 @@ import ignore, { type Ignore } from "ignore";
 import { Lexer, type Token } from "marked";
 import { parse as parseYaml } from "yaml";
 import { absoluteFrom, comparablePath, expandTilde, forwardSlashes, isPathAtOrUnder, isRelativeInside, tryRealpath } from "../profile/paths.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 /** pO/Oee: instruction files larger than 4 MiB are skipped, never truncated. */
 export const MAX_INSTRUCTION_BYTES = 4_194_304;
@@ -58,8 +59,7 @@ export function splitRulePaths(value: unknown): string[] {
 
 /** Fs retries hand-written YAML after quoting special scalars and expanding leading tabs. */
 function frontmatterValue(yaml: string): Record<string, unknown> {
-	const object = (value: unknown): Record<string, unknown> =>
-		value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+	const object = (value: unknown): Record<string, unknown> => (isPlainObject(value) ? value : {});
 	try { return object(parseYaml(yaml)); } catch { /* retry below */ }
 	const repaired = yaml.split("\n").map((line) => {
 		const match = line.match(/^([a-zA-Z_-]+):\s+(\S.*)$/);

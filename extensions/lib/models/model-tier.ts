@@ -42,6 +42,7 @@ import {
 	supportsImageInput,
 } from "./model-policy.ts";
 import { productSettingsPath } from "../profile/product-settings.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 
@@ -228,8 +229,8 @@ export function modelTierOverrides(): Record<string, PromptTier> {
 	}
 	const raw = mtimeMs < 0 ? undefined : readJsonFile<{ modelTiers?: unknown }>(path)?.modelTiers;
 	const tiers: Record<string, PromptTier> = {};
-	if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-		for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+	if (isPlainObject(raw)) {
+		for (const [key, value] of Object.entries(raw)) {
 			if (isPromptTier(value)) tiers[key] = value;
 		}
 	}

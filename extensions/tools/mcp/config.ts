@@ -33,6 +33,7 @@ import { dirname, join, resolve } from "node:path";
 import { expandTilde } from "../../lib/profile/paths.ts";
 import { type McpFile, openSources } from "../../lib/profile/sources.ts";
 import { hashServerConfig } from "./trust.ts";
+import { isPlainObject } from "../../lib/core/plain-object.ts";
 
 export interface StdioServer {
 	kind: "stdio";
@@ -276,12 +277,10 @@ export function mcpConfigFiles(cwd: string, home: string): McpFile[] {
 function serverMapOf(file: Record<string, unknown> | undefined): Record<string, RawServer> | undefined {
 	if (!file || typeof file !== "object") return undefined;
 	const wrapped = (file as { mcpServers?: unknown }).mcpServers;
-	if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
+	if (isPlainObject(wrapped)) {
 		return wrapped as Record<string, RawServer>;
 	}
-	const looksLikeServerMap = Object.values(file).every(
-		(value) => value && typeof value === "object" && !Array.isArray(value),
-	);
+	const looksLikeServerMap = Object.values(file).every(isPlainObject);
 	return looksLikeServerMap ? (file as Record<string, RawServer>) : undefined;
 }
 

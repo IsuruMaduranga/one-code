@@ -26,6 +26,7 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import type { HandBackVerdict } from "../notify/notifications.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export const SUBAGENT_ACTIONS_CHANNEL = brandedId("subagent-actions");
 
@@ -68,5 +69,5 @@ export interface SubagentActionsPayload {
 
 /** Record one call the child started: its name and a deep copy of its input, so a hook that later rewrites the live arguments does not change what the review sees. */
 export function recordAction(log: ChildAction[], toolName: string, input: unknown): void {
-	log.push({ toolName, input: input && typeof input === "object" && !Array.isArray(input) ? structuredClone(input as Record<string, unknown>) : {} });
+	log.push({ toolName, input: isPlainObject(input) ? structuredClone(input) : {} });
 }
