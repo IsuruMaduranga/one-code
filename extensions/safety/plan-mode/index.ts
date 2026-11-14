@@ -56,7 +56,7 @@ import {
 } from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch, planFileRecords, type PlanFileRecord } from "../../lib/rules/plan-mode-channels.ts";
-import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 import { planModeResultText } from "./text.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 
@@ -383,7 +383,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			const maxVisible = 12;
 			let offset = 0;
 			let selected: PlanChoice = initialPlanChoice(options);
-			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : panelUi(pi.events, ctx.ui).custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
+			const showDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
 				// An aborted turn closes the dialog as a cancel; a choice or a cancel
 				// drops the abort listener. Either way the dialog settles once.
 				let settled = false;

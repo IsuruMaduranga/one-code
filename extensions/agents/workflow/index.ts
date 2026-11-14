@@ -81,7 +81,7 @@ import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { followEnteredWorktree } from "../../lib/agents/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../../lib/ui/key-input.ts";
 import { projectConfigDirName } from "../../lib/profile/sources.ts";
-import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
 import { queryDeferred } from "../../lib/request/deferred.ts";
 import { workflowResultText } from "./text.ts";
@@ -520,7 +520,7 @@ async function openWorkflowViewer(
 	stripRows: () => number,
 	opts?: { height?: "full" | "half"; runIndex?: number },
 ): Promise<void> {
-	await panelUi(events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
+	await panelUi(events, ctx.ui, PAGING_PANEL).custom<null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 
 		// Newest run first, so the viewer opens on the latest.
