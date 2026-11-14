@@ -7,12 +7,14 @@ import { writeJsonAtomic } from "../../extensions/lib/core/atomic-write.ts";
 import { type CatalogSources, catalogCacheDir, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { resolveModelTier } from "../../extensions/lib/models/model-tier.ts";
 import { requestSystemPrompt } from "../../extensions/lib/ui/prompt-options.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { registerFormTool } from "../../extensions/lib/profile/tool-variants.ts";
 import { sessionModelTier } from "../../extensions/lib/models/session-model-tier.ts";
 import searchToolsExtension from "../../extensions/tools/search-tools/index.ts";
 import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";
 import { catalogSources } from "./catalog-fixture.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { useProfile } from "./helpers/profile.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { cwdLine } from "../../extensions/request/system-prompt/text.ts";
 
@@ -77,8 +79,11 @@ function setup(betweenConsumers?: () => void) {
 
 beforeEach(() => {
 	vi.stubEnv(envName("PROMPT_TIER"), "auto");
+	// These tests cover the tier policy with grep, find and ls on, whatever the shipped profile turns off.
+	useProfile({ features: {} });
 });
 afterEach(() => {
+	setActiveProfileForTest(undefined);
 	vi.unstubAllEnvs();
 	vi.restoreAllMocks();
 });
@@ -147,6 +152,18 @@ describe("the session's request-surface tier", () => {
 		expect(await t.idlePrompt()).toBe(before.prompt);
 		expect(requestSystemPrompt(t.fake.events, t.ctx)).toBe(before.prompt);
 		expect(await t.request()).toEqual(before);
+	});
+
+	it("keeps all three search tools out on the tiny tier when the profile turns any of them off", async () => {
+		for (const off of searchTools) {
+			useProfile({ tools: { [off]: { enabled: false } } });
+			catalog("tiny");
+			const t = setup();
+			// A loadout that still carries them, as a restored branch can.
+			t.fake.setActiveTools([...baseTools, ...searchTools]);
+			await t.fake.fire("session_start", { reason: "startup" }, t.ctx);
+			expect((await t.request()).tools, off).toEqual(baseTools);
+		}
 	});
 
 	it("re-resolves the prompt, descriptions and search tools together on model_select", async () => {

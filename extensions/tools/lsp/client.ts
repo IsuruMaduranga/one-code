@@ -9,6 +9,9 @@
  * - Content is pushed with didOpen/didChange before every diagnostics read, so
  *   the answer reflects the file on disk even if the edit was the session's
  *   first action.
+ * - A change made on disk by something else reaches the server only when a
+ *   caller reports it (`applyDiskChanges`) or asks for a refresh of the open
+ *   files (`refreshOpenFiles`); the client watches no files itself.
  * - `waitForDiagnostics` awaits the next publish for that document instead of
  *   sleeping a fixed interval, with a timeout and a last-known fallback.
  * - Child handles are unref'd and shut down explicitly, so a one-shot `pi -p`
@@ -16,7 +19,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, type Stats, statSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { LspFailureError } from "./failure.ts";
 import type { LspDiagnostic } from "./format.ts";
@@ -61,8 +64,34 @@ export function configurationResponse(settings: unknown, params: unknown): unkno
 }
 
 interface OpenDocument {
+	path: string;
+	languageId: string;
 	version: number;
 	text: string;
+	/** The file's stat when `text` was read, so a later look can tell it moved without reading it. */
+	mtimeMs: number;
+	size: number;
+}
+
+/**
+ * A file that changed on disk without the session's own edit tools (a shell
+ * command, a build tool, the user's editor). `type` is what happened when the
+ * caller knows; the disk decides whether the file is gone.
+ */
+export interface DiskChange {
+	path: string;
+	type?: "created" | "changed" | "deleted";
+}
+
+/** The LSP `FileChangeType` values of `workspace/didChangeWatchedFiles`. */
+const FILE_CHANGE_TYPE = { created: 1, changed: 2, deleted: 3 } as const;
+
+function statOf(path: string): Stats | undefined {
+	try {
+		return statSync(path);
+	} catch {
+		return undefined;
+	}
 }
 
 export class LspClient {
@@ -161,7 +190,10 @@ export class LspClient {
 						synchronization: { dynamicRegistration: false, didSave: false },
 						publishDiagnostics: { relatedInformation: false },
 					},
-					workspace: { workspaceFolders: true, configuration: true },
+					// Static support only: a server that sees dynamic registration
+					// may hand its file watching to the client, and this client
+					// watches nothing (it sends what `applyDiskChanges` is told).
+					workspace: { workspaceFolders: true, configuration: true, didChangeWatchedFiles: { dynamicRegistration: false } },
 				},
 			},
 			this.options.startupTimeoutMs ?? INITIALIZE_TIMEOUT_MS,
@@ -246,29 +278,93 @@ export class LspClient {
 	 * different language ids.
 	 */
 	syncFile(path: string, languageId: string): string {
+		this.push(path, languageId);
+		return pathToUri(path);
+	}
+
+	/** `didOpen` or `didChange` from disk; true when either was sent. An unreadable file sends nothing. */
+	private push(path: string, languageId: string): boolean {
 		const uri = pathToUri(path);
+		// Stat before the read: a write between the two leaves a stat older
+		// than the text, so the next look reads again instead of missing it.
+		const stat = statOf(path);
 		let text: string;
 		try {
 			text = readFileSync(path, "utf-8");
 		} catch {
-			return uri;
+			return false;
 		}
+		const seen = { mtimeMs: stat?.mtimeMs ?? 0, size: stat?.size ?? -1 };
 
 		const existing = this.open.get(uri);
 		if (!existing) {
-			this.open.set(uri, { version: 1, text });
+			this.open.set(uri, { path, languageId, version: 1, text, ...seen });
 			this.notify("textDocument/didOpen", {
 				textDocument: { uri, languageId, version: 1, text },
 			});
-		} else if (existing.text !== text) {
-			const version = existing.version + 1;
-			this.open.set(uri, { version, text });
-			this.notify("textDocument/didChange", {
-				textDocument: { uri, version },
-				contentChanges: [{ text }],
-			});
+			return true;
 		}
-		return uri;
+		if (existing.text === text) {
+			this.open.set(uri, { ...existing, ...seen });
+			return false;
+		}
+		const version = existing.version + 1;
+		this.open.set(uri, { ...existing, version, text, ...seen });
+		this.notify("textDocument/didChange", {
+			textDocument: { uri, version },
+			contentChanges: [{ text }],
+		});
+		return true;
+	}
+
+	/**
+	 * Tell the server about files that changed on disk, without opening any.
+	 * A file the server holds open gets `didChange` from disk (an open copy
+	 * wins over the disk on the server, so nothing else reaches it), or
+	 * `didClose` when it is gone; every other file goes in one
+	 * `workspace/didChangeWatchedFiles`. Returns the uris whose open copy
+	 * changed or closed.
+	 */
+	applyDiskChanges(changes: readonly DiskChange[]): string[] {
+		const updated: string[] = [];
+		const watched: Array<{ uri: string; type: number }> = [];
+		for (const change of changes) {
+			const uri = pathToUri(change.path);
+			const gone = statOf(change.path) === undefined;
+			const document = this.open.get(uri);
+			if (document) {
+				if (!gone) {
+					if (this.push(document.path, document.languageId)) updated.push(uri);
+					continue;
+				}
+				// Its diagnostics go with it: a server need not publish an empty
+				// list on close, and a read of the dead path must not answer from them.
+				this.open.delete(uri);
+				this.diagnostics.delete(uri);
+				updated.push(uri);
+				this.notify("textDocument/didClose", { textDocument: { uri } });
+			}
+			const type = gone ? "deleted" : change.type === "created" ? "created" : "changed";
+			watched.push({ uri, type: FILE_CHANGE_TYPE[type] });
+		}
+		if (watched.length > 0) this.notify("workspace/didChangeWatchedFiles", { changes: watched });
+		return updated;
+	}
+
+	/**
+	 * Bring every open file whose stat moved since it was sent up to date
+	 * (`applyDiskChanges`), except `skip`, which the caller syncs itself.
+	 * Cheap when nothing moved: one stat per open file, no reads.
+	 */
+	refreshOpenFiles(skip?: string): string[] {
+		const skipUri = skip === undefined ? undefined : pathToUri(skip);
+		const moved: DiskChange[] = [];
+		for (const [uri, document] of this.open) {
+			if (uri === skipUri) continue;
+			const stat = statOf(document.path);
+			if (!stat || stat.mtimeMs !== document.mtimeMs || stat.size !== document.size) moved.push({ path: document.path });
+		}
+		return moved.length > 0 ? this.applyDiskChanges(moved) : [];
 	}
 
 	/** Wait for the next publish for `uri`; resolves early if one already arrived. */
@@ -293,14 +389,10 @@ export class LspClient {
 	 */
 	async getDiagnostics(path: string, languageId: string, timeoutMs = DIAGNOSTICS_TIMEOUT_MS): Promise<LspDiagnostic[]> {
 		const uri = pathToUri(path);
-		const hadContent = this.open.get(uri)?.text;
-		const synced = this.syncFile(path, languageId);
-		const changed = this.open.get(uri)?.text !== hadContent;
-
-		if (changed || !this.diagnostics.has(synced)) {
-			await this.waitForPublish(synced, timeoutMs);
+		if (this.push(path, languageId) || !this.diagnostics.has(uri)) {
+			await this.waitForPublish(uri, timeoutMs);
 		}
-		return this.diagnostics.get(synced) ?? [];
+		return this.diagnostics.get(uri) ?? [];
 	}
 
 	/** Everything the server has published, per document uri (for the watcher). */

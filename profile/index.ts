@@ -48,7 +48,8 @@ import { worktree } from "./text/worktree/index.ts";
 
 export const profile: Profile = {
 	features: {},
-	tools: {},
+	// Search goes through the shell on every tier: pi's grep, find and ls are off (decisions/tools.md).
+	tools: { grep: { enabled: false }, find: { enabled: false }, ls: { enabled: false } },
 	childExtensions: [],
 	text: ({ live }) => ({
 		systemPrompt: systemPromptText(live),

@@ -8,6 +8,8 @@
  * (OpenRouter's `anthropic/*`), and has none to move otherwise.
  */
 
+import { isPlainObject } from "../core/plain-object.ts";
+
 /** The APIs whose standalone side-call payload this placement applies to. */
 export const SIDE_CALL_CACHE_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-completions"]);
 
@@ -22,7 +24,7 @@ type WireRecord = Record<string, unknown>;
  * payload shapes are left unchanged rather than being normalised.
  */
 export function cacheSideCallConversation(payload: unknown): void {
-	if (!isRecord(payload) || !Array.isArray(payload.messages)) return;
+	if (!isPlainObject(payload) || !Array.isArray(payload.messages)) return;
 	const messages = payload.messages;
 	const questionIndex = messages.length - 1;
 	const question = asMessage(messages[questionIndex]);
@@ -76,11 +78,11 @@ function precedingCacheableBlock(messages: unknown[], questionIndex: number): Ta
 }
 
 function asMessage(value: unknown): WireRecord | undefined {
-	return isRecord(value) && typeof value.role === "string" ? value : undefined;
+	return isPlainObject(value) && typeof value.role === "string" ? value : undefined;
 }
 
 function blocks(value: unknown): WireRecord[] {
-	return Array.isArray(value) && value.every(isRecord) ? value : [];
+	return Array.isArray(value) && value.every(isPlainObject) ? value : [];
 }
 
 /** This is pi-ai's own list from its Anthropic message converter. */
@@ -106,18 +108,15 @@ function capMarkers(payload: WireRecord): void {
 
 /** Tool definitions and top-level system blocks can each carry one marker. */
 function topLevelMarkers(value: unknown): WireRecord[] {
-	return Array.isArray(value) ? value.filter((entry): entry is WireRecord => isRecord(entry) && entry.cache_control !== undefined) : [];
+	return Array.isArray(value) ? value.filter((entry): entry is WireRecord => isPlainObject(entry) && entry.cache_control !== undefined) : [];
 }
 
 /** Only a message content block is an Anthropic conversation marker. Never inspect block payloads. */
 function messageMarkers(value: unknown): WireRecord[] {
 	if (!Array.isArray(value)) return [];
-	return value.flatMap((message) => (isRecord(message) ? blocks(message.content).filter((block) => block.cache_control !== undefined) : []));
+	return value.flatMap((message) => (isPlainObject(message) ? blocks(message.content).filter((block) => block.cache_control !== undefined) : []));
 }
 
-function isRecord(value: unknown): value is WireRecord {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 
 /** The conversation cache placement a side call passes to `runSideCall` (`side-call-run.ts`). */

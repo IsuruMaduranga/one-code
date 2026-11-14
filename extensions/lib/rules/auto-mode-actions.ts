@@ -12,29 +12,37 @@
  * while the sequence is what matters. That is only visible once the child is
  * done, which is what this records.
  *
- * The log deliberately holds names and short subjects rather than tool output:
- * output is untrusted content, and feeding it to the classifier is the injection
- * path auto mode exists to close.
+ * The log holds each call's input whole, with no cap on the number of
+ * calls: a clipped command hid its tail from the review, and a count cap hid
+ * everything after it. It never holds tool output: output is untrusted
+ * content, and feeding it to the classifier is the injection path auto mode
+ * exists to close. A run too large for the classifier is not judged (the
+ * review reports it unavailable). The child's final report travels beside
+ * the log, because the report is what reaches the parent: the review judges
+ * it as the hand-back, framed as untrusted agent output.
  */
 
 import { brandedId } from "../profile/brand.mjs";
 import type { HandBackVerdict } from "../notify/notifications.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export const SUBAGENT_ACTIONS_CHANNEL = brandedId("subagent-actions");
 
 export interface ChildAction {
 	toolName: string;
-	/** Command or path, clipped. Never tool output. */
-	subject: string;
+	/** The call's input as the model wrote it, whole. Never tool output. */
+	input: Record<string, unknown>;
 }
 
 export interface SubagentActionsPayload {
 	/** The parent's tool call id, so a foreground review attaches to the right result. */
 	toolCallId: string;
 	actions: ChildAction[];
+	/** The child's final report, whole (the parent may get a bounded preview of it): the review's last transcript entry. */
+	report: string;
 	/**
 	 * True for a background/resident run: the spawning call has already returned, so
-	 * there is no pending tool_result to attach the holistic review to. The gate
+	 * there is no pending tool_result to attach the hand-back review to. The gate
 	 * reviews on receipt and surfaces any concern as its own notification instead.
 	 */
 	background?: boolean;
@@ -57,14 +65,16 @@ export interface SubagentActionsPayload {
 	onReview?: (verdict: HandBackVerdict | undefined) => void;
 }
 
-/** Per-action and total caps: a long-running child must not blow up the prompt. */
-const SUBJECT_LIMIT = 160;
-const MAX_ACTIONS = 60;
+/** Record one call the child started: its name and a deep copy of its input, so a hook that later rewrites the live arguments does not change what the review sees. */
+/**
+ * Whether a finished turn has anything to review: a call it made, or a report
+ * it hands back. A turn whose only call was the hand-back has no actions but
+ * still a report the parent will act on.
+ */
+export function hasReviewableWork(run: { actions: readonly ChildAction[]; report: string }): boolean {
+	return run.actions.length > 0 || run.report.trim() !== "";
+}
 
 export function recordAction(log: ChildAction[], toolName: string, input: unknown): void {
-	if (log.length >= MAX_ACTIONS) return;
-	const args = (input ?? {}) as Record<string, unknown>;
-	const raw = args.command ?? args.file_path ?? args.path ?? args.url ?? args.pattern ?? "";
-	const subject = typeof raw === "string" ? raw : JSON.stringify(raw);
-	log.push({ toolName, subject: subject.slice(0, SUBJECT_LIMIT) });
+	log.push({ toolName, input: isPlainObject(input) ? structuredClone(input) : {} });
 }

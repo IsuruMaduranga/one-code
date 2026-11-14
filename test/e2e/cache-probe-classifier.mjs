@@ -20,7 +20,12 @@
  *      block; a miss there is a WARN, since OpenRouter can route consecutive
  *      calls to different upstream providers.
  *
- * Usage: node test/e2e/cache-probe-classifier.mjs <classifier.jsonl> [--slack N]
+ * With `--review` (cache-probe.sh's review phase) the log must also hold a
+ * subagent's hand-back review (a row whose tool is `subagent-review`) after at
+ * least one earlier call, so check 3 covers the review reading the
+ * cache its spawn and the child's calls wrote.
+ *
+ * Usage: node test/e2e/cache-probe-classifier.mjs <classifier.jsonl> [--slack N] [--review]
  * Exit 1 on a failed check.
  */
 import { readFileSync } from "node:fs";
@@ -28,7 +33,7 @@ import { readFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
 if (!file) {
-	console.error("usage: cache-probe-classifier.mjs <classifier.jsonl> [--slack N]");
+	console.error("usage: cache-probe-classifier.mjs <classifier.jsonl> [--slack N] [--review]");
 	process.exit(2);
 }
 const slackIndex = args.indexOf("--slack");
@@ -49,6 +54,10 @@ const firstDiff = (a, b) => {
 
 const failures = [];
 const warnings = [];
+if (args.includes("--review")) {
+	const at = rows.findIndex((r) => r.tool === "subagent-review");
+	if (at < 1) failures.push(at === -1 ? "no hand-back review was recorded; did the model call the Agent tool, and did the child make a gated call?" : "the hand-back review is the first classifier call; nothing before it to read from");
+}
 if (rows.length < 2) failures.push(`only ${rows.length} classifier request(s) recorded; the check needs at least two gated calls`);
 
 const calls = rows.map((r) => {

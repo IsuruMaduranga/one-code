@@ -5,7 +5,8 @@
  * `extensions/sdk/extension.ts` re-exports. One Code ships none, so the
  * loading cases run in the base suite, on the fixture profile's `probe`.
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -14,7 +15,8 @@ import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensio
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
 import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
-import { createFakePi } from "./helpers/fake-pi.ts";
+import { LSP_FILES_CHANGED_CHANNEL, type LspFilesChangedEvent } from "../../extensions/tools/lsp/request-channel.ts";
+import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const root = join(PROFILE_DIR, PRODUCT_EXTENSIONS_DIR);
 const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name) : [];
@@ -53,5 +55,26 @@ describe("a product's own extensions", () => {
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});
 		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
+	});
+
+	it.skipIf(!existsSync(probe))("the fixture's probe reports the file its tool writes to the language server", async () => {
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_FILE: string };
+		const fake = createFakePi();
+		const reports: LspFilesChangedEvent[] = [];
+		fake.events.on(LSP_FILES_CHANGED_CHANNEL, (data) => {
+			const report = data as LspFilesChangedEvent;
+			reports.push(report);
+			report.reply(Promise.resolve());
+		});
+		module.default(fake.pi as never);
+		const cwd = mkdtempSync(join(tmpdir(), "probe-"));
+		try {
+			await fake.tools.get(module.PROBE_TOOL)!.execute("t", {}, undefined, undefined, createFakeCtx({ cwd }));
+			const path = join(cwd, module.PROBE_FILE);
+			expect(readFileSync(path, "utf8")).toBe("[fixture:probe-file]\n");
+			expect(reports.map(({ server, changes }) => ({ server, changes }))).toEqual([{ server: "fixture", changes: [{ path, type: "created" }] }]);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 });

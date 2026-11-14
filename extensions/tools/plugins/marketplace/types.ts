@@ -9,6 +9,7 @@
  */
 
 import { validPluginName } from "../../../lib/plugins/plugins.ts";
+import { isPlainObject } from "../../../lib/core/plain-object.ts";
 
 export type MarketplaceSource =
 	| { source: "github"; repo: string; ref?: string }
@@ -50,14 +51,11 @@ export interface MarketplaceManifest {
 	plugins: MarketplaceEntry[];
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function validEntrySource(value: unknown): value is PluginEntrySource {
 	// A string source is a marketplace-relative path and must say so ("./…").
 	if (typeof value === "string") return value.startsWith("./");
-	if (!isRecord(value)) return false;
+	if (!isPlainObject(value)) return false;
 	switch (value.source) {
 		case "github":
 			return typeof value.repo === "string" && value.repo.length > 0;
@@ -73,7 +71,7 @@ function validEntrySource(value: unknown): value is PluginEntrySource {
 /** Validate a parsed marketplace.json. Entry-level problems land in `errors`; good entries survive. */
 export function parseMarketplaceManifest(raw: unknown): { manifest?: MarketplaceManifest; errors: string[] } {
 	const errors: string[] = [];
-	if (!isRecord(raw)) return { errors: ["marketplace.json must be a JSON object"] };
+	if (!isPlainObject(raw)) return { errors: ["marketplace.json must be a JSON object"] };
 	if (typeof raw.name !== "string" || raw.name.length === 0) {
 		return { errors: ['marketplace.json is missing a "name"'] };
 	}
@@ -83,7 +81,7 @@ export function parseMarketplaceManifest(raw: unknown): { manifest?: Marketplace
 
 	const plugins: MarketplaceEntry[] = [];
 	for (const [index, entry] of raw.plugins.entries()) {
-		if (!isRecord(entry) || typeof entry.name !== "string" || validPluginName(entry.name) !== entry.name) {
+		if (!isPlainObject(entry) || typeof entry.name !== "string" || validPluginName(entry.name) !== entry.name) {
 			errors.push(`plugins[${index}]: missing or invalid "name" — entry skipped`);
 			continue;
 		}
@@ -96,15 +94,15 @@ export function parseMarketplaceManifest(raw: unknown): { manifest?: Marketplace
 			source: entry.source as PluginEntrySource,
 			description: typeof entry.description === "string" ? entry.description : undefined,
 			version: typeof entry.version === "string" ? entry.version : undefined,
-			author: isRecord(entry.author) && typeof entry.author.name === "string" ? { name: entry.author.name } : undefined,
+			author: isPlainObject(entry.author) && typeof entry.author.name === "string" ? { name: entry.author.name } : undefined,
 			category: typeof entry.category === "string" ? entry.category : undefined,
 			tags: Array.isArray(entry.tags) ? entry.tags.filter((t): t is string => typeof t === "string") : undefined,
 			raw: entry,
 		});
 	}
 
-	const owner = isRecord(raw.owner) && typeof raw.owner.name === "string" ? { name: raw.owner.name } : undefined;
-	const metadata = isRecord(raw.metadata) ? raw.metadata : undefined;
+	const owner = isPlainObject(raw.owner) && typeof raw.owner.name === "string" ? { name: raw.owner.name } : undefined;
+	const metadata = isPlainObject(raw.metadata) ? raw.metadata : undefined;
 	return {
 		manifest: {
 			name: raw.name,
@@ -118,7 +116,7 @@ export function parseMarketplaceManifest(raw: unknown): { manifest?: Marketplace
 
 /** Validate one known_marketplaces.json value; undefined when malformed. */
 export function parseKnownMarketplace(raw: unknown): KnownMarketplace | undefined {
-	if (!isRecord(raw) || !isRecord(raw.source) || typeof raw.installLocation !== "string") return undefined;
+	if (!isPlainObject(raw) || !isPlainObject(raw.source) || typeof raw.installLocation !== "string") return undefined;
 	const source = raw.source as MarketplaceSource;
 	if (!["github", "git", "url", "file", "directory"].includes(source.source)) return undefined;
 	return {

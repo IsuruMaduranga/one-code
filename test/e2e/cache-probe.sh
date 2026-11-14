@@ -19,9 +19,12 @@
 # checks that the auto-mode classifier's transcript is a cache read from call
 # to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs over
 # the classifier's own ONECODE_AUTO_MODE_LOG). `--no-classifier` skips it.
-# A third phase repeats a web_fetch reader call against a deterministic page
+# A review phase spawns one subagent that runs a gated command, and checks the
+# hand-back review reads the cache its spawn and the child's call wrote
+# (cache-probe-classifier.mjs --review). `--no-review` skips it.
+# A reader phase repeats a web_fetch reader call against a deterministic page
 # fixture (cache-probe-reader.sh). `--no-reader` skips it.
-# On a first-party Anthropic model a fourth phase registers a tool mid-session
+# On a first-party Anthropic model a late-tool phase registers a tool mid-session
 # and checks it is announced without a cache miss (cache-probe-late-tool.sh).
 # `--no-late-tool` skips it.
 #
@@ -43,6 +46,7 @@ PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle
 PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
 CHECK_ARGS=()
 CLASSIFIER=1
+REVIEW=1
 READER=1
 LATE_TOOL=0
 case "$MODEL" in
@@ -51,6 +55,8 @@ esac
 for arg in "$@"; do
 	if [ "$arg" = "--no-classifier" ]; then
 		CLASSIFIER=0
+	elif [ "$arg" = "--no-review" ]; then
+		REVIEW=0
 	elif [ "$arg" = "--no-reader" ]; then
 		READER=0
 	elif [ "$arg" = "--no-late-tool" ]; then
@@ -92,18 +98,26 @@ echo "workdir: $WORK"
 status=0
 node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"} || status=1
 
-if [ "$CLASSIFIER" = 1 ]; then
-	echo "--- classifier phase"
-	CPROJECT="$WORK/classifier-project"
-	mkdir -p "$CPROJECT"
-	git -C "$CPROJECT" init -q
-	CPROMPT='Run each of these four commands in its own separate bash call, one after another (never combine them, never in parallel), then reply with exactly the word done: curl -sI https://example.com ; curl -sI https://example.org ; curl -sI https://www.iana.org ; curl -sI https://httpbin.org/get'
+# One auto-mode run in its own project, then the classifier cache check over
+# its ONECODE_AUTO_MODE_LOG: auto_phase <name> <prompt> [check flags…].
+auto_phase() {
+	local name="$1" prompt="$2"
+	shift 2
+	echo "--- $name phase"
+	mkdir -p "$WORK/$name-project"
+	git -C "$WORK/$name-project" init -q
 	(
-		cd "$CPROJECT"
-		ONECODE_AUTO_MODE_LOG="$WORK/classifier.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
-	) || echo "pi exited non-zero in the classifier phase (see $WORK/classifier-stderr.log)"
-	touch "$WORK/classifier.jsonl"
-	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/classifier.jsonl" || status=1
+		cd "$WORK/$name-project"
+		ONECODE_AUTO_MODE_LOG="$WORK/$name.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$prompt" > "$WORK/$name-events.jsonl" 2> "$WORK/$name-stderr.log"
+	) || echo "pi exited non-zero in the $name phase (see $WORK/$name-stderr.log)"
+	touch "$WORK/$name.jsonl"
+	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/$name.jsonl" "$@" || status=1
+}
+if [ "$CLASSIFIER" = 1 ]; then
+	auto_phase classifier 'Run each of these four commands in its own separate bash call, one after another (never combine them, never in parallel), then reply with exactly the word done: curl -sI https://example.com ; curl -sI https://example.org ; curl -sI https://www.iana.org ; curl -sI https://httpbin.org/get'
+fi
+if [ "$REVIEW" = 1 ]; then
+	auto_phase review 'Call the Agent tool exactly once, with subagent_type general-purpose and this prompt: "Run curl -sI https://example.com with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' --review
 fi
 if [ "$READER" = 1 ]; then
 	echo "--- reader phase"

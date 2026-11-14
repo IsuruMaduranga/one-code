@@ -152,8 +152,8 @@ export interface ClassifierText extends ClassifierRuleset {
 	stage2IntentAddendum: string;
 	/** After it, when the transcript holds a permission-rule denial: a rule outranks the user's stated intent. */
 	stage2DenialAddendum: string;
-	/** After `stage2Final` in the completed-run subagent review: judge the finished run as a whole. */
-	reviewAddendum: string;
+	/** The note that opens a finished subagent's review entry; the base appends the report in `<subagent_hand_back>` (transcript.ts). */
+	handBackReview: string;
 	/** The `resolvedPaths` meta line's own explanation, which the ruleset has no sentence for. */
 	resolvedPathsNote: string;
 	/** One of the user's deny rules as a HARD BLOCK line (safety/permissions/rule-prose.ts): `name` survives the rule-name scan, `spec` is the rule verbatim. */

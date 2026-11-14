@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, writtenArguments } from "../../extensions/safety/permissions/auto-mode/history.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 
@@ -46,5 +46,18 @@ describe("a subagent's cursor into the main session", () => {
 		{ startedBy: undefined, inFlight: ["first", "second"], expected: { throughToolCallId: "second" } },
 	])("started by $startedBy with $inFlight in flight", ({ startedBy, inFlight, expected }) => {
 		expect(childHistoryCursor(startedBy, inFlight, inFlight.at(-1))).toEqual(expected);
+	});
+});
+
+describe("a pending call's written arguments", () => {
+	const assistant = (id: string, args: Record<string, unknown>) => ({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "on it" }, { type: "toolCall", id, name: "Agent", arguments: args }] } });
+
+	it("finds the call's block on the branch, the latest when an id repeats", () => {
+		const branch = [assistant("same", { prompt: "first" }), { type: "message", message: { role: "user", content: "next" } }, assistant("same", { prompt: "second" })];
+		expect(writtenArguments(branch, "same")).toEqual({ prompt: "second" });
+	});
+
+	it("finds nothing for a call that is not on the branch", () => {
+		expect(writtenArguments([assistant("one", {})], "other")).toBeUndefined();
 	});
 });

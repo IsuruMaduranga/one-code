@@ -15,6 +15,7 @@ import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { guideDocsDirs, GUIDE_DIR } from "../../extensions/lib/agents/guide-docs.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
 import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { shippedProfileWithAllTools } from "./helpers/profile.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { discoverAgents } from "../../extensions/lib/agents/agent-catalog.ts";
 import { guideAgentDefinition as definition, guideSystemPrompt as systemPrompt, type GuideInput, listableName, settingsSetup } from "../../extensions/agents/subagents/guide-agent.ts";
@@ -33,7 +34,8 @@ const STAND_IN = {
 };
 
 beforeAll(() => {
-	const active = activeProfile();
+	// Every tool on: the read-tier checks below cover grep, find and ls, which a profile may turn off.
+	const active = shippedProfileWithAllTools();
 	setActiveProfileForTest({ ...active, text: { ...active.text, subagents: { ...active.text.subagents!, guideAgent: STAND_IN } } });
 });
 afterAll(() => setActiveProfileForTest(undefined));

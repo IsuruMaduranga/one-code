@@ -32,6 +32,16 @@ describe("cache-probe-reader", () => {
 		expect(result.failures).toEqual([]);
 	});
 
+	it("pairs calls that share an id with their own results, and never lends one call another's", () => {
+		const warm = [row(), row({ usage: { input: 1, cacheRead: 5000, cacheWrite: 0 }, messages: [{ role: "user", content: "<page>same page bytes</page>\nQuestion: same question", timestamp: 2 }] })];
+		const start = { type: "tool_execution_start", toolName: "web_fetch", toolCallId: "same", args: { url: READER_PROBE_LONG_URL, prompt: READER_PROBE_QUESTION } };
+		const end = { type: "tool_execution_end", toolName: "web_fetch", toolCallId: "same", result: { isError: false } };
+		const done = { type: "message_end", message: { role: "assistant", stopReason: "stop" } };
+		expect(checkReaderProbe(warm, [start, end, start, end, done]).status).toBe("pass");
+		const unfinished = checkReaderProbe(warm, [start, start, end, end, done]);
+		expect(unfinished.failures).toContain("web_fetch call 1 has no matching result");
+	});
+
 	it("fails a cache miss instead of downgrading it to a warning", () => {
 		const result = checkReaderProbe([row(), row({ usage: { input: 5000, cacheRead: 4999, cacheWrite: 0 } })], events());
 		expect(result.status).toBe("fail");

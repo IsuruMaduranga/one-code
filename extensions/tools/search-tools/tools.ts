@@ -1,23 +1,17 @@
 /**
- * Pure tier → tool-surface policy: which of pi's inactive built-in search
- * tools should be active for a given prompt tier.
+ * Pure tool-surface policy for pi's inactive built-in search tools: all three
+ * active when the session has them (`searchToolsEnabled`), none otherwise.
  */
 
-import type { PromptTier } from "../../lib/models/model-tier.ts";
-
-/** pi built-ins that exist in the registry but are not active by default. */
-export const SEARCH_TOOLS = ["grep", "find", "ls"] as const;
+import { SEARCH_TOOLS } from "../../lib/models/model-tier.ts";
 
 /**
- * Returns the active-tool list adjusted for the tier: only `tiny` gains the
- * search tools (deduped, appended in a stable order); frontier/workhorse/cheap
- * lose them. Claude Code ships no dedicated search tools on any tier (Haiku
- * included — bash covers search), so `cheap` matches CC exactly; the grep/find/ls
- * crutch is reserved for the sub-Haiku `tiny` models CC never serves. Order of
- * the existing names is preserved so the rebuilt system prompt stays byte-stable.
+ * The active-tool list with the search tools added (deduped, appended in a
+ * stable order) when `enabled`, and removed otherwise. The order of the other
+ * names is kept, so the rebuilt system prompt stays byte-stable.
  */
-export function withSearchTools(active: string[], tier: PromptTier): string[] {
-	if (tier !== "tiny") {
+export function withSearchTools(active: string[], enabled: boolean): string[] {
+	if (!enabled) {
 		const drop = new Set<string>(SEARCH_TOOLS);
 		return active.filter((name) => !drop.has(name));
 	}

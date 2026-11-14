@@ -18,14 +18,14 @@
  *
  * Pure: no pi imports.
  */
-import { isObject } from "./records.ts";
+import { isPlainObject } from "../../core/plain-object.ts";
 import { appendPoint } from "./wire.ts";
 
-const roleOf = (element: unknown) => (isObject(element) ? element.role : undefined);
+const roleOf = (element: unknown) => (isPlainObject(element) ? element.role : undefined);
 
 /** A system message that is not the directive-only form, which may sit anywhere. */
 function isContentSystem(element: unknown): boolean {
-	if (roleOf(element) !== "system" || !isObject(element)) return false;
+	if (roleOf(element) !== "system" || !isPlainObject(element)) return false;
 	const content = element.content;
 	return Array.isArray(content) || typeof content === "string" ? content.length > 0 : content !== undefined;
 }

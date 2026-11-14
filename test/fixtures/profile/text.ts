@@ -316,7 +316,7 @@ export const permissions: NonNullable<ProfileText["permissions"]> = {
 export const classifier: NonNullable<ProfileText["classifier"]> = {
 	stage2IntentAddendum: "[classifier.stage2IntentAddendum]",
 	stage2DenialAddendum: "[classifier.stage2DenialAddendum]",
-	reviewAddendum: "[classifier.reviewAddendum]",
+	handBackReview: "[classifier.handBackReview]",
 	resolvedPathsNote: "[classifier.resolvedPathsNote]",
 	userDenyRule: (name, spec) => mark("classifier.userDenyRule", name, spec),
 	// The rule lists keep the headings and bullet form the base reads (ClassifierRuleset).

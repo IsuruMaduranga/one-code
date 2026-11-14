@@ -173,7 +173,7 @@ the system prompt to match:
 | Frontier | Opus and Fable, current generation, Sonnet 5.5 and later, Haiku 5 and later, and OpenAI's GPT-6 Astra and Sol, served by Anthropic and OpenAI themselves. | A short, terse prompt. |
 | Workhorse | A vendor's large current models. | A full, detailed prompt. |
 | Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The full prompt, with longer, more explicit tool descriptions. |
-| Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
+| Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding. |
 
 Frontier is a fixed list, decided by model version. Haiku 5 and later get
 the frontier prompt only: when One Code picks a model for subagents or the

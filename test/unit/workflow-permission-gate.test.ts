@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 import { resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
 import { memoryDir } from "../../extensions/lib/context/memory.ts";
 import { localGateMode } from "../../extensions/lib/agents/permission-gate.ts";
@@ -15,6 +16,9 @@ import { stubHome } from "./helpers/home.ts";
 import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 import type { PermissionRefusal } from "../../extensions/lib/rules/permission-text.ts";
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
+
+// This file covers the base's handling of grep, find and ls, which a profile may turn off.
+useShippedProfileWithAllTools();
 
 /** Why the child gate refused a call, in the profile's words. */
 const refused = (refusal: PermissionRefusal) => permissionText().refused(refusal);

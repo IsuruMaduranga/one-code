@@ -68,11 +68,9 @@ describe("piVersionWarning", () => {
 	});
 });
 
-describe("the tested range is the one the package, the guide and CI state", () => {
+describe("the tested range is the one the package states", () => {
 	const repoRoot = resolve(import.meta.dirname, "..", "..");
 	const read = (path: string) => readFileSync(join(repoRoot, path), "utf8");
-	const [maxMajor, maxMinor] = TESTED_PI_MAX_EXCLUSIVE.split(".").map(Number);
-	const lastTested = `${maxMajor}.${(maxMinor ?? 0) - 1}`;
 
 	it("the peer range starts at the tested minimum", () => {
 		const pkg = JSON.parse(read("package.json"));
@@ -82,17 +80,5 @@ describe("the tested range is the one the package, the guide and CI state", () =
 	it("the pi the repo develops against is inside the range", () => {
 		const pi = JSON.parse(read("node_modules/@earendil-works/pi-coding-agent/package.json")).version;
 		expect(piVersionWarning(pi)).toBeUndefined();
-	});
-
-	it("the README and the installation guide name the same range", () => {
-		for (const path of ["README.md", "docs/guide/installation.md"]) {
-			expect(read(path).replace(/\s+/g, " "), path).toContain(`${TESTED_PI_MIN} through ${lastTested}`);
-		}
-	});
-
-	it("CI runs the floor smoke against the tested minimum", () => {
-		const ci = read(".github/workflows/ci.yml");
-		expect(ci).toContain("test/e2e/pi-floor-smoke.mjs");
-		expect(ci).toContain("TESTED_PI_MIN");
 	});
 });

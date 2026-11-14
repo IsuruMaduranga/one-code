@@ -3,15 +3,20 @@
  *
  * pi registers seven built-in tools but activates only read/bash/edit/write
  * (findings §2); grep/find/ls sit in the registry and are never activated.
- * Claude Code ships no Grep/Glob/LS on any tier (bash covers search — Haiku
- * included), so frontier/workhorse/cheap stay lean; only One Code's sub-Haiku
- * `tiny` tier, whose prompt steers to "the search tools", gets them in the
- * request. The tier is frozen at session_start/model_select and shared over
- * the event bus, so capability refreshes cannot separate prompt text from the
- * active tool surface.
+ * This extension activates the three on the `tiny` tier, for small models
+ * that search better with dedicated tools, and keeps them out of the other
+ * tiers, where the shell covers search. The three are one unit
+ * (`searchToolsEnabled`, lib/models/model-tier.ts): a profile that turns any
+ * of them off (`tools: { grep: { enabled: false }, … }`) leaves search to the
+ * shell on every tier, and the bash description is told the same answer.
+ * The tier is frozen at session_start/model_select and shared over the event
+ * bus, so capability refreshes cannot separate prompt text from the active
+ * tool surface.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
+import { toolLive } from "../../lib/profile/profile.ts";
+import { searchToolsEnabled } from "../../lib/models/model-tier.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { mergeGrepWindows } from "./grep-merge.ts";
@@ -22,7 +27,7 @@ function searchToolsExtension(pi: ExtensionAPI) {
 	const apply = () => {
 		const tier = requestTier();
 		const active = pi.getActiveTools();
-		const next = withSearchTools(active, tier);
+		const next = withSearchTools(active, searchToolsEnabled(tier, toolLive));
 		if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
 	};
 

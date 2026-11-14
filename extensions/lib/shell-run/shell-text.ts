@@ -46,9 +46,9 @@ export interface ShellParams {
 }
 
 export interface ShellText {
-	/** `searchTools`: the session has the dedicated grep, find and ls tools. */
 	/** The system prompt guideline when PowerShell is the primary shell (Claude Code names it so). */
 	powershellPrimary: string;
+	/** `searchTools`: the session has the dedicated grep, find and ls tools (`searchToolsEnabled`, lib/models/model-tier.ts). */
 	bashDescription(p: { form: DescriptionForm; autoMode: boolean; searchTools: boolean }): string;
 	bashParams: ShellParams;
 	powershellDescription(p: { edition: PowerShellEditionName }): string;

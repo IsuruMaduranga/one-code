@@ -51,6 +51,7 @@ import { isBorrowedUserFile, isRepoFile, settingsSources } from "../profile/sett
 import type { SettingsFile } from "../profile/sources.ts";
 import { productSettingsPath, readSettingsForWrite, SETTINGS_DISPLAY, writeSettings } from "../profile/product-settings.ts";
 import { defaultEnvironment, slotName } from "../../safety/permissions/auto-mode/classifier-prompt.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export interface AutoModeConfig {
 	/** Environment slot lines spliced into CC's ruleset (prefix-less, CC's settings format). */
@@ -365,9 +366,7 @@ export function persistClassifierModel(spec: string | undefined, home: string, s
 
 /** value as a plain object, or undefined — the repeated sub-block guard. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
-	return typeof value === "object" && value !== null && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
+	return isPlainObject(value) ? value : undefined;
 }
 
 /**

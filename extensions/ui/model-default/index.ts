@@ -38,7 +38,7 @@
 import { feature } from "../../lib/profile/feature.ts";
 import { join } from "node:path";
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isObject } from "../../lib/request/ledger/records.ts";
+import { isPlainObject } from "../../lib/core/plain-object.ts";
 import { readState, recordState } from "../../lib/request/ledger/state.ts";
 import { announceLocalCommand } from "../../lib/ui/local-command.ts";
 import { readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
@@ -148,7 +148,7 @@ function modelDefaultExtension(pi: ExtensionAPI) {
 	// session runs that model, saved first if its own process never got to it.
 	pi.on("session_start", (_event, ctx) => {
 		const stored = readState(ctx, UNANNOUNCED_STATE);
-		if (!isObject(stored)) return;
+		if (!isPlainObject(stored)) return;
 		recordState(pi, UNANNOUNCED_STATE, null);
 		const { provider, id, name, saved } = stored;
 		if (typeof provider !== "string" || typeof id !== "string" || typeof name !== "string") return;

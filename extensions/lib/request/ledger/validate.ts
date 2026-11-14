@@ -6,7 +6,8 @@
  *
  * Pure: no pi imports.
  */
-import { isObject, type ToldFact } from "./records.ts";
+import { type ToldFact } from "./records.ts";
+import { isPlainObject } from "../../core/plain-object.ts";
 import { contentHash, declaredToolNames, listKey, type WirePayload } from "./wire.ts";
 
 export type Problem =
@@ -25,7 +26,7 @@ function referenceName(block: Record<string, unknown>): string | undefined {
 /** Every tool name a block references, at any depth: `tool_addition` and `tool_removal` wrap a `tool_reference`. */
 function referencedNames(value: unknown, into: Set<string>): Set<string> {
 	if (Array.isArray(value)) for (const item of value) referencedNames(item, into);
-	else if (isObject(value)) {
+	else if (isPlainObject(value)) {
 		const name = referenceName(value);
 		if (name !== undefined) into.add(name);
 		for (const item of Object.values(value)) referencedNames(item, into);
@@ -33,10 +34,10 @@ function referencedNames(value: unknown, into: Set<string>): Set<string> {
 	return into;
 }
 
-const roleOf = (element: unknown) => (isObject(element) ? element.role : undefined);
+const roleOf = (element: unknown) => (isPlainObject(element) ? element.role : undefined);
 
 const hasContent = (element: unknown) => {
-	const content = isObject(element) ? element.content : undefined;
+	const content = isPlainObject(element) ? element.content : undefined;
 	return Array.isArray(content) || typeof content === "string" ? content.length > 0 : content !== undefined;
 };
 
@@ -70,12 +71,12 @@ export function validateRequest(payload: WirePayload, api: string): Problem[] {
 function withoutReferences(value: unknown, names: ReadonlySet<string>): unknown {
 	if (Array.isArray(value)) {
 		return value.flatMap((item) => {
-			if (isObject(item) && (item.type === "tool_addition" || item.type === "tool_removal") && referencedNames(item, new Set()).size > 0 && [...referencedNames(item, new Set())].every((name) => names.has(name))) return [];
-			if (isObject(item) && names.has(referenceName(item) ?? "")) return [];
+			if (isPlainObject(item) && (item.type === "tool_addition" || item.type === "tool_removal") && referencedNames(item, new Set()).size > 0 && [...referencedNames(item, new Set())].every((name) => names.has(name))) return [];
+			if (isPlainObject(item) && names.has(referenceName(item) ?? "")) return [];
 			return [withoutReferences(item, names)];
 		});
 	}
-	if (!isObject(value)) return value;
+	if (!isPlainObject(value)) return value;
 	const out: Record<string, unknown> = {};
 	for (const [key, item] of Object.entries(value)) out[key] = withoutReferences(item, names);
 	return out;
@@ -95,7 +96,7 @@ export function repairRequest(payload: WirePayload, api: string, problems: reado
 	let list = value.filter((_, index) => !stranded.has(index));
 	if (undeclared.size > 0) {
 		list = (withoutReferences(list, undeclared) as unknown[]).filter(
-			(element) => !(isObject(element) && element.role === "system" && Array.isArray(element.content) && element.content.length === 0 && element.output_config === undefined),
+			(element) => !(isPlainObject(element) && element.role === "system" && Array.isArray(element.content) && element.content.length === 0 && element.output_config === undefined),
 		);
 	}
 	return { ...payload, [key]: list };

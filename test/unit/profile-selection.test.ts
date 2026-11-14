@@ -20,7 +20,7 @@ import { profile as shippedProfile } from "../../profile/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 
-const product = { envPrefix: "X", profiles: ["BI", "mi"] };
+const product = { envPrefix: "X", profiles: ["QA", "lab"] };
 const argv = (...args: string[]) => ["node", "bin", ...args];
 
 afterEach(() => setActiveProfileForTest(undefined));
@@ -29,15 +29,15 @@ describe("the profile a launch names", () => {
 	it("reads --profile, its = form, and a product profile's id as a flag in any case", () => {
 		expect(selectedProfileName(product, argv("--profile", "lean"), {})).toBe("lean");
 		expect(selectedProfileName(product, argv("-p", "hi", "--profile=lean"), {})).toBe("lean");
-		expect(selectedProfileName(product, argv("--bi"), {})).toBe("bi");
-		expect(selectedProfileName(product, argv("--MI", "-p", "hi"), {})).toBe("MI");
+		expect(selectedProfileName(product, argv("--qa"), {})).toBe("qa");
+		expect(selectedProfileName(product, argv("--LAB", "-p", "hi"), {})).toBe("LAB");
 		expect(selectedProfileName(product, argv("-p", "hi"), {})).toBeUndefined();
 	});
 
 	it("prefers the command line to the environment, and reads nothing after a bare --", () => {
-		expect(selectedProfileName(product, argv("--bi"), { X_PROFILE: "lean" })).toBe("bi");
+		expect(selectedProfileName(product, argv("--qa"), { X_PROFILE: "lean" })).toBe("qa");
 		expect(selectedProfileName(product, argv("-p", "hi"), { X_PROFILE: "lean" })).toBe("lean");
-		expect(selectedProfileName(product, argv("--", "--bi"), {})).toBeUndefined();
+		expect(selectedProfileName(product, argv("--", "--qa"), {})).toBeUndefined();
 	});
 
 	it("names the empty profile when --profile has no name, so the launch stops instead of running the default", () => {
@@ -52,19 +52,19 @@ describe("the profile a launch names", () => {
 	});
 
 	it("never takes a flag that only starts like an id, or a prompt that mentions one", () => {
-		expect(selectedProfileName(product, argv("--bisect", "-p", "use --bi here"), {})).toBeUndefined();
+		expect(selectedProfileName(product, argv("--qatar", "-p", "use --qa here"), {})).toBeUndefined();
 	});
 
-	it("is taken out of the arguments the app hands to pi, so a prompt after --BI is not read as its value", () => {
-		expect(withoutProfileFlags(["--BI", "fix it", "--profile", "lean", "--profile=x", "-p", "--", "--bi"], product)).toEqual(["fix it", "-p", "--", "--bi"]);
+	it("is taken out of the arguments the app hands to pi, so a prompt after --QA is not read as its value", () => {
+		expect(withoutProfileFlags(["--QA", "fix it", "--profile", "lean", "--profile=x", "-p", "--", "--qa"], product)).toEqual(["fix it", "-p", "--", "--qa"]);
 	});
 });
 
 describe("a product profile's brand", () => {
-	const brand = { ...data, profiles: ["BI"] };
+	const brand = { ...data, profiles: ["QA"] };
 	const files: Record<string, unknown> = {
-		[join("/pkg/profile", "profiles", "BI", "brand.json")]: { name: "BI Copilot", stateDir: ".bi" },
-		[join("/state", "profiles", "lean", "profile.json")]: { base: "bi" },
+		[join("/pkg/profile", "profiles", "QA", "brand.json")]: { name: "QA Agent", stateDir: ".qa" },
+		[join("/state", "profiles", "lean", "profile.json")]: { base: "qa" },
 		[join("/state", "profiles", "plain", "profile.json")]: {},
 	};
 	const read = (path: string) => {
@@ -81,33 +81,33 @@ describe("a product profile's brand", () => {
 	});
 
 	it("takes the profile's names over the product's, and keeps the product's for what the profiles share", () => {
-		const resolved = resolve("bi");
-		expect(resolved.brand.name).toBe("BI Copilot");
-		expect(resolved.brand.stateDir).toBe(".bi");
+		const resolved = resolve("qa");
+		expect(resolved.brand.name).toBe("QA Agent");
+		expect(resolved.brand.stateDir).toBe(".qa");
 		expect(resolved.brand.envPrefix).toBe(data.envPrefix);
 		expect(resolved.product.stateDir).toBe(data.stateDir);
-		expect(resolved.selection).toEqual({ productProfile: "BI" });
-		expect(resolved.profileDir).toBe("profile/profiles/BI");
+		expect(resolved.selection).toEqual({ productProfile: "QA" });
+		expect(resolved.profileDir).toBe("profile/profiles/QA");
 	});
 
 	it("refuses a name only the product may set", () => {
-		files[join("/pkg/profile", "profiles", "BI", "brand.json")] = { name: "BI", envPrefix: "BI" };
-		expect(() => resolve("BI")).toThrow(/may set only .*found envPrefix/);
-		files[join("/pkg/profile", "profiles", "BI", "brand.json")] = { name: "BI Copilot", stateDir: ".bi" };
+		files[join("/pkg/profile", "profiles", "QA", "brand.json")] = { name: "QA", envPrefix: "QA" };
+		expect(() => resolve("QA")).toThrow(/may set only .*found envPrefix/);
+		files[join("/pkg/profile", "profiles", "QA", "brand.json")] = { name: "QA Agent", stateDir: ".qa" };
 	});
 
 	it("treats any other name as a user's profile, on the product profile it names", () => {
-		expect(resolve("lean").selection).toEqual({ productProfile: "BI", userProfile: "lean" });
-		expect(resolve("lean").brand.stateDir).toBe(".bi");
+		expect(resolve("lean").selection).toEqual({ productProfile: "QA", userProfile: "lean" });
+		expect(resolve("lean").brand.stateDir).toBe(".qa");
 		expect(resolve("plain").selection).toEqual({ userProfile: "plain" });
 		expect(resolve("missing").selection).toEqual({ userProfile: "missing" });
 		expect(resolve("missing").profileDir).toBe("profile");
 	});
 
 	it("refuses a profiles list with a repeated id or the id \"profile\"", () => {
-		expect(() => resolveBrand({ ...data, profiles: ["bi", "BI"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/twice/);
+		expect(() => resolveBrand({ ...data, profiles: ["qa", "QA"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/twice/);
 		expect(() => resolveBrand({ ...data, profiles: ["profile"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/--profile/);
-		expect(() => resolveBrand({ ...data, profiles: ["BI", "Resume"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/must not use "Resume": `--Resume` is already a launch flag/);
+		expect(() => resolveBrand({ ...data, profiles: ["QA", "Resume"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/must not use "Resume": `--Resume` is already a launch flag/);
 	});
 
 	// The product in this checkout: One Code ships one profile, the fixture product two.
@@ -170,7 +170,7 @@ describe("a user's own profile", () => {
 
 	it("names every problem with its file, and returns no profile", () => {
 		const dir = folder({
-			"profile.json": JSON.stringify({ tools: { off: "bash", on: ["x"] }, features: { on: ["hooks"] }, base: "bi", extra: 1 }),
+			"profile.json": JSON.stringify({ tools: { off: "bash", on: ["x"] }, features: { on: ["hooks"] }, base: "qa", extra: 1 }),
 			"system-prompt.md": "  \n",
 			"tools/bash.txt": "x",
 		});
@@ -182,12 +182,12 @@ describe("a user's own profile", () => {
 
 	it("says how to create a profile that does not exist, and refuses a name that is no folder name", () => {
 		const { home } = tempHome("user-profile-");
-		expect(loadUserProfile("nope", join(home, "profiles", "nope"), ["BI"]).problems[0]).toMatch(/no profile is named "nope": create the folder .*the product's own profiles: BI\)$/);
+		expect(loadUserProfile("nope", join(home, "profiles", "nope"), ["QA"]).problems[0]).toMatch(/no profile is named "nope": create the folder .*the product's own profiles: QA\)$/);
 		expect(loadUserProfile("../x", join(home, "x")).problems[0]).toContain("is not a profile name");
 	});
 
 	it("accepts the product profile it sits on in any case", () => {
-		expect(loadUserProfile("lean", folder({ "profile.json": JSON.stringify({ base: "bi" }) }), ["BI"]).profile?.base).toBe("BI");
+		expect(loadUserProfile("lean", folder({ "profile.json": JSON.stringify({ base: "qa" }) }), ["QA"]).profile?.base).toBe("QA");
 	});
 });
 

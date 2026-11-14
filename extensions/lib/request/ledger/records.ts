@@ -11,6 +11,7 @@
  */
 
 import { brandedId } from "../../profile/brand.mjs";
+import { isPlainObject } from "../../core/plain-object.ts";
 
 export const LEDGER_VERSION = 1;
 
@@ -207,19 +208,18 @@ export type ParsedRecord = { [K in RecordKind]: { kind: K; entryId: string; data
 
 const KIND_BY_TYPE = new Map<string, RecordKind>(Object.entries(RECORD).map(([kind, type]) => [type, kind as RecordKind]));
 
-export const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const isString = (value: unknown): value is string => typeof value === "string";
 const isStrings = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
 export const isFileVersion = (file: unknown): file is FileVersion =>
-	isObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number");
+	isPlainObject(file) && isString(file.path) && isString(file.sha256) && (file.size === undefined || typeof file.size === "number") && (file.mtimeMs === undefined || typeof file.mtimeMs === "number");
 const isFileVersions = (value: unknown): boolean => Array.isArray(value) && value.every(isFileVersion);
 
 const isCoverage = (value: unknown): boolean =>
-	isObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
+	isPlainObject(value) && Number.isInteger(value.count) && (value.count as number) >= 0 && isString(value.role) && typeof value.timestamp === "number";
 
 function isToldFact(fact: unknown): boolean {
-	if (!isObject(fact)) return false;
+	if (!isPlainObject(fact)) return false;
 	switch (fact.kind) {
 		case "tools":
 			return isStrings(fact.names) && (fact.callable === undefined || typeof fact.callable === "boolean") && (fact.removed === undefined || typeof fact.removed === "boolean");
@@ -238,7 +238,7 @@ function isToldFact(fact: unknown): boolean {
 const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } = {
 	request: (d) =>
 		(d.covers === undefined || isCoverage(d.covers)) &&
-		isObject(d.identity) &&
+		isPlainObject(d.identity) &&
 		isString(d.identity.api) &&
 		isString(d.identity.provider) &&
 		isString(d.identity.model) &&
@@ -249,7 +249,7 @@ const SHAPE: { [K in RecordKind]: (data: Record<string, unknown>) => boolean } =
 		(d.keep as number) >= 0 &&
 		isStrings(d.append) &&
 		isString(d.head) &&
-		isObject(d.blobs) &&
+		isPlainObject(d.blobs) &&
 		isStrings(d.consumed) &&
 		(d.routing === undefined || isString(d.routing)),
 	told: (d) => Array.isArray(d.facts) && d.facts.every(isToldFact),
@@ -276,7 +276,7 @@ export function readRecord(entry: EntryLike): ParsedRecord | undefined {
 	if (entry.type !== "custom" || entry.customType === undefined) return undefined;
 	const kind = KIND_BY_TYPE.get(entry.customType);
 	const data = entry.data;
-	if (!kind || !isObject(data) || data.v !== LEDGER_VERSION || !isString(data.by) || !SHAPE[kind](data)) return undefined;
+	if (!kind || !isPlainObject(data) || data.v !== LEDGER_VERSION || !isString(data.by) || !SHAPE[kind](data)) return undefined;
 	return { kind, entryId: entry.id, data } as unknown as ParsedRecord;
 }
 

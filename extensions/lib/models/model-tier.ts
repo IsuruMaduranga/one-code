@@ -9,11 +9,12 @@
  *   frontier   Claude Code's own short-prompt models, and OpenAI's GPT-6+ Astra and Sol
  *   workhorse  a vendor's large current models — the long register
  *   cheap      a vendor's smaller or older models — the long register
- *   tiny       literally small models — verbose + weak-model scaffolding + grep/find/ls
+ *   tiny       literally small models — verbose + weak-model scaffolding
  *
  * `extensions/request/system-prompt` picks the prompt text from the tier;
- * `extensions/tools/search-tools` activates grep/find/ls only for `tiny`. Frontier is
- * a version-gated first-party allowlist (Claude Code's own rule); below it the
+ * `extensions/tools/search-tools` activates grep/find/ls only for `tiny`, unless
+ * the profile turns those tools off (`searchToolsEnabled`). Frontier is a
+ * version-gated first-party allowlist; below it the
  * tier comes from the public catalogs (`model-catalog.ts`: release date, price
  * and size against the same vendor's current models), with no model names,
  * dollar floors or benchmark scores in the code. Rationale + rejected
@@ -41,6 +42,7 @@ import {
 	supportsImageInput,
 } from "./model-policy.ts";
 import { productSettingsPath } from "../profile/product-settings.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 
@@ -227,8 +229,8 @@ export function modelTierOverrides(): Record<string, PromptTier> {
 	}
 	const raw = mtimeMs < 0 ? undefined : readJsonFile<{ modelTiers?: unknown }>(path)?.modelTiers;
 	const tiers: Record<string, PromptTier> = {};
-	if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-		for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+	if (isPlainObject(raw)) {
+		for (const [key, value] of Object.entries(raw)) {
 			if (isPromptTier(value)) tiers[key] = value;
 		}
 	}
@@ -241,6 +243,19 @@ export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.Proc
 }
 
 const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
+
+/** pi's built-in search tools: registered by pi, active only where `searchToolsEnabled` says so. */
+export const SEARCH_TOOLS = ["grep", "find", "ls"] as const;
+
+/**
+ * Whether the session has the dedicated search tools: the tiny tier, and all
+ * three live. They are one unit: with any of them off (a profile's tool
+ * switch, the environment) the session searches through the shell, so the
+ * tool surface and the text that names it follow this one answer.
+ */
+export function searchToolsEnabled(tier: PromptTier, live: (tool: string) => boolean): boolean {
+	return tier === "tiny" && SEARCH_TOOLS.every((tool) => live(tool));
+}
 
 /**
  * Whether the session model gets the task tools (`task_create` and family),

@@ -1,7 +1,7 @@
 /** Project the active session branch for the classifier; never keep a second transcript. */
 import { createHash } from "node:crypto";
 import { inContextEntries, latestCompaction } from "../../../lib/request/compaction-boundary.ts";
-import { isHistoricalRead, type TranscriptEntry } from "./transcript.ts";
+import { isHistoricalRead, toolCallEntry, type TranscriptEntry } from "./transcript.ts";
 
 /** Non-model-facing provenance for user messages and harness permission facts. */
 export const CLASSIFIER_USER_INPUT = "auto-mode-user-input";
@@ -15,6 +15,25 @@ export function messageText(content: unknown): string {
 
 function record(value: unknown): Record<string, any> {
 	return value !== null && typeof value === "object" ? value as Record<string, any> : {};
+}
+
+/**
+ * A pending call's arguments as the model wrote them: its toolCall block on
+ * the branch (the latest with that id, since some providers repeat ids). The
+ * gate shows the call this way because the history will show it this way on
+ * the next call, so the classifier's transcript only grows and its cache
+ * holds. The tool_call hook's own input has been through the tool's argument
+ * preparation (the Agent tool adds `task` beside a model's `prompt`).
+ */
+export function writtenArguments(branch: readonly unknown[], toolCallId: string): unknown {
+	for (let i = branch.length - 1; i >= 0; i--) {
+		const entry = record(branch[i]);
+		const message = record(entry.message);
+		if (entry.type !== "message" || message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		const block = message.content.map(record).find((candidate) => candidate.type === "toolCall" && candidate.id === toolCallId);
+		if (block) return block.arguments;
+	}
+	return undefined;
 }
 
 /**
@@ -166,7 +185,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 					reachedPending = true;
 					break;
 				}
-				const tool: TranscriptEntry = { kind: "tool", tool: block.name, input: record(block.arguments) };
+				const tool = toolCallEntry(block.name, block.arguments);
 				if (!isHistoricalRead(tool)) {
 					for (const fact of facts.get(block.id) ?? []) if (fact.gitStatus) transcript.push({ kind: "meta", gitStatus: fact.gitStatus });
 					transcript.push(tool);

@@ -186,8 +186,16 @@ interface TaskResult {
 	/** The kept worktree's branch, which holds any commits the agent made. */
 	worktreeBranch?: string;
 	worktreeKept?: boolean;
-	/** What the child did, for auto mode's return review. */
-	actions?: ChildAction[];
+}
+
+/**
+ * A finished run: the result the tool reports and may save, and, apart from
+ * it, what the child did. The actions carry every call's whole input, so they
+ * go only to auto mode's return review, never into a saved result.
+ */
+interface RunOutcome {
+	result: TaskResult;
+	actions: ChildAction[];
 }
 
 /** The Agent tool's schema, in the profile's words. */
@@ -1605,7 +1613,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					};
 				}
 
-				const result = await executeRun(
+				const { result } = await executeRun(
 					{
 						request: {
 							agent: agentDef.name,
@@ -1699,33 +1707,28 @@ function subagentsExtension(pi: ExtensionAPI) {
 		forkFrom?: string,
 		parent?: { taskId: string; depth: number },
 		onProgress?: (toolCalls: number, text: string, usage: UsageTotals) => void,
-	): Promise<TaskResult> => {
+	): Promise<RunOutcome> => {
 		const { request, record, agentDef } = prepared;
 		// The session's working directory: the entered worktree, if any.
 		const base = workCwd(ctx);
+		const ids = { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task };
+		/** A run that failed before the child did anything (`extra`: a worktree it left behind). */
+		const failedRun = (kind: "failed" | "worktree", osMessage: string, extra: Partial<TaskResult> = {}): RunOutcome => ({
+			result: { ...ids, output: subagentResultText().failure({ kind, osMessage }), toolCalls: 0, usage: emptyUsage(), failed: true, ...extra },
+			actions: [],
+		});
 
 		// Before anything marks the run as running: a failed build must not leave
 		// the task id in runningIds, where SendMessage would call it "still running".
 		const runtime = await runtimeOrError(ctx);
-		if (typeof runtime === "string") {
-			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: subagentResultText().failure({ kind: "failed", osMessage: runtime }), toolCalls: 0, usage: emptyUsage(), failed: true };
-		}
+		if (typeof runtime === "string") return failedRun("failed", runtime);
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
 				worktree = await isolateInWorktree(base, record, request.name);
 			} catch (error) {
-				return {
-					agent: request.agent,
-					name: request.name,
-					taskId: record.taskId,
-					task: request.task,
-					output: subagentResultText().failure({ kind: "worktree", osMessage: (error as Error).message }),
-					toolCalls: 0,
-					usage: emptyUsage(),
-					failed: true,
-				};
+				return failedRun("worktree", (error as Error).message);
 			}
 		}
 
@@ -1758,7 +1761,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		liveHandles.set(record.taskId, handle);
 
 		try {
-			const outcome: ChildOutcome = await handle.result;
+			const { actions, ...outcome }: ChildOutcome = await handle.result;
 			registry.sessionFileFor(record); // resolve now that the child has written it
 			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
@@ -1766,33 +1769,25 @@ function subagentsExtension(pi: ExtensionAPI) {
 				worktreeKept = !(await cleanupWorktree(base, worktree));
 			}
 			return {
-				agent: request.agent,
-				name: request.name,
-				taskId: record.taskId,
-				task: request.task,
-				...outcome,
-				worktreePath: worktreeKept ? worktree?.path : undefined,
-				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
-				worktreeKept,
+				result: {
+					...ids,
+					...outcome,
+					worktreePath: worktreeKept ? worktree?.path : undefined,
+					worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+					worktreeKept,
+				},
+				actions,
 			};
 		} catch (error) {
 			live.finish(true);
 			// A failed run can still have committed or edited in its worktree:
 			// a kept one is reported like a finished run's.
 			const worktreeKept = worktree ? !(await cleanupWorktree(base, worktree)) : undefined;
-			return {
-				agent: request.agent,
-				name: request.name,
-				taskId: record.taskId,
-				task: request.task,
-				output: subagentResultText().failure({ kind: "failed", osMessage: (error as Error).message }),
-				toolCalls: 0,
-				usage: emptyUsage(),
-				failed: true,
+			return failedRun("failed", (error as Error).message, {
 				worktreePath: worktreeKept ? worktree?.path : undefined,
 				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
 				worktreeKept,
-			};
+			});
 		} finally {
 			runningIds.delete(record.taskId);
 		}
@@ -1947,7 +1942,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const stopped = stoppedTaskIds.has(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
-				void awaitHandBackReview(pi.events, p.record, outcome.actions, undefined, mainCallOf(p.record.taskId)).then((review) => {
+				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
 					resident.reviewing--;
 					if (handler) {
 						handler(outcome, review, stopped);
@@ -2317,7 +2312,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				};
 				report();
 				mainCallFor.set(prepared[0].record.taskId, toolCallId);
-				const result = await executeRun(prepared[0], ctx, signal, sessionFile ?? undefined, undefined, (toolCalls, text, usage) => {
+				const { result, actions } = await executeRun(prepared[0], ctx, signal, sessionFile ?? undefined, undefined, (toolCalls, text, usage) => {
 					progress = { toolCalls, text, usage };
 					report();
 				});
@@ -2325,7 +2320,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// permission gate attaches the review to this tool_result.
 				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 					toolCallId,
-					actions: result.actions ?? [],
+					actions,
+					report: result.output,
 				} satisfies SubagentActionsPayload);
 				const stats = formatStats(result.toolCalls, result.usage);
 				const worktreeNote = result.worktreePath ? `\n\n${keptWorktreeNote(result.worktreePath, result.worktreeBranch)}` : "";
@@ -2626,7 +2622,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			runningIds.delete(record.taskId);
 			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
-			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions, report: outcome.output } satisfies SubagentActionsPayload);
 			return {
 				content: [
 					{
@@ -2664,7 +2660,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// does for a resident's turn; a resumed turn once skipped it
 			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
 			// review, so task_output never returns the reply ahead of its verdict.
-			const review = await awaitHandBackReview(pi.events, record, outcome.actions, undefined, mainCallOf(record.taskId));
+			const review = await awaitHandBackReview(pi.events, record, outcome, { startedBy: mainCallOf(record.taskId) });
 			// The outcome includes SubagentHandback and startup/abort errors;
 			// the live snapshot only contains assistant text, not the final report.
 			settledOutput = `${relocationNote}${outcome.output}`;

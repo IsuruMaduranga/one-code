@@ -12,7 +12,7 @@ import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
 import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants.ts";
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { profile } from "../index.ts";
-import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
+import { PROMPT_TIERS, searchToolsEnabled } from "../../extensions/lib/models/model-tier.ts";
 import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
@@ -95,6 +95,26 @@ describe("text naming another tool", () => {
 		const off = profile.text({ live: { has: (tool) => tool !== "bash" } });
 		for (const firm of [true, false]) expect(off.permissions?.autoModeNote({ firm })).toBe("");
 		expect(off.background?.tasks.outputDescription).toContain("(monitor or background subagent)");
+	});
+
+	it("steers tiny to the search tools only while all three are in the session, and to the shell otherwise", () => {
+		// The base hands the bash description `searchTools` by the same rule the prompt's passages follow.
+		const tinyText = (live: LiveTools) => {
+			const t = profile.text({ live });
+			const searchTools = searchToolsEnabled("tiny", live.has);
+			return [...(t.systemPrompt?.lead({ tier: "tiny", taskTools: true, tools: undefined }) ?? []), t.shell?.bashDescription({ form: "long", autoMode: true, searchTools }) ?? ""].join("\n\n");
+		};
+		const on = tinyText({ has: () => true });
+		expect(on).toContain("the grep, find and ls tools to search for files or content");
+		expect(on).toContain("use the search tools directly.");
+		expect(on).toContain("Search with the dedicated tools, not this shell");
+		for (const off of ["grep", "find", "ls"]) {
+			const text = tinyText({ has: (tool) => tool !== off });
+			expect(text, off).toContain("Search for files or content in the shell (grep, find, ls). Otherwise reserve the shell");
+			expect(text, off).toContain("search directly in the shell (grep, find).");
+			expect(text, off).toContain("When running `find`, search from `.`");
+			for (const gone of ["ls tools", "search tools", "dedicated tools, not this shell", "the grep tool", "the find tool", "the ls tool"]) expect(text, `${off}: ${gone}`).not.toContain(gone);
+		}
 	});
 
 	it("is unchanged when every tool is on", () => {

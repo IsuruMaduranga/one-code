@@ -22,7 +22,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "../request/ledger/layout.ts";
-import { isObject } from "../request/ledger/records.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, preludeLength, responsesDeclarations, stripMarkers, toolName, toolsItemFor } from "../request/ledger/wire.ts";
 import { estimateMessageTokens } from "../models/pi-ai-estimate.ts";
 
@@ -70,7 +70,7 @@ const REPLAY_APIS: ReadonlySet<string> = new Set<ReplayApi>([
 /** The value at `path` in `payload`, when it is a number. */
 function capAt(payload: Record<string, unknown>, path: readonly string[]): number | undefined {
 	let value: unknown = payload;
-	for (const key of path) value = isObject(value) ? value[key] : undefined;
+	for (const key of path) value = isPlainObject(value) ? value[key] : undefined;
 	return typeof value === "number" ? value : undefined;
 }
 
@@ -84,7 +84,8 @@ function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly str
 function withCap(payload: Record<string, unknown>, path: readonly string[], value: number): Record<string, unknown> {
 	const [head, ...rest] = path;
 	if (rest.length === 0) return { ...payload, [head]: value };
-	const inner = isObject(payload[head]) ? (payload[head] as Record<string, unknown>) : {};
+	const current = payload[head];
+	const inner = isPlainObject(current) ? current : {};
 	return { ...payload, [head]: withCap(inner, rest, value) };
 }
 
@@ -116,7 +117,7 @@ interface ModelRef {
 export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough, sessionId?: string): RequestCapture | undefined {
 	const api = model?.api;
 	if (!api || !REPLAY_APIS.has(api)) return undefined;
-	if (!model?.provider || !model.id || !isObject(payload) || !Array.isArray(payload[listKey(api)])) return undefined;
+	if (!model?.provider || !model.id || !isPlainObject(payload) || !Array.isArray(payload[listKey(api)])) return undefined;
 	return { api: api as ReplayApi, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}), ...(sessionId ? { sessionId } : {}) };
 }
 
@@ -235,9 +236,9 @@ export function extendPayload(capture: RequestCapture, tail: Record<string, unkn
 				: [...base, ...extra];
 	let out: Record<string, unknown> = { ...capture.payload, [key]: list };
 	// Google's config carries the request's live abort signal: the side call's own, never the session's.
-	if (capture.api.startsWith("google-") && isObject(out.config)) {
+	if (capture.api.startsWith("google-") && isPlainObject(out.config)) {
 		const { abortSignal: _session, ...config } = out.config;
-		const own = isObject(tail.config) ? tail.config.abortSignal : undefined;
+		const own = isPlainObject(tail.config) ? tail.config.abortSignal : undefined;
 		out = { ...out, config: own === undefined ? config : { ...config, abortSignal: own } };
 	}
 	const path = maxTokens === undefined ? undefined : capPath(capture.api, capture.payload);
@@ -425,7 +426,7 @@ function forkGainedTools(declared: ReadonlySet<string>, child: readonly unknown[
 /** Tool names the tail's `tool_reference` blocks load (Anthropic tool search). */
 function referencedTools(value: unknown, found = new Set<string>()): Set<string> {
 	if (Array.isArray(value)) for (const entry of value) referencedTools(entry, found);
-	else if (isObject(value)) {
+	else if (isPlainObject(value)) {
 		if (value.type === "tool_reference" && typeof value.tool_name === "string") found.add(value.tool_name);
 		for (const entry of Object.values(value)) referencedTools(entry, found);
 	}
@@ -485,7 +486,7 @@ function captureMarkers(capture: RequestCapture): number {
 
 function countMarkers(value: unknown): number {
 	if (Array.isArray(value)) return value.reduce((sum: number, entry) => sum + countMarkers(entry), 0);
-	if (!isObject(value)) return 0;
+	if (!isPlainObject(value)) return 0;
 	let count = "cache_control" in value ? 1 : 0;
 	for (const [key, entry] of Object.entries(value)) if (key !== "cache_control") count += countMarkers(entry);
 	return count;
@@ -502,7 +503,7 @@ function dropFirstMarkers(value: unknown, budget: { drop: number }): unknown {
 		});
 		return changed ? out : value;
 	}
-	if (!isObject(value)) return value;
+	if (!isPlainObject(value)) return value;
 	let out: Record<string, unknown> | undefined;
 	if ("cache_control" in value) {
 		const { cache_control: _, ...rest } = value;

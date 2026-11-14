@@ -21,6 +21,7 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 		async start() { state.startServer(); }
 		async getDiagnostics() { return []; }
 		allDiagnostics() { return new Map(); }
+		refreshOpenFiles() { return []; }
 	} };
 });
 

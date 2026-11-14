@@ -30,12 +30,28 @@ const BUNDLES: Record<PromptTier, PromptBundle> = {
 	tiny: lowBundle,
 };
 
+/**
+ * The tiny tier's steer to the grep, find and ls tools, and what it says with
+ * any of them off: search in the shell. After Agent's, which cuts the whole
+ * delegation section the second passage sits in.
+ */
+const SHELL_SEARCH = [
+	[
+		", and the grep, find and ls tools to search for files or content (not the find/grep/ls commands in the shell). Reserve the shell for commands that genuinely need it.",
+		". Search for files or content in the shell (grep, find, ls). Otherwise reserve the shell for commands that genuinely need it.",
+	],
+	["use the search tools directly.", "search directly in the shell (grep, find)."],
+] as const;
+
 /** Per tool, the passages of the prompt that name it, cut when it is off. */
 const PROMPT_PASSAGES: ToolPassages = {
 	// Before edit: its passages are matched as written, with edit still named.
 	bash: [" - Prefer dedicated tools over bash when one fits (read, edit, write) — reserve bash for shell-only operations.\n", ["; to run something, call the bash tool", ""]],
 	skill: [`\n${TYPED_SKILL_BULLET}`, "\n - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising."],
 	Agent: [DELEGATING_WORK, DELEGATE_STRICT, `\n${FORK_BULLET}`],
+	grep: SHELL_SEARCH,
+	find: SHELL_SEARCH,
+	ls: SHELL_SEARCH,
 	edit: [["(read, edit, write)", "(read, write)"], ["call the edit or write tool", "call the write tool"], [" edit to change them (not sed/awk),", ""], ["the edit/write tools", "the write tool"]],
 };
 

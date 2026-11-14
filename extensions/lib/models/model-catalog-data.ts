@@ -28,6 +28,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonFile, writeJsonAtomic } from "../core/atomic-write.ts";
 import { fetchWithTimeout } from "../core/fetch-timeout.ts";
+import { isPlainObject } from "../core/plain-object.ts";
 
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 export const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -100,8 +101,7 @@ type SourceName = keyof typeof FILES;
 // Trimming (shared by the build script and the runtime refresh)
 // ---------------------------------------------------------------------------
 
-const record = (value: unknown): Record<string, unknown> | undefined =>
-	value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+const record = (value: unknown): Record<string, unknown> | undefined => (isPlainObject(value) ? value : undefined);
 const finite = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
 

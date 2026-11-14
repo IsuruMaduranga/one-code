@@ -3,7 +3,8 @@
  * with the weak-model scaffolding layered on: the scaffolding that opencode's
  * small-model prompts use (text≠action, an act-vs-answer rule, per-task
  * playbooks, symmetric anti-over/under-action closers), tool discipline that
- * names the search tools only this tier has, and an explicit skill nudge — the
+ * names the search tools while the session has them (One Code turns them
+ * off, so index.ts swaps in the shell wording), and an explicit skill nudge — the
  * "small models miss skills" concern that motivated tiering, since the skill
  * tool's own description is not tiered. Its `# Using your tools` takes the
  * place of the long register's. Uses the long memory spec.

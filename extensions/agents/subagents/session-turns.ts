@@ -12,7 +12,7 @@
  */
 
 import { recordAction, type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
-import type { HandbackSlot } from "../../lib/agents/subagent-handback.ts";
+import { SUBAGENT_HANDBACK, type HandbackSlot } from "../../lib/agents/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "../../lib/agents/usage.ts";
 import { type RunFailure, subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -89,7 +89,10 @@ export class SessionTurnTracker implements HandbackSlot {
 		switch (event.type) {
 			case "tool_execution_start": {
 				this.toolCalls++;
-				if (event.toolName) recordAction(this.actions, event.toolName, event.args);
+				// The hand-back call's message is the report, which the review gets
+				// framed and defused as its last entry; recorded raw, it could close
+				// the review's transcript.
+				if (event.toolName && event.toolName !== SUBAGENT_HANDBACK) recordAction(this.actions, event.toolName, event.args);
 				return false;
 			}
 			case "message_end": {

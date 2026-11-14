@@ -4,6 +4,14 @@
  * leaf module.
  */
 
+/** Indent every line two spaces, blanks included: the hand-back report framing, which a line at column zero cannot forge. */
+export function indentReport(text: string): string {
+	return text
+		.split("\n")
+		.map((line) => `  ${line}`)
+		.join("\n");
+}
+
 export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /**

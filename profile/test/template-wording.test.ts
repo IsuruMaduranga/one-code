@@ -108,7 +108,7 @@ describe("One Code's system prompt", () => {
 		expect(prompt).toContain('Calling Agent with subagent_type: "fork" creates a fork');
 		expect(prompt).toContain("Prefer dedicated tools over bash when one fits (read, edit, write)");
 		expect(prompt).toContain("write to it directly with the write tool");
-		expect(prompt).not.toContain("the search tools"); // no dedicated search tools above tiny
+		expect(prompt).not.toContain("the search tools"); // no dedicated search tools on any tier
 		expect(prompt).not.toContain("# Delivering work");
 		expect(prompt).not.toContain("# Corrections");
 		// Claude Code-only parts of the long register stay out.
@@ -130,7 +130,11 @@ describe("One Code's system prompt", () => {
 		expect(prompt).toContain("# Answer or act");
 		expect(prompt).toContain("# Playbooks");
 		expect(prompt).toContain("skill tool"); // the skills nudge that motivated tiering
-		expect(prompt).toContain("the grep, find and ls tools"); // tiny keeps the grep/find/ls steer, by tool name
+		// Search goes through the shell: the profile leaves pi's grep, find and ls off on every tier.
+		expect(prompt).toContain("Search for files or content in the shell (grep, find, ls).");
+		expect(prompt).toContain("search directly in the shell (grep, find).");
+		expect(prompt).not.toContain("the grep, find and ls tools");
+		expect(prompt).not.toContain("the search tools");
 		expect(prompt).toContain("to run something, call the bash tool.");
 		expect(prompt).not.toContain("a consistency audit"); // the explore agent's description rules audits out
 		// Built on the long register: its sections stay, with one "# Using your tools" (tiny's).

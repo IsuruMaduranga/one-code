@@ -34,7 +34,7 @@ export const VERSION_VAR = envName("VERSION");
 export const SESSION_DIR_VAR = "PI_CODING_AGENT_SESSION_DIR";
 /**
  * Whether the profile in force keeps its own transcripts: a product profile
- * with a state folder of its own (`.bi` beside the product's). Sign-in and
+ * with a state folder of its own (`.qa` beside the product's). Sign-in and
  * the model list stay in the product's agent directory; the transcripts go
  * to the profile's folder, so one profile's sessions are never listed or
  * resumed under another.

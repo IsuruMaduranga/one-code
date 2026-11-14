@@ -75,6 +75,9 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 		allDiagnostics() {
 			return this.diagnosticsMap;
 		}
+		refreshOpenFiles() {
+			return [];
+		}
 		get publishCount() {
 			return this.publishCountValue;
 		}

@@ -94,12 +94,6 @@ export function stage2User(userPrefix: string, afterRuleDenial = false): string 
 	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${text.stage2IntentAddendum}${afterRuleDenial ? text.stage2DenialAddendum : ""}`;
 }
 
-/** The completed-run review message: shared prefix + full-eval final + the profile's review reframing (judge the finished run as a whole). */
-export function reviewUser(userPrefix: string): string {
-	const text = classifierText();
-	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${text.reviewAddendum}`;
-}
-
 /**
  * The whole number inside the last `<severity>…` tag (closing tag optional),
  * or null. The body must be the number and nothing else: a model answering on
@@ -126,6 +120,16 @@ function parseTag(text: string, tag: string): string | undefined {
 
 /** The threshold: below is allow, at/above is block (CC's Output Format). */
 export const SEVERITY_THRESHOLD = 50;
+
+/**
+ * Each stage's output budget, and the budget of its one retry after a reply
+ * cut off at the first. A model that cannot turn thinking off gets
+ * classifier.ts FORCED_THINKING_PADDING on top of both.
+ */
+export const STAGE1_MAX_TOKENS = 64;
+export const STAGE1_RETRY_MAX_TOKENS = 1024;
+export const STAGE2_MAX_TOKENS = 4096;
+export const STAGE2_RETRY_MAX_TOKENS = 8192;
 
 /** A quote shorter than this proves nothing — a stray word matches any transcript. */
 const INTENT_MIN_CHARS = 8;

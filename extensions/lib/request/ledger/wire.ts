@@ -9,7 +9,8 @@
  * Pure: no pi imports.
  */
 import { createHash } from "node:crypto";
-import { isObject, type RequestIdentity, type RequestRecordData, sameIdentity } from "./records.ts";
+import { type RequestIdentity, type RequestRecordData, sameIdentity } from "./records.ts";
+import { isPlainObject } from "../../core/plain-object.ts";
 
 /** A provider request body as pi-ai built it. */
 export type WirePayload = Record<string, unknown>;
@@ -32,7 +33,7 @@ export function listKey(api: string): "messages" | "input" | "contents" {
 }
 
 /** A Bedrock Converse `{ cachePoint }` block: a marker that is a whole list element. */
-const isCachePoint = (value: unknown): boolean => isObject(value) && Object.keys(value).length === 1 && "cachePoint" in value;
+const isCachePoint = (value: unknown): boolean => isPlainObject(value) && Object.keys(value).length === 1 && "cachePoint" in value;
 
 /**
  * Fields that hold the model's or a tool author's data, never a cache marker:
@@ -45,7 +46,7 @@ const DATA_FIELDS: ReadonlySet<string> = new Set(["input", "args", "arguments", 
 /** `value` without cache markers (`cache_control`, Bedrock `cachePoint` blocks), deeply, except inside `DATA_FIELDS`. */
 export function stripMarkers<T>(value: T): T {
 	if (Array.isArray(value)) return value.filter((item) => !isCachePoint(item)).map(stripMarkers) as T;
-	if (!isObject(value)) return value;
+	if (!isPlainObject(value)) return value;
 	const out: Record<string, unknown> = {};
 	for (const [key, item] of Object.entries(value)) if (key !== "cache_control") out[key] = DATA_FIELDS.has(key) ? item : stripMarkers(item);
 	return out as T;
@@ -54,7 +55,7 @@ export function stripMarkers<T>(value: T): T {
 /** JSON with sorted keys and without cache markers, so neither key order nor a marker changes a hash; `undefined` fields drop out as in JSON. */
 function canonical(value: unknown, data = false): string {
 	if (Array.isArray(value)) return `[${value.filter((item) => data || !isCachePoint(item)).map((item) => (item === undefined ? "null" : canonical(item, data))).join(",")}]`;
-	if (!isObject(value)) return JSON.stringify(value) ?? "null";
+	if (!isPlainObject(value)) return JSON.stringify(value) ?? "null";
 	const fields = Object.keys(value)
 		.filter((key) => (data || key !== "cache_control") && value[key] !== undefined)
 		.sort()
@@ -85,7 +86,7 @@ function outputCaps(payload: WirePayload): number[] {
 	for (const [key, value] of Object.entries(payload)) {
 		if (CAP_KEYS.has(key) && typeof value === "number") caps.push(value);
 		const nested = NESTED_OMIT[key];
-		if (nested && isObject(value)) for (const field of nested) if (typeof value[field] === "number") caps.push(value[field] as number);
+		if (nested && isPlainObject(value)) for (const field of nested) if (typeof value[field] === "number") caps.push(value[field] as number);
 	}
 	return caps;
 }
@@ -106,7 +107,7 @@ export function withRequestFields(body: WirePayload, from: WirePayload): WirePay
 	for (const [key, fields] of Object.entries(NESTED_OMIT)) {
 		const source = from[key];
 		const target = out[key];
-		if (!isObject(source) || !isObject(target)) continue;
+		if (!isPlainObject(source) || !isPlainObject(target)) continue;
 		const merged: Record<string, unknown> = { ...target };
 		for (const field of fields) {
 			if (field in source) merged[field] = source[field];
@@ -124,7 +125,7 @@ export function payloadHead(payload: WirePayload, api: string): Record<string, u
 	for (const [key, value] of Object.entries(payload)) {
 		if (key === list || CAP_KEYS.has(key)) continue;
 		const omit = NESTED_OMIT[key];
-		head[key] = omit && isObject(value) ? Object.fromEntries(Object.entries(value).filter(([field]) => !omit.includes(field))) : value;
+		head[key] = omit && isPlainObject(value) ? Object.fromEntries(Object.entries(value).filter(([field]) => !omit.includes(field))) : value;
 	}
 	return stripMarkers(head);
 }
@@ -183,7 +184,7 @@ const PROMPT_IN_LIST: ReadonlySet<string> = new Set(["openai-completions", "open
  * one at its load point on any version.
  */
 export function isToolsItem(element: unknown): element is Record<string, unknown> & { tools: unknown[] } {
-	return isObject(element) && element.type === "additional_tools" && Array.isArray(element.tools);
+	return isPlainObject(element) && element.type === "additional_tools" && Array.isArray(element.tools);
 }
 
 /** A Responses `additional_tools` item declaring `tools`, in the shape of `like` (pi's own item) when there is one. */
@@ -203,7 +204,7 @@ export function leadingToolsItem(tools: unknown, list: readonly unknown[]): (Rec
 }
 
 /** A plain instruction message: role system or developer, not a typed item such as `additional_tools`. */
-const isInstruction = (element: unknown): boolean => isObject(element) && (element.role === "system" || element.role === "developer") && (element.type === undefined || element.type === "message");
+const isInstruction = (element: unknown): boolean => isPlainObject(element) && (element.role === "system" || element.role === "developer") && (element.type === undefined || element.type === "message");
 
 /**
  * How many leading elements of pi's list render its head: a Responses
@@ -227,7 +228,7 @@ export function preludeLength(list: readonly unknown[], api: string): number {
  * is appended.
  */
 export function isTrailer(element: unknown, api: string): boolean {
-	if (!isObject(element)) return false;
+	if (!isPlainObject(element)) return false;
 	if (api === "anthropic-messages") return element.role === "system" && Array.isArray(element.content) && element.content.length === 0 && element.output_config !== undefined;
 	if (api.endsWith("-responses")) return element.type === "configuration_update";
 	return false;
@@ -235,16 +236,16 @@ export function isTrailer(element: unknown, api: string): boolean {
 
 /** A tool's name in any API's declaration shape, or undefined for a nameless entry (a Bedrock `cachePoint`). */
 export function toolName(tool: unknown): string | undefined {
-	if (!isObject(tool)) return undefined;
+	if (!isPlainObject(tool)) return undefined;
 	if (typeof tool.name === "string") return tool.name;
-	if (isObject(tool.function) && typeof tool.function.name === "string") return tool.function.name;
-	if (isObject(tool.toolSpec) && typeof tool.toolSpec.name === "string") return tool.toolSpec.name;
+	if (isPlainObject(tool.function) && typeof tool.function.name === "string") return tool.function.name;
+	if (isPlainObject(tool.toolSpec) && typeof tool.toolSpec.name === "string") return tool.toolSpec.name;
 	return typeof tool.type === "string" && !("cachePoint" in tool) ? `type:${tool.type}` : undefined;
 }
 
 /** Google's function declarations, flattened out of its tool groups. */
 export function functionDeclarations(groups: readonly unknown[]): unknown[] {
-	return groups.flatMap((group) => (isObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
+	return groups.flatMap((group) => (isPlainObject(group) && Array.isArray(group.functionDeclarations) ? group.functionDeclarations : []));
 }
 
 /** The object whose `tools` array declares a body's tools: Google's `config` (its tools are groups of function declarations), Bedrock's `toolConfig`, else the body itself. */
@@ -255,14 +256,14 @@ const toolsHolder = (api: string): ToolsHolder => (api.startsWith("google-") ? "
 /** The `tools` array of `body`'s `holder`, or undefined when there is none. */
 function toolsIn(body: WirePayload, holder: ToolsHolder): unknown[] | undefined {
 	const at = holder === "body" ? body : body[holder];
-	return isObject(at) && Array.isArray(at.tools) ? at.tools : undefined;
+	return isPlainObject(at) && Array.isArray(at.tools) ? at.tools : undefined;
 }
 
 /** `body` with `tools` as its `holder`'s tools array, the holder created when absent. */
 function withToolsIn(body: WirePayload, holder: ToolsHolder, tools: unknown[]): WirePayload {
 	if (holder === "body") return { ...body, tools };
 	const at = body[holder];
-	return { ...body, [holder]: { ...(isObject(at) ? at : {}), tools } };
+	return { ...body, [holder]: { ...(isPlainObject(at) ? at : {}), tools } };
 }
 
 /** `body` with the tools array where `api` puts it mapped by `fn`: `body` itself when it has none or `fn` returns its input. */
@@ -282,7 +283,7 @@ export function declarationsOf(payload: WirePayload): unknown[] {
 export function declaredToolNames(payload: WirePayload, { eager = false } = {}): Set<string> {
 	const names = new Set<string>();
 	for (const tool of declarationsOf(payload)) {
-		const name = eager && isObject(tool) && tool.defer_loading === true ? undefined : toolName(tool);
+		const name = eager && isPlainObject(tool) && tool.defer_loading === true ? undefined : toolName(tool);
 		if (name !== undefined) names.add(name);
 	}
 	return names;
@@ -290,15 +291,15 @@ export function declaredToolNames(payload: WirePayload, { eager = false } = {}):
 
 /** A declaration's input schema, in any API's shape: what pi validates a call's arguments against. */
 function inputSchemaOf(tool: unknown): unknown {
-	if (!isObject(tool)) return undefined;
-	if (isObject(tool.function)) return tool.function.parameters;
-	if (isObject(tool.toolSpec)) return tool.toolSpec.inputSchema;
+	if (!isPlainObject(tool)) return undefined;
+	if (isPlainObject(tool.function)) return tool.function.parameters;
+	if (isPlainObject(tool.toolSpec)) return tool.toolSpec.inputSchema;
 	return tool.input_schema ?? tool.parameters ?? tool.parametersJsonSchema;
 }
 
 /** The live declaration with the recorded one's `defer_loading`: a load or a deferral moves that flag, never the tool. */
 function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
-	if (!isObject(live) || !isObject(recorded)) return live;
+	if (!isPlainObject(live) || !isPlainObject(recorded)) return live;
 	const { defer_loading: _live, ...rest } = live;
 	return recorded.defer_loading === undefined ? rest : { ...rest, defer_loading: recorded.defer_loading };
 }
@@ -379,7 +380,7 @@ export function withBranchToolOrder(payload: WirePayload, order: readonly string
 /** Google's tool groups with each group's function declarations mapped by `fn`: `groups` itself when `fn` returns every input. */
 function mapGroupDeclarations(groups: unknown[], fn: (declarations: unknown[]) => unknown[]): unknown[] {
 	const out = groups.map((group) => {
-		if (!isObject(group) || !Array.isArray(group.functionDeclarations)) return group;
+		if (!isPlainObject(group) || !Array.isArray(group.functionDeclarations)) return group;
 		const declarations = fn(group.functionDeclarations);
 		return declarations === group.functionDeclarations ? group : { ...group, functionDeclarations: declarations };
 	});
@@ -389,7 +390,7 @@ function mapGroupDeclarations(groups: unknown[], fn: (declarations: unknown[]) =
 /** Google's recorded tool groups merged with the live ones: one group of the merged function declarations (none when empty), then the recorded groups without declarations. */
 function mergeGroups(recorded: readonly unknown[], live: readonly unknown[]): unknown[] {
 	const merged = mergeDeclarations(functionDeclarations(recorded), functionDeclarations(live));
-	const others = recorded.filter((group) => !(isObject(group) && Array.isArray(group.functionDeclarations)));
+	const others = recorded.filter((group) => !(isPlainObject(group) && Array.isArray(group.functionDeclarations)));
 	return [...(merged.length ? [{ functionDeclarations: merged }] : []), ...others];
 }
 
@@ -399,15 +400,15 @@ function mergeGroups(recorded: readonly unknown[], live: readonly unknown[]): un
  * Anthropic rejects a marker on a `defer_loading` tool.
  */
 function withToolsMarker(tools: unknown[], live: readonly unknown[]): unknown[] {
-	const marked = live.find((tool) => isObject(tool) && tool.cache_control !== undefined);
-	const mark = isObject(marked) ? marked.cache_control : undefined;
+	const marked = live.find((tool) => isPlainObject(tool) && tool.cache_control !== undefined);
+	const mark = isPlainObject(marked) ? marked.cache_control : undefined;
 	const out = tools.map((tool) => {
-		if (!isObject(tool) || tool.cache_control === undefined) return tool;
+		if (!isPlainObject(tool) || tool.cache_control === undefined) return tool;
 		const { cache_control: _mark, ...rest } = tool;
 		return rest;
 	});
 	if (mark === undefined) return out;
-	const at = out.findLastIndex((tool) => isObject(tool) && tool.defer_loading !== true);
+	const at = out.findLastIndex((tool) => isPlainObject(tool) && tool.defer_loading !== true);
 	if (at !== -1) out[at] = { ...(out[at] as Record<string, unknown>), cache_control: mark };
 	return out;
 }
@@ -426,9 +427,9 @@ function recordedValue(recorded: unknown, live: unknown): unknown {
 	while (content > 0 && isCachePoint(live[content - 1])) content--;
 	const points = live.slice(content);
 	const lastLive = live[content - 1];
-	const mark = isObject(lastLive) ? lastLive.cache_control : undefined;
+	const mark = isPlainObject(lastLive) ? lastLive.cache_control : undefined;
 	const last = copy.at(-1);
-	if (mark !== undefined && isObject(last)) last.cache_control = mark;
+	if (mark !== undefined && isPlainObject(last)) last.cache_control = mark;
 	return [...copy, ...points];
 }
 
@@ -447,8 +448,8 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 		return withToolsIn(out, holder, holder === "config" ? mergeGroups(recordedTools, live) : mergeDeclarations(recordedTools, live, declaredElsewhere));
 	};
 	if (holder === "config") {
-		const recorded = isObject(head.config) ? head.config : {};
-		const live = isObject(payload.config) ? payload.config : {};
+		const recorded = isPlainObject(head.config) ? head.config : {};
+		const live = isPlainObject(payload.config) ? payload.config : {};
 		const config: Record<string, unknown> = { ...live };
 		if ("systemInstruction" in recorded) config.systemInstruction = recordedValue(recorded.systemInstruction, live.systemInstruction);
 		return withMergedTools({ ...payload, config });
@@ -534,7 +535,7 @@ function underRecordedHead(base: RecordedRequest, payload: WirePayload, api: str
 function listDeclarations(list: readonly unknown[]): Map<string, unknown> {
 	const out = new Map<string, unknown>();
 	for (const item of list) {
-		if (!isObject(item) || (item.type !== "additional_tools" && item.type !== "tool_search_output") || !Array.isArray(item.tools)) continue;
+		if (!isPlainObject(item) || (item.type !== "additional_tools" && item.type !== "tool_search_output") || !Array.isArray(item.tools)) continue;
 		for (const tool of item.tools) {
 			const name = toolName(tool);
 			if (name !== undefined) out.set(name, tool);
@@ -593,9 +594,9 @@ export function recordedToolNames(record: Pick<RecordedRequest, "head" | "list">
 /** The first `cache_control` marker on a list element or one of its content blocks. */
 function listMarker(list: readonly unknown[]): unknown {
 	for (const element of list) {
-		if (!isObject(element)) continue;
+		if (!isPlainObject(element)) continue;
 		if (element.cache_control !== undefined) return element.cache_control;
-		if (Array.isArray(element.content)) for (const block of element.content) if (isObject(block) && block.cache_control !== undefined) return block.cache_control;
+		if (Array.isArray(element.content)) for (const block of element.content) if (isPlainObject(block) && block.cache_control !== undefined) return block.cache_control;
 	}
 	return undefined;
 }
@@ -611,10 +612,10 @@ export function recordedBody(base: RecordedRequest, payload: WirePayload, api: s
 	const list = structuredClone(base.list);
 	const mark = listMarker(payloadList(payload, api));
 	const last = list[appendPoint(list, api) - 1];
-	if (mark !== undefined && isObject(last)) {
+	if (mark !== undefined && isPlainObject(last)) {
 		const blocks = Array.isArray(last.content) ? last.content : undefined;
 		const target = blocks?.at(-1);
-		if (isObject(target)) target.cache_control = mark;
+		if (isPlainObject(target)) target.cache_control = mark;
 		else if (!blocks) last.cache_control = mark;
 	}
 	return withRequestFields(underRecordedHead(base, payload, api, list), payload);

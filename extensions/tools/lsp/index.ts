@@ -17,7 +17,13 @@
  *     plugin is explicit intent. Built-in servers keep root-marker detection;
  *     plugin servers root at `workspaceFolder ?? cwd`.
  *  3. An `lsp_diagnostics` tool (deferred behind `tool_search`) for asking
- *     about a file on demand.
+ *     about a file on demand. It first re-sends any other open file whose
+ *     stat moved on disk, so the answer does not rest on an old copy.
+ *  4. A product extension's channels (request-channel.ts) on a server the
+ *     profile declares: its own requests, and its reports of files changed
+ *     on disk. Only these and `lsp_diagnostics` look at the disk; the
+ *     passive watcher after `edit` and `write` syncs the edited file only,
+ *     as Claude Code does.
  *
  * Claude Code has no other LSP tools; navigation goes through grep/find.
  */
@@ -33,7 +39,7 @@ import { absoluteFrom } from "../../lib/profile/paths.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../../lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
 import { toolRenderers, cutPlainText } from "../../lib/ui/tui-render.ts";
-import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
+import { type DiskChange, LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
@@ -52,7 +58,7 @@ import { findProjectRoot as findRepoRoot } from "../../lib/context/git.ts";
 import { createLspTrustGate, PROJECT_CODE_SERVERS } from "./trust.ts";
 import { activeProfile, requireText } from "../../lib/profile/profile.ts";
 import type { ResolvedLanguageServer } from "../../lib/profile/language-servers.ts";
-import { LSP_REQUEST_CHANNEL, type LspRequestEvent } from "./request-channel.ts";
+import { LSP_FILES_CHANGED_CHANNEL, LSP_REQUEST_CHANNEL, type LspFilesChangedEvent, type LspRequestEvent } from "./request-channel.ts";
 import { failureOf } from "./failure.ts";
 import type { LspFailure } from "./text.ts";
 import { lspResultText } from "./text.ts";
@@ -301,6 +307,12 @@ function lspExtension(pi: ExtensionAPI) {
 	const forceDeltaScan = () => {
 		lastPublishTally = -1;
 	};
+	/** Open files re-sent from disk, or closed because they are gone, count as edited: their delivered-sets reset, as after `edit`. */
+	const markChanged = (uris: readonly string[]) => {
+		if (uris.length === 0) return;
+		for (const uri of uris) tracker.clear(uri);
+		forceDeltaScan();
+	};
 
 	/** Format the pending delta and commit it as delivered; undefined when clean. */
 	const takePendingDelta = (cwd: string): string | undefined => {
@@ -394,7 +406,11 @@ function lspExtension(pi: ExtensionAPI) {
 			const fetched = target
 				? await withKeepAlive(async () => {
 						const client = await clientFor(target, ctx);
-						return client && { all: await client.getDiagnostics(path, target.languageId) };
+						if (!client) return undefined;
+						// Other open files may have changed on disk since they were
+						// sent, and the answer for this one can depend on them.
+						markChanged(client.refreshOpenFiles(path));
+						return { all: await client.getDiagnostics(path, target.languageId) };
 					})
 				: undefined;
 			if (ctx.signal?.aborted) {
@@ -434,28 +450,60 @@ function lspExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// A product extension's own request on a profile server's connection
-	// (request-channel.ts). It needs a live context to start the server, so it
-	// is refused before the session's first event.
+	// A product extension's own request on a profile server's connection, and
+	// its report of files changed on disk (request-channel.ts). A request needs
+	// a live context to start the server, so it is refused before the
+	// session's first event; a report never starts one.
 	let liveCtx: ExtensionContext | undefined;
 	pi.on("session_start", (_event, ctx) => {
 		liveCtx = ctx;
 	});
+	const declaredServer = (name: string): ResolvedLanguageServer => {
+		const server = activeProfile().languageServers.find((candidate) => candidate.name === name);
+		if (!server) throw new Error(`The profile declares no language server named "${name}".`);
+		return server;
+	};
 	const answerRequest = async (request: LspRequestEvent): Promise<unknown> => {
 		const ctx = liveCtx;
 		if (!ctx) throw new Error("No session is running, so no language server can answer.");
-		const server = activeProfile().languageServers.find((candidate) => candidate.name === request.server);
-		if (!server) throw new Error(`The profile declares no language server named "${request.server}".`);
+		const server = declaredServer(request.server);
 		const target = productTarget(server, absoluteFrom(ctx.cwd, request.file), ctx.cwd);
 		return withKeepAlive(async () => {
 			const client = await clientFor(target, ctx);
 			if (!client) throw new Error(`The ${server.name} language server is not running: ${lspResultText.failure(startFailures.get(target.key) ?? { kind: "exitedQuietly" })}`);
+			// The answer is about the files on disk: an open file the shell or
+			// the user changed since it was sent must not be answered from the old copy.
+			markChanged(client.refreshOpenFiles());
 			return client.request(request.method, request.params, request.timeoutMs);
 		});
 	};
 	pi.events.on(LSP_REQUEST_CHANNEL, (data) => {
 		const request = data as LspRequestEvent;
 		request.reply(answerRequest(request));
+	});
+	/** Synchronous, so a request the product sends next goes out after these notifications. */
+	const applyReport = (report: LspFilesChangedEvent): void => {
+		const server = declaredServer(report.server);
+		const ctx = liveCtx;
+		if (!ctx) return;
+		const byClient = new Map<LspClient, DiskChange[]>();
+		for (const change of report.changes) {
+			const path = absoluteFrom(ctx.cwd, change.path);
+			const client = clients.get(productTarget(server, path, ctx.cwd).key);
+			// Not running, or still starting: it reads the disk when it starts.
+			if (!client?.isRunning) continue;
+			byClient.set(client, [...(byClient.get(client) ?? []), { path, type: change.type }]);
+		}
+		for (const [client, changes] of byClient) markChanged(client.applyDiskChanges(changes));
+	};
+	pi.events.on(LSP_FILES_CHANGED_CHANNEL, (data) => {
+		const report = data as LspFilesChangedEvent;
+		try {
+			applyReport(report);
+			report.reply(Promise.resolve());
+		} catch (error) {
+			report.reply(Promise.reject(error));
+		}
 	});
 
 	registerLocalCommand(pi, "lsp", {

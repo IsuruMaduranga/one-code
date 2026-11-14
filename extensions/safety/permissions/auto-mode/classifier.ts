@@ -36,8 +36,11 @@ import {
 	type ClassifyVerdict,
 	parseSeverity,
 	parseStage2,
-	reviewUser,
 	SEVERITY_THRESHOLD,
+	STAGE1_MAX_TOKENS,
+	STAGE1_RETRY_MAX_TOKENS,
+	STAGE2_MAX_TOKENS,
+	STAGE2_RETRY_MAX_TOKENS,
 	stage1User,
 	stage2User,
 } from "./prompt.ts";
@@ -240,9 +243,10 @@ export interface ClassifierDeps {
 	 */
 	onModelUnusable?: (model: string, reason: string) => void;
 	/**
-	 * Completed-run subagent review: evaluate the sequence with a single stage-2
-	 * style full-eval call instead of the two-stage gate (there is no harm floor
-	 * to short-circuit, and the whole point is the intent/ALLOW judgment).
+	 * Completed-run subagent review: one stage-2 call instead of the two-stage
+	 * gate (there is no harm floor to short-circuit for work already done). The
+	 * transcript ends with the hand-back entry (transcript.ts), which frames
+	 * what to judge; the stage instruction is the gate's own.
 	 */
 	reviewOnly?: boolean;
 }
@@ -358,8 +362,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	const { system, userPrefix, history, tail, index } = buildPayload(request);
 	const previousHistoryEnd = deps.state.cacheHistoryEnd;
 	const stage1Text = stage1User(userPrefix);
-	// A permission rule refused something this turn, so stage 2 gets the extra
-	// instruction that the user's intent does not excuse an equivalent-effect
+	// A permission rule refused something in the transcript, so stage 2 gets the
+	// extra instruction that the user's intent does not excuse an equivalent-effect
 	// retry (the profile's `stage2DenialAddendum`). Stage 1 grades harm only and is
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
@@ -448,7 +452,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
-							deps.state.cacheHistoryEnd = history.length - 1;
+							// A review's history ends in the subagent's calls, which the next gate
+							// call's transcript does not hold, so it leaves the session's boundary.
+							if (!deps.reviewOnly) deps.state.cacheHistoryEnd = history.length - 1;
 						},
 					} : {}),
 					...(reasoning ? { reasoning } : {}),
@@ -467,7 +473,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
-						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
 					} catch {
 						// A probe log that cannot be written must not fail the gate.
 					}
@@ -515,16 +521,16 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			let stageInfo: string;
 
 			if (deps.reviewOnly) {
-				// A finished run has no harm floor to short-circuit — go straight to the
-				// full stage-2 evaluation, reframed to judge the whole sequence.
-				const text = await call(reviewUser(userPrefix), 4096, 8192, 2);
+				// A finished run has no harm floor to short-circuit: go straight to the
+				// full stage-2 evaluation of the transcript's hand-back entry (transcript.ts).
+				const text = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
-				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
-				// without a readable severity, one retry with headroom recovers it.
-				// Stage 2's 4096 is CC's too, with one retry at 8192.
-				const s1 = await call(stage1Text, 64, 1024, 1);
+				// STAGE 1: harm only, at its small budget; a reply that overruns it
+				// without a readable severity gets one retry with headroom. Stage 2
+				// likewise (the budgets are prompt.ts's STAGE*_MAX_TOKENS).
+				const s1 = await call(stage1Text, STAGE1_MAX_TOKENS, STAGE1_RETRY_MAX_TOKENS, 1);
 				const sev1 = parseSeverity(s1);
 				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {
 					verdict = { decision: "allow", reason: "", tier: "allow" };
@@ -533,7 +539,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
-					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without quoting the

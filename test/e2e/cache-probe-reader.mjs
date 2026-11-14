@@ -56,16 +56,22 @@ function toolFailures(events, short) {
 		const args = start.event.args ?? {};
 		if (args.url !== expectedUrl) failures.push(`web_fetch call ${call + 1} used ${JSON.stringify(args.url)}, not ${JSON.stringify(expectedUrl)}`);
 		if (args.prompt !== READER_PROBE_QUESTION) failures.push(`web_fetch call ${call + 1} changed the reader question`);
-		const end = ends.find(({ event }) => event.toolCallId === start.event.toolCallId);
+		// A call's result is the first one with its id after its start and before
+		// the next start with that id: some providers (DeepSeek through OpenRouter)
+		// give two calls of one session the same id, and a call that never
+		// finished must not borrow the next one's result.
+		const resultOf = (begin) => {
+			const next = starts.find(({ event, index }) => index > begin.index && event.toolCallId === begin.event.toolCallId);
+			return ends.find(({ event, index }) => index > begin.index && (!next || index < next.index) && event.toolCallId === begin.event.toolCallId);
+		};
+		const end = resultOf(start);
 		if (!end) {
 			failures.push(`web_fetch call ${call + 1} has no matching result`);
 			continue;
 		}
-		if (end.index <= start.index) failures.push(`web_fetch call ${call + 1} completed before it started`);
 		if (end.event.result?.isError || end.event.isError) failures.push(`web_fetch call ${call + 1} returned an error`);
 		if (call > 0) {
-			const previous = starts[call - 1];
-			const previousEnd = ends.find(({ event }) => event.toolCallId === previous.event.toolCallId);
+			const previousEnd = resultOf(starts[call - 1]);
 			if (!previousEnd || start.index <= previousEnd.index) failures.push("the second web_fetch started before the first completed");
 		}
 	}

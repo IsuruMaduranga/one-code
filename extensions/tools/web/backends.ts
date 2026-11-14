@@ -18,6 +18,7 @@
 
 import { BRAVE_KEY_ENV, SETTINGS_FILE, SETTINGS_SNIPPET, TAVILY_KEY_ENV } from "./backend-names.ts";
 import type { BackendAttempt, BackendFailure, ChainFailure } from "./text.ts";
+import { isPlainObject } from "../../lib/core/plain-object.ts";
 
 /** A backend failed for a reason the profile words. */
 export class BackendError extends Error {
@@ -103,8 +104,8 @@ export function webSearchSettingsFrom(raw: unknown): WebSearchSettings {
 		const order = value.order.filter((n): n is BackendName => typeof n === "string" && (BACKEND_NAMES as string[]).includes(n));
 		if (order.length) settings.order = order;
 	}
-	if (value.apiKeys && typeof value.apiKeys === "object" && !Array.isArray(value.apiKeys)) {
-		const keys = value.apiKeys as Record<string, unknown>;
+	if (isPlainObject(value.apiKeys)) {
+		const keys = value.apiKeys;
 		const apiKeys: WebSearchSettings["apiKeys"] = {};
 		if (typeof keys.brave === "string" && keys.brave.trim()) apiKeys.brave = keys.brave.trim();
 		if (typeof keys.tavily === "string" && keys.tavily.trim()) apiKeys.tavily = keys.tavily.trim();
