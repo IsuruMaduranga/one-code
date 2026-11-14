@@ -36,6 +36,8 @@ const piPackage = JSON.parse(readFileSync(join(piRoot, "package.json"), "utf8"))
 };
 const appPackage = JSON.parse(readFileSync(join(repoRoot, "app", "package.json"), "utf8")) as {
 	version: string;
+	/** The extension package the app loads, under the product's own name. */
+	productExtension: string;
 	dependencies?: Record<string, string>;
 };
 const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
@@ -134,17 +136,17 @@ describe("bundled app dependency closure over pi's library entry", () => {
 	 */
 	/**
 	 * Releases are lockstep (working-docs/decisions/distribution.md): both packages ship
-	 * the same version every release, and the app pins `one-code-extension` at
-	 * exactly its own version. The exact pin means the extension must publish
+	 * the same version every release, and the app pins the extension package
+	 * (its `productExtension`) at exactly its own version. The exact pin means the extension must publish
 	 * FIRST — publishing the app first gives every installer "No matching version
-	 * found for one-code-extension@<v>". Distribution review 2026-09-09, M2: the
+	 * found for <extension>@<v>". Distribution review 2026-09-09, M2: the
 	 * tag v0.2.0 named a tree that was never published while three weeks of
 	 * commits carried the same version, and nothing guarded the three-way match.
 	 */
 	it("keeps root version, app version, and the app's extension pin in lockstep", () => {
 		const appDeclares = appPackage.dependencies ?? {};
 		expect(appPackage.version, "app version matches root version").toBe(rootPackage.version);
-		expect(appDeclares["one-code-extension"], "the app pins one-code-extension at its own version").toBe(rootPackage.version);
+		expect(appDeclares[appPackage.productExtension], "the app pins the extension package at its own version").toBe(rootPackage.version);
 	});
 
 	it("has no app-side entry for a package pi has since started declaring itself", () => {
