@@ -30,10 +30,19 @@
  * too, and a second payload in the call a request went out in is pi-ai's
  * strict-tools fallback, a real re-send. The cap alone cannot tell them
  * apart: pi-ai clamps a request's cap to the window's room, down to 1.
+ *
+ * What it records is what goes on the wire only while Anthropic message
+ * threads stay off: a `continue` would send just the new messages. So it
+ * registers the `anthropic` provider's stream with threads off
+ * (lib/request/message-threads.ts). And pi warms only during a run, never
+ * between runs (lib/request/cache-warming.ts), as on pi 1.5.0.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { threadlessAnthropicProvider } from "../../lib/request/message-threads.ts";
+import { cacheWarmingVeto } from "../../lib/request/cache-warming.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
@@ -45,11 +54,14 @@ import { redactTail } from "../../lib/request/ledger/redact.ts";
 import { hasSecretValues, redactSecretValuesIn } from "../../lib/profile/secrets.ts";
 import { appendPoint, encodeRequest, hasWarmCap, listKey, type RecordedRequest, recordedBody, recordedRequest, samePrefix, spliceRequest, type WirePayload, withBranchToolOrder, withRequestFields } from "../../lib/request/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders } from "../../lib/side-calls/request-replay.ts";
+import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
 import { brand, envName } from "../../lib/profile/brand.mjs";
 
 function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
+	pi.registerProvider("anthropic", threadlessAnthropicProvider(streamSimple));
+	pi.on("cache_warming_decision", (_event, ctx) => cacheWarmingVeto(ctx.isIdle()));
 	/** The plan of the last `context` pass; a warm re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;
 	/**
@@ -96,7 +108,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		const identity = plan ? undefined : sessionIdentity(pi, ctx.model);
 		const routing = plan ? routingOf(plan, own) : ((identity && foldSession(ctx.sessionManager, identity).lastRequest?.routing) ?? own);
 		if (routing === own) return;
-		Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel | undefined, routing));
+		Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel | undefined, routing, RESPONSES_SESSION_HEADER));
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {

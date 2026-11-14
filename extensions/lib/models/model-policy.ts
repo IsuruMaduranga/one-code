@@ -79,6 +79,7 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	"qwen-token-plan": hosted("host:qwen-plan"),
 	"qwen-token-plan-cn": hosted("host:qwen-plan"),
 	"qwen-token-plan-individual": hosted("host:qwen-plan"),
+	"qwen-token-plan-individual-cn": hosted("host:qwen-plan"),
 	meta: direct("meta"),
 	xiaomi: direct("xiaomi"),
 	"xiaomi-token-plan-cn": direct("xiaomi"),

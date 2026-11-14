@@ -23,6 +23,7 @@ import { brandedId } from "../profile/brand.mjs";
 import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "../request/ledger/layout.ts";
 import { isPlainObject } from "../core/plain-object.ts";
+import { compareVersions } from "../app/pi-version.ts";
 import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, preludeLength, responsesDeclarations, stripMarkers, toolName, toolsItemFor } from "../request/ledger/wire.ts";
 import { estimateMessageTokens } from "../models/pi-ai-estimate.ts";
 
@@ -128,15 +129,34 @@ export interface AffinityModel extends ModelRef {
 }
 
 /**
+ * The header pi-ai's OpenAI Responses client names the session in:
+ * `session-id` from pi-ai 1.5.1 (pi #11639), `session_id` before. Chat
+ * Completions still sends `session_id`, Codex builds its own headers.
+ */
+export type ResponsesSessionHeader = "session-id" | "session_id";
+
+/**
+ * The Responses session header of the running pi-ai, from its exported
+ * `PI_AI_VERSION` (pi-ai 1.4.0 on; absent before, which sent `session_id`).
+ * The header is invisible to extensions: pi-ai adds it below
+ * `before_provider_headers`, so its version is what can be observed.
+ */
+export function responsesSessionHeader(piAiVersion: unknown): ResponsesSessionHeader {
+	const order = typeof piAiVersion === "string" ? compareVersions(piAiVersion, "1.5.1") : undefined;
+	return order !== undefined && order >= 0 ? "session-id" : "session_id";
+}
+
+/**
  * The session-affinity headers pi-ai sends with `sessionId` for `model`, so a
  * fork can send its parent's: a gateway routes on them (OpenRouter spreads a
  * model across hosts, each with its own cache), and the fork is a different
- * session. Extension headers merge after pi-ai's, so these override. A copy
- * of pi-ai's `createClient` rules for the three replayable APIs, unchanged
- * from 0.87.1 to 0.99.2 (re-check at a pi bump:
- * features/pi-adaptation/plan.md §3 step 9).
+ * session. Extension headers merge after pi-ai's, so these override, and the
+ * names must be the ones the running pi-ai uses (`responsesHeader`), or the
+ * fork carries its own id under pi-ai's name beside its parent's under ours.
+ * A copy of pi-ai's `createClient` rules for the three replayable APIs
+ * (re-check at a pi bump: features/pi-adaptation/plan.md §3 step 9).
  */
-export function affinityHeaders(model: AffinityModel | undefined, sessionId: string): Record<string, string> {
+export function affinityHeaders(model: AffinityModel | undefined, sessionId: string, responsesHeader: ResponsesSessionHeader): Record<string, string> {
 	if (!model) return {};
 	const openRouter = model.provider === "openrouter" || (model.baseUrl ?? "").includes("openrouter.ai");
 	const send = model.compat?.sendSessionAffinityHeaders ?? openRouter;
@@ -149,8 +169,9 @@ export function affinityHeaders(model: AffinityModel | undefined, sessionId: str
 	if (model.api === "openai-completions" && !send) return {};
 	const format = model.compat?.sessionAffinityFormat ?? (openRouter ? "openrouter" : "openai");
 	if (format === "openrouter") return { "x-session-id": sessionId };
+	const sessionHeader = model.api === "openai-responses" ? responsesHeader : "session_id";
 	return {
-		...(format === "openai" ? { session_id: sessionId } : {}),
+		...(format === "openai" ? { [sessionHeader]: sessionId } : {}),
 		"x-client-request-id": sessionId,
 		...(model.api === "openai-completions" ? { "x-session-affinity": sessionId } : {}),
 	};

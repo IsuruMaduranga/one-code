@@ -27,6 +27,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
+import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 
@@ -68,7 +69,7 @@ export function forkCacheExtension(capture: RequestCapture) {
 		// headers, and the parent's cache lives there. Harmless on a whole request.
 		pi.on("before_provider_headers", (event, ctx) => {
 			if (!capture.sessionId || !captureMatches(capture, ctx.model as ModelRef | undefined)) return;
-			Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel, capture.sessionId));
+			Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel, capture.sessionId, RESPONSES_SESSION_HEADER));
 		});
 
 		pi.on("before_provider_request", (event, ctx) => {

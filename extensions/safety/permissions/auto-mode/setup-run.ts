@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { withoutMessageThreads } from "../../../lib/request/message-threads.ts";
 import { readSettingsFile } from "../../../lib/profile/settings-files.ts";
 import { withReasoningFallback } from "../../../lib/models/model-policy.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -222,7 +223,7 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 		const reply = await withReasoningFallback(model, (reasoning) => {
 			const timeout = AbortSignal.timeout(DRAFT_TIMEOUT_MS);
 			return completeSimple(
-				resolved,
+				withoutMessageThreads(resolved),
 				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
 				{
 					apiKey: auth.apiKey,

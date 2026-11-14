@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	affinityHeaders,
+	responsesSessionHeader,
 	captureMatches,
 	captureRequest,
 	extendPayload,
@@ -409,15 +410,31 @@ describe("affinityHeaders: pi-ai's session-affinity headers, for a fork to send 
 	const or = { provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" };
 	it("OpenRouter routes on x-session-id for every API", () => {
 		for (const api of ["openai-completions", "openai-responses", "anthropic-messages"]) {
-			expect(affinityHeaders({ ...or, api, id: "m" }, "S")).toEqual({ "x-session-id": "S" });
+			expect(affinityHeaders({ ...or, api, id: "m" }, "S", "session_id")).toEqual({ "x-session-id": "S" });
 		}
 	});
 	it("elsewhere follows pi-ai: Responses always, Completions and Anthropic only when the compat asks", () => {
-		expect(affinityHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1", id: "m" }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S" });
-		expect(affinityHeaders({ api: "openai-completions", provider: "deepseek", baseUrl: "https://api.deepseek.com", id: "m" }, "S")).toEqual({});
-		expect(affinityHeaders({ api: "openai-completions", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S", "x-session-affinity": "S" });
-		expect(affinityHeaders({ api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com", id: "m" }, "S")).toEqual({});
-		expect(affinityHeaders({ api: "anthropic-messages", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ "x-session-affinity": "S" });
+		expect(affinityHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1", id: "m" }, "S", "session_id")).toEqual({ session_id: "S", "x-client-request-id": "S" });
+		expect(affinityHeaders({ api: "openai-completions", provider: "deepseek", baseUrl: "https://api.deepseek.com", id: "m" }, "S", "session_id")).toEqual({});
+		expect(affinityHeaders({ api: "openai-completions", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S", "session_id")).toEqual({ session_id: "S", "x-client-request-id": "S", "x-session-affinity": "S" });
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com", id: "m" }, "S", "session_id")).toEqual({});
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S", "session_id")).toEqual({ "x-session-affinity": "S" });
+	});
+	it("names the Responses session in the running pi-ai's header, and Completions always in session_id", () => {
+		expect(affinityHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1", id: "m" }, "S", "session-id")).toEqual({ "session-id": "S", "x-client-request-id": "S" });
+		expect(affinityHeaders({ api: "openai-completions", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S", "session-id")).toEqual({ session_id: "S", "x-client-request-id": "S", "x-session-affinity": "S" });
+	});
+});
+
+describe("responsesSessionHeader: pi-ai renamed the Responses session header in 1.5.1", () => {
+	it("reads session-id from 1.5.1 on and session_id before, or with no version exported", () => {
+		expect(responsesSessionHeader("1.5.2")).toBe("session-id");
+		expect(responsesSessionHeader("1.5.1")).toBe("session-id");
+		expect(responsesSessionHeader("1.6.0")).toBe("session-id");
+		expect(responsesSessionHeader("1.5.0")).toBe("session_id");
+		expect(responsesSessionHeader("1.4.0")).toBe("session_id");
+		expect(responsesSessionHeader(undefined)).toBe("session_id");
+		expect(responsesSessionHeader("not-a-version")).toBe("session_id");
 	});
 });
 
