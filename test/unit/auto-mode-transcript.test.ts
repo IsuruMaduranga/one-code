@@ -134,8 +134,8 @@ describe("toolCallEntry", () => {
 		expect(toolCallEntry("bash", { command: "npm test", description: "Run tests", timeout: 60 })).toEqual({ kind: "tool", tool: "bash", input: { command: "npm test" } });
 	});
 
-	it("shows the command the harness really runs when it rewrote the call", () => {
-		expect(toolCallEntry("bash", { command: "npm test" }, "cd /wt && npm test")).toEqual({ kind: "tool", tool: "bash", input: { command: "cd /wt && npm test" } });
+	it("shows the command as the model wrote it when the harness has wrapped the call", () => {
+		expect(toolCallEntry("bash", { command: "cd '/wt' && (npm test)" }, "npm test")).toEqual({ kind: "tool", tool: "bash", input: { command: "npm test" } });
 	});
 
 	it("shows every other tool by its whole input", () => {

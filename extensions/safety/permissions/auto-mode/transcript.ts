@@ -69,12 +69,14 @@ export type TranscriptEntry =
  * main gate's pending call, a child's gated call, the session's history and a
  * finished subagent's review. Our counterpart of Claude Code's per-tool
  * `toAutoClassifierInput`, so one call never reaches the classifier in two
- * shapes. A shell call is its command: `runs` when the harness rewrote what
- * actually runs (a worktree wrapper), else the call's own. Every other tool
- * is its whole input.
+ * shapes. A shell call is its command as the model wrote it: `asWritten` when
+ * the harness has since wrapped the call's own command (a worktree's `cd`
+ * wrapper), so the classifier judges what the model asked for and the wrapper
+ * does not escalate every call (PERMISSIONS-REVIEW-2026-09-05 L3). Every other
+ * tool is its whole input.
  */
-export function toolCallEntry(tool: string, input: unknown, runs?: string): TranscriptEntry {
-	if (runs !== undefined) return { kind: "tool", tool, input: { command: runs } };
+export function toolCallEntry(tool: string, input: unknown, asWritten?: string): TranscriptEntry {
+	if (asWritten !== undefined) return { kind: "tool", tool, input: { command: asWritten } };
 	const args = isPlainObject(input) ? input : {};
 	if (SHELL_TOOLS.has(tool) && typeof args.command === "string") return { kind: "tool", tool, input: { command: args.command } };
 	return { kind: "tool", tool, input: args };
