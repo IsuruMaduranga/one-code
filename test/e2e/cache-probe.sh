@@ -32,6 +32,13 @@
 # cannot see; the probe project sets `transport: "sse"` and is trusted with
 # --approve so the session's requests go through fetch.
 #
+# `--repo-only` loads only this repo's extensions (`--no-extensions -e <repo>`),
+# for an agent dir (PI_CODING_AGENT_DIR) whose settings name another package.
+# `--expect-auth login|key` records the credential shape of every request in the
+# session and classifier phases (dump-requests.ts WIRE_AUTH_DUMP, never a value)
+# and fails unless each one used the Anthropic login (bearer, no x-api-key) or
+# the API key, and went to the probe's own model (test/e2e/cache-probe-auth.mjs).
+#
 # It runs the repo's own pi (node_modules), the version One Code ships against,
 # not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
 # optionally names a new output directory without changing TMPDIR for test fixtures.
@@ -49,11 +56,21 @@ CLASSIFIER=1
 REVIEW=1
 READER=1
 LATE_TOOL=0
+REPO_ARGS=()
+EXPECT_AUTH=""
 case "$MODEL" in
 anthropic/*) LATE_TOOL=1 ;;
 esac
+expect_auth_next=0
 for arg in "$@"; do
-	if [ "$arg" = "--no-classifier" ]; then
+	if [ "$expect_auth_next" = 1 ]; then
+		EXPECT_AUTH="$arg"
+		expect_auth_next=0
+	elif [ "$arg" = "--expect-auth" ]; then
+		expect_auth_next=1
+	elif [ "$arg" = "--repo-only" ]; then
+		REPO_ARGS=(--no-extensions -e "$REPO")
+	elif [ "$arg" = "--no-classifier" ]; then
 		CLASSIFIER=0
 	elif [ "$arg" = "--no-review" ]; then
 		REVIEW=0
@@ -67,6 +84,13 @@ for arg in "$@"; do
 		CHECK_ARGS+=("$arg")
 	fi
 done
+case "$EXPECT_AUTH" in
+"" | login | key) ;;
+*)
+	echo "--expect-auth takes login or key, not '$EXPECT_AUTH'" >&2
+	exit 2
+	;;
+esac
 
 if [ -n "${CACHE_PROBE_WORK_DIR:-}" ]; then
 	WORK="$CACHE_PROBE_WORK_DIR"
@@ -87,12 +111,21 @@ openai-codex/*)
 	;;
 esac
 
+# --expect-auth: where every recorded request notes its credential shape, and the
+# dump the auto-mode phases load to record theirs.
+AUTH_DUMP=""
+PHASE_DUMP=()
+if [ -n "$EXPECT_AUTH" ]; then
+	AUTH_DUMP="$WORK/auth.jsonl"
+	PHASE_DUMP=(-e "$REPO/test/e2e/dump-requests.ts")
+fi
+
 echo "model:   $MODEL"
 echo "pi:      $(node "$PI_BIN" --version 2>/dev/null | tail -1)"
 echo "workdir: $WORK"
 (
 	cd "$PROJECT"
-	WIRE_DUMP="$WORK/wire.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-requests.ts" ${APPROVE[@]+"${APPROVE[@]}"} --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
+	WIRE_DUMP="$WORK/wire.jsonl" WIRE_AUTH_DUMP="$AUTH_DUMP" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} -e "$REPO/test/e2e/dump-requests.ts" ${APPROVE[@]+"${APPROVE[@]}"} --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
 ) || echo "pi exited non-zero (see $WORK/stderr.log)"
 
 status=0
@@ -108,7 +141,7 @@ auto_phase() {
 	git -C "$WORK/$name-project" init -q
 	(
 		cd "$WORK/$name-project"
-		ONECODE_AUTO_MODE_LOG="$WORK/$name.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$prompt" > "$WORK/$name-events.jsonl" 2> "$WORK/$name-stderr.log"
+		WIRE_DUMP="$WORK/$name-wire.jsonl" WIRE_AUTH_DUMP="$AUTH_DUMP" ONECODE_AUTO_MODE_LOG="$WORK/$name.jsonl" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ${PHASE_DUMP[@]+"${PHASE_DUMP[@]}"} --model "$MODEL" --mode json --permission-mode auto -p "$prompt" > "$WORK/$name-events.jsonl" 2> "$WORK/$name-stderr.log"
 	) || echo "pi exited non-zero in the $name phase (see $WORK/$name-stderr.log)"
 	touch "$WORK/$name.jsonl"
 	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/$name.jsonl" "$@" || status=1
@@ -118,6 +151,10 @@ if [ "$CLASSIFIER" = 1 ]; then
 fi
 if [ "$REVIEW" = 1 ]; then
 	auto_phase review 'Call the Agent tool exactly once, with subagent_type general-purpose and this prompt: "Run curl -sI https://example.com with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' --review
+fi
+if [ -n "$EXPECT_AUTH" ]; then
+	echo "--- credential check (session and auto-mode phases)"
+	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
 fi
 if [ "$READER" = 1 ]; then
 	echo "--- reader phase"

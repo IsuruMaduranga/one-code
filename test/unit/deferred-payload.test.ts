@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	registryNameOnWire,
 	stabilizeDeferredTools,
 	stabilizeResponsesToolLoads,
 	responsesToolLoadCompat,
@@ -268,11 +269,132 @@ describe("stabilizeDeferredTools", () => {
 		expect(stabilizeDeferredTools(out, registry, deferred)).toEqual(out);
 	});
 
-	it("does nothing without a tools array or when the wire names are not the registry's (stealth renames)", () => {
+	it("does nothing without a tools array or when a wire name matches no registry tool", () => {
 		expect(stabilizeDeferredTools({ messages: [] }, registry, deferred)).toBeUndefined();
 		expect(stabilizeDeferredTools({ tools: [], messages: [] }, registry, deferred)).toBeUndefined();
 		expect(stabilizeDeferredTools({ tools: [{ name: "Read" }, { name: "ToolSearch" }], messages: [] }, registry, deferred)).toBeUndefined();
 		expect(stabilizeDeferredTools({ tools: [{ input_schema: {} }], messages: [] }, registry, deferred)).toBeUndefined();
+	});
+});
+
+/**
+ * The names pi sends on the Anthropic login path: some eager tools go out in
+ * another case (`Read` for `read`), every other name as registered. The hook
+ * sees them after pi renamed them.
+ */
+describe("stabilizeDeferredTools on renamed tool names", () => {
+	const loginRegistry = [
+		{ name: "read", description: "Read a file", parameters: { properties: { path: { type: "string" } }, required: ["path"] } },
+		{ name: "bash", description: "Run a command", parameters: { properties: { command: { type: "string" } }, required: ["command"] } },
+		{ name: "skill", description: "Run a skill", parameters: { properties: {} } },
+		{ name: "tool_search", description: "Search", parameters: { properties: { query: { type: "string" } }, required: ["query"] } },
+		{ name: "Agent", description: "Spawn", parameters: { properties: {} } },
+		{ name: "cron_list", description: "List jobs", parameters: { properties: {} } },
+		{ name: "mcp__s__a", description: "A", parameters: { properties: {} } },
+	];
+	const loginDeferred = (name: string) => name === "cron_list" || name === "mcp__s__a";
+	const def = (name: string) => {
+		const tool = loginRegistry.find((t) => t.name === name)!;
+		return { name, description: tool.description, input_schema: { type: "object", properties: tool.parameters.properties, required: tool.parameters.required ?? [] }, defer_loading: true };
+	};
+	const anchor = { name: "__pi_deferred_placeholder__", description: "Reserved.", input_schema: { type: "object", properties: {}, required: [] }, defer_loading: true };
+	const renamedEager = [
+		{ name: "Read", input_schema: {} },
+		{ name: "Bash", input_schema: {} },
+		{ name: "tool_search", input_schema: {} },
+		{ name: "Skill", input_schema: {} },
+		{ name: "Agent", input_schema: {}, cache_control: breakpoint },
+	];
+	/** Request 1 after the hook: pi's renamed eager entries as carried, its anchor, then the deferred tail. */
+	const loginRequest1 = [...renamedEager, anchor, def("cron_list"), def("mcp__s__a")];
+	const names = (tools: unknown) => (tools as Array<{ name: string; defer_loading?: boolean }>).map((t) => `${t.name}${t.defer_loading ? "(D)" : ""}`);
+
+	it("defers the registry's deferred tools and keeps every name the request carries", () => {
+		const payload = { tools: [...renamedEager, anchor], messages: [] };
+		const out = stabilizeDeferredTools(payload, loginRegistry, loginDeferred)!;
+		expect(out.tools).toEqual(loginRequest1);
+		// No registry spelling of a renamed tool is written back.
+		expect(names(out.tools)).not.toContain("read");
+		expect(stabilizeDeferredTools(out, loginRegistry, loginDeferred)).toEqual(out);
+	});
+
+	it("demotes a tool loaded after the rename and references it under the name its load gave", () => {
+		const payload = {
+			tools: [...renamedEager.map(({ cache_control: _, ...tool }) => tool), anchor, { name: "cron_list", input_schema: {}, cache_control: breakpoint }],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "hi" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "toolu_0", name: "Bash", input: { command: "ls" } }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_0", content: "a.txt" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "tool_search", input: { query: "select:cron_list" } }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: loadedResult(["cron_list"]), cache_control: breakpoint }] },
+			],
+		};
+		const out = stabilizeDeferredTools(payload, loginRegistry, loginDeferred, new Map([["toolu_1", ["cron_list"]]]))!;
+		expect(out.tools).toEqual(loginRequest1);
+		const messages = out.messages as Array<{ content: Array<Record<string, unknown>> }>;
+		// The renamed call is left as pi sent it.
+		expect(messages[1]).toBe(payload.messages[1]);
+		expect(messages[4].content[0].content).toEqual([{ type: "tool_reference", tool_name: "cron_list" }]);
+	});
+
+	it("keeps pi's rendering when a renamed tool is itself deferred", () => {
+		const grepRegistry = [...loginRegistry, { name: "grep", description: "Search files", parameters: { properties: {} } }];
+		const grepDeferred = (name: string) => loginDeferred(name) || name === "grep";
+		// Loaded, so pi rendered it eager under its renamed spelling.
+		const loaded = { tools: [...renamedEager, anchor, { name: "Grep", input_schema: {} }], messages: [] };
+		expect(stabilizeDeferredTools(loaded, grepRegistry, grepDeferred, new Map([["toolu_1", ["grep"]]]))).toBeUndefined();
+		// pi's deferred rendering of it under that spelling would be declared twice beside the tail.
+		const deferredRendering = { tools: [...renamedEager, { name: "Grep", input_schema: {}, defer_loading: true }], messages: [] };
+		expect(stabilizeDeferredTools(deferredRendering, grepRegistry, grepDeferred)).toBeUndefined();
+	});
+
+	it("falls back to pi's rendering when a wire name could stand for two registry tools", () => {
+		// Two registered tools that differ only in case: a renamed name cannot tell them apart.
+		const twoCases = [...loginRegistry, { name: "mcp__s__getUser", description: "U", parameters: { properties: {} } }, { name: "mcp__s__getuser", description: "u", parameters: { properties: {} } }];
+		expect(stabilizeDeferredTools({ tools: [...renamedEager, { name: "MCP__S__GETUSER", input_schema: {} }], messages: [] }, twoCases, loginDeferred)).toBeUndefined();
+		// Each one under its own exact name is no guess.
+		expect(stabilizeDeferredTools({ tools: [...renamedEager, { name: "mcp__s__getUser", input_schema: {} }], messages: [] }, twoCases, loginDeferred)).toBeDefined();
+		// A renamed name whose registry tool the wire also carries under its own name.
+		expect(stabilizeDeferredTools({ tools: [...renamedEager, { name: "read", input_schema: {} }], messages: [] }, loginRegistry, loginDeferred)).toBeUndefined();
+	});
+
+	it("works on a subagent's request, whose registry and eager set are its own", () => {
+		// A child declares fewer tools and defers what its parent injects into it (MCP, SendMessage).
+		const childRegistry = [loginRegistry[0], loginRegistry[1], loginRegistry[3], loginRegistry[5], loginRegistry[6], { name: "SendMessage", description: "Message", parameters: { properties: {} } }];
+		const childDeferred = (name: string) => loginDeferred(name) || name === "SendMessage";
+		const childEager = [{ name: "Read", input_schema: {} }, { name: "Bash", input_schema: {} }, { name: "tool_search", input_schema: {}, cache_control: breakpoint }];
+		const first = stabilizeDeferredTools({ tools: [...childEager, anchor], messages: [] }, childRegistry, childDeferred)!;
+		expect(names(first.tools)).toEqual(["Read", "Bash", "tool_search", "__pi_deferred_placeholder__(D)", "SendMessage(D)", "cron_list(D)", "mcp__s__a(D)"]);
+		const afterLoad = {
+			tools: [{ name: "Read", input_schema: {} }, { name: "Bash", input_schema: {} }, { name: "tool_search", input_schema: {} }, anchor, { name: "cron_list", input_schema: {}, cache_control: breakpoint }],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "go" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "toolu_c", name: "tool_search", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_c", content: loadedResult(["cron_list"]) }] },
+			],
+		};
+		expect(stabilizeDeferredTools(afterLoad, childRegistry, childDeferred, new Map([["toolu_c", ["cron_list"]]]))!.tools).toEqual(first.tools);
+	});
+});
+
+describe("registryNameOnWire", () => {
+	it("matches an exact name, else the one registry name equal to it ignoring case", () => {
+		const lookup = registryNameOnWire(["read", "tool_search", "Agent"], new Set(["Read", "tool_search", "Agent"]));
+		expect(lookup("Read")).toBe("read");
+		expect(lookup("tool_search")).toBe("tool_search");
+		expect(lookup("Agent")).toBe("Agent");
+		expect(lookup("ToolSearch")).toBeUndefined();
+		expect(lookup.ambiguous("ToolSearch")).toBe(false);
+	});
+
+	it("matches nothing, and says so, when the name could be two tools", () => {
+		const lookup = registryNameOnWire(["mcp__s__getUser", "mcp__s__getuser", "read"], new Set(["MCP__S__GETUSER", "Read", "read"]));
+		expect(lookup("MCP__S__GETUSER")).toBeUndefined();
+		expect(lookup.ambiguous("MCP__S__GETUSER")).toBe(true);
+		expect(lookup("mcp__s__getUser")).toBe("mcp__s__getUser");
+		// `read` is on the wire under its own name, so `Read` is not it.
+		expect(lookup("Read")).toBeUndefined();
+		expect(lookup.ambiguous("Read")).toBe(true);
 	});
 });
 

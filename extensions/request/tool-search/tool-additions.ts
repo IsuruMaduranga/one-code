@@ -80,8 +80,9 @@ export function liftAddenda<T extends StoredMessage>(messages: T[]): { messages:
  * carries a pinned addendum part (removed). Also returns every name added: they
  * must be declared deferred in `tools`. With `references: false` the message
  * is Claude Code's sentence and names alone, for a request whose tools cannot
- * be referenced (OAuth renames them): the tools are active, so the model can
- * still call them. Undefined when there is none.
+ * be referenced (`stabilizeDeferredTools` cannot match its names to the
+ * registry): the tools are active, so the model can still call them.
+ * Undefined when there is none.
  */
 export function withToolAdditions(
 	payload: Record<string, unknown>,

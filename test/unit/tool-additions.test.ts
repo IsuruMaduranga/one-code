@@ -64,6 +64,41 @@ describe("liftAddenda and withToolAdditions", () => {
 		expect(addendumNames(`note\n${framed}`)).toBeUndefined();
 	});
 
+	it("references a batch added after pi renamed the eager tools, under the names the request carries", () => {
+		const registry = [
+			{ name: "read", parameters: { properties: {} } },
+			{ name: "bash", parameters: { properties: {} } },
+			{ name: "mcp__s__a", description: "A", parameters: { properties: {} } },
+			{ name: "mcp__s__b", description: "B", parameters: { properties: {} } },
+		];
+		const isDeferred = (name: string) => name.startsWith("mcp__");
+		// pi rendered the announced tools eager after its renamed ones; the call that answered carries the addendum.
+		const payload = {
+			tools: [{ name: "Read", input_schema: {} }, { name: "Bash", input_schema: {} }, { name: "mcp__s__a", input_schema: {} }, { name: "mcp__s__b", input_schema: {} }],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "hi" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t", name: "Bash", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "done" }] },
+			],
+		};
+		const lifted = withToolAdditions(payload, new Map([["t", ["mcp__s__a", "mcp__s__b"]]]))!;
+		const out = stabilizeDeferredTools(lifted.payload, registry, isDeferred, new Map(), new Set(lifted.names))!;
+		expect(out.tools).toEqual([
+			{ name: "Read", input_schema: {} },
+			{ name: "Bash", input_schema: {} },
+			{ name: "mcp__s__a", description: "A", input_schema: { type: "object", properties: {}, required: [] }, defer_loading: true },
+			{ name: "mcp__s__b", description: "B", input_schema: { type: "object", properties: {}, required: [] }, defer_loading: true },
+		]);
+		expect((out.messages as unknown[])[3]).toEqual({
+			role: "system",
+			content: [
+				{ type: "text", text: `${TOOLS_AVAILABLE}\nmcp__s__a\nmcp__s__b` },
+				{ type: "tool_addition", tool: { type: "tool_reference", name: "mcp__s__a" } },
+				{ type: "tool_addition", tool: { type: "tool_reference", name: "mcp__s__b" } },
+			],
+		});
+	});
+
 	it("is declared deferred in tools once added, even though pi rendered it eager", () => {
 		const registry = [
 			{ name: "read", parameters: { properties: {} } },

@@ -303,6 +303,39 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
 	return [...items.slice(0, -1), { ...items[items.length - 1], cache_control }];
 }
 
+/** {@link registryNameOnWire}'s lookup: a wire name's registry name, and whether a name is ambiguous. */
+export interface RegistryNameLookup {
+	(wireName: string): string | undefined;
+	/** The name matches more than one registry tool ignoring case, or its one match is on the wire under its own name too. */
+	ambiguous(wireName: string): boolean;
+}
+
+/**
+ * The registry tool each name on the wire stands for, read from the request:
+ * the tool of that exact name, else the one registry tool whose name equals it
+ * ignoring case (the names pi sends on the Anthropic login path, findings
+ * §87). No match is a guess: a name that two registry tools share ignoring
+ * case (`mcp__s__getUser` and `mcp__s__getuser`), or whose one match the wire
+ * also carries under its own name, matches nothing and is `ambiguous`.
+ */
+export function registryNameOnWire(registry: readonly string[], wireNames: ReadonlySet<string>): RegistryNameLookup {
+	const exact = new Set(registry);
+	const byFolded = new Map<string, string[]>();
+	for (const name of exact) byFolded.set(name.toLowerCase(), [...(byFolded.get(name.toLowerCase()) ?? []), name]);
+	const candidates = (wireName: string) => byFolded.get(wireName.toLowerCase()) ?? [];
+	const ambiguous = (wireName: string) => {
+		if (exact.has(wireName)) return false;
+		const matches = candidates(wireName);
+		return matches.length > 1 || (matches.length === 1 && wireNames.has(matches[0]));
+	};
+	const lookup = (wireName: string) => {
+		if (exact.has(wireName)) return wireName;
+		const matches = candidates(wireName);
+		return matches.length === 1 && !wireNames.has(matches[0]) ? matches[0] : undefined;
+	};
+	return Object.assign(lookup, { ambiguous });
+}
+
 /**
  * An Anthropic request whose `tools` array is byte-identical to request 1's,
  * whatever `tool_search` has loaded since — the client side of Anthropic's
@@ -326,11 +359,15 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
  *   references it, so it needs no `tool_search` result.
  * - pi's own deferred entries that are not registry tools (its
  *   `__pi_deferred_placeholder__`) stay in place.
+ * - The names pi sends on the Anthropic login path differ from the registry's
+ *   in case only (`Read` for `read`). Each wire name is matched to its registry
+ *   tool by {@link registryNameOnWire}, read from the request alone, and every
+ *   tool the request carries keeps the name it carries.
  *
  * Returns undefined (leave the payload alone) when the request carries no
- * tools or the wire names are not the registry's (pi's OAuth "stealth" mode
- * renames them to Claude Code casing, and an unmatched name must not be
- * duplicated). Never mutates its input.
+ * tools, a wire name matches no registry tool or more than one, or a renamed
+ * tool is deferred (pi renders it eager under a name the deferred tail would
+ * not carry, so a demotion would declare it twice). Never mutates its input.
  */
 export function stabilizeDeferredTools(
 	payload: Record<string, unknown>,
@@ -341,19 +378,30 @@ export function stabilizeDeferredTools(
 ): Record<string, unknown> | undefined {
 	const existing = payload.tools;
 	if (!Array.isArray(existing) || existing.length === 0) return undefined;
-	const registry = new Set(tools.map((t) => t.name));
+	if (existing.some((raw) => typeof (raw as WireTool | null)?.name !== "string")) return undefined;
+	const wireNames = new Set((existing as WireTool[]).map((tool) => tool.name));
+	const registryNameOf = registryNameOnWire(tools.map((t) => t.name), wireNames);
 
 	const eager: WireTool[] = [];
 	const anchors: WireTool[] = [];
+	// The registry names of the eager tools, whatever spelling the wire uses.
+	const eagerNames = new Set<string>();
 	for (const raw of existing) {
-		const tool = raw as WireTool | null;
-		if (typeof tool?.name !== "string") return undefined;
-		if (!registry.has(tool.name)) {
-			if (tool.defer_loading === true) anchors.push(tool);
+		const tool = raw as WireTool;
+		const own = registryNameOf(tool.name);
+		if (own === undefined) {
+			// pi's own deferred entries (its placeholder) stay in place.
+			if (tool.defer_loading === true && !registryNameOf.ambiguous(tool.name)) anchors.push(tool);
 			else return undefined;
 			continue;
 		}
-		if (tool.defer_loading !== true) eager.push(tool);
+		// A renamed tool is only ever eager here, so the demotion below (keyed on
+		// wire names, as the tool calls and loads are) never touches one.
+		if (own !== tool.name && (tool.defer_loading === true || isDeferred(own))) return undefined;
+		if (tool.defer_loading !== true) {
+			eager.push(tool);
+			eagerNames.add(own);
+		}
 	}
 
 	const messages: WireMessage[] = Array.isArray(payload.messages) ? (payload.messages as WireMessage[]) : [];
@@ -401,7 +449,7 @@ export function stabilizeDeferredTools(
 		last !== undefined && demoted.has(last.name) ? last.cache_control : undefined,
 	);
 	if (keptEager.length === 0) return undefined;
-	const eagerNames = new Set(keptEager.map((tool) => tool.name));
+	for (const name of demoted) eagerNames.delete(name);
 	const deferred = tools
 		.filter((t) => isDeferred(t.name) && !eagerNames.has(t.name))
 		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))

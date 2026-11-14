@@ -325,8 +325,9 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// where the model takes one, declared deferred.
 		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
 		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
-		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
-		// rendered them and the addition goes as text.
+		// A request stabilize cannot match to the registry (an ambiguous name, a
+		// renamed tool that is deferred) keeps the tools pi rendered, and the
+		// addition goes as text.
 		if (!stable) return announceAsText();
 		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
