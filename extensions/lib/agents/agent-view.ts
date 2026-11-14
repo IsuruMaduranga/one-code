@@ -29,6 +29,72 @@ export interface AgentViewAnnouncement {
 }
 
 /** The slice of a live run the target is built from. */
+/**
+ * A scroll of the open agent view, sent by the prompt editor
+ * (`AgentViewScroll`). In fullscreen the editor claims pi-tui's viewport keys
+ * while a view is open (`capturesViewportInput`), so they scroll the view
+ * instead of the main transcript hidden under it; the wheel arrives as lines.
+ */
+export const AGENT_VIEW_SCROLL_CHANNEL = brandedId("agent-view-scroll");
+
+export type AgentViewScroll =
+	| { action: "pageUp" | "pageDown" | "halfPageUp" | "halfPageDown" | "lineUp" | "lineDown" | "top" | "bottom" }
+	| { action: "wheel"; lines: number };
+
+/** pi-tui's fullscreen viewport bindings, in the order they are tried. */
+const VIEWPORT_BINDINGS = [
+	["tui.altScreen.pageUp", "pageUp"],
+	["tui.altScreen.pageDown", "pageDown"],
+	["tui.altScreen.halfPageUp", "halfPageUp"],
+	["tui.altScreen.halfPageDown", "halfPageDown"],
+	["tui.altScreen.lineUp", "lineUp"],
+	["tui.altScreen.lineDown", "lineDown"],
+	["tui.altScreen.top", "top"],
+	["tui.altScreen.bottom", "bottom"],
+] as const;
+
+/** The view scroll a key asks for under the user's own bindings, or undefined. */
+export function viewportScrollFor(matches: (binding: string) => boolean): AgentViewScroll | undefined {
+	for (const [binding, action] of VIEWPORT_BINDINGS) if (matches(binding)) return { action };
+	return undefined;
+}
+
+/** pi-tui keeps this many rows of the last page on screen when it pages. */
+const PAGE_OVERLAP = 4;
+
+/**
+ * The view's scroll (lines up from the bottom) after `scroll`, clamped to
+ * `[0, maxScroll]`, for a view `height` rows tall. A wheel's lines are
+ * negative going up, as pi-tui reports them.
+ */
+export function scrolledView(current: number, maxScroll: number, height: number, scroll: AgentViewScroll): number {
+	const page = Math.max(1, height - PAGE_OVERLAP);
+	const half = Math.max(1, Math.floor(height / 2));
+	const delta = (() => {
+		switch (scroll.action) {
+			case "pageUp":
+				return page;
+			case "pageDown":
+				return -page;
+			case "halfPageUp":
+				return half;
+			case "halfPageDown":
+				return -half;
+			case "lineUp":
+				return 1;
+			case "lineDown":
+				return -1;
+			case "top":
+				return maxScroll;
+			case "bottom":
+				return -current;
+			case "wheel":
+				return -scroll.lines;
+		}
+	})();
+	return Math.max(0, Math.min(Math.max(0, maxScroll), current + delta));
+}
+
 export interface ViewedRun {
 	name: string;
 	agentType: string;

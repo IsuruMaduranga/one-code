@@ -50,7 +50,7 @@ import {
 	thinkingLabel,
 } from "./startup.ts";
 import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
-import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
+import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { paintedUserMarker, userMessageMarkdown } from "./user-marker.ts";
 import { TitleAnimation } from "./title-animation.ts";
@@ -236,6 +236,7 @@ function installPromptMarker(
 	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
 	argumentHints: ReadonlyMap<string, CommandHint>,
 	agentView: { target?: AgentViewTarget },
+	scrollAgentView: (scroll: AgentViewScroll) => void = () => {},
 ): void {
 	if (knobValue("NO_INPUT_MARKER") === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
@@ -252,6 +253,8 @@ function installPromptMarker(
 		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
 	};
 	const badge = () => agentView.target?.badge;
+	// While an agent is viewed, the viewport keys and the wheel scroll the view.
+	const scrollView = () => (agentView.target ? scrollAgentView : undefined);
 	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
 	// The editor can outlive this context across a session replacement; a stale
 	// context throws, and ↑ must still reach the editor then.
@@ -264,7 +267,7 @@ function installPromptMarker(
 	};
 	ui.setEditorComponent(
 		(tui: unknown, theme: unknown, keybindings: unknown) =>
-			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued),
+			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued, scrollView),
 	);
 }
 
@@ -458,7 +461,9 @@ function brandingExtension(pi: ExtensionAPI) {
 		transcriptTheme = ctx.ui.theme;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
-		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);
+		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView, (scroll) =>
+			pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
+		);
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {

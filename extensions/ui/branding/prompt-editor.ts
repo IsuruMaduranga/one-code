@@ -11,7 +11,7 @@
  */
 
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { applyBorderBadge, fitBadge } from "../../lib/agents/agent-view.ts";
+import { type AgentViewScroll, applyBorderBadge, fitBadge, viewportScrollFor } from "../../lib/agents/agent-view.ts";
 import { applyArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { visibleWidth } from "../../lib/ui/text-width.ts";
 import { applyPromptMarker } from "./prompt-marker.ts";
@@ -34,6 +34,8 @@ export class PromptEditor extends CustomEditor {
 	/** Whether a message waits in pi's queue mid-turn (queued-edit.ts). */
 	#queued: () => boolean;
 	#keys: EditorArgs[2];
+	/** Scrolls the open agent view; undefined while main is on screen (lib/agents/agent-view.ts). */
+	#scrollView: () => ((scroll: AgentViewScroll) => void) | undefined;
 	/** The width pi wraps the text at, from the last render (pi's own formula). */
 	#layoutWidth = Number.POSITIVE_INFINITY;
 
@@ -46,6 +48,7 @@ export class PromptEditor extends CustomEditor {
 		badge: () => string | undefined = () => undefined,
 		paintBadge: (label: string) => string = (label) => label,
 		queued: () => boolean = () => false,
+		scrollView: () => ((scroll: AgentViewScroll) => void) | undefined = () => undefined,
 	) {
 		super(tui, theme, keybindings, { paddingX: PROMPT_PADDING, embedWorkingStatus: true });
 		this.#renderMarker = renderMarker;
@@ -54,16 +57,45 @@ export class PromptEditor extends CustomEditor {
 		this.#paintBadge = paintBadge;
 		this.#queued = queued;
 		this.#keys = keybindings;
+		this.#scrollView = scrollView;
+	}
+
+	/**
+	 * While an agent view is open the editor takes pi-tui's fullscreen viewport
+	 * keys (PageUp/PageDown and the rest), which would otherwise scroll the
+	 * main transcript hidden under the view; handleInput hands them to the
+	 * view. An open autocomplete menu keeps them, as in pi's editor.
+	 */
+	get capturesViewportInput(): boolean {
+		return super.capturesViewportInput || this.#scrollView() !== undefined;
 	}
 
 	/** ↑ on the first line restores queued messages, as in Claude Code (queued-edit.ts). */
 	handleInput(data: string): void {
+		const scrollView = this.#scrollView();
+		if (scrollView && !super.capturesViewportInput) {
+			const scroll = viewportScrollFor((binding) => this.#keys.matches(data, binding as never));
+			if (scroll) {
+				scrollView(scroll);
+				return;
+			}
+		}
 		const dequeue = this.actionHandlers.get("app.message.dequeue");
 		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this, this.#queued(), this.#layoutWidth)) {
 			dequeue();
 			return;
 		}
 		super.handleInput(data);
+	}
+
+	/** A wheel over the editor's rows scrolls an open agent view, not the main transcript under it. */
+	handleMouse(event: Parameters<CustomEditor["handleMouse"]>[0]): ReturnType<CustomEditor["handleMouse"]> {
+		const scrollView = this.#scrollView();
+		if (scrollView && event.type === "wheel" && event.wheelDelta) {
+			scrollView({ action: "wheel", lines: event.wheelDelta });
+			return { handled: true };
+		}
+		return super.handleMouse(event);
 	}
 
 	/**

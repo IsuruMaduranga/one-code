@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentViewTarget, applyBorderBadge, fitBadge, unwrapUserMessage, userMessageForAgent } from "../../extensions/lib/agents/agent-view.ts";
+import { agentViewTarget, applyBorderBadge, fitBadge, scrolledView, unwrapUserMessage, userMessageForAgent, viewportScrollFor } from "../../extensions/lib/agents/agent-view.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { moveTasksSelection, renderTasksDialog, tasksItems } from "../../extensions/agents/subagents/tasks-dialog.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
@@ -103,5 +103,27 @@ describe("renderTasksDialog", () => {
 		expect(moveTasksSelection(0, "up", 3)).toBe(0);
 		expect(moveTasksSelection(2, "down", 3)).toBe(2);
 		expect(moveTasksSelection(1, "down", 3)).toBe(2);
+	});
+});
+
+describe("scrolling the agent view", () => {
+	it("reads the viewport keys under the user's own bindings", () => {
+		const bound = (name: string) => (binding: string) => binding === name;
+		expect(viewportScrollFor(bound("tui.altScreen.pageUp"))).toEqual({ action: "pageUp" });
+		expect(viewportScrollFor(bound("tui.altScreen.bottom"))).toEqual({ action: "bottom" });
+		expect(viewportScrollFor(bound("tui.editor.cursorUp"))).toBeUndefined();
+	});
+
+	it("pages by the view's height less pi-tui's overlap, halves, lines, ends and wheel lines, inside the range", () => {
+		expect(scrolledView(0, 100, 20, { action: "pageUp" })).toBe(16);
+		expect(scrolledView(16, 100, 20, { action: "pageDown" })).toBe(0);
+		expect(scrolledView(0, 100, 20, { action: "halfPageUp" })).toBe(10);
+		expect(scrolledView(5, 100, 20, { action: "lineDown" })).toBe(4);
+		expect(scrolledView(5, 100, 20, { action: "top" })).toBe(100);
+		expect(scrolledView(50, 100, 20, { action: "bottom" })).toBe(0);
+		expect(scrolledView(0, 100, 20, { action: "wheel", lines: -3 })).toBe(3);
+		expect(scrolledView(95, 100, 20, { action: "pageUp" })).toBe(100);
+		expect(scrolledView(2, 100, 20, { action: "pageDown" })).toBe(0);
+		expect(scrolledView(0, 0, 20, { action: "pageUp" })).toBe(0);
 	});
 });
