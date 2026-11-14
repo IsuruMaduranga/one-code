@@ -195,3 +195,17 @@ declare module "*/apply-brand.mjs" {
 	export function stampExtension<T extends Record<string, unknown>>(pkg: T): Omit<T, keyof Listing> & Listing;
 	export function stampApp(pkg: Record<string, unknown>): Record<string, unknown> & Listing;
 }
+
+/** Types for the base sync (scripts/sync-base.mjs). */
+declare module "*/sync-base.mjs" {
+	export const SYNC_FILE: string;
+	/** The paths of the repository that belong to the product; a folder ends with a slash. */
+	export const PRODUCT_PATHS: readonly string[];
+	export function isProductPath(file: string, paths: readonly string[]): boolean;
+	/** The base at `ref` of `source` (a path or a URL), exported into a new folder. */
+	export function fetchBase(source: string, ref: string): { dir: string; commit: string };
+	/** Makes `product` hold the exported base in `base`, and records `record` in the sync file. */
+	export function applyBase(product: string, base: string, record: { source?: string; ref?: string; commit?: string }): { written: string[]; deleted: string[]; stamped: boolean };
+	/** The base paths where `product` differs from a fresh sync of its recorded commit. */
+	export function checkBase(product: string, base: string): string[];
+}
