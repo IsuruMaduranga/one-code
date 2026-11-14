@@ -32,7 +32,7 @@
 		{"id": "google/gemini-3.6-flash", "max": null, "low": null, "price": [0.75, 3.75], "deprecated": false},
 		{"id": "google/gemini-3.5-flash", "max": null, "low": null, "price": [1.5, 9], "deprecated": false},
 		{"id": "deepseek/deepseek-v4.1-flash-1017", "max": 32.6, "low": null, "price": [0.3, 1.2], "deprecated": false},
-		{"id": "deepseek/deepseek-v4-pro", "max": 23.1, "low": null, "price": [1.32, 3.96], "deprecated": false},
+		{"id": "deepseek/deepseek-v4-pro", "max": null, "low": null, "price": [1.5016, 3.2], "deprecated": false},
 		{"id": "deepseek/deepseek-v4-pro-0813", "max": 23.1, "low": null, "price": [1.32, 3.96], "deprecated": false},
 		{"id": "deepseek/deepseek-v4.1-flash", "max": null, "low": null, "price": [0.3, 1.2], "deprecated": true},
 		{"id": "deepseek/deepseek-v4-flash", "max": null, "low": null, "price": [0.14, 0.28], "deprecated": false},

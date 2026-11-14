@@ -108,7 +108,7 @@ role has its own rule, built on the model tiers that
   | Gemini 4 Carbon | Gemini 4 Hydrogen | main model |
   | Gemini 4 Argon | Gemini 4 Hydrogen | Gemini 3.8 Flash |
   | Gemini 4 Hydrogen | main model | Gemini 3.8 Flash |
-  | DeepSeek V4 Pro | DeepSeek V4.1 Flash 1017 | DeepSeek V4.1 Flash 1017 |
+  | DeepSeek V4 Pro 0813 | DeepSeek V4.1 Flash 1017 | DeepSeek V4.1 Flash 1017 |
   | GLM-5.3 | GLM-5.3 Flash | GLM-5.3 Flash |
   | MiMo V2.6 Pro | MiMo V2.6 Flash | MiMo V2.6 Flash |
   | MiniMax M3 | MiniMax M3.1 Flash | MiniMax M3.1 Flash |

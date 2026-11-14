@@ -66,7 +66,7 @@ export const PAIRING_TABLE: readonly PairingRow[] = [
 	{ sessions: ["google/gemini-4-hydrogen"], subagent: SESSION, classifier: "google/gemini-3.8-flash" },
 	{ sessions: ["google/gemini-3.8-flash"], subagent: SESSION, classifier: SESSION },
 	// DeepSeek. V4.1 Flash 1017 outscores V4 Pro by 9.5 points at under a quarter of its price.
-	{ sessions: ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813"], subagent: "deepseek/deepseek-v4.1-flash-1017", classifier: "deepseek/deepseek-v4.1-flash-1017" },
+	{ sessions: ["deepseek/deepseek-v4-pro-0813"], subagent: "deepseek/deepseek-v4.1-flash-1017", classifier: "deepseek/deepseek-v4.1-flash-1017" },
 	{ sessions: ["deepseek/deepseek-v4.1-flash-1017"], subagent: SESSION, classifier: SESSION },
 	// Z.ai, Xiaomi, MiniMax, Meta: each vendor's flash model, within 4 points of its larger one or above it.
 	{ sessions: ["zhipuai/glm-5.3"], subagent: "zhipuai/glm-5.3-flash", classifier: "zhipuai/glm-5.3-flash" },
