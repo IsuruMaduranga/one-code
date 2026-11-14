@@ -75,11 +75,14 @@ export function fetchBase(source, ref) {
 	return { dir, commit };
 }
 
+/** The paths a product owns: the fixed ones and those its sync record adds. */
+const ownPaths = (record) => [...PRODUCT_PATHS, ...(record?.own ?? [])];
+
 /** Every file under `dir`, as forward-slashed relative paths. */
-function filesUnder(dir, prefix = "") {
+function filesUnder(dir) {
 	const found = [];
 	for (const entry of execFileSync("find", [".", "-type", "f", "-print0"], { cwd: dir, encoding: "utf8", maxBuffer: 1 << 28 }).split("\0")) {
-		if (entry) found.push(prefix + entry.replace(/^\.\//, ""));
+		if (entry) found.push(entry.replace(/^\.\//, ""));
 	}
 	return found.sort();
 }
@@ -91,7 +94,7 @@ function filesUnder(dir, prefix = "") {
 export function applyBase(product, base, record) {
 	const syncPath = join(product, SYNC_FILE);
 	const previous = existsSync(syncPath) ? readJson(syncPath) : undefined;
-	const own = [...PRODUCT_PATHS, ...(previous?.own ?? [])];
+	const own = ownPaths(previous);
 	const version = previous && existsSync(join(product, "package.json")) ? readJson(join(product, "package.json")).version : FIRST_VERSION;
 
 	const baseFiles = filesUnder(base).filter((file) => !isProductPath(file, own));
@@ -121,10 +124,11 @@ export function applyBase(product, base, record) {
 	const app = readJson(join(product, "app/package.json"));
 	writeJson(join(product, "package.json"), { ...readJson(join(product, "package.json")), version });
 	writeJson(join(product, "app/package.json"), { ...app, version, dependencies: { ...app.dependencies, [app.productExtension]: version } });
-	if (existsSync(join(product, "profile/brand.json"))) execFileSync(process.execPath, ["scripts/apply-brand.mjs"], { cwd: product, stdio: "inherit" });
+	const stamped = existsSync(join(product, "profile/brand.json"));
+	if (stamped) execFileSync(process.execPath, ["scripts/apply-brand.mjs"], { cwd: product, stdio: "inherit" });
 
 	writeJson(syncPath, { ...previous, ...record });
-	return { written: written.filter((file) => !STAMPED.includes(file)), deleted: stale, stamped: existsSync(join(product, "profile/brand.json")) };
+	return { written: written.filter((file) => !STAMPED.includes(file)), deleted: stale, stamped };
 }
 
 /** The base paths where `product` differs from a fresh sync of its recorded commit. */
@@ -132,16 +136,17 @@ export function checkBase(product, base) {
 	const copy = mkdtempSync(join(tmpdir(), "base-check-"));
 	try {
 		const files = checkoutFiles(product);
-		for (const file of files) cpSync(join(product, file), join(copy, file), { recursive: false });
+		for (const file of files) cpSync(join(product, file), join(copy, file));
 		git(copy, "init", "-q");
 		git(copy, "add", "-A");
 		const record = readJson(join(product, SYNC_FILE));
-		const own = [...PRODUCT_PATHS, ...(record.own ?? [])];
+		const own = ownPaths(record);
 		applyBase(copy, base, record);
 		const expected = filesUnder(copy).filter((file) => !file.startsWith(".git/") && !isProductPath(file, own));
 		const actual = new Set(files.filter((file) => !isProductPath(file, own)));
 		const differing = expected.filter((file) => !actual.has(file) || !readFileSync(join(copy, file)).equals(readFileSync(join(product, file))));
-		const extra = [...actual].filter((file) => !expected.includes(file));
+		const expectedSet = new Set(expected);
+		const extra = [...actual].filter((file) => !expectedSet.has(file));
 		return [...differing.map((file) => `${file}: differs from the base`), ...extra.map((file) => `${file}: not in the base`)];
 	} finally {
 		rmSync(copy, { recursive: true, force: true });
@@ -158,8 +163,12 @@ function main(argv) {
 	const product = resolve(take("--into") ?? process.cwd());
 	const staged = take("--staged");
 	const commitArg = take("--commit");
-	const check = args.includes("--check");
-	if (check) args.splice(args.indexOf("--check"), 1);
+	const has = (flag) => {
+		const at = args.indexOf(flag);
+		if (at >= 0) args.splice(at, 1);
+		return at >= 0;
+	};
+	const check = has("--check");
 	const recorded = existsSync(join(product, SYNC_FILE)) ? readJson(join(product, SYNC_FILE)) : undefined;
 	const source = args[0] ?? recorded?.source;
 	if (!source) throw new Error("usage: node scripts/sync-base.mjs <source> [ref]   (or --check [source])");
