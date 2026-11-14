@@ -28,8 +28,8 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { catalogModelFor } from "./model-catalog.ts";
-import { isAliasOrVariantId, isDatedDuplicate, modelsContainedToSession, pricedInput, supportsImageInput, vendorProfile } from "./model-policy.ts";
+import { catalogModelFor, isDatedDuplicate } from "./model-catalog.ts";
+import { isAliasOrVariantId, modelsContainedToSession, pricedInput, supportsImageInput, vendorProfile } from "./model-policy.ts";
 import { isAutoSelectable, type ModelPrice, servedCatalogIds } from "./model-tier.ts";
 
 export type PairingRole = "subagent" | "classifier";

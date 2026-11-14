@@ -55,7 +55,6 @@ import {
 	crossesProvider,
 	findConfigured,
 	isClaudeFamilyModel,
-	isDatedDuplicate,
 	isSnapshotDatedId,
 	isStaleContainmentStamp,
 	modelsContainedToSession,
@@ -63,6 +62,7 @@ import {
 	pricedInput,
 	supportsImageInput,
 } from "./model-policy.ts";
+import { isDatedDuplicate } from "./model-catalog.ts";
 import { pairedModel } from "./model-pairings.ts";
 import { wordsInForce } from "../profile/live-words.ts";
 import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "./model-tier.ts";

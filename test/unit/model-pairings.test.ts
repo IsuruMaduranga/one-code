@@ -96,6 +96,20 @@ describe("pairedModel", () => {
 		expect(pairedModel("classifier", [opus, sonnet, sameHaiku], sonnet)).toEqual({ kind: "model", model: sameHaiku });
 	});
 
+	it("picks a later release whose id reads as a dated snapshot of an older listed model", () => {
+		pinCatalog([
+			{ id: "deepseek/deepseek-v4-pro-0813", released: "2026-08-13", price: [1.32, 3.96], servedAs: ["openrouter/deepseek/deepseek-v4-pro"] },
+			{ id: "deepseek/deepseek-v4.1-flash", released: "2026-09-10", price: [0.3, 1.2], servedAs: ["openrouter/deepseek/deepseek-v4.1-flash"] },
+			{ id: "deepseek/deepseek-v4.1-flash-1017", released: "2026-10-17", price: [0.3, 1.2], servedAs: ["openrouter/deepseek/deepseek-v4.1-flash-1017"] },
+		]);
+		const session = model("openrouter", "deepseek/deepseek-v4-pro", 1.32);
+		const older = model("openrouter", "deepseek/deepseek-v4.1-flash", 0.3);
+		const flash1017 = model("openrouter", "deepseek/deepseek-v4.1-flash-1017", 0.3);
+		const pool = [session, older, flash1017];
+		expect(pairedModel("subagent", pool, session)).toEqual({ kind: "model", model: flash1017 });
+		expect(pairedModel("classifier", pool, session)).toEqual({ kind: "model", model: flash1017 });
+	});
+
 	it("drops a pick that fails the image gate", () => {
 		pinCatalog(ANTHROPIC);
 		const withoutImages = { ...sonnet, input: ["text"] } as Model<Api>;

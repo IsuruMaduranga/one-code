@@ -18,7 +18,7 @@ import {
 	trimOpenRouter,
 	unknownRepos,
 } from "../../extensions/lib/models/model-catalog-data.ts";
-import { autoSelectable, autoSelectSkipReason, bareId, buildCatalogIndex, catalogModelFor, sizeFromName } from "../../extensions/lib/models/model-catalog.ts";
+import { autoSelectable, autoSelectSkipReason, bareId, buildCatalogIndex, catalogModelFor, isDatedDuplicate, sizeFromName } from "../../extensions/lib/models/model-catalog.ts";
 import { catalogSources, type FixtureModel } from "./catalog-fixture.ts";
 
 const entry = (models: FixtureModel[], id: string) => buildCatalogIndex(catalogSources(models)).models.get(id)!;
@@ -411,5 +411,46 @@ describe("refreshing the catalogs", () => {
 		expect(catalogRefreshEnabled({}, {})).toBe(true);
 		expect(catalogRefreshEnabled({ refreshModelCatalog: false }, {})).toBe(false);
 		expect(catalogRefreshEnabled({}, { PI_OFFLINE: "1" })).toBe(false);
+	});
+});
+
+describe("isDatedDuplicate against the catalog", () => {
+	const row = (provider: string, id: string) => ({ provider, id });
+
+	it("keeps a snapshot the catalog knows as a later release than the model its alias names", () => {
+		const index = buildCatalogIndex(
+			catalogSources([
+				{ id: "deepseek/deepseek-v4.1-flash", released: "2026-09-10", servedAs: ["openrouter/deepseek/deepseek-v4.1-flash"] },
+				{ id: "deepseek/deepseek-v4.1-flash-1017", released: "2026-10-17", servedAs: ["openrouter/deepseek/deepseek-v4.1-flash-1017"] },
+			]),
+		);
+		const pool = [row("openrouter", "deepseek/deepseek-v4.1-flash"), row("openrouter", "deepseek/deepseek-v4.1-flash-1017")];
+		expect(isDatedDuplicate(pool[1], pool, index)).toBe(false);
+	});
+
+	it("collapses a snapshot that names the same entry as its alias", () => {
+		const index = buildCatalogIndex(catalogSources([{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15" }]));
+		const pool = [row("anthropic", "claude-haiku-4-5"), row("anthropic", "claude-haiku-4-5-20251001")];
+		expect(catalogModelFor(pool[1], index)?.id).toBe("anthropic/claude-haiku-4-5");
+		expect(isDatedDuplicate(pool[1], pool, index)).toBe(true);
+	});
+
+	it("collapses a snapshot the catalog cannot place after its alias: no release date, or not later", () => {
+		const undated = buildCatalogIndex(
+			catalogSources([
+				{ id: "deepseek/deepseek-v4-flash", released: "2026-04-24", servedAs: ["openrouter/deepseek/deepseek-v4-flash"] },
+				{ id: "deepseek/deepseek-v4-flash-0731", released: "", servedAs: ["openrouter/deepseek/deepseek-v4-flash-0731"] },
+			]),
+		);
+		const pool = [row("openrouter", "deepseek/deepseek-v4-flash"), row("openrouter", "deepseek/deepseek-v4-flash-0731")];
+		expect(catalogModelFor(pool[1], undated)?.released).toBeUndefined();
+		expect(isDatedDuplicate(pool[1], pool, undated)).toBe(true);
+		const sameDay = buildCatalogIndex(
+			catalogSources([
+				{ id: "deepseek/deepseek-v4-flash", released: "2026-07-31", servedAs: ["openrouter/deepseek/deepseek-v4-flash"] },
+				{ id: "deepseek/deepseek-v4-flash-0731", released: "2026-07-31", servedAs: ["openrouter/deepseek/deepseek-v4-flash-0731"] },
+			]),
+		);
+		expect(isDatedDuplicate(pool[1], pool, sameDay)).toBe(true);
 	});
 });

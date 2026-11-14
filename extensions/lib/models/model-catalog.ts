@@ -460,3 +460,35 @@ export function catalogModelFor(model: { provider: string; id: string }, index: 
 	const canonical = index.byBareId.get(bare) ?? index.byBareId.get(stripSnapshotDate(bare));
 	return canonical ? index.models.get(canonical) : undefined;
 }
+
+/**
+ * Whether `model` is a dated snapshot whose undated alias is also present in
+ * `pool`: the row a listing collapses so the same model is not offered twice.
+ * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
+ * is never read as a snapshot of `deepseek-v4-flash`. A snapshot the catalog
+ * knows as a later release than the model the alias names is a model of its
+ * own (OpenRouter's `deepseek-v4.1-flash-1017` beside the September
+ * `deepseek-v4.1-flash`) and stays; where the catalog cannot tell (a row with
+ * no provider, no entry or no release date, or both naming one entry) the
+ * snapshot collapses onto the alias.
+ */
+export function isDatedDuplicate(
+	model: { id: string; provider?: string },
+	pool: ReadonlyArray<{ id: string; provider?: string }>,
+	index: CatalogIndex = currentCatalog(),
+): boolean {
+	const aliasId = stripSnapshotDate(model.id);
+	if (aliasId === model.id) return false;
+	const alias = pool.find((other) => other.id === aliasId);
+	if (!alias) return false;
+	return !laterRelease(model, alias, index);
+}
+
+/** Whether the catalog names `snapshot` a different model from `alias`'s, released after it. */
+function laterRelease(snapshot: { id: string; provider?: string }, alias: { id: string; provider?: string }, index: CatalogIndex): boolean {
+	if (snapshot.provider === undefined || alias.provider === undefined) return false;
+	const own = catalogModelFor({ provider: snapshot.provider, id: snapshot.id }, index);
+	const named = catalogModelFor({ provider: alias.provider, id: alias.id }, index);
+	if (!own || !named || own.id === named.id || own.released === undefined || named.released === undefined) return false;
+	return own.released > named.released;
+}

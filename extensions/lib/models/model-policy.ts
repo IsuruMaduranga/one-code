@@ -417,17 +417,6 @@ export function isSnapshotDatedId(id: string): boolean {
 	return stripSnapshotDate(id) !== id;
 }
 
-/**
- * Whether `model` is a dated snapshot whose undated alias is also present in
- * `pool` — the row a listing collapses so the same model is not offered twice.
- * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
- * is never read as a snapshot of `deepseek-v4-flash`.
- */
-export function isDatedDuplicate(model: { id: string }, pool: ReadonlyArray<{ id: string }>): boolean {
-	const alias = stripSnapshotDate(model.id);
-	return alias !== model.id && pool.some((other) => other.id === alias);
-}
-
 /** The canonical `provider/id` spec — one source of truth for the string form. */
 export function modelSpec(model: { provider: string; id: string }): string {
 	return `${model.provider}/${model.id}`;
