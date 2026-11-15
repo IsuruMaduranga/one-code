@@ -1,7 +1,8 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import data from "../../profile/brand.json" with { type: "json" };
-import { type Brand, brand, brandedId, checkBrand, envName, productStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { type Brand, brand, brandedId, checkBrand, envName, productStateDir, sharedStateDir } from "../../extensions/lib/profile/brand.mjs";
+import { sharedStateDir as sdkSharedStateDir } from "../../extensions/sdk/profile.ts";
 
 // The typecheck's proof that the shipped brand is complete.
 data satisfies Brand;
@@ -12,6 +13,13 @@ describe("brand", () => {
 		expect(envName("STATE_DIR")).toBe(`${brand.envPrefix}_STATE_DIR`);
 		expect(productStateDir({}, "/home/u")).toBe(join("/home/u", brand.stateDir));
 		expect(productStateDir({ [envName("STATE_DIR")]: "/elsewhere" }, "/home/u")).toBe("/elsewhere");
+	});
+
+	it("gives a profile's declarations the shared state folder through the SDK, the one rule the base uses", () => {
+		// A product that names a file there (a language server's jar) copies no rule: the SDK's function is the base's own.
+		expect(sdkSharedStateDir).toBe(sharedStateDir);
+		expect(sdkSharedStateDir({}, "/home/u")).toBe(join("/home/u", brand.stateDir));
+		expect(sdkSharedStateDir({ [envName("STATE_DIR")]: "/elsewhere" }, "/home/u")).toBe("/elsewhere");
 	});
 
 	it("rejects a brand that misses a name or spells a prefix wrongly", () => {
