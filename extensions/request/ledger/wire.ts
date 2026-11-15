@@ -34,14 +34,14 @@
  * What it records is what goes on the wire only while Anthropic message
  * threads stay off: a `continue` would send just the new messages. So it
  * registers the `anthropic` provider's stream with threads off
- * (lib/request/message-threads.ts). And pi warms only during a run, never
- * between runs (lib/request/cache-warming.ts), as on pi 1.5.0.
+ * (lib/request/message-threads.ts), sending the credentials pi's provider
+ * would (lib/request/anthropic-stream.ts). And pi warms only during a run,
+ * never between runs (lib/request/cache-warming.ts), as on pi 1.5.0.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { threadlessAnthropicProvider } from "../../lib/request/message-threads.ts";
+import { threadlessAnthropicRegistration } from "../../lib/request/anthropic-stream.ts";
 import { cacheWarmingVeto } from "../../lib/request/cache-warming.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
@@ -60,7 +60,8 @@ import { brand, envName } from "../../lib/profile/brand.mjs";
 
 function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
-	pi.registerProvider("anthropic", threadlessAnthropicProvider(streamSimple));
+	const threadless = threadlessAnthropicRegistration();
+	if (threadless) pi.registerProvider("anthropic", threadless);
 	pi.on("cache_warming_decision", (_event, ctx) => cacheWarmingVeto(ctx.isIdle()));
 	/** The plan of the last `context` pass; a warm re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;

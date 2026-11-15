@@ -52,16 +52,32 @@ describe("threadlessAnthropicProvider", () => {
 });
 
 describe("side calls", () => {
-	// A side call goes straight to pi-ai, past the provider registration, so each
-	// one must pass its model through withoutMessageThreads.
-	it("every completeSimple call in the extensions passes its model through withoutMessageThreads", () => {
-		const missing: string[] = [];
-		for (const file of sourceFiles(join(repo, "extensions"))) {
-			const source = readFileSync(file, "utf8");
-			for (const match of source.matchAll(/\bcompleteSimple\(\s*([^\n]*)/g)) {
-				if (!match[1].startsWith("withoutMessageThreads(")) missing.push(`${relative(repo, file)}: completeSimple(${match[1].slice(0, 60)}`);
+	// A side call goes straight to pi-ai, past the provider registration, so it
+	// must turn threads off itself and must not take pi-ai compat's key from the
+	// environment: lib/request/anthropic-stream.ts completeThreadless does both.
+	// No other file under extensions/ or profile/ may call a pi-ai stream entry.
+	const STREAM_ENTRY = /\b(complete|completeSimple|stream|streamSimple)\b/;
+	const PI_AI_IMPORT = /import\s+(?!type\b)(\{[^}]*\}|\*\s+as\s+\w+)\s+from\s+["']@earendil-works\/pi-ai(?:\/[^"']*)?["']/g;
+	const OWNER = join("extensions", "lib", "request", "anthropic-stream.ts");
+
+	it("only anthropic-stream.ts imports pi-ai's stream entries or the whole module's compat view", () => {
+		const offenders: string[] = [];
+		for (const root of ["extensions", "profile"]) {
+			for (const file of sourceFiles(join(repo, root))) {
+				const path = relative(repo, file);
+				if (path === OWNER || path.split(/[\\/]/).includes("test")) continue;
+				for (const match of readFileSync(file, "utf8").matchAll(PI_AI_IMPORT)) {
+					const names = match[1].replace(/\btype\s+\w+/g, "");
+					const wholeCompat = match[1].startsWith("*") && /pi-ai\/compat/.test(match[0]);
+					if (STREAM_ENTRY.test(names) || wholeCompat) offenders.push(`${path}: ${match[0]}`);
+				}
 			}
 		}
-		expect(missing).toEqual([]);
+		expect(offenders).toEqual([]);
+	});
+
+	it("the side calls reach pi-ai through completeThreadless", () => {
+		const callers = sourceFiles(join(repo, "extensions")).filter((file) => /\bcompleteThreadless\(/.test(readFileSync(file, "utf8")));
+		expect(callers.length).toBeGreaterThanOrEqual(6);
 	});
 });

@@ -15,10 +15,12 @@
  * - the session loop and in-process children: `threadlessAnthropicProvider`,
  *   registered for the `anthropic` provider by request/ledger/wire.ts, wraps
  *   the stream pi's model runtime calls for it;
- * - side calls (`completeSimple` straight to pi-ai): each passes its model
+ * - side calls: each goes through `completeThreadless`, which passes its model
  *   through `withoutMessageThreads`.
  *
- * On pi before 1.5.1 the field means nothing, and both are no-ops in effect.
+ * Both hand the request to a pi-ai stream that sends exactly the credentials
+ * pi's own provider would have sent (lib/request/anthropic-stream.ts). On pi
+ * before 1.5.1 the field means nothing; the wrappers then change nothing.
  */
 
 /** The pi-ai API that has message threads. */
@@ -51,10 +53,10 @@ export interface ThreadlessProviderConfig<M extends ThreadModel, C, O, R> {
 
 /**
  * A provider config for `pi.registerProvider(<provider>, …)` whose stream
- * hands every request to `stream` (pi-ai's own `streamSimple`) with threads
- * off. pi's provider composer calls it only for that provider's models on
- * `anthropic-messages`, with the auth, headers and payload hook already
- * resolved in `options`; a registration without `models` keeps the provider's
+ * hands every request to `stream` (pi-ai's Anthropic Messages implementation,
+ * lib/request/anthropic-stream.ts) with threads off. pi's provider composer
+ * calls it only for that provider's models on `anthropic-messages`, with the
+ * auth, headers and payload hook already resolved in `options`; a registration without `models` keeps the provider's
  * catalog, auth and name (pi 1.0 to 1.5, `core/provider-composer.ts`).
  */
 export function threadlessAnthropicProvider<M extends ThreadModel, C, O, R>(stream: (model: M, context: C, options?: O) => R): ThreadlessProviderConfig<M, C, O, R> {
