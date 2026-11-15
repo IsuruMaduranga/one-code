@@ -1,49 +1,64 @@
 /**
- * Process-tree termination for the shells One Code spawns in the background
- * (`bash run_in_background`, `monitor`) and for language servers
- * (`tools/lsp/client.ts`), and the one way to wait for such a child to finish.
+ * Owned process trees: how every long-lived child process One Code starts
+ * (background shells and monitors, language servers, stdio MCP servers) is
+ * started, owned and ended, and the one way to wait for a child to finish.
  *
- * A `$SHELL -c "cmd"` child is only the leader: with zsh (macOS default) a
- * `cmd; echo` or a pipeline runs the command in further processes, and
- * `child.kill()` signals the shell alone — the command lives on as an orphan
- * holding the inherited stdout pipe, so `close` never fires (the task cannot
- * finish, a `task_output block:true` waits its full timeout) and in a one-shot
- * run the open pipe keeps node alive until the orphan exits
- * (LIFECYCLE-REVIEW-2026-09-06 M2, measured: 3 min 21 s on a `tail -f | cat`).
+ * A child is only the leader of what it starts. A `$SHELL -c "cmd"` with zsh
+ * (macOS default) runs a `cmd; echo` or a pipeline in further processes, and a
+ * language or MCP server is often a launcher (a shell script, `npx`, a `.cmd`
+ * shim) in front of the real process. `child.kill()` signals the leader alone:
+ * the rest lives on as an orphan holding the inherited stdout pipe, so `close`
+ * never fires (a task cannot finish, a `task_output block:true` waits its full
+ * timeout) and in a one-shot run the open pipe keeps node alive until the
+ * orphan exits (LIFECYCLE-REVIEW-2026-09-06 M2, measured: 3 min 21 s on a
+ * `tail -f | cat`).
  *
- * The producer spawns `detached` (own process group; `detachedSpawnOptions`)
- * and stops it with `killProcessTree`, which signals the negative pid — the
- * whole group — falling back to the child alone when the group is already gone.
- * `stopProcessTree` adds the grace period: SIGTERM now, SIGKILL to the group
- * when it ends, whether or not the leader is still alive. The leader is often
- * only the `bash -c` wrapper, which dies on TERM at once while the command it
- * forked (a dev server in its graceful-shutdown handler) keeps the group and
- * its port; a leader-only check skipped the SIGKILL exactly then
- * (LIFECYCLE-BACKGROUND-REVIEW-2026-09-26 M1, measured). A group whose SIGKILL
- * is still pending when the process exits (pi's quit calls `process.exit`,
- * and the grace timer is unref'd) is SIGKILLed from a `process.on("exit")`
- * hook, so nothing One Code stopped outlives it.
+ * `spawnOwnedTree` is the one way to start such a child. It takes the caller's
+ * spawn call (so each site keeps its own launch: `commandLaunch`'s Windows
+ * shims, `spawnShellCommand`), starts it `detached` (its own process group;
+ * `detachedSpawnOptions`), remembers the group (`rememberProcessGroup`), and
+ * returns the child with the tree's stop policy:
  *
- * `rememberProcessGroup` owns a background shell's or a language server's
- * group for the lifetime of this process, including descendants left by a
- * successfully exited leader.
- * Session replacement must not kill those intentionally launched daemons.
- * Each module instance keeps its own groups through process listeners (never
- * through a session context or cross-extension module state), reaps empty
- * groups, and sends TERM synchronously on process exit or termination signals.
+ * - `stop` (`stopProcessTree`): SIGTERM now, SIGKILL to the group when the
+ *   grace ends, whether or not the leader is still alive. The leader is often
+ *   only a wrapper, which dies on TERM at once while what it forked (a dev
+ *   server in its graceful-shutdown handler) keeps the group and its port; a
+ *   leader-only check skipped the SIGKILL exactly then
+ *   (LIFECYCLE-BACKGROUND-REVIEW-2026-09-26 M1, measured). A group whose
+ *   SIGKILL is still pending when the process exits (pi's quit calls
+ *   `process.exit`, and the grace timer is unref'd) is SIGKILLed from a
+ *   `process.on("exit")` hook.
+ * - `kill` (`killProcessTree`): one signal to the whole group (falling back to
+ *   the child alone when the group is already gone); `taskkill /T /F` on
+ *   Windows, which has no groups.
+ * - `endGroupWithLauncher`: when the leader exits, by itself or on a stop, the
+ *   rest of its group is stopped too. A launcher-fronted server (LSP, MCP)
+ *   needs it; a background shell does not, because the daemons a finished
+ *   shell leaves are deliberate.
+ *
+ * A remembered group is owned for the lifetime of this process, including
+ * what a successfully exited leader left behind; session replacement must not
+ * kill those intentionally launched daemons. Each module instance keeps its
+ * own groups through process listeners (never through a session context or
+ * cross-extension module state), reaps empty groups, and on process exit or a
+ * termination signal sends TERM synchronously and leaves a watchdog to SIGKILL
+ * what outlasts the grace, so nothing One Code owns outlives the process.
  *
  * `waitForChildExit` is the counterpart on the waiting side: it settles on
- * `exit` plus a short stdio grace, never on `close` alone — a descendant the
+ * `exit` plus a short stdio grace, never on `close` alone: a descendant the
  * kill missed (Windows: a process the `taskkill /T` snapshot did not see) can
  * hold the inherited pipes open for as long as it lives, and the task must not
  * wait for it (pi's `waitForChildProcess` has the same shape and reason).
+ * Short-lived children that a caller awaits (hooks, the bash tool, `!`
+ * expansions) use it with `detachedSpawnOptions` and `killProcessTree`
+ * directly; they are not owned past their wait.
  */
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { system32Path } from "../profile/paths.ts";
 import { brandedId, envName } from "../profile/brand.mjs";
 
-/** SIGTERM → SIGKILL grace for a stopped tree (bash tasks, monitors, what a language server leaves). */
+/** SIGTERM → SIGKILL grace for a stopped tree (background shells, monitors, what a language or MCP server leaves). */
 export const KILL_GRACE_MS = 2_000;
 
 /** After `exit`, how long buffered stdio may keep arriving before the wait settles. */
@@ -259,7 +274,8 @@ function terminateRememberedGroups(): void {
 }
 
 /**
- * Remember a detached background tree from spawn until its group becomes empty.
+ * Remember a detached tree from spawn until its group becomes empty
+ * (`spawnOwnedTree` calls it; a long-lived child is never remembered alone).
  * Register before awaiting its leader, so even immediate process exit covers
  * running work. The unref'd reaper cannot keep a print run alive. No session
  * shutdown handler touches this set; the process listeners keep this module
@@ -344,6 +360,53 @@ export function stopProcessTree(child: ChildProcess, graceMs: number): void {
 		killProcessTree(child, "SIGKILL");
 	}, graceMs);
 	timer.unref?.();
+}
+
+/** A long-lived child in its own process group, owned until this process exits, and how to end its tree. */
+export interface OwnedTree {
+	readonly child: ChildProcess;
+	/** SIGTERM the tree now and SIGKILL its group after `graceMs` (`stopProcessTree`). */
+	stop(graceMs: number): void;
+	/** Send one signal to the whole tree, with no grace (`killProcessTree`). */
+	kill(signal: NodeJS.Signals): void;
+	/** Whether the tree still has a member to end (`rememberedGroupAlive`). */
+	alive(): boolean;
+}
+
+export interface OwnedTreeOptions {
+	/**
+	 * When the leader exits, by itself or on a stop, stop the rest of its
+	 * group (SIGTERM, SIGKILL after `KILL_GRACE_MS`). For a launcher in front of
+	 * the real process (a language or MCP server's script, `npx`, a `.cmd`
+	 * shim), which can exit and leave the server running. Off for a background
+	 * shell: what a finished shell leaves behind is deliberate and lives until
+	 * the process exits.
+	 */
+	endGroupWithLauncher?: boolean;
+}
+
+/**
+ * Start a long-lived child as an owned tree: `start` makes the spawn call
+ * with the given options spread into its own (on POSIX they make the child
+ * the leader of a new process group; Windows has none, and the tree is
+ * reached through its leader), and the group is remembered at once, so the
+ * process's exit and termination-signal hooks end it even if nothing else
+ * does. Every long-lived spawner goes through here (test/unit/process-spawners.test.ts).
+ */
+export function spawnOwnedTree(start: (detached: { detached: boolean }) => ChildProcess, options: OwnedTreeOptions = {}): OwnedTree {
+	const child = start(detachedSpawnOptions());
+	rememberProcessGroup(child);
+	if (options.endGroupWithLauncher) {
+		child.on("exit", () => {
+			if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
+		});
+	}
+	return {
+		child,
+		stop: (graceMs) => stopProcessTree(child, graceMs),
+		kill: (signal) => killProcessTree(child, signal),
+		alive: () => rememberedGroupAlive(child),
+	};
 }
 
 export interface ChildExit {
