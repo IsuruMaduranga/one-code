@@ -62,7 +62,7 @@ export default function probe(pi: ExtensionAPI) {
 			writeFileSync(page, "<p>[fixture:probe-page]</p>\n");
 			// No browser (an SSH session, no display): name the page so the user can open it.
 			const failed = await openInBrowser(pathToFileURL(page).href);
-			ctx.ui.notify(failed ? `[fixture:no-browser:${failed}] ${page}` : "[fixture:page-opened]", failed ? "warning" : "info");
+			ctx.ui.notify(failed ? `[fixture:no-browser:${failed.reason}] ${page}` : "[fixture:page-opened]", failed ? "warning" : "info");
 		},
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: PROBE_TOOL } satisfies DeferRequest);

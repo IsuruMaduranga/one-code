@@ -19,8 +19,12 @@ describe("the artifact text", () => {
 		expect(artifactsResultText.published({ ...page, browser: { kind: "autoOpenOff", settingsPath: "~/.onecode/settings.json" } })).toContain(
 			"Opening the browser is off (artifacts.autoOpen is false in ~/.onecode/settings.json). Give the user the link.",
 		);
-		expect(artifactsResultText.opened({ url: "file:///v.html", failed: "noDisplay" })).toBe("file:///v.html\nNo browser was opened: no graphical display is available. Give the user the link.");
-		expect(artifactsResultText.noBrowserReason("launchFailed")).toBe("the browser could not be started");
+		expect(artifactsResultText.opened({ url: "file:///v.html", failed: { reason: "noDisplay" } })).toBe("file:///v.html\nNo browser was opened: no graphical display is available. Give the user the link.");
+		const launchFailed = { reason: "launchFailed", command: "xdg-open", osMessage: "spawn xdg-open ENOENT" } as const;
+		expect(artifactsResultText.noBrowserReason(launchFailed)).toBe("the browser could not be started (`xdg-open`: spawn xdg-open ENOENT)");
+		expect(artifactsResultText.opened({ url: "file:///v.html", failed: launchFailed })).toBe(
+			"file:///v.html\nNo browser was opened: the browser could not be started (`xdg-open`: spawn xdg-open ENOENT). Give the user the link.",
+		);
 	});
 
 	it("words the user's answer to a delete and the store's failures", () => {

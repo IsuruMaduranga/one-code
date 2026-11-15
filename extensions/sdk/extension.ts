@@ -32,8 +32,9 @@
  * `productStateDir` is the product's state folder (the state-dir variable
  * when set, else the home folder's entry for the profile in force), and
  * `openInBrowser` hands a URL to the desktop's browser, returning why none
- * opened (an SSH session, no display, no opener) so the caller can show the
- * URL instead.
+ * opened (`{ reason: "ssh" | "noDisplay" }`, or `{ reason: "launchFailed",
+ * command, osMessage }` when the opener did not start) so the caller can show
+ * the URL instead and say what failed.
  *
  * A product tool registers through pi like any tool. Two helpers keep it in
  * line with the base's own tools: `persistIfLarge` bounds a large text result
@@ -53,4 +54,4 @@ export { isMethodNotFound, type LspErrorDetail, lspErrorDetail } from "../tools/
 export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
 export { toolRenderers } from "../lib/ui/tui-render.ts";
 export { productStateDir } from "../lib/profile/paths.ts";
-export { type NoBrowserReason, openInBrowser } from "../lib/ui/open-browser.ts";
+export { type NoBrowser, openInBrowser } from "../lib/ui/open-browser.ts";

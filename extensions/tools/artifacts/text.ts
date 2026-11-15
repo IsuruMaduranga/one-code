@@ -6,9 +6,7 @@
  * values.
  */
 
-
-/** Why no browser opened: an SSH session, no graphical display, or the opener failed. */
-export type NoBrowser = "ssh" | "noDisplay" | "launchFailed";
+import type { NoBrowser } from "../../lib/ui/open-browser.ts";
 
 /** Why a page was not published. */
 export type PublishProblem =
@@ -85,14 +83,19 @@ export interface ArtifactsResultText {
 	published(p: { id: string; title: string; version: number; created: boolean; url: string; file: string; galleryUrl: string; browser: PublishBrowser }): string;
 }
 
-const NO_BROWSER: Record<NoBrowser, string> = {
-	ssh: "this session runs over SSH",
-	noDisplay: "no graphical display is available",
-	launchFailed: "the browser could not be started",
+const noBrowserClause = (failed: NoBrowser): string => {
+	switch (failed.reason) {
+		case "ssh":
+			return "this session runs over SSH";
+		case "noDisplay":
+			return "no graphical display is available";
+		case "launchFailed":
+			return `the browser could not be started (\`${failed.command}\`: ${failed.osMessage})`;
+	}
 };
 
 const browserNote = ({ failed }: { failed?: NoBrowser }) =>
-	failed ? `No browser was opened: ${NO_BROWSER[failed]}. Give the user the link.` : "Opened it in the user's default browser.";
+	failed ? `No browser was opened: ${noBrowserClause(failed)}. Give the user the link.` : "Opened it in the user's default browser.";
 
 function publishProblem(problem: PublishProblem): string {
 	switch (problem.kind) {
@@ -153,7 +156,7 @@ export const artifactsResultText: ArtifactsResultText = {
 		const more = total > shown.length ? `\n(${total - shown.length} more not shown; raise \`limit\` to see them.)` : "";
 		return `${total} artifact${total === 1 ? "" : "s"}, newest first:\n${shown.map(listLine).join("\n")}${more}\nGallery: ${galleryUrl}`;
 	},
-	noBrowserReason: (reason) => NO_BROWSER[reason],
+	noBrowserReason: noBrowserClause,
 	openedGallery: ({ url, failed }) => `Gallery: ${url}\n${browserNote({ failed })}`,
 	opened: ({ url, failed }) => `${url}\n${browserNote({ failed })}`,
 	deleteNeedsId: "Pass the `id` of the artifact to delete.",

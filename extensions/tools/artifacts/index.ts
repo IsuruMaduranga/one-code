@@ -21,13 +21,13 @@ import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { productSettingsPath } from "../../lib/profile/product-settings.ts";
-import { openInBrowser } from "../../lib/ui/open-browser.ts";
+import { type NoBrowser, openInBrowser } from "../../lib/ui/open-browser.ts";
 import { tildify } from "../../lib/profile/paths.ts";
 import { sanitizeDisplayText, terminalLink } from "../../lib/ui/terminal-text.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { requireText } from "../../lib/profile/profile.ts";
-import type { ArtifactsText, NoBrowser, PublishBrowser, PublishProblem } from "./text.ts";
+import type { ArtifactsText, PublishBrowser, PublishProblem } from "./text.ts";
 import {
 	type ArtifactMeta,
 	artifactsRoot,

@@ -43,5 +43,5 @@ export function browserOpenPlan(url: string, platform: NodeJS.Platform = process
 export function openBrowser(url: string): Promise<boolean> {
 	const plan = browserOpenPlan(url);
 	if ("refused" in plan) throw new Error(`refusing to open the authorization URL: ${plan.refused}`);
-	return launchOpener(plan);
+	return launchOpener(plan).then((failure) => failure === undefined);
 }

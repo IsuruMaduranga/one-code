@@ -28,7 +28,7 @@ import {
 	withLock,
 } from "../../extensions/tools/artifacts/store.ts";
 import { renderViewer } from "../../extensions/tools/artifacts/viewer.ts";
-import { noDisplayReason, openerPlan, openInBrowser } from "../../extensions/lib/ui/open-browser.ts";
+import { launchOpener, noDisplayReason, openerPlan, openInBrowser } from "../../extensions/lib/ui/open-browser.ts";
 
 let base: string;
 let root: string;
@@ -428,10 +428,17 @@ describe("open-browser", () => {
 		expect(noDisplayReason("win32", {})).toBeUndefined();
 	});
 
+	it("keeps the command and the system's message when the opener does not start", async () => {
+		const command = join(tmpdir(), "no-such-opener-for-test");
+		const failure = await launchOpener({ command, args: ["file:///a.html"] });
+		expect(failure?.command).toBe(command);
+		expect(failure?.osMessage).toMatch(/ENOENT/);
+	});
+
 	it("opens nothing where no desktop is reachable, and says why", async () => {
 		vi.stubEnv("SSH_CONNECTION", "1.2.3.4 5 6.7.8.9 22");
 		try {
-			await expect(openInBrowser("file:///a.html")).resolves.toBe("ssh");
+			await expect(openInBrowser("file:///a.html")).resolves.toEqual({ reason: "ssh" });
 		} finally {
 			vi.unstubAllEnvs();
 		}
