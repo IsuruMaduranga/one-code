@@ -98,6 +98,14 @@ function capHookText(text: string, ctx: HookDispatchCtx, label: string): string 
 	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${randomUUID()}`, maxBytes: HOOK_MODEL_TEXT_CAP });
 }
 
+/** Which of an event's hooks a dispatch runs, and how far its consent question reaches. */
+interface DispatchMatch {
+	candidates?: string[];
+	ignoreMatcher?: boolean;
+	/** Ask consent for the project's hooks of every event, not this one's only: the user just typed a prompt. */
+	consentForEveryEvent?: boolean;
+}
+
 interface MatchedHook {
 	source: HooksSource;
 	hook: HookCommand;
@@ -168,7 +176,7 @@ function hooksExtension(pi: ExtensionAPI) {
 	const collectHooks = async (
 		ctx: HookDispatchCtx,
 		event: CcHookEvent,
-		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
+		matchValue: DispatchMatch,
 	): Promise<MatchedHook[]> => {
 		const loaded = loadHookSettings(ctx.cwd);
 		const pluginSources = loaded.disabled ? [] : loadPluginHooks(defaultDiscoverRoots(getAgentDir(), ctx.cwd), loaded.diagnostics);
@@ -177,14 +185,18 @@ function hooksExtension(pi: ExtensionAPI) {
 		}
 
 		const projectSources = loaded.sources.filter((s) => s.scope === "project" || s.scope === "local");
-		const hasProjectHooks = projectSources.some((s) => s.config[event]?.length);
+		// The user's own prompt asks for consent to the project's hooks of every
+		// event: a hook for an event that never asks (Notification) is approved
+		// here, while the user is present.
+		const hasProjectHooks = projectSources.some((s) => (matchValue.consentForEveryEvent ? Object.values(s.config).some((entries) => (entries as unknown[] | undefined)?.length) : s.config[event]?.length));
 		let projectAllowed = true;
 		if (hasProjectHooks) {
 			projectAllowed = await projectHooksApproved(ctx.cwd, projectSources, {
 				hasUI: ctx.hasUI,
 				// A Notification fires when the user is away (a prompt waiting, the
 				// session idle): no consent dialog there, so unapproved project hooks
-				// are skipped until another event's prompt or a stored approval allows them.
+				// are skipped until the user's next prompt asks (consentForEveryEvent)
+				// or a stored approval allows them.
 				noPrompt: ctx.sessionEnded || event === "Notification",
 				signal: ctx.signal,
 				confirm: (title, message) => consentDialog(pi.events, (signal) => ctx.ui.confirm(title, message, { signal: signal && ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal ?? ctx.signal })),
@@ -227,7 +239,7 @@ function hooksExtension(pi: ExtensionAPI) {
 	const dispatch = async (
 		ctx: HookDispatchCtx,
 		event: CcHookEvent,
-		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
+		matchValue: DispatchMatch,
 		payloadOrFactory: HookStdinPayload | (() => Promise<HookStdinPayload | undefined>),
 		/** Runs once, only when hooks will actually run — the point where a caller can snapshot state the hooks may change. */
 		willRun?: () => void,
@@ -408,7 +420,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		await drainSessionStart();
 		if (gen !== sessionGen) return { action: "handled" as const };
 		const payload: HookStdinPayload = { ...basePayload(ctx, "UserPromptSubmit"), prompt: event.text };
-		const outcome = await dispatch(ctx, "UserPromptSubmit", { ignoreMatcher: true }, payload);
+		const outcome = await dispatch(ctx, "UserPromptSubmit", { ignoreMatcher: true, consentForEveryEvent: true }, payload);
 		if (gen !== sessionGen) return { action: "handled" as const };
 		if (outcome.block) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);

@@ -97,4 +97,49 @@ describe("Notification hooks", () => {
 		expect(confirm).toHaveBeenCalledTimes(1);
 		vi.unstubAllEnvs();
 	});
+
+	it("asks at the user's next prompt for a project whose only hooks are Notification hooks, never when one fires", async () => {
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
+		settings.sources = [{ scope: "project", path: "/p/.claude/settings.json", config: { Notification: [{ hooks: [{ type: "command", command: "project-ping" }] }] } }];
+		const fake = createFakePi();
+		hooksExtension(fake.pi as never);
+		const confirm = vi.fn(async () => true);
+		const ctx = createFakeCtx({ hasUI: true, cwd: mkdtempSync(join(stateDir, "only-notification-")) });
+		(ctx.ui as { confirm: unknown }).confirm = confirm;
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		await settle();
+		// Nothing asks at startup (no SessionStart hook) or when the notification fires.
+		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "Prod is waiting for your input", notificationType: "idle_prompt" });
+		await settle();
+		expect(confirm).not.toHaveBeenCalled();
+		expect(hook).not.toHaveBeenCalled();
+		// The user types a prompt: the dialog covers the Notification hooks too.
+		await fake.fire("input", { text: "hi", source: "interactive" }, ctx);
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(hook).not.toHaveBeenCalled();
+		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "Prod is waiting for your input", notificationType: "idle_prompt" });
+		await settle();
+		expect(hook.mock.calls.map((call) => call[0])).toEqual(["project-ping"]);
+		expect(confirm).toHaveBeenCalledTimes(1);
+		vi.unstubAllEnvs();
+	});
+
+	it("keeps a declined project's Notification hooks skipped and asks no more this session", async () => {
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
+		settings.sources = [{ scope: "project", path: "/p/.claude/settings.json", config: { Notification: [{ hooks: [{ type: "command", command: "project-ping-2" }] }] } }];
+		const fake = createFakePi();
+		hooksExtension(fake.pi as never);
+		const confirm = vi.fn(async () => false);
+		const ctx = createFakeCtx({ hasUI: true, cwd: mkdtempSync(join(stateDir, "declined-")) });
+		(ctx.ui as { confirm: unknown }).confirm = confirm;
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		await settle();
+		await fake.fire("input", { text: "hi", source: "interactive" }, ctx);
+		await fake.fire("input", { text: "again", source: "interactive" }, ctx);
+		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "Prod is waiting for your input", notificationType: "idle_prompt" });
+		await settle();
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(hook).not.toHaveBeenCalled();
+		vi.unstubAllEnvs();
+	});
 });

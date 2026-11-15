@@ -18,18 +18,19 @@ Hooks are read from the `hooks` block of these files:
 - Installed plugins
 
 A project's hooks can run arbitrary code, so they run only after you
-approve them once. At startup One Code lists each command from the
-project's files and asks "Run this project's hooks?". The approval is
+approve them once. One Code lists each command from the project's files
+and asks "Run this project's hooks?": at startup when the project has a
+`SessionStart` hook, otherwise when you send your next prompt. The approval is
 stored in `~/.onecode/hooks/project-approvals.json` with a hash of the hook
 configuration, so any change asks again. Declining is remembered for the
 session only. User, managed, and plugin hooks never prompt.
 
-A `Notification` hook never opens that dialog. It fires when you're away
-from the terminal, so asking then would keep the hook waiting until you
-came back. Until the project's hooks are approved, by the dialog another
-event opens or by an approval stored earlier, the project's `Notification`
-hooks are skipped. Your user, managed, and plugin `Notification` hooks run
-as usual.
+A `Notification` hook never opens that dialog itself. It fires when you're
+away from the terminal, so asking then would keep the hook waiting until you
+came back. The dialog your next prompt opens covers the project's
+`Notification` hooks too, even when they're the only hooks the project has.
+Until you approve, they're skipped. Your user, managed, and plugin
+`Notification` hooks run as usual.
 
 Set `disableAllHooks: true` in your user settings to skip user, project, and
 plugin hooks. Managed hooks still run unless managed settings also disable
