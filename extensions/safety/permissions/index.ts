@@ -1445,7 +1445,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
-			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message, { signal: ctx.signal }), ctx.signal)) === true;
+			const approved = (await serializePrompt(() => {
+				if (ctx.signal?.aborted) return Promise.resolve(false);
+				announcePrompt(pi.events, desktopNotificationText.projectTrust(brand.name));
+				return ctx.ui.confirm(title, message, { signal: ctx.signal });
+			}, ctx.signal)) === true;
 			if (ctx.signal?.aborted) return;
 			if (approved) {
 				projectAllowTrusted = true;

@@ -63,6 +63,8 @@ export const desktopNotificationText = {
 	outsideRead: (product: string) => `${product} needs your permission to read outside the working directories`,
 	/** The manual approval auto mode falls back to when its review of the call could not run. */
 	reviewFallback: (product: string, tool: string) => `${product} needs your permission to use ${tool} (auto mode could not review it)`,
+	/** The one-time question whether to trust a repository's allow rules and workspace directories. */
+	projectTrust: (product: string) => `${product} needs you to decide whether to trust this repository's permission settings`,
 	attention: (product: string) => `${product} needs your attention`,
 	idle: (product: string) => `${product} is waiting for your input`,
 };
