@@ -36,11 +36,13 @@ describe("One Code's system prompt", () => {
 			"You are One Code",
 			"You are an agent working with the user toward their goals, using your own judgment along the way.\n\nIMPORTANT: Assist with authorized security testing",
 			"# Harness\n",
-			"Write code that reads like the surrounding code",
+			"When you use a pronoun for someone",
+			"You must treat information you learn about the user and their project as private.",
 			"# Session-specific guidance\n",
 			"# Available tools\n",
 			"# Memory\n",
 			"# Context management\n",
+			"Do build original games, games in a genre or with similar mechanics",
 		];
 		const at = order.map((s) => prompt.indexOf(s));
 		for (const [i, pos] of at.entries()) expect(pos, order[i]).toBeGreaterThanOrEqual(0);
@@ -54,6 +56,7 @@ describe("One Code's system prompt", () => {
 		expect(prompt).toContain("give a recommendation, not an exhaustive survey");
 		expect(prompt).not.toContain("# Delivering work");
 		expect(prompt).not.toContain("# Corrections");
+		expect(prompt).not.toContain("Write code that reads like the surrounding code");
 		// Text for features and tools One Code lacks stays out.
 		expect(prompt).not.toContain("<pasted_content>");
 		expect(prompt).not.toContain("EndConversation");
