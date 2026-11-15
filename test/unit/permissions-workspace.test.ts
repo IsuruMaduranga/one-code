@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/rules/workspace-channel.ts";
@@ -17,7 +17,7 @@ import { decide } from "../../extensions/lib/rules/matcher.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { listWorkspaceDirectories } from "../../extensions/lib/rules/settings.ts";
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/safety/permissions/workspace.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, recordPromptDescriptions } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { useRepositorySettings, writeRepositorySettings } from "./helpers/settings-files.ts";
 
@@ -189,8 +189,7 @@ describe("workspace directories in the gate", () => {
 	it("describes the trust question to the desktop notifier just before it opens", async () => {
 		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
 		await start();
-		const events: string[] = [];
-		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const events = recordPromptDescriptions(fake.events);
 		vi.mocked((ctx.ui as { confirm: () => unknown }).confirm).mockImplementation(async () => {
 			events.push("opened");
 			return true;

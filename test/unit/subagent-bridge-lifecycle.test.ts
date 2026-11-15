@@ -7,10 +7,10 @@ import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } from "../../extensions/lib/agents/subagent-gate.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, recordPromptDescriptions } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -170,8 +170,7 @@ describe("subagent permission bridge lifecycle", () => {
 	// Described, so the desktop notifier names it, and notifies for a child's
 	// prompt while the main session is idle.
 	it("describes the first outside-read consent dialog to the desktop notifier before it opens", async () => {
-		const events: string[] = [];
-		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const events = recordPromptDescriptions(fake.events);
 		const outside = join(root, "outside.txt");
 		writeFileSync(outside, "outside the project");
 		ctx = createFakeCtx({ ...ctx, hasUI: true, ui: { select: vi.fn(async () => { events.push("opened"); return undefined; }) } });

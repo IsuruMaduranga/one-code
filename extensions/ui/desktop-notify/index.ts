@@ -21,6 +21,7 @@ import {
 	type DesktopNotification,
 	notificationChannel,
 	notificationWrites,
+	isPromptId,
 	PROMPT_ATTENTION_CHANNEL,
 	PROMPT_ATTENTION_WITHDRAWN_CHANNEL,
 	type PromptAttention,
@@ -77,11 +78,11 @@ function desktopNotifyExtension(pi: ExtensionAPI) {
 	});
 	pi.events.on(PROMPT_ATTENTION_CHANNEL, (data) => {
 		const { message, id } = (data as Partial<PromptAttention> | undefined) ?? {};
-		if (typeof message === "string") notifier?.describeNextPrompt(message, typeof id === "object" && id !== null ? id : undefined);
+		if (typeof message === "string" && isPromptId(id)) notifier?.describeNextPrompt(message, id);
 	});
 	pi.events.on(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, (data) => {
 		const id = (data as Partial<PromptAttentionWithdrawn> | undefined)?.id;
-		if (typeof id === "object" && id !== null) notifier?.withdrawPrompt(id);
+		if (isPromptId(id)) notifier?.withdrawPrompt(id);
 	});
 	pi.on("agent_start", () => notifier?.turnStarted());
 	pi.on("agent_settled", () => notifier?.turnSettled());

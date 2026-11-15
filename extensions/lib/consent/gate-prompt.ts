@@ -50,3 +50,13 @@ export async function openGatePrompt<T>(options: GatePromptOptions<T>): Promise<
 		withdraw?.();
 	}
 }
+
+/**
+ * `openGatePrompt` bound to a bus and a context: call the result with what the
+ * prompt waits for, the signal that cancels it, and the opener. The context is
+ * read when the prompt opens, so a stale one fails there, not here.
+ */
+export function bindGatePrompt(events: Emitter, ctx: { hasUI: boolean }) {
+	return <T>(attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
+		openGatePrompt({ events, attention, signal, hasUI: () => ctx.hasUI, open });
+}

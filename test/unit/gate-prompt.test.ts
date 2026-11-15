@@ -1,5 +1,6 @@
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
-import { openGatePrompt } from "../../extensions/lib/consent/gate-prompt.ts";
+import { bindGatePrompt, openGatePrompt } from "../../extensions/lib/consent/gate-prompt.ts";
 import {
 	AttentionNotifier,
 	type DesktopNotification,
@@ -9,18 +10,17 @@ import {
 	type PromptAttention,
 	type PromptAttentionWithdrawn,
 } from "../../extensions/lib/notify/desktop.ts";
+import { recordPromptDescriptions } from "./helpers/fake-pi.ts";
 
 /** A bus that records descriptions and withdrawals, and forwards both to `listener`. */
 function bus(listener?: (channel: string, data: unknown) => void) {
-	const log: string[] = [];
-	const events = {
-		emit: (channel: string, data: unknown) => {
-			if (channel === PROMPT_ATTENTION_CHANNEL) log.push(`described: ${(data as PromptAttention).message}`);
-			else if (channel === PROMPT_ATTENTION_WITHDRAWN_CHANNEL) log.push("withdrawn");
-			else log.push(channel);
-			listener?.(channel, data);
-		},
-	};
+	const events = createEventBus();
+	const log = recordPromptDescriptions(events);
+	events.on(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, () => log.push("withdrawn"));
+	if (listener) {
+		events.on(PROMPT_ATTENTION_CHANNEL, (data) => listener(PROMPT_ATTENTION_CHANNEL, data));
+		events.on(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, (data) => listener(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, data));
+	}
 	return { events, log };
 }
 
@@ -111,6 +111,20 @@ describe("openGatePrompt", () => {
 			throw new Error("This extension ctx is stale");
 		};
 		await expect(openGatePrompt({ events, attention: "described", open })).rejects.toThrow("stale");
+		expect(log).toEqual(["described: described", "withdrawn"]);
+	});
+});
+
+describe("bindGatePrompt", () => {
+	it("opens through openGatePrompt, reading the context's UI when the prompt opens", async () => {
+		const { events, log } = bus();
+		const ctx = { hasUI: false };
+		const gate = bindGatePrompt(events, ctx);
+		const open = vi.fn(async () => "Yes");
+		expect(await gate("described", undefined, open)).toBeUndefined();
+		expect(open).not.toHaveBeenCalled();
+		ctx.hasUI = true;
+		expect(await gate("described", undefined, open)).toBe("Yes");
 		expect(log).toEqual(["described: described", "withdrawn"]);
 	});
 });

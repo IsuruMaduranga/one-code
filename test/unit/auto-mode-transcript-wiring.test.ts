@@ -6,12 +6,12 @@ import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/safet
 import type { TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, recordPromptDescriptions } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 const seen: TranscriptEntry[][] = [];
@@ -170,8 +170,7 @@ describe("classifier history in the permissions gate", () => {
 		overflow = true;
 		ctx.hasUI = true;
 		ctx.mode = "rpc";
-		const events: string[] = [];
-		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const events = recordPromptDescriptions(fake.events);
 		const select = (ctx.ui as { select: ReturnType<typeof vi.fn> }).select;
 		select.mockImplementation(async () => { events.push("opened"); return "Yes"; });
 		expect(await call("bash", { command: "rm probe.*" })).toBeUndefined();
