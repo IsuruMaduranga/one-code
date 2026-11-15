@@ -817,6 +817,30 @@ describe("task_output beside a background agent's hand-back", () => {
 	});
 });
 
+// A background launch's result tells the model not to read the output file
+// only when a launch line names one.
+describe("the launch result's output-file sentence", () => {
+	it("names the output file when the run has a session folder", async () => {
+		fakeResident();
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate" })) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("output file: ");
+		expect(result.content[0].text).toMatch(/Do NOT (read or )?tail the output file while it runs/);
+	});
+
+	it("leaves the sentence out when no output file exists", async () => {
+		fakeResident();
+		const h = await mount();
+		// A session folder that cannot hold the run's folder: the run has no output file.
+		const notADir = join(dir, "not-a-dir");
+		writeFileSync(notADir, "");
+		(h.ctx.sessionManager as { getSessionDir: () => string }).getSessionDir = () => notADir;
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate" })) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("running in background");
+		expect(result.content[0].text).not.toContain("output file");
+	});
+});
+
 // design.md section 14: a /tree switch used to add the selected branch's runs
 // to the abandoned branch's, which stayed addressable by SendMessage and list_agents.
 describe("subagent runs follow a /tree switch", () => {
