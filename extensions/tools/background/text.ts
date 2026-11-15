@@ -198,8 +198,6 @@ export interface TaskToolsResultText {
 	noOutputYet: string;
 	/** task_output on a background agent still running: its report comes by notification only. */
 	agentStillRunning: string;
-	/** task_output on a finished task whose completion notification is already on its way. */
-	onItsWay: string;
 	/** Heads output clipped to its tail; the spool file at `path` has all of it. */
 	clippedHeader(p: { path: string }): string;
 	alreadyEnded(p: { id: string; status: string }): string;
@@ -216,7 +214,6 @@ const taskToolsResultText: TaskToolsResultText = {
 	noOutputYet: "(no output yet)",
 	agentStillRunning:
 		"The agent is still running. You will be notified automatically when it completes, with its report; you do not need to call this tool for it. Continue other work or respond to the user in the meantime.",
-	onItsWay: "Its output is already on its way to you as a task notification, which arrives after this result.",
 	clippedHeader: ({ path }) => `[Truncated. Full output: ${path}]\n\n`,
 	alreadyEnded: ({ id, status }) => `Task ${id} is already ${status}.`,
 	residentEnded: ({ id, description }) =>

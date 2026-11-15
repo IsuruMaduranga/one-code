@@ -427,6 +427,14 @@ export function mergeNotificationTexts(texts: string[]): string {
 export const NOTIFICATION_ID_KEY = "notificationId";
 /** `details` key on a coalesced message: the `{customType, details}` of each notification it carries, in arrival order. */
 export const NOTIFICATION_BATCH_KEY = "notifications";
+/**
+ * `details` key, `true` on a notification that delivers a task's completion
+ * (its report or final output), as opposed to a progress message or a
+ * monitor's event batch under the same `taskId`. Only such a notification is
+ * withdrawn when `task_output` returns the task's output
+ * (`TASK_OUTPUT_DELIVERED_CHANNEL`).
+ */
+export const TASK_COMPLETION_KEY = "completesTask";
 
 /** Inject a harness notification (a task/agent completion, a monitor event, a review note) into the conversation. */
 export interface TaskNotifier {
@@ -441,23 +449,20 @@ export interface TaskNotifier {
 }
 
 /**
- * `task_output` announces here that it is about to return a FINISHED task's
- * output in a tool result. A notifier created with `withdrawOnDelivery` then
- * drops a completion for that task it has not handed to pi yet (in its
- * coalescing window, or held after an interrupt): the background-shell
- * `delivered_as_tool_result` withdrawal, applied to every task kind. The
- * model already holds the output, so the notification would only repeat it.
- *
- * A completion already handed to pi cannot be taken back: pi's queue delivers
- * it after the tool call. The notifier then sets `inFlight`, and task_output
- * points at the notification instead of returning the output a second time.
- * The emit is synchronous, so the flag is set when `emit` returns.
+ * `task_output` announces here that it returns a FINISHED task's output in a
+ * tool result, which it always does. A notifier created with
+ * `withdrawOnDelivery` then drops that task's completion notification
+ * (`TASK_COMPLETION_KEY`) where it has not handed it to pi yet: in its
+ * coalescing window, held after an interrupt, or handed to pi but discarded
+ * by an interrupt and about to be sent again. That is the background-shell
+ * `delivered_as_tool_result` withdrawal, applied to every task kind. Progress
+ * messages and other tasks' notifications stay. A completion pi already
+ * queued is delivered as well: the model then sees the output twice, which is
+ * the lesser harm than a report it never gets.
  */
 export const TASK_OUTPUT_DELIVERED_CHANNEL = brandedId("task-output-delivered");
 export interface TaskOutputDelivered {
 	taskId: string;
-	/** Set by a notifier: the task's completion is already on its way to the model. */
-	inFlight?: boolean;
 }
 
 /** The ExtensionAPI slice the notifier uses (`events` only for `withdrawOnDelivery`). */
@@ -655,6 +660,8 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	/** Notifications waiting for the coalescing window to close. */
 	let batch: Incoming[] = [];
 	let batchTimer: ReturnType<typeof setTimeout> | undefined;
+	/** Completions handed to pi whose output task_output has since returned: dropped if they are ever sent again. */
+	const returned = new WeakSet<Incoming>();
 
 	const dispatch = (id: string, entry: Pending) => {
 		if (!active) {
@@ -807,6 +814,13 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 				pending.delete(id);
 				continue;
 			}
+			// pi discarded it unsent: a completion task_output returned meanwhile goes, its peers stay.
+			const items = entry.items.filter((item) => !returned.has(item));
+			if (items.length === 0) {
+				pending.delete(id);
+				continue;
+			}
+			if (items.length < entry.items.length) Object.assign(entry, merge(items), { items });
 			entry.resent = true;
 			dispatch(id, entry);
 		}
@@ -843,17 +857,14 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	});
 	if (options.withdrawOnDelivery) {
 		pi.events?.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => {
-			const delivered = data as TaskOutputDelivered | undefined;
-			const taskId = delivered?.taskId;
-			if (delivered === undefined || taskId === undefined) return;
-			const keep = (item: Incoming) => item.details.taskId !== taskId;
-			batch = batch.filter(keep);
-			held = held.filter(keep);
-			// A sent entry still awaiting confirmation is in pi's queue and lands
-			// after the tool call: it stays (an interrupt that discards the queue
-			// resends it), and task_output says the output is on its way rather
-			// than returning it as well.
-			for (const entry of pending.values()) if (!entry.items.every(keep)) delivered.inFlight = true;
+			const taskId = (data as TaskOutputDelivered | undefined)?.taskId;
+			if (taskId === undefined) return;
+			const completes = (item: Incoming) => item.details.taskId === taskId && item.details[TASK_COMPLETION_KEY] === true;
+			batch = batch.filter((item) => !completes(item));
+			held = held.filter((item) => !completes(item));
+			// One already in pi's queue lands after the tool call (a duplicate, accepted);
+			// if an interrupt discards it instead, it is not sent again.
+			for (const entry of pending.values()) for (const item of entry.items) if (completes(item)) returned.add(item);
 		});
 	}
 

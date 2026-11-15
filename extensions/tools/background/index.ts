@@ -63,6 +63,7 @@ import {
 } from "../../lib/agents/cron.ts";
 import {
 	createTaskNotifier,
+	TASK_COMPLETION_KEY,
 	monitorEndedSummary,
 	monitorEventSummary,
 	oneShotNote,
@@ -484,11 +485,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 				}
 				const batch = pending;
 				pending = emptyBatch();
-				// CC's mid-run monitor batch: no status, the lines in `<event>`.
+				// CC's mid-run monitor batch: no status, the lines in `<event>`. The
+				// batch forced out as the monitor ends belongs to its completion: the
+				// end's own recent tail and task_output's result hold those lines.
 				notify(
 					"task-notification",
 					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch, text.monitor.moreLines) }),
-					{ taskId: id, events: batchSize(batch) },
+					{ taskId: id, events: batchSize(batch), ...(force ? { [TASK_COMPLETION_KEY]: true } : {}) },
 				);
 			};
 
@@ -537,7 +540,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
 							result: recent || undefined,
 						}),
-						{ taskId: id, status: finalStatus },
+						{ taskId: id, status: finalStatus, [TASK_COMPLETION_KEY]: true },
 					);
 				};
 				if (log && !log.closed) {
@@ -740,12 +743,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 
 			updateWidget();
 			const header = text.tasks.taskLine(shownTask(task));
-			// The model is about to hold a finished task's output: a completion
-			// notification not yet sent for it is withdrawn, and one already sent
-			// brings the output instead of this result (lib/notify/notifications.ts).
-			const delivered: TaskOutputDelivered = { taskId: task.id };
-			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, delivered);
-			const body = delivered.inFlight ? text.tasks.onItsWay : taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
+			// A finished task's output is always returned here; its completion
+			// notification is withdrawn where pi does not hold it yet
+			// (lib/notify/notifications.ts TASK_OUTPUT_DELIVERED_CHANNEL).
+			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
+			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
 			return {
 				content: [{ type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },

@@ -92,6 +92,7 @@ import {
 	agentMessage,
 	agentSummary,
 	createTaskNotifier,
+	TASK_COMPLETION_KEY,
 	type HandBackVerdict,
 	handBackPointer,
 	handBackWarning,
@@ -1345,7 +1346,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
 		const record = registry.resolve(opts.from);
-		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined };
+		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined, [TASK_COMPLETION_KEY]: true };
 		const envelope = (result: string) =>
 			taskNotification({
 				kind: "agent",

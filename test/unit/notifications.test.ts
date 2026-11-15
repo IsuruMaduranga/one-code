@@ -4,6 +4,7 @@ import {
 	awaitOneShotTurn,
 	createTaskNotifier,
 	frameForDelivery,
+	TASK_COMPLETION_KEY,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	handBackPointer,
 	mergeNotificationTexts,
@@ -368,8 +369,8 @@ describe("createTaskNotifier coalescing (M1)", () => {
 		const notify = createTaskNotifier(pi, { coalesceMs: 250, withdrawOnDelivery: true });
 		primed();
 		fire("agent_start");
-		notify("task-notification", shellDone("1"), { taskId: "1" });
-		notify("task-notification", shellDone("2"), { taskId: "2" });
+		notify("task-notification", shellDone("1"), { taskId: "1", [TASK_COMPLETION_KEY]: true });
+		notify("task-notification", shellDone("2"), { taskId: "2", [TASK_COMPLETION_KEY]: true });
 		emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "1" });
 		vi.advanceTimersByTime(250);
 		expect(sent).toHaveLength(1);
@@ -378,7 +379,7 @@ describe("createTaskNotifier coalescing (M1)", () => {
 		const other = fakePi();
 		const notifyAgent = createTaskNotifier(other.pi, { coalesceMs: 250 });
 		other.primed();
-		notifyAgent("subagent-result", shellDone("3"), { taskId: "3" });
+		notifyAgent("subagent-result", shellDone("3"), { taskId: "3", [TASK_COMPLETION_KEY]: true });
 		other.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "3" });
 		vi.advanceTimersByTime(250);
 		expect(other.sent).toHaveLength(1);
