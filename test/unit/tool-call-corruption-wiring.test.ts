@@ -71,6 +71,26 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fake.sentUserMessages).toEqual([]);
 	});
 
+	it("sends no key and no request when the openrouter provider points at a proxy", async () => {
+		ctx.model = { ...model, baseUrl: "https://proxy.example.com/v1" };
+		await stream();
+		await call();
+		await end();
+		await flush();
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/provider.*could not.*identified/), "error");
+	});
+
+	it("prefers the credential's resolved base URL over the model's", async () => {
+		getAuth.mockResolvedValue({ ok: true, apiKey: "session-key", baseUrl: "https://proxy.example.com/v1" });
+		await stream();
+		await call();
+		await end();
+		await flush();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it("reports the stop as a turn failure before aborting, once", async () => {
 		const order: string[] = [];
 		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));

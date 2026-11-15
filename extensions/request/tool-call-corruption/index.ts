@@ -99,7 +99,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		const notice = withKeepAlive(async () => {
 			const provider = named ?? await openRouterProviderName(responseId, async () => {
 				const auth = await registry.getApiKeyAndHeaders(model);
-				return auth.ok ? auth.apiKey : undefined;
+				return auth.ok ? { apiKey: auth.apiKey, baseUrl: auth.baseUrl ?? model.baseUrl } : undefined;
 			}, controller.signal);
 			if (alive() && !controller.signal.aborted) notifyOrPrint(output, toolCallCorruptionNotice(model.id, provider, failure), "error");
 		}).finally(() => pending.delete(controller));

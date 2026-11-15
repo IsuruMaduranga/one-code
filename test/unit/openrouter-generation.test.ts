@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice } from "../../extensions/request/tool-call-corruption/openrouter-generation.ts";
+import { generationEndpoint, isOpenRouter, openRouterProviderName, toolCallCorruptionNotice } from "../../extensions/request/tool-call-corruption/openrouter-generation.ts";
 
+const direct = { apiKey: "key", baseUrl: "https://openrouter.ai/api/v1" };
 const response = (provider: unknown = "Morph") => ({ ok: true, status: 200, json: async () => ({ data: { provider_name: provider } }) });
 
 describe("OpenRouter generation attribution", () => {
@@ -18,12 +19,30 @@ describe("OpenRouter generation attribution", () => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 	});
-	const lookup = (getApiKey = async () => "key") => openRouterProviderName("gen-123", getApiKey, controller.signal);
+	const lookup = (getAuth: () => Promise<{ apiKey?: string; baseUrl?: string } | undefined> = async () => direct) => openRouterProviderName("gen-123", getAuth, controller.signal);
 
 	it("encodes the generation id and uses the session credential only for OpenRouter", async () => {
-		expect(await openRouterProviderName("gen &/?", async () => "key", controller.signal)).toBe("Morph");
+		expect(await openRouterProviderName("gen &/?", async () => direct, controller.signal)).toBe("Morph");
 		expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/generation?id=gen%20%26%2F%3F", expect.objectContaining({ headers: { Authorization: "Bearer key" } }));
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("skips the lookup silently when the openrouter provider points at a proxy", async () => {
+		for (const baseUrl of ["https://proxy.example.com/openrouter/v1", "https://openrouter.ai.example.com/api/v1", "http://openrouter.ai/api/v1", "not a url"]) {
+			expect(await lookup(async () => ({ apiKey: "key", baseUrl }))).toBeUndefined();
+		}
+		expect(fetchMock).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("looks up on OpenRouter's own host when the model carries no base URL", async () => {
+		expect(await lookup(async () => ({ apiKey: "key" }))).toBe("Morph");
+		expect(fetchMock.mock.calls[0][0]).toBe("https://openrouter.ai/api/v1/generation?id=gen-123");
+	});
+
+	it("builds the endpoint under the resolved base URL", () => {
+		expect(generationEndpoint("https://openrouter.ai/api/v1/", "a b")).toBe("https://openrouter.ai/api/v1/generation?id=a%20b");
+		expect(generationEndpoint("https://proxy.example.com/api/v1", "a")).toBeUndefined();
 	});
 
 	it("retries lagging generation metadata", async () => {
@@ -61,16 +80,17 @@ describe("OpenRouter generation attribution", () => {
 
 	it("returns unknown without exposing credential-resolution errors", async () => {
 		expect(await lookup(async () => { throw new Error("secret-key"); })).toBeUndefined();
+		expect(await openRouterProviderName("gen-123", async () => ({}), controller.signal)).toBeUndefined();
 		expect(await openRouterProviderName("gen-123", async () => undefined, controller.signal)).toBeUndefined();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
 	it("does no work without a generation id or after cancellation", async () => {
-		const getApiKey = vi.fn(async () => "key");
-		expect(await openRouterProviderName(undefined, getApiKey, controller.signal)).toBeUndefined();
+		const getAuth = vi.fn(async () => direct);
+		expect(await openRouterProviderName(undefined, getAuth, controller.signal)).toBeUndefined();
 		controller.abort();
-		expect(await lookup(getApiKey)).toBeUndefined();
-		expect(getApiKey).not.toHaveBeenCalled();
+		expect(await lookup(getAuth)).toBeUndefined();
+		expect(getAuth).not.toHaveBeenCalled();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
@@ -108,11 +128,11 @@ describe("OpenRouter generation attribution", () => {
 	});
 
 	it("does not start a request if auth resolves after cancellation", async () => {
-		let resolveKey!: (value: string) => void;
+		let resolveKey!: (value: { apiKey: string; baseUrl: string }) => void;
 		const result = lookup(() => new Promise((resolve) => { resolveKey = resolve; }));
 		controller.abort();
 		expect(await result).toBeUndefined();
-		resolveKey("late-key");
+		resolveKey({ apiKey: "late-key", baseUrl: direct.baseUrl });
 		await vi.advanceTimersByTimeAsync(0);
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
