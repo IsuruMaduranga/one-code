@@ -98,6 +98,14 @@ for arg in "$@"; do
 		CHECK_ARGS+=("$arg")
 	fi
 done
+if [ "$expect_auth_next" = 1 ]; then
+	echo "--expect-auth needs a value: login or key" >&2
+	exit 2
+fi
+if [ "$late_form_next" = 1 ]; then
+	echo "--late-tool-form needs a value: tool_addition or addendum" >&2
+	exit 2
+fi
 case "$EXPECT_AUTH" in
 "" | login | key) ;;
 *)
