@@ -46,7 +46,7 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/tools/background/index.ts": { kind: "registered", how: "monitors: remembered from spawn, stopped with stopProcessTree" },
 	"extensions/tools/bash/index.ts": { kind: "awaited", how: "pi's bash tool waits for its command and kills the tree on abort or timeout" },
 	"extensions/tools/lsp/client.ts": { kind: "registered", how: "language servers: remembered from spawn, stopped with stopProcessTree" },
-	"extensions/tools/mcp/client.ts": { kind: "exception", how: "stdio MCP servers through the SDK's StdioClientTransport, which signals the leader's pid only" },
+	"extensions/tools/mcp/stdio-transport.ts": { kind: "registered", how: "stdio MCP servers: remembered from spawn, the group stopped on close and when its launcher exits" },
 	"extensions/tools/plugins/marketplace/git.ts": { kind: "awaited", how: "git, with a timeout" },
 	"extensions/tools/plugins/shell-expand.ts": { kind: "awaited", how: "waitForChildExit with a timeout that kills the group" },
 	"extensions/ui/footer/pr.ts": { kind: "awaited", how: "gh, with a timeout" },
