@@ -94,7 +94,7 @@ describe("text naming another tool", () => {
 	it("gives a session without bash no auto-mode note, which is about working through bash", () => {
 		const off = profile.text({ live: { has: (tool) => tool !== "bash" } });
 		for (const firm of [true, false]) expect(off.permissions?.autoModeNote({ firm })).toBe("");
-		expect(off.background?.tasks.outputDescription).toContain("(monitor or background subagent)");
+		expect(off.background?.tasks.outputDescription).toContain("(monitor)");
 	});
 
 	it("steers tiny to the search tools only while all three are in the session, and to the shell otherwise", () => {

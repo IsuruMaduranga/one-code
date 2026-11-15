@@ -75,7 +75,7 @@ describe("notification lifecycle races", () => {
 		expect(released).toContain("<task-id>second</task-id>");
 	});
 
-	it("withdraws a task from a sent completion still awaiting confirmation, so an interrupt does not resend it", async () => {
+	it("keeps a sent completion awaiting confirmation and reports it in flight, so task_output points at it and an interrupt still resends it", async () => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
 		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 250, withdrawOnDelivery: true });
@@ -83,21 +83,28 @@ describe("notification lifecycle races", () => {
 		await fake.fire("agent_start", {});
 		notify("task-notification", completion("first"), { taskId: "first" });
 		notify("task-notification", completion("second"), { taskId: "second" });
-		notify("task-notification", completion("lone"), { taskId: "lone" });
 		await vi.advanceTimersByTimeAsync(250);
-		notify("task-notification", completion("lone"), { taskId: "lone" });
-		await vi.advanceTimersByTimeAsync(250);
-		// task_output delivers two tasks while their completions wait in pi's
-		// queue; then Esc discards that queue.
-		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "first" });
-		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "lone" });
-		await interrupt(fake);
+		notify("task-notification", completion("third"), { taskId: "third" });
 		const sentBefore = fake.sentMessages.length;
+		// task_output asks about a task whose completion already waits in pi's
+		// queue (it lands after the tool call), and about one still in the
+		// coalescing window (withdrawn: task_output returns the output itself).
+		const first: { taskId: string; inFlight?: boolean } = { taskId: "first" };
+		const third: { taskId: string; inFlight?: boolean } = { taskId: "third" };
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, first);
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, third);
+		expect(first.inFlight).toBe(true);
+		expect(third.inFlight).toBeUndefined();
+		await vi.advanceTimersByTimeAsync(250);
+		expect(fake.sentMessages).toHaveLength(sentBefore);
+		// Esc discards pi's queue: the resend carries both sent completions.
+		await interrupt(fake);
+		const afterInterrupt = fake.sentMessages.length;
 		await fake.fire("before_agent_start", {});
-		expect(fake.sentMessages).toHaveLength(sentBefore + 1);
-		const released = textAt(fake, sentBefore);
-		expect(released).not.toContain("<task-id>first</task-id>");
-		expect(released).not.toContain("<task-id>lone</task-id>");
+		expect(fake.sentMessages).toHaveLength(afterInterrupt + 1);
+		const released = textAt(fake, afterInterrupt);
+		expect(released).toContain("<task-id>first</task-id>");
 		expect(released).toContain("<task-id>second</task-id>");
+		expect(released).not.toContain("<task-id>third</task-id>");
 	});
 });

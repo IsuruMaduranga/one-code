@@ -8,8 +8,8 @@
  * (lib/profile/tool-variants.ts). Changes from Claude Code's text: a fork rejects a
  * `model` override rather than ignoring it, agent definitions come from
  * `.claude/agents/*.md` only, and tool names are One Code's. The closing
- * paragraph describes what only One Code has: `task_output` and `task_stop`,
- * the one-shot print session, run names and `action: "list"`.
+ * paragraph describes what only One Code has: `task_stop` for a run, the
+ * one-shot print session, run names and `action: "list"`.
  */
 
 import type { DescriptionForm } from "../../../extensions/sdk/profile.ts";
@@ -120,7 +120,7 @@ Agent({
 /** One Code's own part, after Claude Code's text in both forms. */
 export const AGENT_HOW_AGENTS_RUN = `## How agents run
 
-- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.
+- Stop a run with task_stop (deferred — load it with tool_search first).
 - In a one-shot print session the call blocks and returns the report directly — no notification follows.
 - Give a complete, self-contained task: the agent cannot ask follow-up questions.
 - Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. \`action: "list"\` re-prints the agent catalog.`;

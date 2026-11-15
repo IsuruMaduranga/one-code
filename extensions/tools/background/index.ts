@@ -708,6 +708,17 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const task = registry.get(params.task_id);
 			if (!task) return unknownTask(params.task_id);
 
+			// An agent reports through its task notification only: a call on a
+			// running one returns at once and says so, whatever `block` asks,
+			// so a wait for the report never becomes a poll.
+			if (task.kind === "subagent" && task.status === "running") {
+				updateWidget();
+				return {
+					content: [{ type: "text", text: `${text.tasks.taskLine(shownTask(task))}\n\n${text.tasks.agentStillRunning}` }],
+					details: { taskId: task.id, status: task.status, logPath: task.logPath },
+				};
+			}
+
 			if (params.block !== false && task.status === "running") {
 				const timeoutMs = Math.min(params.timeout ?? 30_000, MAX_BLOCK_TIMEOUT_MS);
 				let timer: ReturnType<typeof setTimeout> | undefined;
@@ -729,10 +740,12 @@ function backgroundExtension(pi: ExtensionAPI) {
 
 			updateWidget();
 			const header = text.tasks.taskLine(shownTask(task));
-			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
-			// The model now holds a finished task's output: a completion notification
-			// still waiting to go out for it is redundant (lib/notify/notifications.ts).
-			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
+			// The model is about to hold a finished task's output: a completion
+			// notification not yet sent for it is withdrawn, and one already sent
+			// brings the output instead of this result (lib/notify/notifications.ts).
+			const delivered: TaskOutputDelivered = { taskId: task.id };
+			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, delivered);
+			const body = delivered.inFlight ? text.tasks.onItsWay : taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
 			return {
 				content: [{ type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },

@@ -6,11 +6,11 @@ import { describe, expect, it } from "vitest";
 import { pendingClaimReminder } from "../../extensions/agents/subagents/pending-claim.ts";
 
 describe("the pending-claim reminder", () => {
-	it("names the run and offers both sanctioned ways to get the result", () => {
+	it("names the run and points at the notification, never at polling", () => {
 		const text = pendingClaimReminder([{ name: "count-src-python-files", taskId: "b1f7f47e" }]);
 		expect(text).toContain("count-src-python-files (task b1f7f47e)");
-		expect(text).toContain("task_output with block=true");
-		expect(text).toMatch(/wait for the notification/i);
+		expect(text).not.toContain("task_output");
+		expect(text?.endsWith("Wait for the notification.")).toBe(true);
 	});
 
 	it("is conditional, never an accusation — the trigger fires on correct turns too", () => {

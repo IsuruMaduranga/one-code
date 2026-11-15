@@ -58,7 +58,10 @@ describe("the shipped texts", () => {
 	it("Agent: One Code's paragraph follows Claude Code's text in both forms", () => {
 		expect(agentDescription("short")).toBe(`${AGENT_SHORT_DESCRIPTION}\n\n${AGENT_HOW_AGENTS_RUN}`);
 		expect(agentDescription("long")).toBe(`${AGENT_LONG_DESCRIPTION.trimEnd()}\n\n${AGENT_HOW_AGENTS_RUN}`);
-		expect(AGENT_HOW_AGENTS_RUN).toContain("task_output");
+		expect(AGENT_HOW_AGENTS_RUN).toContain("- Stop a run with task_stop (deferred — load it with tool_search first).");
+		// An agent's report arrives by notification only: the description never sends the model to poll.
+		expect(agentDescription("short")).not.toContain("task_output");
+		expect(agentDescription("long")).not.toContain("task_output");
 		expect(AGENT_HOW_AGENTS_RUN).toContain('`action: "list"`');
 	});
 

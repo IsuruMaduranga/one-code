@@ -1283,9 +1283,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 		});
 	}
 
-	// A hand-back the model already read through task_output (block: true on the
-	// agent's task) is withdrawn — One Code's task_output returns the full report,
-	// so the message and its pointer would only repeat it (see decisions).
+	// A hand-back not yet sent when task_output returns a finished agent's
+	// report is withdrawn, and one already sent makes task_output point at it,
+	// so the report reaches the model once (lib/notify/notifications.ts).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
 	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {

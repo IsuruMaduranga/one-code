@@ -161,17 +161,15 @@ export interface SubagentsResultText {
 
 /**
  * The anti-fabrication sentence, carried by the RESULT of a background spawn
- * and not only by the Agent tool's description, as Claude Code does ("You
- * know nothing about its results until that notification arrives…"). A
- * cheap-tier model that had the description in every request still wrote a
- * pending agent's answer before the notification arrived, then read the real
- * notification as confirmation of what it had invented
- * (WEAK-MODEL-REVIEW-2026-09-06 H1). This is the copy the model reads at the
- * point of action.
+ * and of a message to a running agent, not only by the Agent tool's
+ * description: the model reads it at the point of action. It ends on what to
+ * do instead (keep working or answer the user), never on fetching the result:
+ * an earlier clause that sent the model to a blocking task_output whenever the
+ * request asked for the agent's findings turned nearly every delegation into a
+ * poll (decisions/subagents-workflows.md).
  */
 const PENDING_RESULT =
-	"You know nothing about the agent's result until that notification arrives: do not report, assume, or predict it, in prose or otherwise. If the request asks you to report what the agent found, that IS a step that cannot proceed without the result — call task_output with block=true and wait, rather than ending your turn with an answer you do not have yet.";
-
+	"You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.";
 
 // Claude Code closes every catalog row with a tools clause, the one place it
 // tells the model an agent cannot edit: "*" for its built-in agents, "All
@@ -260,7 +258,7 @@ function failure(f: RunFailure): string {
 function launchLine(line: LaunchLine): string {
 	switch (line.kind) {
 		case "running":
-			return `⏳ ${line.name} (task ${line.taskId}) running in background${line.logPath ? ` — interim output readable at ${line.logPath}` : ""}`;
+			return `⏳ ${line.name} (task ${line.taskId}) running in background${line.logPath ? ` — output file: ${line.logPath}` : ""}`;
 		case "worktreeFailed":
 			return `✗ ${line.name}: could not create a worktree: ${line.osMessage}`;
 		case "startFailed":
@@ -285,15 +283,8 @@ const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${
 
 /** The task tools in the results and notes of a run: what still holds when one is off. */
 const RESULT_PASSAGES: ToolPassages = {
-	task_output: [
-		[" — call task_output with block=true and wait, rather than ending your turn with an answer you do not have yet.", " — tell the user you are waiting for it and end your turn without an answer; the notification brings the result."],
-		" Call task_output only if your next step cannot proceed without the result (block=true waits).",
-		["; inspect with task_output.", "."],
-		[", and task_output does not know this id.", "."],
-		["Wait for the notification, or call task_output with block=true.", "Wait for the notification."],
-		" Use task_output to check on one, or task_stop to end it.",
-	],
-	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], [" Use task_output to check on one, or task_stop to end it.", " Use task_output to check on one."]],
+	task_output: [[", and task_output does not know this id.", "."]],
+	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], " Use task_stop to end one."],
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
@@ -326,16 +317,22 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		// registered (WEAK-MODEL-REVIEW-2026-09-06 M3).
 		inlineReport: ({ name, taskId, note }) =>
 			results(`${name} (task ${taskId}): ${note} Its report follows here; there is no background task to poll, and task_output does not know this id.`),
-		launched: ({ lines }) =>
-			results(`${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a task notification on its own — you do not need to wait for it or poll; keep working. ${PENDING_RESULT} Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`),
+		// The agent's own launch result in the reference wording, plus what only
+		// One Code has (several runs per call, task_stop, steering by SendMessage).
+		launched: ({ lines }) => {
+			const many = lines.length > 1;
+			return results(
+				`${lines.join("\n")}\n\n${many ? "The agents are" : "The agent is"} working in the background. You will be notified automatically when ${many ? "each one completes" : "it completes"}. ${PENDING_RESULT}\nDo not duplicate ${many ? "these agents'" : "this agent's"} work — avoid working with the same files or topics ${many ? "they are" : "it is"} using.\nDo NOT Read or tail the output file while ${many ? "they run" : "it runs"}. If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+			);
+		},
 		launchLine,
 		steered: ({ name }) =>
 			`Message steered into ${name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
 		nextTurn: ({ name }) =>
-			results(`${name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${name}. ${PENDING_RESULT}`),
+			`${name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${name}. ${PENDING_RESULT}`,
 		sentToResident: ({ name, taskId }) =>
-			results(`Message sent to resident agent ${name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT}`),
-		sent: ({ name, taskId }) => results(`Message sent to ${name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT}`),
+			`Message sent to resident agent ${name} (task ${taskId}). The reply will arrive as a task notification on its own. ${PENDING_RESULT}`,
+		sent: ({ name, taskId }) => `Message sent to ${name} (task ${taskId}). The reply will arrive as a task notification on its own. ${PENDING_RESULT}`,
 		inlineReply: ({ name, note }) => `${name}: ${note} Its reply follows here; there is no background task to poll.`,
 		relocated: ({ name, cwd, worktreeRemoved, ranIn }) =>
 			`[${name}'s working directory ${cwd} no longer exists${worktreeRemoved ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ranIn}.]`,
@@ -349,14 +346,12 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		// model that only said "I'm waiting for the agent"), so the text must not
 		// accuse (agents/subagents/pending-claim.ts).
 		pendingClaim: ({ runs }) =>
-			results(
-				`You ended that turn while ${namedRuns(runs)} ${runs.length === 1 ? "was" : "were"} still running. ${runs.length === 1 ? "It has" : "They have"} not reported yet, ` +
-					"so anything you stated about the result did not come from the agent — if you gave the user a result, say plainly in your next message that it was not the agent's and correct it. " +
-					"Wait for the notification, or call task_output with block=true.",
-			),
+			`You ended that turn while ${namedRuns(runs)} ${runs.length === 1 ? "was" : "were"} still running. ${runs.length === 1 ? "It has" : "They have"} not reported yet, ` +
+			"so anything you stated about the result did not come from the agent — if you gave the user a result, say plainly in your next message that it was not the agent's and correct it. " +
+			"Wait for the notification.",
 		runningAfterCompaction: ({ runs }) =>
 			results(
-				`Background agents you started before this conversation was compacted are still running: ${namedRuns(runs)}. Each one notifies you when it finishes; do not start the same work again. Use task_output to check on one, or task_stop to end it.`,
+				`Background agents you started before this conversation was compacted are still running: ${namedRuns(runs)}. Each one notifies you when it finishes; do not start the same work again. Use task_stop to end one.`,
 			),
 		reviewTimedOut: "auto mode's review of this agent's actions did not finish before the report was delivered",
 	};

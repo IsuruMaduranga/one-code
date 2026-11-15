@@ -2,15 +2,16 @@ import { getEventListeners } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
+import { TASK_OUTPUT_DELIVERED_CHANNEL, type TaskOutputDelivered } from "../../extensions/lib/notify/notifications.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-function mountTask() {
+function mountTask(kind = "test") {
 	const fake = createFakePi();
 	backgroundExtension(fake.pi as never);
 	let finish!: () => void;
 	const task: BackgroundTask = {
 		id: "bwait001",
-		kind: "test",
+		kind,
 		description: "pending work",
 		status: "running",
 		startedAt: Date.now(),
@@ -75,5 +76,46 @@ describe("task_output blocking lifecycle", () => {
 		const result = await call;
 		expect(result).toMatchObject({ details: { status: "running" } });
 		expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+	});
+});
+
+describe("task_output on a background agent", () => {
+	afterEach(() => vi.useRealTimers());
+
+	it("returns at once for a running agent, whatever block asks, and says the notification brings the report", async () => {
+		vi.useFakeTimers();
+		const { output, fake } = mountTask("subagent");
+		const asked: string[] = [];
+		fake.events.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => asked.push((data as TaskOutputDelivered).taskId));
+		let returned = false;
+		const call = output().then((result) => {
+			returned = true;
+			return result;
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(returned).toBe(true);
+		const result = (await call) as { content: { text: string }[]; details: { status: string } };
+		expect(result.details.status).toBe("running");
+		expect(result.content[0].text).toContain("The agent is still running. You will be notified automatically when it completes, with its report");
+		expect(result.content[0].text).not.toContain("partial output");
+		expect(asked).toEqual([]);
+	});
+
+	it("points at a completion already on its way instead of returning the output a second time", async () => {
+		const { output, fake, task } = mountTask("subagent");
+		task.status = "completed";
+		fake.events.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => {
+			(data as TaskOutputDelivered).inFlight = true;
+		});
+		const result = (await output()) as { content: { text: string }[] };
+		expect(result.content[0].text).toContain("Its output is already on its way to you as a task notification");
+		expect(result.content[0].text).not.toContain("partial output");
+	});
+
+	it("returns a finished agent's report when no completion is on its way", async () => {
+		const { output, task } = mountTask("subagent");
+		task.status = "completed";
+		const result = (await output()) as { content: { text: string }[] };
+		expect(result.content[0].text).toContain("partial output");
 	});
 });

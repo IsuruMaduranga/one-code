@@ -441,16 +441,23 @@ export interface TaskNotifier {
 }
 
 /**
- * `task_output` announces here that it returned a FINISHED task's output in a
- * tool result. A notifier created with `withdrawOnDelivery` then drops a
- * completion for that task still waiting in its coalescing window — CC's
- * `delivered_as_tool_result` withdrawal for background shells, applied to
- * agents as well: the model already holds the output, so the notification
- * would only cost it a turn to say "nothing new".
+ * `task_output` announces here that it is about to return a FINISHED task's
+ * output in a tool result. A notifier created with `withdrawOnDelivery` then
+ * drops a completion for that task it has not handed to pi yet (in its
+ * coalescing window, or held after an interrupt): the background-shell
+ * `delivered_as_tool_result` withdrawal, applied to every task kind. The
+ * model already holds the output, so the notification would only repeat it.
+ *
+ * A completion already handed to pi cannot be taken back: pi's queue delivers
+ * it after the tool call. The notifier then sets `inFlight`, and task_output
+ * points at the notification instead of returning the output a second time.
+ * The emit is synchronous, so the flag is set when `emit` returns.
  */
 export const TASK_OUTPUT_DELIVERED_CHANNEL = brandedId("task-output-delivered");
 export interface TaskOutputDelivered {
 	taskId: string;
+	/** Set by a notifier: the task's completion is already on its way to the model. */
+	inFlight?: boolean;
 }
 
 /** The ExtensionAPI slice the notifier uses (`events` only for `withdrawOnDelivery`). */
@@ -836,20 +843,17 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	});
 	if (options.withdrawOnDelivery) {
 		pi.events?.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => {
-			const taskId = (data as TaskOutputDelivered | undefined)?.taskId;
-			if (taskId === undefined) return;
+			const delivered = data as TaskOutputDelivered | undefined;
+			const taskId = delivered?.taskId;
+			if (delivered === undefined || taskId === undefined) return;
 			const keep = (item: Incoming) => item.details.taskId !== taskId;
 			batch = batch.filter(keep);
 			held = held.filter(keep);
-			// A sent entry still awaiting confirmation is resent (or held) when an
-			// interrupt discards pi's queue: drop the task from it too, re-merging
-			// what remains, so the model is not told of output it already has.
-			for (const [id, entry] of [...pending]) {
-				const items = entry.items.filter(keep);
-				if (items.length === entry.items.length) continue;
-				if (items.length === 0) pending.delete(id);
-				else Object.assign(entry, merge(items), { items });
-			}
+			// A sent entry still awaiting confirmation is in pi's queue and lands
+			// after the tool call: it stays (an interrupt that discards the queue
+			// resends it), and task_output says the output is on its way rather
+			// than returning it as well.
+			for (const entry of pending.values()) if (!entry.items.every(keep)) delivered.inFlight = true;
 		});
 	}
 
