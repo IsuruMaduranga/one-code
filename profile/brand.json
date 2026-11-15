@@ -5,7 +5,7 @@
 	"envPrefix": "ONECODE",
 	"stateDir": ".onecode",
 	"productFile": "ONECODE.md",
-	"theme": "onecode",
+	"theme": "onecode-light/onecode",
 	"homepage": "https://github.com/IsuruMaduranga/one-code",
 	"guideDir": "docs/guide",
 	"subtitle": "the Claude Code experience, on any model",

@@ -27,12 +27,11 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { readJsonFile } from "../core/atomic-write.ts";
-import { autoSelectable, catalogModelFor, sizeFromName, smallByName, TINY_PARAMS } from "./model-catalog.ts";
+import { autoSelectable, catalogModelFor, isDatedDuplicate, sizeFromName, smallByName, TINY_PARAMS } from "./model-catalog.ts";
 import {
 	anthropicModelId,
 	baseModelId,
 	isKnownProvider,
-	isDatedDuplicate,
 	isExperimentalBuild,
 	modelIdentity,
 	modelsContainedToSession,

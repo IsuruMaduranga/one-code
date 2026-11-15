@@ -24,6 +24,7 @@
 import { feature } from "../../lib/profile/feature.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { withoutMessageThreads } from "../../lib/request/message-threads.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../../lib/models/model-policy.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
@@ -89,7 +90,7 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 				(reasoning) => {
 					const timeout = AbortSignal.timeout(TITLE_TIMEOUT_MS);
 					return completeSimple(
-						baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+						withoutMessageThreads(baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model),
 						{
 							systemPrompt: words.system,
 							messages: [{ role: "user", content: sessionTitleInput(words, text), timestamp: Date.now() }],

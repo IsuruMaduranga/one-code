@@ -32,7 +32,7 @@
     "thinkingText": "grayDim",
     "selectedBg": "surface",
     "scrollbarThumb": "surfaceRaised",
-    "userMessageBg": "surface",
+    "userMessageBg": "",
     "userMessageText": "",
     "customMessageBg": "surface",
     "customMessageText": "",

@@ -35,7 +35,9 @@ Set `ONECODE_NO_BANNER=1` to keep pi's own header.
 ## Prompt and transcript markers
 
 Your input line starts with a `❯` marker and the model's replies with a `●`
-bullet, as in Claude Code. Tool calls render as `● Tool(arguments)` with
+bullet, as in Claude Code. Your messages in the transcript carry the same
+`❯`, and a slash command you typed shows as the command line, not the prompt
+it expands to. Tool calls render as `● Tool(arguments)` with
 the result on an indented `⎿` line. Thinking is collapsed behind
 `✻ Thinking… (ctrl+t to expand)`.
 
@@ -158,10 +160,31 @@ in full-screen mode too; on an older pi it's opt-in. See
 
 ## Themes
 
-Two themes ship: `onecode` (dark, the bundled app's default) and
-`onecode-light`. Any other pi theme also works. See
+Two themes ship: `onecode` (dark) and `onecode-light`. The bundled app
+picks the one that matches your terminal's background, and switches when
+your terminal does (for example, when macOS changes between light and
+dark). Any other pi theme also works. See
 [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes)
 for how to select one.
+
+## Desktop notifications
+
+One Code tells you when it's waiting for you, as Claude Code does. When a
+permission question or another prompt has waited about six seconds without
+a keypress, you get "One Code needs your permission to use Bash" (or "needs
+your attention"). When a turn you started has finished and you haven't
+touched a key for a minute, you get "One Code is waiting for your input".
+
+The notification goes through your terminal: iTerm2, kitty and Ghostty show
+it as a desktop notification. Other terminals, and a session inside tmux,
+get nothing unless you pick a channel with `preferredNotifChannel` in
+`~/.onecode/settings.json`, for example `"terminal_bell"`; inside tmux a
+desktop channel also needs tmux's `allow-passthrough` option. Set it to
+`"notifications_disabled"` to turn notifications off. A `Notification`
+hook runs with each one, whatever the channel; see [Hooks](hooks.md).
+
+Notifications come only from the terminal interface, never from a one-shot
+or RPC run.
 
 ## Keyboard shortcuts
 

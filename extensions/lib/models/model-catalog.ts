@@ -92,6 +92,8 @@ export interface CatalogModel {
 }
 
 const TIER_RANK: Record<CatalogTier, number> = { workhorse: 0, cheap: 1, tiny: 2 };
+/** A trailing version tag (`-1.0`, `-v2`): what a gateway's id may add or drop from its vendor's. */
+const VERSION_TAG = /^-v?\d+(?:\.\d+)*$/;
 const SMALL_WORD = /(?:^|[-/.])(?:nano|micro|lite|tiny)(?:[-/.:]|$)/i;
 /** Any size tag: `27b`, `1.5b`, Gemma's effective-size `e2b`, and an MoE's active `17b`. */
 const ANY_SIZE_TAG = /(?:^|[-/.])e?(\d+(?:\.\d+)?)b(?=[-/.:]|$)/i;
@@ -183,9 +185,24 @@ export function buildCatalogIndex(sources: CatalogSources): CatalogIndex {
 			.filter(([, policy]) => policy.kind === "gateway")
 			.map(([provider]) => MODELS_DEV_PROVIDER[provider] ?? provider),
 	);
+	// A gateway row models.dev leaves unlinked whose vendor lists the same
+	// model under the id plus or minus a version tag, released the same day
+	// (OpenRouter's `meta/muse-ember` for Meta's `muse-ember-1.0`), is that
+	// model, not a gateway-only one.
+	const vendorTwin = (id: string, row: ModelsDevModel): string | undefined => {
+		const [vendor, rest] = id.split("/");
+		const own = modelsDev[vendor]?.models;
+		if (!own || own[rest] || !row.release_date) return undefined;
+		const versioned = (longer: string, shorter: string) => longer.startsWith(`${shorter}-`) && VERSION_TAG.test(longer.slice(shorter.length));
+		const twins = Object.entries(own).filter(([other, ownRow]) => ownRow.release_date === row.release_date && (versioned(other, rest) || versioned(rest, other)));
+		if (twins.length !== 1) return undefined;
+		const [other, ownRow] = twins[0];
+		return ownRow.canonical_model_id ?? `${vendor}/${other}`;
+	};
 	const canonicalOf = (provider: string, id: string, row: ModelsDevModel): string | undefined => {
 		const canonical =
-			row.canonical_model_id ?? (vendors.has(provider) ? `${provider}/${id}` : gateways.has(provider) && id.split("/").length === 2 ? id : undefined);
+			row.canonical_model_id ??
+			(vendors.has(provider) ? `${provider}/${id}` : gateways.has(provider) && id.split("/").length === 2 ? (vendorTwin(id, row) ?? id) : undefined);
 		return canonical && canonical.indexOf("/") === canonical.lastIndexOf("/") ? canonical : undefined;
 	};
 
@@ -459,4 +476,36 @@ export function catalogModelFor(model: { provider: string; id: string }, index: 
 	const bare = bareId(baseModelId(model.id));
 	const canonical = index.byBareId.get(bare) ?? index.byBareId.get(stripSnapshotDate(bare));
 	return canonical ? index.models.get(canonical) : undefined;
+}
+
+/**
+ * Whether `model` is a dated snapshot whose undated alias is also present in
+ * `pool`: the row a listing collapses so the same model is not offered twice.
+ * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
+ * is never read as a snapshot of `deepseek-v4-flash`. A snapshot the catalog
+ * knows as a later release than the model the alias names is a model of its
+ * own (OpenRouter's `deepseek-v4.1-flash-1017` beside the September
+ * `deepseek-v4.1-flash`) and stays; where the catalog cannot tell (a row with
+ * no provider, no entry or no release date, or both naming one entry) the
+ * snapshot collapses onto the alias.
+ */
+export function isDatedDuplicate(
+	model: { id: string; provider?: string },
+	pool: ReadonlyArray<{ id: string; provider?: string }>,
+	index: CatalogIndex = currentCatalog(),
+): boolean {
+	const aliasId = stripSnapshotDate(model.id);
+	if (aliasId === model.id) return false;
+	const alias = pool.find((other) => other.id === aliasId);
+	if (!alias) return false;
+	return !laterRelease(model, alias, index);
+}
+
+/** Whether the catalog names `snapshot` a different model from `alias`'s, released after it. */
+function laterRelease(snapshot: { id: string; provider?: string }, alias: { id: string; provider?: string }, index: CatalogIndex): boolean {
+	if (snapshot.provider === undefined || alias.provider === undefined) return false;
+	const own = catalogModelFor({ provider: snapshot.provider, id: snapshot.id }, index);
+	const named = catalogModelFor({ provider: alias.provider, id: alias.id }, index);
+	if (!own || !named || own.id === named.id || own.released === undefined || named.released === undefined) return false;
+	return own.released > named.released;
 }

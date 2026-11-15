@@ -83,7 +83,8 @@ describe("anthropicBetas", () => {
 		expect(declared.length).toBeGreaterThan(0);
 		// pi sends the tool-changes beta only on its native tool_addition path, which
 		// never engages while One Code forces the system prompt (findings §7).
-		const skipped = new Set(["inline-tools-2026-09-15"]);
+		// Message threads are never sent: every Anthropic model has them off (lib/request/message-threads.ts).
+		const skipped = new Set(["inline-tools-2026-09-15", "message-threads-2026-08-12"]);
 		const mirrored = new Set(
 			anthropicBetas(true, {
 				supportsEagerToolInputStreaming: false,

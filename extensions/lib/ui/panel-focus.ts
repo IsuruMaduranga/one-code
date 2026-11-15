@@ -55,13 +55,29 @@ function watchFocus(component: object, onChange: (focused: boolean) => void): vo
 	});
 }
 
+/** What a panel declares to pi-tui beyond its focus. */
+export interface PanelOptions {
+	/**
+	 * The panel pages with PageUp/PageDown (and the other fullscreen viewport
+	 * keys). In fullscreen pi-tui scrolls the transcript with those keys
+	 * before the focused component sees them, unless the component sets
+	 * `capturesViewportInput` (pi-tui 1.5.0; findings §10 item 21). A panel
+	 * that does not page leaves them to the transcript, so the user can read
+	 * above a question while it waits.
+	 */
+	capturesViewportInput?: boolean;
+}
+
+/** The options of a panel that pages: `panelUi(pi.events, ctx.ui, PAGING_PANEL)`. */
+export const PAGING_PANEL: PanelOptions = Object.freeze({ capturesViewportInput: true });
+
 /**
  * A `ctx.ui.custom` factory that reports its panel's focus on
  * `PANEL_FOCUS_CHANNEL`: `ctx.ui.custom(panelFactory(pi.events, (tui, theme,
  * keybindings, done) => …))`. The panel counts as gone when it loses focus or
  * calls `done`.
  */
-export function panelFactory<A extends unknown[], C>(events: Emitter, factory: (...args: A) => C): (...args: A) => C {
+export function panelFactory<A extends unknown[], C>(events: Emitter, factory: (...args: A) => C, options: PanelOptions = {}): (...args: A) => C {
 	return (...args: A): C => {
 		const id = {};
 		const report = (focused: boolean) => events.emit(PANEL_FOCUS_CHANNEL, { id, focused } satisfies PanelFocusEvent);
@@ -73,7 +89,12 @@ export function panelFactory<A extends unknown[], C>(events: Emitter, factory: (
 			}) as A[3];
 		}
 		const watch = (component: unknown) => {
-			if (component && typeof component === "object") watchFocus(component, report);
+			if (component && typeof component === "object") {
+				watchFocus(component, report);
+				if (options.capturesViewportInput && !("capturesViewportInput" in component)) {
+					Object.defineProperty(component, "capturesViewportInput", { value: true, configurable: true, enumerable: true });
+				}
+			}
 			return component;
 		};
 		const made = factory(...args);
@@ -83,10 +104,11 @@ export function panelFactory<A extends unknown[], C>(events: Emitter, factory: (
 
 /**
  * `ctx.ui` with a `custom` whose panels report their focus:
- * `panelUi(pi.events, ctx.ui).custom<T>((tui, theme, keybindings, done) => …)`.
+ * `panelUi(pi.events, ctx.ui).custom<T>((tui, theme, keybindings, done) => …)`;
+ * a panel that pages passes `PAGING_PANEL`.
  */
-export function panelUi<U extends { custom: (...args: any[]) => any }>(events: Emitter, ui: U): Pick<U, "custom"> {
-	const custom = (factory: (...args: unknown[]) => unknown, ...rest: unknown[]) => ui.custom(panelFactory(events, factory), ...rest);
+export function panelUi<U extends { custom: (...args: any[]) => any }>(events: Emitter, ui: U, options: PanelOptions = {}): Pick<U, "custom"> {
+	const custom = (factory: (...args: unknown[]) => unknown, ...rest: unknown[]) => ui.custom(panelFactory(events, factory, options), ...rest);
 	return { custom: custom as U["custom"] };
 }
 

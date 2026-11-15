@@ -54,6 +54,8 @@ export interface FakePi {
 	commands: Map<string, FakeCommand>;
 	messageRenderers: Map<string, unknown>;
 	entryRenderers: Map<string, unknown>;
+	/** Resolvers from `registerToolRenderer`, in registration order. */
+	toolRendererResolvers: Array<(toolName: string, next: () => unknown) => unknown>;
 	sentMessages: SentMessage[];
 	sentUserMessages: Array<{ content: unknown; options?: unknown }>;
 	appendedEntries: Array<{ customType: string; data?: unknown }>;
@@ -76,6 +78,7 @@ export function createFakePi(): FakePi {
 	const tools = new Map<string, FakeToolDefinition>();
 	const commands = new Map<string, FakeCommand>();
 	const messageRenderers = new Map<string, unknown>();
+	const toolRendererResolvers: FakePi["toolRendererResolvers"] = [];
 	const entryRenderers = new Map<string, unknown>();
 	const sentMessages: SentMessage[] = [];
 	const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
@@ -109,6 +112,9 @@ export function createFakePi(): FakePi {
 			messageRenderers.set(customType, renderer);
 		},
 		registerMarkdownTransformer: vi.fn(),
+		registerToolRenderer: (resolver: FakePi["toolRendererResolvers"][number]) => {
+			toolRendererResolvers.push(resolver);
+		},
 		registerEntryRenderer: (customType: string, renderer: unknown) => {
 			entryRenderers.set(customType, renderer);
 		},
@@ -154,6 +160,7 @@ export function createFakePi(): FakePi {
 		commands,
 		messageRenderers,
 		entryRenderers,
+		toolRendererResolvers,
 		sentMessages,
 		sentUserMessages,
 		appendedEntries,

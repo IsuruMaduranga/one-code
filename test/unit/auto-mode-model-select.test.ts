@@ -101,14 +101,14 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		const opus = model("anthropic", "claude-opus-5-5", 4, 200_000);
 		const sonnet = model("anthropic", "claude-sonnet-5-5", 2, 200_000);
 		const haiku = model("anthropic", "claude-haiku-4-5", 1, 200_000);
-		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "paired" }, { model: opus, source: "session" }]);
 		const fable = model("anthropic", "claude-fable-5-1", 10, 200_000);
-		// Opus 5.5 stays as a backup, in case the provider refuses Sonnet 5.5 to this account.
+		// Sonnet 5.5 stays as a backup, in case the provider refuses Opus 5.5 to this account.
 		expect(pickFull([fable, opus, sonnet, haiku], fable).candidates).toEqual([
-			{ model: sonnet, source: "paired" },
-			{ model: opus, source: "economical" },
+			{ model: opus, source: "paired" },
+			{ model: sonnet, source: "economical" },
 			{ model: fable, source: "session" },
 		]);
+		expect(pickFull([opus, sonnet, haiku], opus).candidates).toEqual([{ model: sonnet, source: "paired" }, { model: opus, source: "session" }]);
 	});
 
 	it("screens a frontier session the table does not name with the cheapest frontier model, never a lower tier", () => {

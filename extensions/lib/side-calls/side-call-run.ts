@@ -18,6 +18,7 @@
 
 import { type Api, type AssistantMessage, type Context, cleanupSessionResources, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { withoutMessageThreads } from "../request/message-threads.ts";
 import { withReasoningFallback } from "../models/model-policy.ts";
 import { SIDE_CALL_KINDS, type SideCallLogContext, logSideCallUsage } from "./side-call-usage.ts";
 
@@ -77,7 +78,7 @@ export async function runSideCall(run: SideCallRun): Promise<AssistantMessage> {
 		model,
 		async (reasoning) => {
 			const timeout = AbortSignal.timeout(run.timeoutMs);
-			const reply = await completeSimple(target, context, {
+			const reply = await completeSimple(withoutMessageThreads(target), context, {
 				apiKey: auth.apiKey,
 				headers: auth.headers,
 				env: auth.env,

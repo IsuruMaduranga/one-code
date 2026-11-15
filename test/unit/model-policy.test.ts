@@ -1,10 +1,10 @@
 import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { describe, expect, it } from "vitest";
+import { isDatedDuplicate } from "../../extensions/lib/models/model-catalog.ts";
 import {
 	BUILTIN_PROVIDER_POLICIES,
 	crossesProvider,
 	forcedReasoningLevel,
-	isDatedDuplicate,
 	isMovingAlias,
 	isReasoningMandatoryError,
 	isSelectableVariant,

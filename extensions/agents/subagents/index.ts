@@ -101,7 +101,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -111,13 +111,12 @@ import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../../lib/agents/agent-view.ts";
+import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent } from "../../lib/agents/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
 import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey, shellRows } from "./shell-panel.ts";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
-import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { extendingCompletions } from "../../lib/ui/argument-hints.ts";
 import { readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -944,7 +943,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * retargets to the next agent, Enter/esc close it and the main transcript is
 	 * back.
 	 */
-	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
+	let view: { retarget(taskId: string): void; scrollWith(move: AgentViewScroll): void; close(): void } | undefined;
+	// The prompt editor's viewport keys and wheel while a view is open (branding's PromptEditor).
+	pi.events.on(AGENT_VIEW_SCROLL_CHANNEL, (data) => {
+		const move = data as AgentViewScroll | undefined;
+		if (move && typeof move.action === "string") view?.scrollWith(move);
+	});
 	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + other strips + cwd/status(2) + one spare. */
 	const viewReserve = () => {
 		const shellLines = panel.shellLineCount();
@@ -975,28 +979,28 @@ function subagentsExtension(pi: ExtensionAPI) {
 		let closed = false;
 		let repaintFn: (() => void) | undefined;
 		let doneFn: ((result: null) => void) | undefined;
-		/** Fullscreen only: turns pi's own viewport scrolling into view scrolling. */
-		let mirror: ViewportMirror | undefined;
+		/** The view's height at its last render, for page-sized scrolls. */
+		let shownHeight = 8;
 		const entry = {
 			retarget(id: string) {
 				if (currentId === id) return;
 				currentId = id;
 				scroll = 0;
-				mirror?.park(0);
 				panel.setView(id);
 				announceView(id);
 				repaintFn?.();
 			},
-			scrollBy(delta: number) {
-				scroll = Math.max(0, Math.min(maxScroll, scroll + delta));
+			/** A page, half page, line, end or wheel move (lib/agents/agent-view.ts). */
+			scrollWith(move: AgentViewScroll) {
+				const next = scrolledView(scroll, maxScroll, shownHeight, move);
+				if (next === scroll) return;
+				scroll = next;
 				repaintFn?.();
 			},
 			close() {
 				if (closed) return;
 				closed = true;
 				if (view === entry) view = undefined;
-				mirror?.restore();
-				mirror = undefined;
 				panel.setView(undefined);
 				announceView(undefined);
 				doneFn?.(null);
@@ -1024,21 +1028,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 					);
 					repaintFn = live.repaint;
 					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
-					const viewport = asScrollableViewport(tui);
-					if (viewport && !closed) mirror = new ViewportMirror(viewport);
 					return {
 						render: (width: number) => {
-							// The page keys and the wheel scroll pi's main viewport, under
-							// this overlay; take the move as ours and park main again.
-							if (mirror) {
-								const next = mirror.absorb(scroll, maxScroll);
-								if (next !== scroll) {
-									scroll = next;
-									cache = undefined;
-								}
-							}
 							// Keyed by height too: a resize or another strip changing size moves the room.
 							const viewHeight = height();
+							shownHeight = viewHeight;
 							if (cache?.width === width && cache.height === viewHeight) return cache.lines;
 							const run = liveRuns.get(currentId);
 							let lines: string[];
@@ -1054,6 +1048,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 						},
 						invalidate: () => {
 							cache = undefined;
+						},
+						// The wheel over the view scrolls it; reported handled, so pi-tui
+						// does not scroll the main transcript under the overlay instead.
+						handleMouse: (event: { type: string; wheelDelta?: number }) => {
+							if (event.type !== "wheel" || !event.wheelDelta) return undefined;
+							entry.scrollWith({ action: "wheel", lines: event.wheelDelta });
+							return { handled: true };
 						},
 						dispose: () => live.cleanup(),
 					};
@@ -1160,14 +1161,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && !panel.shellChipFocused) {
-					// Viewing an agent with the editor focused: the page keys scroll the
-					// view, and Esc in an empty editor goes back to main.
+					// Viewing an agent with the editor focused: Esc in an empty editor
+					// goes back to main. The editor itself hands the viewport keys and
+					// the wheel to the view (AGENT_VIEW_SCROLL_CHANNEL), under the
+					// user's own bindings.
 					if (view && panel.editorFocused()) {
 						const id = keyId(data);
-						if (id === "pageUp" || id === "pageDown") {
-							view.scrollBy(id === "pageUp" ? 10 : -10);
-							return { consume: true };
-						}
 						if (id === "escape" && editorEmpty()) {
 							closeView();
 							return { consume: true };
@@ -1230,7 +1229,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					case "pageDown":
 						// Scroll an open view; with none open, swallow so the page keys
 						// never leak into the editor while the strip holds focus.
-						view?.scrollBy(decoded.key === "pageUp" ? 10 : -10);
+						view?.scrollWith({ action: decoded.key });
 						return { consume: true };
 				}
 			});
@@ -1244,12 +1243,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// A message is addressed from the agent's task id; its headline names the
 	// agent, from the live registry or the message's own details (a resumed
 	// session has no live runs).
+	const clicked = new ClickToggles();
 	for (const customType of ["subagent-message", "subagent-result"]) {
 		pi.registerMessageRenderer(customType, (message, options, theme) => {
 			const details = (message as { details?: { taskId?: unknown; name?: unknown } }).details;
 			const agentName = (from: string): string | undefined =>
 				liveRuns.get(from)?.name ?? (details?.taskId === from && typeof details.name === "string" ? details.name : undefined);
-			return notificationComponent(theme, customMessageText(message.content), options.expanded, { agentName, hint: expandHintFor(options) });
+			return clickToExpand(clicked, message, options.expanded, (expanded) =>
+				notificationComponent(theme, customMessageText(message.content), expanded, { agentName, hint: expandHintFor(options) }),
+			);
 		});
 	}
 

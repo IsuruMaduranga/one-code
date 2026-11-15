@@ -1010,6 +1010,52 @@ export function notificationUserMarkdown(text: string): string | undefined {
 		.join("\n\n");
 }
 
+/** A left click, the slice of pi-tui's mouse event a clickable row reads. */
+interface RowClick {
+	type: string;
+	button: string;
+}
+
+/**
+ * Which messages the user expanded or collapsed with a click, keyed by the
+ * message object pi hands the renderer on every rebuild (custom message
+ * renderers get no entry id). A click overrides the ctrl+o state it was made
+ * under; pressing ctrl+o again puts every row back under it, as pi's tool
+ * rows do.
+ */
+export class ClickToggles {
+	private readonly state = new WeakMap<object, { expanded: boolean; underGlobal: boolean }>();
+
+	expanded(message: object, globalExpanded: boolean): boolean {
+		const own = this.state.get(message);
+		return own && own.underGlobal === globalExpanded ? own.expanded : globalExpanded;
+	}
+
+	toggle(message: object, globalExpanded: boolean): void {
+		this.state.set(message, { expanded: !this.expanded(message, globalExpanded), underGlobal: globalExpanded });
+	}
+}
+
+/**
+ * A message row a left click expands or collapses, in fullscreen, where pi
+ * routes mouse events to the transcript's components (pi-tui 0.85.0); pi
+ * gives its own tool rows and thinking the same click (0.84.2) but not
+ * custom messages. ctrl+o stays the keyboard path, so no key is hidden.
+ */
+export function clickToExpand(toggles: ClickToggles, message: object, globalExpanded: boolean, build: (expanded: boolean) => TuiComponent): TuiComponent & { handleMouse(event: RowClick): { handled: true } | undefined } {
+	let inner = build(toggles.expanded(message, globalExpanded));
+	return {
+		render: (width) => inner.render(width),
+		invalidate: () => inner.invalidate(),
+		handleMouse(event) {
+			if (event.type !== "click" || event.button !== "left") return undefined;
+			toggles.toggle(message, globalExpanded);
+			inner = build(toggles.expanded(message, globalExpanded));
+			return { handled: true };
+		},
+	};
+}
+
 /**
  * `agentName` names the agent a message comes from (its task id is the
  * wire address): the headline reads `› Message from @<name>`, falling back to

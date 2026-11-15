@@ -45,10 +45,10 @@ Only command hooks are supported. Hook entries of type `http`, `prompt`, or
 | `SessionEnd` | When a session ends. |
 | `PreCompact` | Before context compaction. |
 | `PostCompact` | After context compaction, with the summary. |
+| `Notification` | When One Code tells you it is waiting: a prompt has waited a few seconds with no keypress, or a finished turn has sat for a minute. The matcher reads `notification_type`. Runs in the terminal interface only. |
 
-Claude Code's `Notification`, `SubagentStop`, and `PermissionRequest`
-events aren't supported. pi has no event that carries the notification
-concept, and the other two aren't implemented.
+Claude Code's `SubagentStop` and `PermissionRequest` events aren't
+supported.
 
 Hooks also run inside subagents: a `PreToolUse` hook that blocks a command
 blocks it in a subagent too.
@@ -75,6 +75,7 @@ The hook's standard input is a JSON object with these fields:
 | `compact_summary` | `PostCompact` | The summary that replaced the context. |
 | `source` | `SessionStart` | `startup`, `resume`, `clear`, or `compact`. |
 | `reason` | `SessionEnd` | `clear`, `logout`, `prompt_input_exit`, or `other`. |
+| `message`, `notification_type` | `Notification` | What you're told, and `permission_prompt` or `idle_prompt`. |
 | `agent_id`, `agent_type` | Inside a subagent | Identify the subagent making the call. |
 
 The hook's environment also carries `CLAUDE_PROJECT_DIR`, the parent project

@@ -41,6 +41,7 @@ const CLAUDE_CUTOFFS: Record<string, string> = {
 	"haiku 4.5": "February 2025",
 	"haiku 5.5": "June 2026",
 	"fable 5.1": "June 2026",
+	"fable 5.2": "June 2026",
 };
 
 /** A Claude model's name as Claude Code says it ("Opus 5.5", "Haiku 4.5"), from an id in any provider's spelling. */

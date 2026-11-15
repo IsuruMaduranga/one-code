@@ -41,6 +41,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
+import { withoutMessageThreads } from "../../lib/request/message-threads.ts";
 import {
 	convertToLlm,
 	type ExtensionAPI,
@@ -243,7 +244,7 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			const timeout = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
 			const callContext: Context = plan ? { systemPrompt: "", messages: plan.tail, tools: [] } : request;
-			const result = await completeSimple(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, callContext, {
+			const result = await completeSimple(withoutMessageThreads(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model), callContext, {
 				apiKey: auth.apiKey,
 				headers,
 				env: auth.env,

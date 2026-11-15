@@ -86,8 +86,8 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 		case "pageUp":
 			return { kind: "pageUp" };
 		case "pageDown":
-		// pi's fullscreen mode keeps PageUp/PageDown for its own scrollback, so
-		// space and b page too (findings §10).
+		// Space and b page too, for terminals and multiplexers that keep the
+		// page keys (findings §10 item 21).
 		case "space":
 			return { kind: "pageDown" };
 		case "tab":

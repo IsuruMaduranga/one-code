@@ -50,8 +50,10 @@ import {
 	thinkingLabel,
 } from "./startup.ts";
 import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
-import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
+import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
+import { paintedUserMarker, userMessageMarkdown } from "./user-marker.ts";
+import { TitleAnimation } from "./title-animation.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
 
@@ -217,20 +219,6 @@ export function bannerLines(
  * chevron (U+276F), one column wide so the two-column gutter still aligns. */
 const PROMPT_GLYPH = "❯";
 
-/**
- * `pi.registerMarkdownTransformer` typed locally: the runtime (pi ≥ 0.84) exposes
- * it, but the pinned 0.83 type declarations do not, so we cast and feature-detect
- * — the same "older pi may lack the hook" handling as the prompt marker.
- */
-interface MarkdownTransformerHost {
-	registerMarkdownTransformer?: (
-		transformer: (
-			markdown: string,
-			context: { messageType: "user" | "assistant" | "assistant-thinking"; isStreaming: boolean; availableWidth: number },
-		) => string,
-	) => void;
-}
-
 /** The slice of the UI context the prompt marker needs (older pi may lack the hook). */
 interface BrandingEditorUI {
 	setEditorComponent?: (factory: (tui: unknown, theme: unknown, keybindings: unknown) => unknown) => void;
@@ -248,6 +236,7 @@ function installPromptMarker(
 	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
 	argumentHints: ReadonlyMap<string, CommandHint>,
 	agentView: { target?: AgentViewTarget },
+	scrollAgentView: (scroll: AgentViewScroll) => void = () => {},
 ): void {
 	if (knobValue("NO_INPUT_MARKER") === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
@@ -264,6 +253,8 @@ function installPromptMarker(
 		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
 	};
 	const badge = () => agentView.target?.badge;
+	// While an agent is viewed, the viewport keys and the wheel scroll the view.
+	const scrollView = () => (agentView.target ? scrollAgentView : undefined);
 	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
 	// The editor can outlive this context across a session replacement; a stale
 	// context throws, and ↑ must still reach the editor then.
@@ -276,7 +267,7 @@ function installPromptMarker(
 	};
 	ui.setEditorComponent(
 		(tui: unknown, theme: unknown, keybindings: unknown) =>
-			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued),
+			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued, scrollView),
 	);
 }
 
@@ -343,16 +334,19 @@ function brandingExtension(pi: ExtensionAPI) {
 
 	applyThinkingDefault();
 	applyOutputPadDefault();
-	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
-	// assistant text is transformed (not thinking or user turns); the transformer
-	// runs in markdown rendering, so print/rpc output is untouched.
-	// *_NO_ASSISTANT_MARKER=1 opts out, mirroring *_NO_INPUT_MARKER.
-	const transformerHost = pi as unknown as MarkdownTransformerHost;
-	if (knobValue("NO_ASSISTANT_MARKER") !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
-		transformerHost.registerMarkdownTransformer((markdown, context) =>
-			context.messageType === "assistant" ? markAssistantMarkdown(markdown) : markdown,
-		);
-	}
+	// Mark each block of assistant prose with Claude Code's "●" bullet and each
+	// user prompt with its "❯" pointer. The transformer runs in markdown
+	// rendering, so print/rpc output, stored entries and requests are untouched.
+	// It is the only rewrite of a user message (user-marker.ts says why).
+	// *_NO_ASSISTANT_MARKER=1 drops the bullet, mirroring *_NO_INPUT_MARKER.
+	// The pointer is painted from the live theme, captured at session_start.
+	const assistantMarker = knobValue("NO_ASSISTANT_MARKER") !== "1";
+	let transcriptTheme: unknown;
+	pi.registerMarkdownTransformer((markdown, context) => {
+		if (context.messageType === "user") return userMessageMarkdown(markdown, paintedUserMarker(transcriptTheme));
+		if (context.messageType === "assistant" && assistantMarker) return markAssistantMarkdown(markdown);
+		return markdown;
+	});
 	// The label and prompt marker apply in every session; *_NO_BANNER only
 	// disables the header.
 	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
@@ -366,20 +360,53 @@ function brandingExtension(pi: ExtensionAPI) {
 	// (a second /clear inside the 0 ms window); pi's stale-ctx guard throws, and a
 	// throw inside a timer is uncaught — so the write is inert after shutdown.
 	let live = false;
-	const retitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle(title: string): void } }) => {
+	type TitleCtx = { hasUI: boolean; cwd: string; mode?: string; ui: { setTitle(title: string): void } };
+	// The ctx the title animation writes through, dropped at session_shutdown.
+	let titleCtx: TitleCtx | undefined;
+	// Claude Code's leading glyph: ✳ at rest, ⠂/⠐ while a turn runs, held on ✳
+	// while a prompt waits for the user (title-animation.ts).
+	const titleGlyph = new TitleAnimation({
+		every: (ms, tick) => {
+			const timer = setInterval(tick, ms);
+			timer.unref?.();
+			return () => clearInterval(timer);
+		},
+		write: () => {
+			try {
+				if (titleCtx) retitle(titleCtx);
+			} catch {
+				// A ctx pi has already retired: session_shutdown stops the timer next.
+			}
+		},
+	});
+	const retitle = (ctx: TitleCtx) => {
 		if (!live || !ctx.hasUI) return;
 		const name = pi.getSessionName?.()?.trim();
 		// pi writes the title inside its OSC 0 and strips only CR and LF; a BEL or
 		// ESC in the session name (any source) or the directory would end it early.
-		const title = sanitizeTitle(name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME);
+		const title = sanitizeTitle(`${titleGlyph.glyph} ${name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME}`);
 		if (title === lastTitle) return; // agent_start fires every turn; write only on change
 		lastTitle = title;
 		ctx.ui.setTitle(title);
 	};
-	pi.on("session_info_changed", (_event, ctx) => retitle(ctx));
-	pi.on("agent_start", (_event, ctx) => retitle(ctx));
+	pi.on("session_info_changed", (_event, ctx) => {
+		titleCtx = ctx;
+		retitle(ctx);
+	});
+	pi.on("agent_start", (_event, ctx) => {
+		titleCtx = ctx;
+		// The animation rewrites the title every frame: only the TUI shows it
+		// (an RPC client would get a setTitle request per frame).
+		if (ctx.mode === "tui") titleGlyph.start();
+		else retitle(ctx);
+	});
+	pi.on("agent_settled", () => titleGlyph.settle());
+	pi.on("ui_prompt_start", () => titleGlyph.promptOpened());
+	pi.on("ui_prompt_end", () => titleGlyph.promptClosed());
 	pi.on("session_shutdown", () => {
 		live = false;
+		titleGlyph.stop();
+		titleCtx = undefined;
 	});
 
 	// Commands' argument placeholders (lib/ui/argument-hints.ts), drawn by the prompt editor.
@@ -431,9 +458,12 @@ function brandingExtension(pi: ExtensionAPI) {
 		// sticks; a new session may carry a name (resume), so forget the last.
 		lastTitle = undefined;
 		live = true;
+		transcriptTheme = ctx.ui.theme;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
-		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);
+		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView, (scroll) =>
+			pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
+		);
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {

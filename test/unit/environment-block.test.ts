@@ -27,6 +27,7 @@ describe("modelLine", () => {
 		expect(modelLine({ id: "claude-haiku-4-5-20251001" })).toBe(context.modelLine({ name: "Haiku 4.5", id: "claude-haiku-4-5-20251001", cutoff: "February 2025" }));
 		expect(modelLine({ id: "claude-haiku-5-5" })).toBe(context.modelLine({ name: "Haiku 5.5", id: "claude-haiku-5-5", cutoff: "June 2026" }));
 		expect(modelLine({ id: "claude-opus-5" })).toBe(context.modelLine({ name: "Opus 5", id: "claude-opus-5", cutoff: "May 2026" }));
+		expect(modelLine({ id: "claude-fable-5-2" })).toBe(context.modelLine({ name: "Fable 5.2", id: "claude-fable-5-2", cutoff: "June 2026" }));
 	});
 
 	it("reads gateway and dotted spellings, and passes no cutoff when none is known", () => {

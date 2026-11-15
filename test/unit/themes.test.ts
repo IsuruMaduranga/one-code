@@ -20,6 +20,15 @@ const themesDir = join(import.meta.dirname, "..", "..", "profile", "themes");
 const themeFiles = readdirSync(themesDir).filter((f) => f.endsWith(".json"));
 
 describe("bundled themes", () => {
+	// The app seeds pi's settings with the brand's theme on first run: one
+	// theme, or pi's "<light>/<dark>" pair that follows the terminal (pi 0.79.7).
+	it("names shipped themes in the brand's first-run theme", () => {
+		const { theme } = JSON.parse(readFileSync(join(themesDir, "..", "brand.json"), "utf-8")) as { theme: string };
+		const names = theme.split("/");
+		expect(names.length === 1 || names.length === 2, theme).toBe(true);
+		for (const name of names) expect(themeFiles, name).toContain(`${name}.json`);
+	});
+
 	it("ships at least one theme", () => {
 		expect(themeFiles.length).toBeGreaterThan(0);
 		expect(REQUIRED).toHaveLength(51);

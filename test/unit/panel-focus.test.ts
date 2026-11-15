@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory, panelUi } from "../../extensions/lib/ui/panel-focus.ts";
+import { PAGING_PANEL, PANEL_FOCUS_CHANNEL, PanelFocus, panelFactory, panelUi } from "../../extensions/lib/ui/panel-focus.ts";
 
 /** A bus that feeds one PanelFocus, as the permissions extension listens. */
 function bus() {
@@ -114,5 +114,35 @@ describe("PanelFocus", () => {
 		focus.note({ focused: true });
 		expect(focus.busy).toBe(false);
 		await focus.whenClear();
+	});
+});
+
+describe("a panel that pages", () => {
+	const events = { emit: () => {} };
+	const run = (factory: (...args: unknown[]) => object, options?: typeof PAGING_PANEL) => panelFactory(events, factory, options)({}, {}, {}, () => {}) as { capturesViewportInput?: boolean };
+
+	it("takes the fullscreen page keys from the transcript", () => {
+		expect(run(() => ({ render: () => [] }), PAGING_PANEL).capturesViewportInput).toBe(true);
+	});
+
+	it("leaves them to the transcript otherwise", () => {
+		expect(run(() => ({ render: () => [] })).capturesViewportInput).toBeUndefined();
+	});
+
+	it("keeps a component's own answer", () => {
+		const component = {
+			render: () => [],
+			get capturesViewportInput() {
+				return false;
+			},
+		};
+		expect(run(() => component, PAGING_PANEL).capturesViewportInput).toBe(false);
+	});
+
+	it("passes through panelUi", () => {
+		let made: { capturesViewportInput?: boolean } | undefined;
+		const ui = { custom: (factory: (...args: unknown[]) => unknown) => (made = factory({}, {}, {}, () => {}) as typeof made) };
+		panelUi(events, ui, PAGING_PANEL).custom(() => ({ render: () => [] }));
+		expect(made?.capturesViewportInput).toBe(true);
 	});
 });

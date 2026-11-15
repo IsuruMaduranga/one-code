@@ -66,6 +66,7 @@ import {
 	jsonSchemaToTypeBox,
 	type McpContentBlock,
 	type McpResourceContents,
+	namespacedToolLabel,
 	namespacedToolName,
 } from "./schema.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
@@ -94,6 +95,21 @@ const piMcpConfigs = (cwd: string) => piMcpConfigPaths(getAgentDir(), cwd, CONFI
 
 function mcpExtension(pi: ExtensionAPI) {
 	const text = requireText("mcp");
+	// MCP tools register only once their server connects, so a resumed
+	// session's earlier MCP calls had no renderer until then (forever, for a
+	// server that never connects) and drew in pi's fallback: a bold name and
+	// the arguments as JSON. Give an unregistered `mcp__` name the row its
+	// connected tool would get. pi 1.0.1 added the resolver.
+	const fallbackRows = new Map<string, ReturnType<typeof toolRenderers>>();
+	pi.registerToolRenderer?.((name, next) => {
+		const registered = next();
+		if (registered) return registered;
+		const label = namespacedToolLabel(name);
+		if (!label) return undefined;
+		let rows = fallbackRows.get(name);
+		if (!rows) fallbackRows.set(name, (rows = toolRenderers(label)));
+		return rows;
+	});
 	const connections = new Map<string, Connection>();
 	let failures: FailedConnection[] = [];
 	const registered = new Map<string, { server: string; tool: string }>();

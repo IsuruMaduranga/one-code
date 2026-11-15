@@ -79,6 +79,7 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	"qwen-token-plan": hosted("host:qwen-plan"),
 	"qwen-token-plan-cn": hosted("host:qwen-plan"),
 	"qwen-token-plan-individual": hosted("host:qwen-plan"),
+	"qwen-token-plan-individual-cn": hosted("host:qwen-plan"),
 	meta: direct("meta"),
 	xiaomi: direct("xiaomi"),
 	"xiaomi-token-plan-cn": direct("xiaomi"),
@@ -414,17 +415,6 @@ export function stripSnapshotDate(id: string): string {
 /** Whether the id ends in a snapshot date of either shape (`stripSnapshotDate` would change it). */
 export function isSnapshotDatedId(id: string): boolean {
 	return stripSnapshotDate(id) !== id;
-}
-
-/**
- * Whether `model` is a dated snapshot whose undated alias is also present in
- * `pool` — the row a listing collapses so the same model is not offered twice.
- * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
- * is never read as a snapshot of `deepseek-v4-flash`.
- */
-export function isDatedDuplicate(model: { id: string }, pool: ReadonlyArray<{ id: string }>): boolean {
-	const alias = stripSnapshotDate(model.id);
-	return alias !== model.id && pool.some((other) => other.id === alias);
 }
 
 /** The canonical `provider/id` spec — one source of truth for the string form. */

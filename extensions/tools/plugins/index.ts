@@ -75,7 +75,7 @@ import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { promptCommandText } from "../../lib/plugins/skill-invoke.ts";
-import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 
 
 // The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen
@@ -164,7 +164,7 @@ function pluginsExtension(pi: ExtensionAPI) {
 		panelOpen = true;
 		let restartNotice = false;
 		try {
-			await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
+			await panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<null>((tui, theme, _keybindings, done) => {
 				const paint: PanelPaint = {
 					fg: safeThemePaint(theme),
 					bold: safeThemeBold(theme),

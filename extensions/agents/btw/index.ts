@@ -56,7 +56,7 @@ import { createMarkdownProse } from "../../lib/ui/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { type BtwExchange, exchangeMessages, historyMessages } from "./prompt.ts";
-import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 import { btwResultText } from "./text.ts";
 
 const BTW_MAX_TOKENS = 8192;
@@ -257,7 +257,7 @@ function btwExtension(pi: ExtensionAPI) {
 			};
 			let panelOpen = true;
 
-			await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
+			await panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<null>((tui, theme, _keybindings, done) => {
 				const state = initialBtwState();
 				let cache: { width: number; lines: string[] } | undefined;
 				const repaint = () => {

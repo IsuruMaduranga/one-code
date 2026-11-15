@@ -122,7 +122,8 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 		} else {
 			firstRun = true;
 			// Seeding settings also skips pi's first-time setup, which would offer
-			// pi's stock themes; One Code's own theme is the branded first-run.
+			// pi's stock themes; the brand's theme is the branded first-run. It may
+			// be pi's "<light>/<dark>" pair, which follows the terminal's background.
 			// Fullscreen (alt-screen) is the One Code look — the TUI owns the
 			// screen and exits clean. Seeded only here, so users who switch back
 			// to regular mode keep their choice.

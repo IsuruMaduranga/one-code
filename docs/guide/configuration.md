@@ -77,6 +77,7 @@ appear in `projects/<slug>/settings.json`.
 | Key | Type | Set by | Effect |
 |---|---|---|---|
 | `subagentModel` | string | `/subagent` | Default model for subagents and workflow agents: `provider/model-id`, a short alias, or `inherit`. |
+| `preferredNotifChannel` | string | By hand | How a desktop notification reaches you: `auto` (the default: iTerm2, kitty or Ghostty, picked from the terminal), `iterm2`, `iterm2_with_bell`, `kitty`, `ghostty`, `terminal_bell`, or `notifications_disabled`. See [Desktop notifications](terminal-interface.md#desktop-notifications). |
 | `suggestNewerModels` | boolean | By hand | Suggest a newer model in the same line at a similar or lower price. Defaults to `true`; `false` turns off notices and the `/doctor` suggestion. |
 | `modelTiers` | object | By hand (user settings only) | Your own tier for a model, keyed by `provider/id` or by the provider's model id alone: `frontier`, `workhorse`, `cheap` or `tiny`. See [Prompting adapts to the model](providers-and-models.md#prompting-adapts-to-the-model). |
 | `refreshModelCatalog` | boolean | By hand | `false` stops the daily refresh of the model catalogs behind the tiers; the copy on disk stays in use. Defaults to `true`. |
@@ -104,9 +105,14 @@ The main model chosen with `/model` is saved in pi's own settings file as
 
 ## Full-screen mode and themes
 
-The bundled app starts in full-screen mode with the `onecode` theme and
-quiet startup. It sets these on first run in pi's settings and never
-overrides a value you change later.
+The bundled app starts in full-screen mode with quiet startup and the
+theme pair `onecode-light/onecode`: pi picks `onecode-light` on a light
+terminal background and `onecode` on a dark one, and follows the terminal
+when it changes. The app sets these on first run in pi's settings and
+never overrides a value you change later, so an install from before the
+pair keeps its single theme until you set `"theme": "onecode-light/onecode"`
+yourself. A terminal that reports neither its background nor whether it is
+light or dark gets `onecode`.
 
 On your own pi, 1.0 and later start in full-screen mode. On an older pi,
 to use full-screen mode for one session:
@@ -126,12 +132,13 @@ leave out `tuiMode`, since full-screen is already the default:
 ```json
 {
   "tuiMode": "fullscreen",
-  "theme": "onecode",
+  "theme": "onecode-light/onecode",
   "quietStartup": true
 }
 ```
 
-Use `"theme": "onecode-light"` for the light theme. Full-screen mode uses
+Use `"theme": "onecode"` or `"theme": "onecode-light"` to keep one theme
+whatever the terminal's background. Full-screen mode uses
 the terminal's alternate screen and restores your terminal on exit.
 
 One Code also works with other pi extensions, themes, and settings; see pi's

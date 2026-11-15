@@ -57,6 +57,7 @@ export class LedgerSim {
 				},
 			},
 			appendEntry: (customType: string, data: unknown) => this.add({ type: "custom", customType, data }),
+			registerProvider: () => {},
 		};
 		ledgerExtension(pi as never);
 		let plan: RequestPlan | undefined;

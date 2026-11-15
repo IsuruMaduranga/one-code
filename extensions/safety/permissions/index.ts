@@ -18,6 +18,8 @@
  */
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
+import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL, type PromptAttention } from "../../lib/notify/desktop.ts";
+import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
 import { feature } from "../../lib/profile/feature.ts";
@@ -1267,6 +1269,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		return run;
 	};
 
+	/** Tell the desktop notifier which tool the prompt about to open asks for (lib/notify/desktop.ts). */
+	const describePrompt = (toolName: string) =>
+		pi.events.emit(PROMPT_ATTENTION_CHANNEL, { message: desktopNotificationText.permission(brand.name, ccToolName(toolName)) } satisfies PromptAttention);
+
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
 		if (!ctx.hasUI || ctx.mode === "print") {
@@ -1613,9 +1619,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 			cause: result.cause,
 			home: os.homedir(),
 		});
-		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
-			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
-		);
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) => {
+			describePrompt(event.toolName);
+			return ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout });
+		});
 		if (ctx.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
@@ -1801,9 +1808,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
 			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()), call.signal);
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
-		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
-			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
-		);
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) => {
+			describePrompt(toolName);
+			return ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout });
+		});
 		if (call.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
