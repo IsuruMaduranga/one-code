@@ -86,3 +86,46 @@ describe.skipIf(process.platform === "win32")("a remembered group when its owner
 	}, 15_000);
 });
 
+/** A worker that ends on SIGTERM, left by a shell that has finished. */
+const WORKER = `sleep 60 & printf "%s %s\\n" "$$" "$!"`;
+
+/**
+ * pi's bundle loads signal-exit v3 (through proper-lockfile) as the owner
+ * imports it: one listener per signal, which re-raises the signal once only
+ * signal-exit's own listeners are left. The owner checks it is there.
+ */
+const SIGNAL_EXIT_LOADED = `if (!process.__signal_exit_emitter__?.count || process.listenerCount("SIGINT") < 1) throw new Error("signal-exit is not listening");`;
+
+describe.skipIf(process.platform === "win32")("a remembered group when its owner survives a signal", () => {
+	it("is left running when another listener keeps the owner alive, and ended when the owner exits", async () => {
+		const run = await startOwner(WORKER, "process.exit(0);", `process.on("SIGINT", () => {});`);
+		try {
+			run.owner.kill("SIGINT");
+			await new Promise((resolveWait) => setTimeout(resolveWait, 500));
+			expect(run.owner.exitCode).toBe(null);
+			expect(alive(run.worker)).toBe(true);
+			// Still listening: a second held SIGINT changes nothing either.
+			run.owner.kill("SIGINT");
+			await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+			expect(alive(run.worker)).toBe(true);
+
+			run.owner.stdin!.write("go\n");
+			await run.exited;
+			expect(await until(() => !alive(run.worker))).toBe(true);
+		} finally {
+			run.cleanup();
+		}
+	}, 15_000);
+
+	it("is ended when a signal-exit observer re-raises the signal", async () => {
+		const run = await startOwner(WORKER, "", SIGNAL_EXIT_LOADED);
+		try {
+			run.owner.kill("SIGINT");
+			const [, signal] = await run.exited;
+			expect(signal).toBe("SIGINT");
+			expect(await until(() => !alive(run.worker))).toBe(true);
+		} finally {
+			run.cleanup();
+		}
+	}, 15_000);
+});

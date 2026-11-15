@@ -41,7 +41,7 @@
 
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { system32Path } from "../profile/paths.ts";
-import { envName } from "../profile/brand.mjs";
+import { brandedId, envName } from "../profile/brand.mjs";
 
 /** SIGTERM → SIGKILL grace for a stopped tree (bash tasks, monitors, what a language server leaves). */
 export const KILL_GRACE_MS = 2_000;
@@ -148,6 +148,31 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 	}
 }
 
+/** Marks this module's signal handlers (every module instance's) apart from other listeners. */
+const OWN_SIGNAL_HANDLER = Symbol.for(brandedId("process-tree-signal-handler"));
+
+/**
+ * signal-exit observers on the process (v3 keeps its count on
+ * `process.__signal_exit_emitter__`, v4 under a global symbol). Each one
+ * re-raises a signal once only its own listeners are left, so the process
+ * still dies of it: they do not keep it running.
+ */
+function signalExitObservers(): number {
+	const v3 = (process as { __signal_exit_emitter__?: { count?: number } }).__signal_exit_emitter__?.count ?? 0;
+	const v4 = (globalThis as Record<symbol, { count?: number } | undefined>)[Symbol.for("signal-exit emitter")]?.count ?? 0;
+	return v3 + v4;
+}
+
+/**
+ * Whether a listener other than ours and signal-exit's takes `signal`: pi's
+ * own SIGTERM/SIGHUP shutdown (which ends in `process.exit`, so the exit hook
+ * runs), or one that keeps the process running.
+ */
+function signalHandledElsewhere(signal: NodeJS.Signals): boolean {
+	const foreign = process.listeners(signal).filter((listener) => !(listener as { [OWN_SIGNAL_HANDLER]?: true })[OWN_SIGNAL_HANDLER]);
+	return foreign.length > signalExitObservers();
+}
+
 /** Groups owned by this producer, retained by process listeners across session replacement. */
 const rememberedGroups = new Set<ChildProcess>();
 let groupReaper: NodeJS.Timeout | undefined;
@@ -247,12 +272,26 @@ export function rememberProcessGroup(child: ChildProcess): void {
 	if (groupReaper) return;
 	process.on("exit", terminateRememberedGroups);
 	for (const signal of terminationSignals) {
-		const handler = () => {
-			terminateRememberedGroups();
-			// Do not swallow Node's default signal termination when there is no
-			// pi handler. With isolated producers, the last listener re-raises it.
-			if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
-		};
+		const handler = Object.assign(
+			() => {
+				// Someone else takes the signal: the process is not dying of it
+				// here. Leave the groups to the exit hook, which runs if it does
+				// exit, and listen again once this dispatch is over. Ending them
+				// now killed the language servers and background shells of a
+				// process that kept running (the exit probe's held SIGINT).
+				if (signalHandledElsewhere(signal)) {
+					setImmediate(() => {
+						if (groupSignalHandlers.get(signal) === handler) process.prependOnceListener(signal, handler);
+					});
+					return;
+				}
+				terminateRememberedGroups();
+				// Do not swallow Node's default signal termination when there is no
+				// pi handler. With isolated producers, the last listener re-raises it.
+				if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+			},
+			{ [OWN_SIGNAL_HANDLER]: true as const },
+		);
 		groupSignalHandlers.set(signal, handler);
 		// Run before signal-exit observers: after we remove ourselves they must
 		// still see the original listener count and preserve default termination.
