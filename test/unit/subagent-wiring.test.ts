@@ -179,6 +179,30 @@ describe("subagent shutdown during launch", () => {
 		expect(h.tasks.size).toBe(0);
 	});
 
+	it("forgets a /btw fork when shutdown begins as its runtime is handed over", async () => {
+		const runtime = fakeResident();
+		let h!: Awaited<ReturnType<typeof mount>>;
+		// The runtime is ready, then shutdown begins before the fork resumes.
+		const handOver = {
+			then(ready: (runtime: SubagentRuntime) => unknown) {
+				const next = ready(runtime.runner as unknown as SubagentRuntime);
+				for (const handler of h.fake.handlers.get("session_shutdown") ?? []) void handler({}, h.ctx);
+				return Promise.resolve(next);
+			},
+			catch() {
+				return handOver;
+			},
+		};
+		vi.mocked(SubagentRuntime.create).mockReturnValue(handOver as unknown as Promise<SubagentRuntime>);
+		h = await mount();
+		const sessionFile = join(dir, "session.jsonl");
+		writeFileSync(sessionFile, "");
+		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
+		expect(await btwFork.requestBtwFork(h.fake.events, { ctx: h.ctx, question: "What next", messages: [] })).toEqual({ error: "The session ended before the fork started." });
+		const listed = (await h.call("list_agents", {})) as { details: { agents: Array<{ name: string }> } };
+		expect(listed.details.agents.map((a) => a.name)).not.toContain("what-next");
+	});
+
 	it("builds no resident when shutdown begins while its worktree is created", async () => {
 		const runtime = fakeResident();
 		const build = vi.spyOn(runtime.runner, "runResident");

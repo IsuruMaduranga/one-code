@@ -1813,6 +1813,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** Forget prepared runs that will not launch, so list_agents and SendMessage never offer them. */
+	const forgetRuns = (runs: PreparedRun[]) => {
+		for (const p of runs) registry.remove(p.record.taskId);
+	};
+
 	/**
 	 * Launch one prepared run as a background resident (Claude Code parity):
 	 * it returns as soon as the child starts, the report arrives as a steered
@@ -2088,10 +2093,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// fork launched after shutdown's stop-all sweep would outlive it.
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			registry.remove(taskId);
+			forgetRuns([prepared]);
 			return { error: `Cannot fork: ${runtime}` };
 		}
-		if (shuttingDown) return { error: "The session ended before the fork started." };
+		if (shuttingDown) {
+			forgetRuns([prepared]);
+			return { error: "The session ended before the fork started." };
+		}
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
 			void stopAgent(taskId);
@@ -2379,8 +2387,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const lines: string[] = [...renamed, ...modelNotes];
 			const runtime = await runtimeOrError(ctx);
 			if (typeof runtime === "string") {
-				// Nothing launched: forget the runs so list_agents and SendMessage never offer them.
-				for (const p of prepared) registry.remove(p.record.taskId);
+				// Nothing launched.
+				forgetRuns(prepared);
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
 			let outputFile = false;
