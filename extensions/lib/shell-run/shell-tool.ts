@@ -295,7 +295,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: words().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
+						text: words().backgroundStarted({ id, ...(logPath ? { logPath } : {}) }),
 					},
 				],
 				details: { taskId: id, logPath },

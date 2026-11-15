@@ -62,7 +62,8 @@ export interface ShellResultText {
 	exitCode(p: { code: number; output: string }): string;
 	/** `label` is the tool's display name (Bash, PowerShell). */
 	noBackgroundShell(p: { label: string }): string;
-	backgroundStarted(p: { label: string; id: string; description: string; logPath?: string }): string;
+	/** A background run's launch result; `logPath` is its output file, when it has one. */
+	backgroundStarted(p: { id: string; logPath?: string }): string;
 	/** How a run ended, as the one-shot result and the task notification put it ("completed", "failed (exit code 2)"). */
 	finish(end: ShellEnd): string;
 	/** Why a run failed when an exit code does not say (a timeout, a signal), for the task notification; undefined otherwise. */
@@ -158,8 +159,7 @@ function finish(end: ShellEnd): string {
 }
 
 const STARTED_PASSAGES: ToolPassages = {
-	task_output: [" If your next step cannot proceed without the result, task_output with block=true waits for it."],
-	task_stop: [" Stop with task_stop."],
+	read: [" To check interim output, use read on that file path."],
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
@@ -168,9 +168,12 @@ export const shellResultWords = (live: LiveTools): ShellResultText => ({
 	// Claude Code's failure text: `Exit code N`, then the output on its own lines.
 	exitCode: ({ code, output }) => (output === "" ? `Exit code ${code}` : `Exit code ${code}\n${output}`).trimEnd(),
 	noBackgroundShell: ({ label }) => `No ${label} executable is available for a background run.`,
-	backgroundStarted: ({ label, id, description, logPath }) =>
+	// The reference's launch result, word for word with One Code's tool name:
+	// it says the notification comes and where interim output is, and offers
+	// no wait (task_output still reads the output on demand).
+	backgroundStarted: ({ id, logPath }) =>
 		withoutOff(
-			`⏳ ${label} task ${id} running in background (${description}).\n\nCompletion will arrive as a task notification on its own naming the output file — you do not need to wait for it or poll; keep working.${logPath ? ` To check interim output, read ${logPath}.` : ""} If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.`,
+			`Command running in background with ID: ${id}.${logPath ? ` Output is being written to: ${logPath}.` : ""} You will be notified when it completes.${logPath ? " To check interim output, use read on that file path." : ""}`,
 			live,
 			STARTED_PASSAGES,
 		),

@@ -44,7 +44,7 @@ function texts(live: LiveTools): NamedText[] {
 		{ kind: "consolePrompt", command: "Read-Host" },
 	];
 	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
-	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
+	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ id: "b1", logPath: "/l" }));
 	const runs = [{ name: "a", taskId: "t1" }];
 	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
 	push("Agent inline report", "subagents", subagents.inlineReport({ name: "a", taskId: "t1", note: "n" }));

@@ -24,9 +24,10 @@ describe("the shell text", () => {
 	});
 
 	it("says a background run's completion arrives on its own", () => {
-		expect(shellResultText().backgroundStarted({ label: "Bash", id: "b1234567", description: "build", logPath: "/l/out.log" })).toBe(
-			"⏳ Bash task b1234567 running in background (build).\n\nCompletion will arrive as a task notification on its own naming the output file — you do not need to wait for it or poll; keep working. To check interim output, read /l/out.log. If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.",
+		expect(shellResultText().backgroundStarted({ id: "b1234567", logPath: "/l/out.log" })).toBe(
+			"Command running in background with ID: b1234567. Output is being written to: /l/out.log. You will be notified when it completes. To check interim output, use read on that file path.",
 		);
+		expect(shellResultText().backgroundStarted({ id: "b1234567" })).toBe("Command running in background with ID: b1234567. You will be notified when it completes.");
 	});
 
 	it("words how a run ended", () => {

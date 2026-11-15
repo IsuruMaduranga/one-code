@@ -35,7 +35,7 @@ describe("a child session's tools", () => {
 			...(["core", "desktop", "unknown"] as const).map((edition) => shell.powershellDescription({ edition })),
 			shellResultText(childLive()).blocked({ kind: "sleep", shown: "sleep 30", sleepName: "sleep", untilExample: "until test -f x; do sleep 2; done" }),
 			shellResultText(childLive()).blocked({ kind: "consolePrompt", command: "Read-Host" }),
-			shellResultText(childLive()).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }),
+			shellResultText(childLive()).backgroundStarted({ id: "b1", logPath: "/l" }),
 		];
 		for (const text of texts) for (const tool of ABSENT) expect(mentions(text, tool, { monitor: [/monitor for regressions/] }), tool).toEqual([]);
 	});
