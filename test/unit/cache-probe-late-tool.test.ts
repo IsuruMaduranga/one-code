@@ -3,10 +3,11 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
+import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
 import { LATE_TOOL_HINT, LATE_TOOL_NAME } from "../e2e/late-tool-fixture.ts";
 
-const ADDENDUM_HEAD =
-	'Additional deferred tools became available via tool_search since this conversation started (they registered after the first request). Same rules: load with tool_search "select:<name>" before calling.';
+const ADDENDUM_HEAD = toolSearchResultText.addendumHead;
 const asJsonl = (rows: unknown[]) => `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
 const usage = (cacheRead: number, cacheWrite: number) => ({ input: 10, output: 5, cacheRead, cacheWrite });
 const reply = (u: object) => ({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: u, content: [{ type: "toolCall", name: LATE_TOOL_NAME }] } });
@@ -22,7 +23,7 @@ type Placement = "message" | "text-block" | "tool-result-string" | "tool-result-
 const addendumMessage = (addendum: string, placement: Placement) => {
 	if (placement === "message") return { role: "user", content: addendum };
 	if (placement === "text-block") return { role: "user", content: [{ type: "text", text: addendum }] };
-	const output = `before-late\n\n<system-reminder>\n<total_tokens>1000 tokens left</total_tokens>\n</system-reminder>\n<system-reminder>\n${addendum}\n</system-reminder>`;
+	const output = `before-late\n\n${wrapReminder("<total_tokens>1000 tokens left</total_tokens>")}\n${wrapReminder(addendum)}`;
 	const content = placement === "tool-result-string" ? output : [{ type: "text", text: output }];
 	return { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content, is_error: false, cache_control: { type: "ephemeral" } }] };
 };
