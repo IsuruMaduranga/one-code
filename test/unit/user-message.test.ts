@@ -44,6 +44,7 @@ describe("markUserMarkdown", () => {
 
 	it.each([
 		["a fence indented two spaces", "  ```js\nconst a = 1;\n  ```\nwhy?", ["code", "paragraph"]],
+		["a tilde fence indented two spaces", "  ~~~ts\nconst x = 1;\n  ~~~\nafter", ["code", "paragraph"]],
 		["a list indented one space", " - a\n - b", ["list"]],
 		["a heading indented three spaces", "   # Title", ["heading"]],
 		["indented code (four spaces)", "    def foo():\n        return 1", ["code"]],
