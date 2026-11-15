@@ -2,11 +2,12 @@
  * A server behind a launcher script, that ignores `exit` and a closed stdin
  * (as a JVM server started by a shell script does): the client must end the
  * real process, not only the script, when `stop()` falls back to a kill,
- * when the script exits and leaves the server running, and when this
+ * when the script exits (on stop or mid-session) and leaves the server
+ * running, and when this
  * process exits without stopping it (a crash, where pi calls `process.exit`
  * without a `session_shutdown`).
  */
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -56,6 +57,19 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 
 		await client.stop();
 		expect(await until(() => !alive(pid))).toBe(true);
+	});
+
+	it("is ended when its launcher dies mid-session", async () => {
+		const { config, env } = launcher(pidFile);
+		const client = new LspClient(config, dir, { env });
+		await client.start();
+		const pid = await readServerPid();
+		const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+
+		process.kill(launcherPid, "SIGKILL");
+		expect(await until(() => !alive(pid))).toBe(true);
+		expect(client.isRunning).toBe(false);
+		await client.stop();
 	});
 
 	it("is ended when its owner crashes without stopping it", async () => {

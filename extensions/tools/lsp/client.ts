@@ -177,6 +177,9 @@ export class LspClient {
 		});
 		child.on("exit", (code, signal) => {
 			this.ready = false;
+			// A launcher can exit, on stop or by itself, and leave the server it
+			// started running: end the rest of its group.
+			if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
 			if (!this.failure && code !== 0) {
 				const detail = stderr.trim().split("\n").slice(-3).join(" ");
 				this.failure = { kind: "exited", command: this.config.command, ...(signal ? { signal } : { code }), ...(detail ? { detail } : {}) };
@@ -428,6 +431,9 @@ export class LspClient {
 			// Server may already be gone.
 		}
 		this.child = undefined;
+		// Already gone (a crash the session is respawning after): its exit
+		// handler has ended the group, and no exit event is left to wait for.
+		if (child.exitCode !== null || child.signalCode !== null) return;
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {
 				// The tree, not the leader: a launcher script's real server is a
@@ -440,8 +446,6 @@ export class LspClient {
 			timer.unref?.();
 			child.once("exit", () => {
 				clearTimeout(timer);
-				// A launcher can exit and leave the server it started running.
-				if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
 				resolve();
 			});
 		});
