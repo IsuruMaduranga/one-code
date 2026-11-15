@@ -7,6 +7,19 @@
  * `clean`, else an error with a code and a source, and a warning.
  */
 
+/**
+ * `EXIT_PROBE_STUBBORN=1` (test/e2e/exit-probe.mjs sets it in its launcher
+ * scripts): ignore the `exit` notification, a closed stdin, SIGINT and SIGHUP,
+ * as a JVM server behind a launcher script can. SIGTERM still ends it.
+ */
+const stubborn = Boolean(process.env.EXIT_PROBE_STUBBORN);
+if (stubborn) {
+	setInterval(() => {}, 60_000);
+	for (const signal of ["SIGINT", "SIGHUP"]) process.on(signal, () => {});
+	process.stdin.on("error", () => {});
+	process.stdout.on("error", () => {});
+}
+
 const diagnosticsFor = (text) =>
 	text.includes("clean")
 		? []
@@ -30,7 +43,7 @@ function handle(message) {
 		case "shutdown":
 			return send({ id, result: null });
 		case "exit":
-			return process.exit(0);
+			return stubborn ? undefined : process.exit(0);
 		case "textDocument/didOpen":
 			return publish(params.textDocument.uri, params.textDocument.text);
 		case "textDocument/didChange":
