@@ -2381,16 +2381,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
 			let outputFile = false;
+			let running = 0;
 			for (const p of prepared) {
-				const { line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
+				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
+				if (launched) running++;
 				if (logPath) outputFile = true;
 			}
 			return {
 				content: [
 					{
 						type: "text",
-						text: subagentResultText().launched({ lines, outputFile }),
+						text: subagentResultText().launched({ lines, running, outputFile }),
 					},
 				],
 				details: { agentRuns: records, background: true },

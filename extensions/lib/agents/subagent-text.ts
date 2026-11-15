@@ -132,8 +132,12 @@ export interface SubagentsResultText {
 	stats(p: { toolCalls: number; tokens?: string; cost?: number }): string;
 	/** A one-shot session's inline report; `note` is the shared one-shot note. */
 	inlineReport(p: { name: string; taskId: string; note: string }): string;
-	/** A background launch's result; `outputFile`: some launched agent writes an output file (its line names it). */
-	launched(p: { lines: string[]; outputFile: boolean }): string;
+	/**
+	 * A background launch's result. `lines` holds the notes and every launch
+	 * line, failed ones included; `running`: how many agents launched and run;
+	 * `outputFile`: some launched agent writes an output file (its line names it).
+	 */
+	launched(p: { lines: string[]; running: number; outputFile: boolean }): string;
 	launchLine(line: LaunchLine): string;
 	/** SendMessage results. */
 	steered(p: { name: string }): string;
@@ -317,8 +321,10 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			results(`${name} (task ${taskId}): ${note} Its report follows here; there is no background task to poll, and task_output does not know this id.`),
 		// The agent's own launch result in the reference wording, plus what only
 		// One Code has (several runs per call, task_stop, steering by SendMessage).
-		launched: ({ lines, outputFile }) => {
-			const many = lines.length > 1;
+		launched: ({ lines, running, outputFile }) => {
+			// Counted from the agents, never the lines: a note or a failed launch
+			// is a line too, and one running agent is still "it".
+			const many = running > 1;
 			// One Code's own read tool, and only for a file a launch line names.
 			const noRead = outputFile ? `Do NOT read or tail the output file while ${many ? "they run" : "it runs"}. ` : "";
 			return results(

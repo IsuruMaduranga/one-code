@@ -841,6 +841,20 @@ describe("the launch result's output-file sentence", () => {
 	});
 });
 
+// A rename note is a line of the launch result but not an agent: one running
+// agent is still "it".
+describe("the launch result's count of agents", () => {
+	it("speaks of one agent when a rename note comes with it", async () => {
+		fakeResident();
+		const h = await mount();
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" });
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate again", name: "worker" })) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain('the name "worker" is already used');
+		expect(result.content[0].text).toContain("The agent is working in the background. You will be notified automatically when it completes.");
+		expect(result.content[0].text).not.toContain("The agents are");
+	});
+});
+
 // design.md section 14: a /tree switch used to add the selected branch's runs
 // to the abandoned branch's, which stayed addressable by SendMessage and list_agents.
 describe("subagent runs follow a /tree switch", () => {
