@@ -6,17 +6,21 @@
  * Two moments, as in Claude Code:
  *
  * - **A prompt waits** (`permission_prompt`): a prompt opened during a turn
- *   (a permission question, the plan approval, a question to the user). The
- *   prompt counts as an interaction when it opens; every 6 s the notifier
- *   checks for a keypress in the last 6 s and notifies once when there was
- *   none. A panel the user opened while idle is theirs and never notifies.
+ *   (a permission question, the plan approval, a question to the user), or a
+ *   described prompt opened at any time (a background subagent's permission
+ *   question can arrive while the main session is idle). The prompt counts as
+ *   an interaction when it opens; every 6 s the notifier checks for a keypress
+ *   in the last 6 s and notifies once when there was none. A panel the user
+ *   opened while idle is theirs and never notifies.
  * - **The turn ended and the user is away** (`idle_prompt`): 60 s after a run
  *   settles, if the user submitted something this session, has not touched a
  *   key since the run ended, and no prompt is open.
  *
  * The extension that owns a prompt can say what it waits for on
  * `PROMPT_ATTENTION_CHANNEL` just before it opens (the permissions gate names
- * the tool); a prompt nobody described reads "needs your attention".
+ * the tool); a prompt nobody described reads "needs your attention". Only the
+ * harness describes its prompts (the permissions gate, the plan approval), so
+ * a described prompt waits for the user whether or not a turn is running.
  *
  * Every notification is announced on `DESKTOP_NOTIFICATION_CHANNEL` (the hooks
  * extension runs the `Notification` hooks from it) and then written to the
@@ -120,9 +124,11 @@ export class AttentionNotifier {
 	/** An outermost prompt opened (`ui_prompt_start`). */
 	promptOpened(): void {
 		this.prompts++;
+		const described = this.attention !== undefined;
 		const message = this.attention ?? desktopNotificationText.attention(this.product);
 		this.attention = undefined;
-		if (this.stopped || !this.working || this.prompts > 1) return;
+		// While idle, only a described prompt counts: an undescribed one is a panel the user opened.
+		if (this.stopped || (!this.working && !described) || this.prompts > 1) return;
 		this.interacted();
 		this.cancelPrompt = this.io.every(INTERACTION_THRESHOLD_MS, () => {
 			if (this.io.now() - this.lastInteraction < INTERACTION_THRESHOLD_MS) return;
