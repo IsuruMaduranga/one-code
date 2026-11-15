@@ -21,8 +21,10 @@
  *      `systemChars` plus `historyChars`, its system prompt and transcript up
  *      to the pending action), estimated as that share of its tokens, less one
  *      cache block; a miss is a FAIL. A request whose hook left the payload
- *      alone (`cacheEdited` false) is checked as an implicit cache. Its implicit breakpoint also writes the action and stage text,
- *      which no later request repeats, so read + write overshoots there.
+ *      alone (`cacheEdited` false), and the request after it, are checked as
+ *      an implicit cache, with a WARN. A skipped request's implicit
+ *      breakpoint also writes the action and stage text, which no later
+ *      request repeats, so read + write overshoots there.
  *      Implicit caches (Codex, OpenRouter): at least the share of request N's
  *      prompt that request N+1 repeats, less one cache block; a miss there is a
  *      WARN, since OpenRouter can route consecutive calls to different upstream
@@ -111,9 +113,11 @@ for (let i = 0; i < calls.length; i++) {
 			const at = firstDiff(prevTranscript, cur.user);
 			failures.push(`transcript of call ${i + 1} does not extend call ${i}'s (first difference at char ${at}: …${JSON.stringify(prevTranscript.slice(at, at + 60))})`);
 		}
-		// A request the hook left alone carries no history breakpoints to read back to.
-		const marked = historyMarks && prev.historyMarks;
+		// A request the hook left alone carries no history breakpoints: the one
+		// after it has none to read back to, and it cannot read the marked ones.
+		const marked = historyMarks && prev.historyMarks && !cur.skipped;
 		if (historyMarks && prev.skipped) warnings.push(`classifier call ${i} had the cache hook but its payload was left alone (a blank part or an unexpected shape); call ${i + 1} is checked as an implicit cache`);
+		if (historyMarks && cur.skipped) warnings.push(`classifier call ${i + 1} had the cache hook but it left this request unmarked (a blank part or an unexpected shape); it is checked as an implicit cache`);
 		need = explicit
 			? prev.read + prev.write - slack
 			: Math.floor((prev.total * (marked ? prev.history : firstDiff(prev.text, cur.text))) / prev.text.length) - IMPLICIT_BLOCK - slack;
