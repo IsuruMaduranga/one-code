@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
+import * as taskRegistry from "../../extensions/lib/agents/task-registry.ts";
+import * as btwFork from "../../extensions/lib/side-calls/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { DEFAULT_COALESCE_MS, handBackFlagBlock, handBackWarning, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
@@ -238,6 +240,23 @@ describe("the main-session call that started a run's turn", () => {
 		expect(runtime.options().mainToolCallId?.()).toBe("send-call");
 		runtime.finish([{ toolName: "bash", input: { command: "ls" } }]);
 		expect(reviews.at(-1)?.startedBy).toBe("send-call");
+	});
+
+	it("forgets the starting call of a run that did not launch", async () => {
+		// The same id twice, so a later run without a starting call would read a stale one.
+		vi.spyOn(taskRegistry, "generateTaskId").mockReturnValue("a-reused");
+		vi.spyOn(btwFork, "btwForkTaskId").mockReturnValue("a-reused");
+		const runtime = fakeResident();
+		vi.spyOn(worktrees, "isGitRepo").mockResolvedValue(true);
+		vi.spyOn(worktrees, "createWorktree").mockRejectedValue(new Error("no space"));
+		const h = await mount();
+		const sessionFile = join(dir, "session.jsonl");
+		writeFileSync(sessionFile, "");
+		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
+		const failed = (await h.fake.tools.get("Agent")!.execute("agent-call", { subagent_type: "general-purpose", task: "Count", isolation: "worktree" }, undefined, undefined, h.ctx)) as { isError?: boolean };
+		expect(failed.isError).toBe(true);
+		expect(await btwFork.requestBtwFork(h.fake.events, { ctx: h.ctx, question: "What next", messages: [] })).toMatchObject({ taskId: "a-reused" });
+		expect(runtime.options().mainToolCallId?.()).toBeUndefined();
 	});
 
 	it("judges a nested spawn against its top-level run's starting call", async () => {

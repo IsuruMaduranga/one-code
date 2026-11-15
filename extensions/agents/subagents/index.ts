@@ -1829,9 +1829,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
 		// A run that did not launch is forgotten here, on every failure path, so
-		// neither list_agents nor SendMessage ever offers it.
+		// neither list_agents nor SendMessage ever offers it, and no call stays
+		// mapped to it.
 		const failed = (line: string) => {
 			registry.remove(p.record.taskId);
+			mainCallFor.delete(p.record.taskId);
 			return { launched: false, line };
 		};
 		const ended = () => failed(launchLine({ kind: "sessionEnded", name: p.record.name }));
