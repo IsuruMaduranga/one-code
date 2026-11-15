@@ -50,6 +50,18 @@ describe("DeferredRegistry", () => {
 		r.add({ name: "a" });
 		expect(r.hintFor("a")).toBeUndefined();
 	});
+
+	it("lists its tools as deferral requests, in order, with a hint only where one was given", () => {
+		const r = new DeferredRegistry();
+		r.add({ name: "a", keywords: ["x"], hint: "first" });
+		r.add({ name: "b" });
+		r.add({ name: "a", keywords: ["y"] });
+		expect(r.requests()).toEqual([
+			{ name: "a", keywords: ["x", "y"], hint: "first" },
+			{ name: "b", keywords: [] },
+		]);
+		expect(r.requests()[1]).not.toHaveProperty("hint");
+	});
 });
 
 describe("searchTools", () => {

@@ -345,11 +345,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	});
 
 	pi.events.on(DEFERRED_QUERY_CHANNEL, (data) => {
-		const query = data as DeferredQuery;
-		for (const name of deferredRegistry.names) {
-			const hint = deferredRegistry.hintFor(name);
-			query.tools.push({ name, keywords: deferredRegistry.keywordsFor(name), ...(hint ? { hint } : {}) });
-		}
+		(data as DeferredQuery).tools.push(...deferredRegistry.requests());
 	});
 
 	pi.events.on(DEFER_CHANNEL, (data) => {

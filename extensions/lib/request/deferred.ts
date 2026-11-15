@@ -85,15 +85,15 @@ export interface SearchableTool {
 }
 
 export class DeferredRegistry {
-	private entries = new Map<string, string[]>();
-	/** The hint each tool's owner gave (`DeferRequest.hint`); a later one replaces it. */
-	private hints = new Map<string, string>();
+	/** Per tool: its keywords, and the hint its owner gave (`DeferRequest.hint`; a later one replaces it). */
+	private entries = new Map<string, { keywords: string[]; hint?: string }>();
 
 	add(request: DeferRequest): void {
 		if (!request?.name) return;
-		const existing = this.entries.get(request.name) ?? [];
-		this.entries.set(request.name, [...new Set([...existing, ...(request.keywords ?? [])])]);
-		if (request.hint) this.hints.set(request.name, request.hint);
+		const existing = this.entries.get(request.name);
+		const keywords = [...new Set([...(existing?.keywords ?? []), ...(request.keywords ?? [])])];
+		const hint = request.hint || existing?.hint;
+		this.entries.set(request.name, hint ? { keywords, hint } : { keywords });
 	}
 
 	get names(): string[] {
@@ -101,12 +101,17 @@ export class DeferredRegistry {
 	}
 
 	keywordsFor(name: string): string[] {
-		return this.entries.get(name) ?? [];
+		return this.entries.get(name)?.keywords ?? [];
 	}
 
 	/** The owner's listing hint for a tool, if it gave one. */
 	hintFor(name: string): string | undefined {
-		return this.hints.get(name);
+		return this.entries.get(name)?.hint;
+	}
+
+	/** Every deferred tool as the request that defers it, in registration order. */
+	requests(): DeferRequest[] {
+		return [...this.entries].map(([name, { keywords, hint }]) => ({ name, keywords, ...(hint ? { hint } : {}) }));
 	}
 
 	has(name: string): boolean {
@@ -114,7 +119,6 @@ export class DeferredRegistry {
 	}
 
 	remove(name: string): boolean {
-		this.hints.delete(name);
 		return this.entries.delete(name);
 	}
 }
