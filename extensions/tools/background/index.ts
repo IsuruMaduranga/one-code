@@ -63,6 +63,7 @@ import {
 } from "../../lib/agents/cron.ts";
 import {
 	createTaskNotifier,
+	handBackFlagBlock,
 	TASK_COMPLETION_KEY,
 	monitorEndedSummary,
 	monitorEventSummary,
@@ -748,8 +749,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 			// (lib/notify/notifications.ts TASK_OUTPUT_DELIVERED_CHANNEL).
 			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
 			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
+			// A flagged agent turn: auto mode's warning comes with the report, as
+			// on the hand-back and the foreground Agent result.
+			const flag = task.reviewWarning ? [{ type: "text" as const, text: handBackFlagBlock(task.reviewWarning) }] : [];
 			return {
-				content: [{ type: "text", text: `${header}\n\n${body}` }],
+				content: [...flag, { type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },
 			};
 		},

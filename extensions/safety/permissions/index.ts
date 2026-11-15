@@ -30,7 +30,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { hasReviewableWork, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
 import { guideDocsDirs } from "../../lib/agents/guide-docs.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
-import { handBackWarning, type HandBackVerdict } from "../../lib/notify/notifications.ts";
+import { handBackFlagBlock, handBackWarning, type HandBackVerdict } from "../../lib/notify/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../../lib/models/model-unusable.ts";
 
 import { classifierCacheKey, classifierChain, classify, createClassifierState, releaseClassifierResources } from "./auto-mode/classifier.ts";
@@ -2243,7 +2243,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 * surfaces a warning rather than blocking it: the work has already happened, so
 	 * the useful move is to make sure the model and the user see it.
 	 */
-	const reviewFlagged = (verdict: HandBackVerdict) => `<system-reminder>\n${handBackWarning(verdict)}\n</system-reminder>`;
+	const reviewFlagged = (verdict: HandBackVerdict) => handBackFlagBlock(handBackWarning(verdict));
 
 	// Review a finished run: its actions and its report. Returns the verdict to
 	// surface, or undefined when the run is fine. Shared by the foreground

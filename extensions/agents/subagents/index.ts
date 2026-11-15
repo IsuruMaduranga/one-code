@@ -1257,9 +1257,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 		});
 	}
 
-	// A hand-back not yet sent when task_output returns a finished agent's
-	// report is withdrawn, and one already sent makes task_output point at it,
-	// so the report reaches the model once (lib/notify/notifications.ts).
+	// task_output on a finished agent returns its report, and the hand-back is
+	// withdrawn where pi does not hold it yet; one pi already queued lands as
+	// well (lib/notify/notifications.ts TASK_OUTPUT_DELIVERED_CHANNEL).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
 	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {
@@ -1352,7 +1352,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
 		const record = registry.resolve(opts.from);
-		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined, [TASK_COMPLETION_KEY]: true };
+		// task_output may withdraw only a hand-back its own result repeats: not
+		// one carrying auto mode's flag, and not a later turn's update, since
+		// task_output returns the first turn's report for that task id.
+		const withdrawable = warning === undefined && opts.details?.update !== true;
+		const details = {
+			...opts.details,
+			taskId: opts.taskId,
+			name: opts.name,
+			failed: status === "failed",
+			reviewed: opts.review !== undefined,
+			...(withdrawable ? { [TASK_COMPLETION_KEY]: true } : {}),
+		};
 		const envelope = (result: string) =>
 			taskNotification({
 				kind: "agent",
@@ -1866,6 +1877,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
+			task.reviewWarning = review ? handBackWarning(review) : undefined;
 			firstTurnOutput = outcome.output;
 			finish();
 			notifyHandBack({
@@ -2490,6 +2502,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			resident.turnHandlers.push((outcome, review, stopped) => {
 				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
+				task.reviewWarning = review ? handBackWarning(review) : undefined;
 				replyOutput = outcome.output;
 				finish();
 				// `<task-id>` is this message's task (what task_output resolves); `from=`
@@ -2672,6 +2685,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			settledOutput = `${relocationNote}${outcome.output}`;
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
+			task.reviewWarning = review ? handBackWarning(review) : undefined;
 			finish();
 			notifyHandBack({
 				from: record.taskId,

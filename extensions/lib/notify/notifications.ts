@@ -145,6 +145,16 @@ export function handBackWarning(verdict: HandBackVerdict): string {
 	return notificationWords().handBackWarning({ kind: verdict.kind, reason, clipped });
 }
 
+/**
+ * A flagged hand-back's warning as a tool result carries it: a text block of
+ * its own, framed as a system reminder, ahead of the result. The foreground
+ * Agent result and `task_output`'s result for a flagged agent task both use
+ * it, so the flag reads the same whichever route brings the report.
+ */
+export function handBackFlagBlock(warning: string): string {
+	return wrapReminder(warning);
+}
+
 export interface TaskUsage {
 	subagentTokens: number;
 	toolUses: number;
@@ -432,7 +442,11 @@ export const NOTIFICATION_BATCH_KEY = "notifications";
  * (its report or final output), as opposed to a progress message or a
  * monitor's event batch under the same `taskId`. Only such a notification is
  * withdrawn when `task_output` returns the task's output
- * (`TASK_OUTPUT_DELIVERED_CHANNEL`).
+ * (`TASK_OUTPUT_DELIVERED_CHANNEL`), so a producer sets it only where that
+ * result holds everything the notification says. An agent's hand-back that
+ * carries auto mode's review flag never has it (the flag must reach the model
+ * by every route), nor does a later turn's update under the agent's first
+ * task id (task_output returns the first turn's report).
  */
 export const TASK_COMPLETION_KEY = "completesTask";
 
