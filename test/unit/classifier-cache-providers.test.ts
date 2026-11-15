@@ -131,3 +131,72 @@ describe("standalone side-call breakpoints on OpenRouter's Anthropic format", ()
 		expect(markers(payload)).toBeLessThanOrEqual(4);
 	});
 });
+
+// Shape only: checked against pi-ai's own Bedrock adapter offline; not sent to Bedrock.
+describe("standalone side-call breakpoints on Bedrock Claude", () => {
+	const bedrockAssistant = (content: unknown[], timestamp: number, stopReason = "stop") => ({
+		role: "assistant" as const, content, api: "bedrock-converse-stream", provider: "amazon-bedrock", model: bedrockClaude.id, usage: {}, stopReason, timestamp,
+	});
+	const point = { cachePoint: { type: "default", ttl: "1h" } };
+
+	it("moves the question's cache point after the reply before it, keeping the system point", async () => {
+		const payload = await payloadOf(bedrockClaude, "Side-call system", [
+			user("Initial user", 1),
+			bedrockAssistant([{ type: "text", text: "Assistant answer" }], 2),
+			user("Side question", 3),
+		], cacheSideCallConversation);
+		expect(payload.system).toEqual([{ text: "Side-call system" }, point]);
+		expect(payload.messages).toEqual([
+			{ role: "user", content: [{ text: "Initial user" }] },
+			{ role: "assistant", content: [{ text: "Assistant answer" }, point] },
+			{ role: "user", content: [{ text: "Side question" }] },
+		]);
+	});
+
+	it("puts the point after a tool result, not after a tool call", async () => {
+		const payload = await payloadOf(bedrockClaude, "", [
+			user("Initial user", 1),
+			bedrockAssistant([{ type: "text", text: "Reading it." }, { type: "toolCall", id: "tool-1", name: "read", arguments: {} }], 2, "toolUse"),
+			{ role: "toolResult", toolCallId: "tool-1", toolName: "read", content: [{ type: "text", text: "File bytes" }], isError: false, timestamp: 3 },
+			bedrockAssistant([{ type: "toolCall", id: "tool-2", name: "read", arguments: {} }], 4, "toolUse"),
+			{ role: "toolResult", toolCallId: "tool-2", toolName: "read", content: [{ type: "text", text: "More bytes" }], isError: false, timestamp: 5 },
+			user("Side question", 6),
+		], cacheSideCallConversation);
+		const messages = payload.messages as Wire[];
+		const question = messages.at(-1)!;
+		expect(question.content).toEqual([{ text: "Side question" }]);
+		// The last tool result before the question closes the cached conversation.
+		const results = messages.filter((message) => message.content.some((block: Wire) => "toolResult" in block));
+		expect(results.at(-1)!.content.at(-1)).toEqual(point);
+		expect(results.at(-1)!.content.at(-2).toolResult.toolUseId).toBe("tool-2");
+		expect(markers(payload)).toBe(1);
+	});
+
+	it("leaves a payload with no cache point (a model Bedrock does not cache) as pi-ai built it", () => {
+		const payload = { messages: [{ role: "assistant", content: [{ text: "Answer" }] }, { role: "user", content: [{ text: "Side question" }] }] };
+		const before = structuredClone(payload);
+		cacheSideCallConversation(payload);
+		expect(payload).toEqual(before);
+	});
+
+	it("keeps at most four cache points, dropping the earliest", () => {
+		const payload = {
+			system: [{ text: "System" }, { cachePoint: { type: "default" } }],
+			toolConfig: { tools: [{ toolSpec: { name: "a" } }, { cachePoint: { type: "default" } }] },
+			messages: [
+				{ role: "user", content: [{ text: "One" }, { cachePoint: { type: "default" } }] },
+				{ role: "assistant", content: [{ text: "Two" }, { cachePoint: { type: "default" } }] },
+				{ role: "user", content: [{ text: "Three" }] },
+				{ role: "assistant", content: [{ text: "Four" }] },
+				{ role: "user", content: [{ text: "Side question" }, { cachePoint: { type: "default" } }] },
+			],
+		};
+		cacheSideCallConversation(payload);
+		expect(markers(payload)).toBe(4);
+		// The tool list's point, earliest in wire order, went; the question's moved onto "Four".
+		expect(payload.toolConfig.tools).toEqual([{ toolSpec: { name: "a" } }]);
+		expect(payload.system).toEqual([{ text: "System" }, { cachePoint: { type: "default" } }]);
+		expect(payload.messages.at(-2)).toEqual({ role: "assistant", content: [{ text: "Four" }, { cachePoint: { type: "default" } }] });
+		expect(payload.messages.at(-1)).toEqual({ role: "user", content: [{ text: "Side question" }] });
+	});
+});
