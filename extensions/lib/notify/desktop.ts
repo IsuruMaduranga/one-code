@@ -50,6 +50,11 @@ export interface PromptAttention {
 	message: string;
 }
 
+/** Say what the next prompt waits for, on `PROMPT_ATTENTION_CHANNEL`, just before opening it. */
+export function announcePrompt(events: { emit(channel: string, data: unknown): void }, message: string): void {
+	events.emit(PROMPT_ATTENTION_CHANNEL, { message } satisfies PromptAttention);
+}
+
 /** The words, from the product's name. */
 export const desktopNotificationText = {
 	permission: (product: string, tool: string) => `${product} needs your permission to use ${tool}`,

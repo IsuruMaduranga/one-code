@@ -18,7 +18,7 @@
  */
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL, type PromptAttention } from "../../lib/notify/desktop.ts";
+import { announcePrompt, desktopNotificationText } from "../../lib/notify/desktop.ts";
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
@@ -1270,10 +1270,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		return run;
 	};
 
-	/** Tell the desktop notifier what the prompt about to open waits for (lib/notify/desktop.ts). */
-	const announcePrompt = (message: string) => pi.events.emit(PROMPT_ATTENTION_CHANNEL, { message } satisfies PromptAttention);
 	/** The permission question's description: the tool it asks for. */
-	const describePrompt = (toolName: string) => announcePrompt(desktopNotificationText.permission(brand.name, ccToolName(toolName)));
+	const describePrompt = (toolName: string) => announcePrompt(pi.events, desktopNotificationText.permission(brand.name, ccToolName(toolName)));
 
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
@@ -1290,7 +1288,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		logDecision(ctx, { tool: toolName, subject, outcome: "prompt", source: "user", transcriptTooLong: true, reason });
 		const choice = await serializePrompt(() => {
 			if (signal?.aborted) return Promise.resolve(undefined);
-			announcePrompt(desktopNotificationText.reviewFallback(brand.name, ccToolName(toolName)));
+			announcePrompt(pi.events, desktopNotificationText.reviewFallback(brand.name, ccToolName(toolName)));
 			return ctx.ui.select(`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`, askOptions(undefined), { signal });
 		}, signal);
 		const allowed = !signal?.aborted && choice === YES;
@@ -1348,7 +1346,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(productSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			announcePrompt(desktopNotificationText.outsideRead(brand.name));
+			announcePrompt(pi.events, desktopNotificationText.outsideRead(brand.name));
 			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal });
 			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
