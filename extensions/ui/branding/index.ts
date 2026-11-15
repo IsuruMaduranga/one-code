@@ -52,7 +52,6 @@ import {
 import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
-import { paintedUserMarker, userMessageMarkdown } from "./user-marker.ts";
 import { TitleAnimation } from "./title-animation.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
@@ -334,19 +333,14 @@ function brandingExtension(pi: ExtensionAPI) {
 
 	applyThinkingDefault();
 	applyOutputPadDefault();
-	// Mark each block of assistant prose with Claude Code's "●" bullet and each
-	// user prompt with its "❯" pointer. The transformer runs in markdown
-	// rendering, so print/rpc output, stored entries and requests are untouched.
-	// It is the only rewrite of a user message (user-marker.ts says why).
-	// *_NO_ASSISTANT_MARKER=1 drops the bullet, mirroring *_NO_INPUT_MARKER.
-	// The pointer is painted from the live theme, captured at session_start.
+	// Mark each block of assistant prose with Claude Code's "●" bullet. The
+	// transformer runs in markdown rendering, so print/rpc output, stored
+	// entries and requests are untouched. A user message is the user-message
+	// extension's (lib/ui/user-message.ts), which adds the "❯" pointer while
+	// this feature is on. *_NO_ASSISTANT_MARKER=1 drops the bullet, mirroring
+	// *_NO_INPUT_MARKER.
 	const assistantMarker = knobValue("NO_ASSISTANT_MARKER") !== "1";
-	let transcriptTheme: unknown;
-	pi.registerMarkdownTransformer((markdown, context) => {
-		if (context.messageType === "user") return userMessageMarkdown(markdown, paintedUserMarker(transcriptTheme));
-		if (context.messageType === "assistant" && assistantMarker) return markAssistantMarkdown(markdown);
-		return markdown;
-	});
+	pi.registerMarkdownTransformer((markdown, context) => (context.messageType === "assistant" && assistantMarker ? markAssistantMarkdown(markdown) : markdown));
 	// The label and prompt marker apply in every session; *_NO_BANNER only
 	// disables the header.
 	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
@@ -458,7 +452,6 @@ function brandingExtension(pi: ExtensionAPI) {
 		// sticks; a new session may carry a name (resume), so forget the last.
 		lastTitle = undefined;
 		live = true;
-		transcriptTheme = ctx.ui.theme;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
 		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView, (scroll) =>
