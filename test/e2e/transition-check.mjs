@@ -40,6 +40,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { announcements } from "./deferred-addendum.mjs";
 
 const work = process.argv[2];
 if (!work) {
@@ -94,29 +95,6 @@ function referencedNames(value, out = new Set()) {
 		for (const inner of Object.values(value)) referencedNames(inner, out);
 	}
 	return out;
-}
-
-/** How many times each tool name is announced as newly available (a tool_addition block or the deferred-tool addendum). */
-function announcements(messages) {
-	const counts = new Map();
-	const bump = (name) => counts.set(name, (counts.get(name) ?? 0) + 1);
-	for (const message of messages) {
-		const blocks = Array.isArray(message.content) ? message.content : [];
-		const additions = blocks.filter((block) => block?.type === "tool_addition").map((block) => block.tool?.name ?? block.name);
-		for (const name of additions) if (typeof name === "string") bump(name);
-		if (additions.length) continue;
-		for (const block of blocks) {
-			const text = typeof block?.text === "string" ? block.text : typeof block?.content === "string" ? block.content : "";
-			const at = text.indexOf("Additional deferred tools became available");
-			if (at === -1) continue;
-			for (const line of text.slice(at).split("\n").slice(1)) {
-				const name = line.trim();
-				if (/^[A-Za-z0-9_:-]+$/.test(name)) bump(name);
-				else if (name) break;
-			}
-		}
-	}
-	return counts;
 }
 
 const preview = (value) => {
