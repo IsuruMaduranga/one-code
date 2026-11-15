@@ -72,5 +72,7 @@ status=0
 	status=1
 }
 touch "$WORK/wire.jsonl"
-node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" --late-tool late_echo ${FORM[@]+"${FORM[@]}"} || status=1
+# The listing hint the addendum line must carry comes from the fixture, its one home.
+HINT="$(cd "$REPO" && node --input-type=module -e 'import { LATE_TOOL_HINT } from "./test/e2e/late-tool-fixture.ts"; process.stdout.write(LATE_TOOL_HINT)')"
+node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" --late-tool late_echo --late-tool-hint "$HINT" ${FORM[@]+"${FORM[@]}"} || status=1
 exit "$status"
