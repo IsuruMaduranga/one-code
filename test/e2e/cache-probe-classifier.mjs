@@ -15,15 +15,31 @@
  *      (Anthropic, Bedrock, Claude on OpenRouter): cacheRead[N+1] >= cacheRead[N] + cacheWrite[N] - slack,
  *      which holds when the breakpoint sits on the transcript history and not
  *      after the stage instruction (the stage text and the action under review
- *      are never written). Implicit caches (OpenAI, OpenRouter): at least the
- *      share of request N's prompt that request N+1 repeats, less one cache
- *      block; a miss there is a WARN, since OpenRouter can route consecutive
- *      calls to different upstream providers.
+ *      are never written). OpenAI Responses with breakpoints on the history
+ *      (the log row's `cacheMarks`, the history parts the classifier marked;
+ *      GPT-5.6 and later): at least request N's marked history (the row's
+ *      `systemChars` plus `markedHistoryChars`, its system prompt and the
+ *      transcript up to the last marked part; `historyChars`, the transcript
+ *      up to the pending action, on a row without it), estimated as that share
+ *      of its tokens, less one cache block; a miss is a FAIL. A request without history breakpoints
+ *      (its hook left the payload alone, `cacheEdited` false, or its model
+ *      has no hook), and the request after it, are checked as an implicit
+ *      cache, with a WARN. A skipped request's implicit
+ *      breakpoint also writes the action and stage text, which no later
+ *      request repeats, so read + write overshoots there.
+ *      Implicit caches (Codex, OpenRouter): at least the share of request N's
+ *      prompt that request N+1 repeats, less one cache block; a miss there is a
+ *      WARN, since OpenRouter can route consecutive calls to different upstream
+ *      providers.
  *
  * With `--review` (cache-probe.sh's review phase) the log must also hold a
  * subagent's hand-back review (a row whose tool is `subagent-review`) after at
  * least one earlier call, so check 3 covers the review reading the
  * cache its spawn and the child's calls wrote.
+ *
+ * A log written before the classifier logged its cache hook has neither
+ * `cacheBreakpoints` nor `cacheMarks`; its rows are checked under the implicit
+ * rule.
  *
  * Usage: node test/e2e/cache-probe-classifier.mjs <classifier.jsonl> [--slack N] [--review]
  * Exit 1 on a failed check.
@@ -65,12 +81,26 @@ const calls = rows.map((r) => {
 	// Explicit breakpoints: Anthropic Messages, Bedrock Converse, and Claude on
 	// OpenRouter (Chat Completions carrying Anthropic's cache_control).
 	const explicit = r.api === "anthropic-messages" || r.api === "bedrock-converse-stream" || (r.api === "openai-completions" && /^openrouter\/anthropic\//.test(r.model ?? ""));
+	const historyMarks = r.api === "openai-responses" && r.cacheMarks > 0;
 	const read = u.cacheRead ?? 0;
-	return { text: r.system + r.user, system: r.system, user: r.user, explicit, read, write: u.cacheWrite ?? 0, total: (u.input ?? 0) + read + (u.cacheWrite ?? 0) };
+	return {
+		text: r.system + r.user,
+		system: r.system,
+		user: r.user,
+		explicit,
+		historyMarks,
+		skipped: r.cacheBreakpoints === true && r.cacheEdited === false,
+		// Past MAX_RESPONSES_HISTORY_MARKS only the marked parts are cached; an older row lacks the field.
+		history: (r.systemChars ?? 0) + (r.markedHistoryChars ?? r.historyChars ?? 0),
+		read,
+		write: u.cacheWrite ?? 0,
+		total: (u.input ?? 0) + read + (u.cacheWrite ?? 0),
+	};
 });
 const explicit = calls.some((c) => c.explicit);
+const historyMarks = !explicit && calls.some((c) => c.historyMarks);
 
-console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : "implicit"} cache)`);
+console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : historyMarks ? "history breakpoints" : "implicit"} cache)`);
 console.log("call   total   cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < calls.length; i++) {
 	const cur = calls[i];
@@ -83,12 +113,19 @@ for (let i = 0; i < calls.length; i++) {
 			const at = firstDiff(prevTranscript, cur.user);
 			failures.push(`transcript of call ${i + 1} does not extend call ${i}'s (first difference at char ${at}: …${JSON.stringify(prevTranscript.slice(at, at + 60))})`);
 		}
+		// Only a marked request after a marked one is held to the marked
+		// history: a request without breakpoints (its hook left it alone, or
+		// its model has no hook) cannot read the marked prefix, and the one
+		// after it has none to read back to.
+		const marked = historyMarks && prev.historyMarks && cur.historyMarks;
+		if (historyMarks && prev.skipped) warnings.push(`classifier call ${i} had the cache hook but its payload was left alone (a blank part or an unexpected shape); call ${i + 1} is checked as an implicit cache`);
+		if (historyMarks && cur.skipped) warnings.push(`classifier call ${i + 1} had the cache hook but it left this request unmarked (a blank part or an unexpected shape); it is checked as an implicit cache`);
 		need = explicit
 			? prev.read + prev.write - slack
-			: Math.floor((prev.total * firstDiff(prev.text, cur.text)) / prev.text.length) - IMPLICIT_BLOCK - slack;
+			: Math.floor((prev.total * (marked ? prev.history : firstDiff(prev.text, cur.text))) / prev.text.length) - IMPLICIT_BLOCK - slack;
 		if (cur.read < need) {
 			const msg = `classifier call ${i + 1} read ${cur.read} cached tokens; it should have read at least ${need} of what call ${i} sent (miss of ${need - cur.read})`;
-			(explicit ? failures : warnings).push(msg);
+			(explicit || marked ? failures : warnings).push(msg);
 		}
 	}
 	console.log(`${String(i + 1).padStart(4)}  ${String(cur.total).padStart(6)}  ${String(cur.read).padStart(9)}  ${String(cur.write).padStart(10)}  ${String(need ?? "-").padStart(10)}`);

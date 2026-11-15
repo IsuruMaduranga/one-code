@@ -8,10 +8,12 @@
  * - **A prompt waits** (`permission_prompt`): a prompt opened during a turn
  *   (a permission question, the plan approval, a question to the user), or a
  *   described prompt opened at any time (a background subagent's permission
- *   question can arrive while the main session is idle). The prompt counts as
- *   an interaction when it opens; every 6 s the notifier checks for a keypress
- *   in the last 6 s and notifies once when there was none. A panel the user
- *   opened while idle is theirs and never notifies.
+ *   question can arrive while the main session is idle). Every 6 s the
+ *   notifier checks for a keypress in the last 6 s, counting from the prompt's
+ *   opening, and notifies once when there was none. The opening is not the
+ *   user's interaction, so a prompt that opens and closes on its own leaves the
+ *   idle notification due. A panel the user opened while idle is theirs and
+ *   never notifies.
  * - **The turn ended and the user is away** (`idle_prompt`): 60 s after a run
  *   settles, if the user submitted something this session, has not touched a
  *   key since the run ended, and no prompt is open.
@@ -48,10 +50,21 @@ export interface PromptAttention {
 	message: string;
 }
 
+/** Say what the next prompt waits for, on `PROMPT_ATTENTION_CHANNEL`, just before opening it. */
+export function announcePrompt(events: { emit(channel: string, data: unknown): void }, message: string): void {
+	events.emit(PROMPT_ATTENTION_CHANNEL, { message } satisfies PromptAttention);
+}
+
 /** The words, from the product's name. */
 export const desktopNotificationText = {
 	permission: (product: string, tool: string) => `${product} needs your permission to use ${tool}`,
 	planApproval: (product: string) => `${product} needs your approval for the plan`,
+	/** Auto mode's one-time question before its first read outside the working directories. */
+	outsideRead: (product: string) => `${product} needs your permission to read outside the working directories`,
+	/** The manual approval auto mode falls back to when its review of the call could not run. */
+	reviewFallback: (product: string, tool: string) => `${product} needs your permission to use ${tool} (auto mode could not review it)`,
+	/** The one-time question whether to trust a repository's allow rules and workspace directories. */
+	projectTrust: (product: string) => `${product} needs you to decide whether to trust this repository's permission settings`,
 	attention: (product: string) => `${product} needs your attention`,
 	idle: (product: string) => `${product} is waiting for your input`,
 };
@@ -129,9 +142,12 @@ export class AttentionNotifier {
 		this.attention = undefined;
 		// While idle, only a described prompt counts: an undescribed one is a panel the user opened.
 		if (this.stopped || (!this.working && !described) || this.prompts > 1) return;
-		this.interacted();
+		// Not `interacted()`: the user did not open it, and a described prompt
+		// opened while idle (a background agent's) must not cancel the idle notice.
+		// The 6 s check counts from the opening too.
+		const openedAt = this.io.now();
 		this.cancelPrompt = this.io.every(INTERACTION_THRESHOLD_MS, () => {
-			if (this.io.now() - this.lastInteraction < INTERACTION_THRESHOLD_MS) return;
+			if (this.io.now() - Math.max(this.lastInteraction, openedAt) < INTERACTION_THRESHOLD_MS) return;
 			this.cancelPrompt?.();
 			this.cancelPrompt = undefined;
 			if (!this.stopped) this.io.notify({ message, notificationType: "permission_prompt" });

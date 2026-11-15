@@ -61,6 +61,12 @@ describe("the subagent result text", () => {
 		expect(subagentResultText().launched({ lines: ["L1", "L2"], running: 2, outputFile: true })).toBe(`L1\nL2${two}`);
 	});
 
+	it("fails a launch where no agent runs, with no promise of a notification", () => {
+		expect(subagentResultText().refused({ kind: "noneLaunched", lines: ["Note", "✗ x-1: could not start: boom"] })).toBe(
+			"Note\n✗ x-1: could not start: boom\n\nNo agent started, so no notification will arrive. Fix the problem above and call Agent again, or do the task yourself.",
+		);
+	});
+
 	it("heads the agent catalog as Claude Code does and words each row", () => {
 		const row = subagentResultText().catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
 		expect(row.startsWith("- editor: Edits prose")).toBe(true);

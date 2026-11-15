@@ -10,6 +10,7 @@ import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, watchPermissionBridge } f
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { buildGate } from "./helpers/permission-gate-harness.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
 
 function deferred<T>() {
 	let resolve!: (value: T) => void;
@@ -164,6 +165,20 @@ describe("subagent permission bridge lifecycle", () => {
 		expect(await pending).toMatchObject({ block: true });
 		expect(signal?.aborted).toBe(true);
 		expect(parent.signal.aborted).toBe(false);
+	});
+
+	// Described, so the desktop notifier names it, and notifies for a child's
+	// prompt while the main session is idle.
+	it("describes the first outside-read consent dialog to the desktop notifier before it opens", async () => {
+		const events: string[] = [];
+		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const outside = join(root, "outside.txt");
+		writeFileSync(outside, "outside the project");
+		ctx = createFakeCtx({ ...ctx, hasUI: true, ui: { select: vi.fn(async () => { events.push("opened"); return undefined; }) } });
+		await fake.fire("session_start", { reason: "reload" }, ctx);
+		fake.events.emit(MODE_CHANNEL, { mode: "auto" });
+		await bridge({ toolName: "read", input: { path: outside }, cwd, model: { provider: "anthropic", id: "claude-opus-4-8" } as never });
+		expect(events).toEqual([`described: ${desktopNotificationText.outsideRead(brand.name)}`, "opened"]);
 	});
 
 	it("skips a stopped child's outside-read prompt queued behind another permission dialog", async () => {

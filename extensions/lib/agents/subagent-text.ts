@@ -64,6 +64,8 @@ export type SubagentRefusal =
 	| { kind: "nestedCheckFailed"; osMessage: string }
 	/** The runtime could not start (`problem` worded by `runtimeProblem`). */
 	| { kind: "couldNotStart"; problem: string }
+	/** No run of a background launch started; `lines` holds the notes and each run's failed launch line. */
+	| { kind: "noneLaunched"; lines: string[] }
 	/** SendMessage from the main conversation to "main". */
 	| { kind: "mainIsNotRecipient" }
 	/** SendMessage to a name or id no run has; `known` lists the runs. */
@@ -133,7 +135,8 @@ export interface SubagentsResultText {
 	/** A one-shot session's inline report; `note` is the shared one-shot note. */
 	inlineReport(p: { name: string; taskId: string; note: string }): string;
 	/**
-	 * A background launch's result. `lines` holds the notes and every launch
+	 * A background launch's result when at least one agent runs (none running
+	 * is the `noneLaunched` refusal). `lines` holds the notes and every launch
 	 * line, failed ones included; `running`: how many agents launched and run;
 	 * `outputFile`: some launched agent writes an output file (its line names it).
 	 */
@@ -216,6 +219,8 @@ function refused(refusal: SubagentRefusal, product: SubagentClauses): string {
 			return `Nested Agent call refused: permission check failed (${refusal.osMessage}).`;
 		case "couldNotStart":
 			return `Could not start the agent: ${refusal.problem}`;
+		case "noneLaunched":
+			return `${refusal.lines.join("\n")}\n\nNo agent started, so no notification will arrive. Fix the problem above and call Agent again, or do the task yourself.`;
 		case "mainIsNotRecipient":
 			return 'You are the main conversation — "main" is only a valid recipient from inside a subagent.';
 		case "noRun":

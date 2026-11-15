@@ -7,11 +7,12 @@
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
  *   transcript byte-for-byte. Where the request carries explicit breakpoints
  *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
- *   Bedrock Converse), onPayload splits the user text at stable history-entry
- *   boundaries and moves the user cache marker before the pending action and
- *   stage instruction (cache.ts). Both stages and later gated calls can read
- *   that prefix; the system markers stay intact. Other APIs keep the single
- *   string and their provider's prefix caching.
+ *   Bedrock Converse, and OpenAI Responses on a model that takes explicit
+ *   breakpoints), onPayload splits the user text at stable history-entry
+ *   boundaries and puts the breakpoint before the pending action and stage
+ *   instruction (cache.ts). Both stages and later gated calls can read that
+ *   prefix; the system markers stay intact. Other APIs keep the single string
+ *   and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -29,7 +30,7 @@ import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choi
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
 import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../../lib/models/model-policy.ts";
 import type { AutoModeConfig } from "../../../lib/rules/auto-mode-config.ts";
-import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
+import { cacheClassifierHistory, classifierCarriesBreakpoints } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -193,7 +194,7 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
-	/** Previous history boundary on a breakpoint API, a cache lookup hint only (cache.ts). */
+	/** Previous history boundary, a cache lookup hint for the marker shapes only (cache.ts). */
 	cacheHistoryEnd?: number;
 }
 
@@ -429,7 +430,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// reasoning-mandatory retry below) gets its lowest supported level — the
 		// off-request would 400 and the gate would fail closed on every call.
 		const reasoning = deps.state.forcedReasoning.get(key) ?? forcedReasoningLevel(model);
+		/** What the payload hook did to the latest request, for the probe log: parts marked, or undefined when it left the payload alone. */
+		let cacheMarks: number | undefined;
 		const runCall = (userText: string, maxTokens: number, stage: number) => {
+			cacheMarks = undefined;
 			if (debug === "2") {
 				process.stderr.write(
 					`\n[auto-mode payload] stage=${stage} model=${key} maxTokens=${maxTokens} systemLen=${system.length} userLen=${userText.length}\n` +
@@ -449,9 +453,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
+					...(classifierCarriesBreakpoints(model) ? {
 						onPayload: (payload: unknown) => {
-							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
+							cacheMarks = cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							// A review's history ends in the subagent's calls, which the next gate
 							// call's transcript does not hold, so it leaves the session's boundary.
 							if (!deps.reviewOnly) deps.state.cacheHistoryEnd = history.length - 1;
@@ -473,7 +477,27 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
-						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+						appendFileSync(
+							usageLog,
+							`${JSON.stringify({
+								model: key,
+								api: model.api,
+								cacheBreakpoints: classifierCarriesBreakpoints(model),
+								cacheEdited: cacheMarks !== undefined,
+								cacheMarks: cacheMarks ?? 0,
+								systemChars: system.length,
+								historyChars: history.join("").length,
+								// On Responses the marks run from the first history part, so the count
+								// ends the marked text, which past MAX_RESPONSES_HISTORY_MARKS is shorter.
+								...(model.api === "openai-responses" && cacheMarks ? { markedHistoryChars: history.slice(0, cacheMarks).join("").length } : {}),
+								tool: request.toolName,
+								stage,
+								system,
+								user: userText,
+								usage: reply.usage,
+								stopReason: reply.stopReason,
+							})}\n`,
+						);
 					} catch {
 						// A probe log that cannot be written must not fail the gate.
 					}

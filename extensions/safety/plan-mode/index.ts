@@ -21,7 +21,7 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import { brand } from "../../lib/profile/brand.mjs";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL, type PromptAttention } from "../../lib/notify/desktop.ts";
+import { announcePrompt, desktopNotificationText } from "../../lib/notify/desktop.ts";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -386,7 +386,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			let offset = 0;
 			let selected: PlanChoice = initialPlanChoice(options);
 			const showDialog = (): Promise<PlanChoice | null> => {
-				pi.events.emit(PROMPT_ATTENTION_CHANNEL, { message: desktopNotificationText.planApproval(brand.name) } satisfies PromptAttention);
+				announcePrompt(pi.events, desktopNotificationText.planApproval(brand.name));
 				return openDialog();
 			};
 			const openDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<PlanChoice | null>((tui, theme, _keybindings, close) => {

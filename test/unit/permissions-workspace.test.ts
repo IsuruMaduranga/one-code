@@ -9,6 +9,8 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
+import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/rules/workspace-channel.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
@@ -182,6 +184,19 @@ describe("workspace directories in the gate", () => {
 		expect(await read(join(shared, "notes.md"))).toBeUndefined();
 		await start();
 		expect(announced.at(-1)).toEqual([shared]);
+	});
+
+	it("describes the trust question to the desktop notifier just before it opens", async () => {
+		writeRepositorySettings(cwd, home, { permissions: { additionalDirectories: [shared] } });
+		await start();
+		const events: string[] = [];
+		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		vi.mocked((ctx.ui as { confirm: () => unknown }).confirm).mockImplementation(async () => {
+			events.push("opened");
+			return true;
+		});
+		expect(await read(join(shared, "notes.md"))).toBeUndefined();
+		expect(events).toEqual([`described: ${desktopNotificationText.projectTrust(brand.name)}`, "opened"]);
 	});
 
 	it("asks to trust the repository's directories for a plan-mode shell read there", async () => {

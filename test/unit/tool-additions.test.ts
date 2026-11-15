@@ -108,6 +108,16 @@ describe("liftAddenda and withToolAdditions", () => {
 		});
 	});
 
+	it("takes a late batch's names from its facts when a line carries the tool owner's hint", () => {
+		const names = ["late_echo", "mcp__s__plain"];
+		const text = deferredAddendumText(names, {}, (name) => (name === "late_echo" ? "When you echo, use it." : undefined));
+		expect(text.split("\n").slice(1)).toEqual(["late_echo: When you echo, use it.", "mcp__s__plain"]);
+		const carried = carriedAddenda([{ text, facts: [{ kind: "tools", names, callable: true }] }]);
+		expect(addendumNames(wrapReminder(text), carried)).toEqual(names);
+		const stored = [{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "done" }, { type: "text", text: wrapReminder(text) }] }];
+		expect(liftAddenda(stored, carried).byCall.get("t")).toEqual(names);
+	});
+
 	it("references a batch added after pi renamed the eager tools, under the names the request carries", () => {
 		const registry = [
 			{ name: "read", parameters: { properties: {} } },

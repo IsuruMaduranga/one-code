@@ -48,16 +48,19 @@
  *      once it appears, and is announced either by a reference-form
  *      `tool_addition` in a system message or by the deferred-tool addendum.
  *      `--late-tool-form tool_addition|addendum` also requires that form.
+ *      `--late-tool-hint TEXT` makes an addendum announcement's line for NAME
+ *      exactly `NAME: TEXT` (the tool_addition form has no listing line).
  *
  * Usage: node test/e2e/cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok]
- *          [--late-tool NAME [--late-tool-form tool_addition|addendum]]
+ *          [--late-tool NAME [--late-tool-form tool_addition|addendum] [--late-tool-hint TEXT]]
  * Exit 1 on any failed check. `cache-probe.sh` produces both inputs.
  */
 import { readFileSync } from "node:fs";
+import { addendumLines, addendumToolName, textOf } from "./deferred-addendum.mjs";
 
 const USAGE =
-	"usage: cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok] [--late-tool NAME [--late-tool-form tool_addition|addendum]]";
-const VALUE_FLAGS = new Set(["--slack", "--late-tool", "--late-tool-form"]);
+	"usage: cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok] [--late-tool NAME [--late-tool-form tool_addition|addendum] [--late-tool-hint TEXT]]";
+const VALUE_FLAGS = new Set(["--slack", "--late-tool", "--late-tool-form", "--late-tool-hint"]);
 const args = process.argv.slice(2);
 const positional = [];
 const flags = new Map();
@@ -74,6 +77,7 @@ if (positional.length !== 2 || [...flags.values()].includes(undefined) || (lateT
 const slack = Number(flags.get("--slack") ?? 0);
 const eagerLoadOk = flags.has("--eager-load-ok");
 const lateTool = flags.get("--late-tool");
+const lateToolHint = flags.get("--late-tool-hint");
 
 const lines = (path) =>
 	readFileSync(path, "utf8")
@@ -273,9 +277,6 @@ for (let i = 0; i < usages.length; i++) {
 	}
 }
 
-/** The first line of the deferred-tool addendum (request/tool-search/tool-additions.ts ADDENDUM_HEAD). */
-const ADDENDUM_START = "Additional deferred tools became available via tool_search";
-
 if (lateTool !== undefined) {
 	const entryIn = (p) => (p.tools ?? []).find((t) => t?.name === lateTool);
 	const firstWith = requests.findIndex((p) => entryIn(p) !== undefined);
@@ -283,8 +284,15 @@ if (lateTool !== undefined) {
 		(p.messages ?? []).some(
 			(m) => m?.role === "system" && Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_addition" && b.tool?.name === lateTool),
 		);
-	// The addendum lists the names one per line after its first line.
-	const addendumIn = (p) => (p.messages ?? []).some((m) => JSON.stringify(m.content ?? "").includes(ADDENDUM_START) && JSON.stringify(m.content).includes(`\\n${lateTool}`));
+	/** The addendum's line for the tool in request `p` (deferred-addendum.mjs), in a user message or a tool result. */
+	const addendumLine = (p) => {
+		for (const m of p.messages ?? []) {
+			const line = addendumLines(textOf(m?.content)).find((l) => addendumToolName(l) === lateTool);
+			if (line !== undefined) return line;
+		}
+		return undefined;
+	};
+	const addendumIn = (p) => addendumLine(p) !== undefined;
 	const form = requests.some(additionIn) ? "tool_addition" : requests.some(addendumIn) ? "addendum" : undefined;
 	const called = responses.some((m) => (m.content ?? []).some((c) => c?.type === "toolCall" && c.name === lateTool));
 	console.log(`late tool ${lateTool}: first in request ${firstWith === -1 ? "none" : firstWith + 1}, announced by ${form ?? "nothing"}, ${called ? "called" : "not called"}`);
@@ -296,6 +304,11 @@ if (lateTool !== undefined) {
 	}
 	if (form === undefined) failures.push(`${lateTool} was never announced, by tool_addition or by the addendum`);
 	else if (lateToolForm !== undefined && form !== lateToolForm) failures.push(`${lateTool} was announced by ${form}, expected ${lateToolForm}`);
+	if (form === "addendum" && lateToolHint !== undefined) {
+		const found = requests.map(addendumLine).find((l) => l !== undefined);
+		const expected = `${lateTool}: ${lateToolHint}`;
+		if (found !== expected) failures.push(`the addendum's line for ${lateTool} is ${found === undefined ? "missing" : JSON.stringify(found)}, expected ${JSON.stringify(expected)}`);
+	}
 	if (!called) warnings.push(`the model never called ${lateTool}`);
 }
 

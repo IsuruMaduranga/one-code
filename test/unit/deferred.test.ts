@@ -37,6 +37,42 @@ describe("DeferredRegistry", () => {
 		r.add({ name: "" });
 		expect(r.names).toEqual([]);
 	});
+
+	it("keeps the owner's listing hint: a later one replaces it, a request without one keeps it, removal drops it", () => {
+		const r = new DeferredRegistry();
+		r.add({ name: "a", hint: "first" });
+		r.add({ name: "a", hint: "second" });
+		r.add({ name: "a", keywords: ["x"] });
+		expect(r.hintFor("a")).toBe("second");
+		r.add({ name: "b" });
+		expect(r.hintFor("b")).toBeUndefined();
+		r.remove("a");
+		r.add({ name: "a" });
+		expect(r.hintFor("a")).toBeUndefined();
+	});
+
+	it("keeps an owner's hint on one line: whitespace runs and line breaks become one space, and a blank one is no hint", () => {
+		const r = new DeferredRegistry();
+		r.add({ name: "a", hint: "  When you echo,\n\n  use it.\r\n\tnot_a_tool: no " });
+		expect(r.hintFor("a")).toBe("When you echo, use it. not_a_tool: no");
+		r.add({ name: "a", hint: " \n\t " });
+		expect(r.hintFor("a")).toBe("When you echo, use it. not_a_tool: no");
+		r.add({ name: "b", hint: "\n \n" });
+		expect(r.hintFor("b")).toBeUndefined();
+		expect(r.requests()[1]).not.toHaveProperty("hint");
+	});
+
+	it("lists its tools as deferral requests, in order, with a hint only where one was given", () => {
+		const r = new DeferredRegistry();
+		r.add({ name: "a", keywords: ["x"], hint: "first" });
+		r.add({ name: "b" });
+		r.add({ name: "a", keywords: ["y"] });
+		expect(r.requests()).toEqual([
+			{ name: "a", keywords: ["x", "y"], hint: "first" },
+			{ name: "b", keywords: [] },
+		]);
+		expect(r.requests()[1]).not.toHaveProperty("hint");
+	});
 });
 
 describe("searchTools", () => {
@@ -190,5 +226,44 @@ describe("deferredReminderText", () => {
 		const text = deferredReminderText([{ name: "web_fetch" }, { name: "monitor" }, { name: "mcp__s__t" }], words);
 		expect(text).toBe([toolSearchResultText.listingHead, "web_fetch", "monitor: When you watch, use it.", "mcp__s__t", "", "Load what the next step needs."].join("\n"));
 		expect(deferredAddendumText(["monitor", "x"], words)).toBe([toolSearchResultText.addendumHead, "monitor: When you watch, use it.", "x"].join("\n"));
+	});
+
+	describe("a hint from the tool's owner", () => {
+		const words = { listingHints: { monitor: "When you watch, use it." } };
+		const owner = (hints: Record<string, string>) => (name: string) => hints[name];
+
+		it("is used for a tool the profile has no hint for", () => {
+			expect(deferredReminderText([{ name: "late" }], words, owner({ late: "When you echo, use it." }))).toBe(
+				[toolSearchResultText.listingHead, "late: When you echo, use it."].join("\n"),
+			);
+			expect(deferredAddendumText(["late"], words, owner({ late: "When you echo, use it." }))).toBe(
+				[toolSearchResultText.addendumHead, "late: When you echo, use it."].join("\n"),
+			);
+		});
+
+		it("never replaces the profile's hint", () => {
+			const hints = owner({ monitor: "Owner's words." });
+			expect(deferredReminderText([{ name: "monitor" }], words, hints)).toBe([toolSearchResultText.listingHead, "monitor: When you watch, use it."].join("\n"));
+			expect(deferredAddendumText(["monitor"], words, hints)).toBe([toolSearchResultText.addendumHead, "monitor: When you watch, use it."].join("\n"));
+		});
+
+		it("gives way to an empty profile entry, which lists the bare name", () => {
+			const hints = owner({ late: "When you echo, use it." });
+			expect(deferredReminderText([{ name: "late" }], { listingHints: { late: "" } }, hints)).toBe([toolSearchResultText.listingHead, "late"].join("\n"));
+			expect(deferredAddendumText(["late"], { listingHints: { late: "" } }, hints)).toBe([toolSearchResultText.addendumHead, "late"].join("\n"));
+		});
+
+		it("is used for a tool whose name the profile's object only inherits", () => {
+			const hints = (name: string) => (name === "constructor" ? "When you build, use it." : undefined);
+			expect(deferredAddendumText(["constructor", "toString"], words, hints)).toBe([toolSearchResultText.addendumHead, "constructor: When you build, use it.", "toString"].join("\n"));
+		});
+
+		it("leaves the bare name when neither has one, byte for byte as without owner hints", () => {
+			const tools = [{ name: "web_fetch" }, { name: "monitor" }, { name: "mcp__s__t" }];
+			const hints = owner({ late: "When you echo, use it." });
+			expect(deferredReminderText(tools, words, hints)).toBe(deferredReminderText(tools, words));
+			expect(deferredReminderText(tools, words, hints)).toBe([toolSearchResultText.listingHead, "web_fetch", "monitor: When you watch, use it.", "mcp__s__t"].join("\n"));
+			expect(deferredAddendumText(["x"], words, hints)).toBe(deferredAddendumText(["x"], words));
+		});
 	});
 });

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import lateToolFixture, { LATE_TOOL_HINT, LATE_TOOL_NAME } from "../e2e/late-tool-fixture.ts";
 import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
@@ -6,6 +7,7 @@ import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
+import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 
 /**
  * The deferred-tools listing is live state: what a request that opens an epoch
@@ -64,6 +66,40 @@ describe("tool-search listing and render-time addenda", () => {
 		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
 		expect(blocks).toEqual([{ text: deferredAddendumText(["mcp__a__x", "mcp__a__y"]), facts: [{ kind: "tools", names: ["mcp__a__x", "mcp__a__y"] }] }]);
 		expect(fake.render({ told: { tools: ["web_fetch", "mcp__a__x", "mcp__a__y"] } })).toEqual([]);
+	});
+
+	it("lists and announces a tool by its owner's hint, the batch's names from its facts; a profile hint wins", () => {
+		// The profile's words are injected, so the rule holds on any profile (deferred.test.ts proves it on the helpers).
+		const active = activeProfile();
+		const toolSearch = { ...active.text.toolSearch!, listingHints: { web_fetch: "When you fetch, use it." } };
+		setActiveProfileForTest({ ...active, text: { ...active.text, toolSearch } });
+		try {
+			const fake = mount();
+			const listed = () => listings(fake.reminders).at(-1)?.text?.split("\n") ?? [];
+			expect(listed()).toContain("web_fetch: When you fetch, use it.");
+			fake.addDeferred("late_echo", "When you echo, use it.");
+			// The profile's hint for web_fetch holds when its owner offers one.
+			fake.pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", hint: "Owner's words." });
+			expect(listed()).toContain("late_echo: When you echo, use it.");
+			expect(listed()).toContain("web_fetch: When you fetch, use it.");
+			const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+			expect(blocks).toEqual([{ text: [toolSearchResultText.addendumHead, "late_echo: When you echo, use it."].join("\n"), facts: [{ kind: "tools", names: ["late_echo"] }] }]);
+		} finally {
+			setActiveProfileForTest(active);
+		}
+	});
+
+	it("lists the cache probe's late-tool fixture by its own hint, so the live probe sends a hinted line", () => {
+		vi.useFakeTimers();
+		try {
+			const fake = mount();
+			lateToolFixture(fake.pi as never);
+			fake.pi.fire("before_provider_request", { payload: {} }, {});
+			vi.advanceTimersByTime(200);
+			expect(listings(fake.reminders).at(-1)?.text?.split("\n")).toContain(`${LATE_TOOL_NAME}: ${LATE_TOOL_HINT}`);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("says once that a tool the epoch was told about is gone, when its absence is known", () => {

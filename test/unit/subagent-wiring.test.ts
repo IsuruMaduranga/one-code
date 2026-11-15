@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/lib/rules/auto-mode-actions.ts";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
+import * as taskRegistry from "../../extensions/lib/agents/task-registry.ts";
+import * as btwFork from "../../extensions/lib/side-calls/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { DEFAULT_COALESCE_MS, handBackFlagBlock, handBackWarning, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
@@ -177,6 +179,30 @@ describe("subagent shutdown during launch", () => {
 		expect(h.tasks.size).toBe(0);
 	});
 
+	it("forgets a /btw fork when shutdown begins as its runtime is handed over", async () => {
+		const runtime = fakeResident();
+		let h!: Awaited<ReturnType<typeof mount>>;
+		// The runtime is ready, then shutdown begins before the fork resumes.
+		const handOver = {
+			then(ready: (runtime: SubagentRuntime) => unknown) {
+				const next = ready(runtime.runner as unknown as SubagentRuntime);
+				for (const handler of h.fake.handlers.get("session_shutdown") ?? []) void handler({}, h.ctx);
+				return Promise.resolve(next);
+			},
+			catch() {
+				return handOver;
+			},
+		};
+		vi.mocked(SubagentRuntime.create).mockReturnValue(handOver as unknown as Promise<SubagentRuntime>);
+		h = await mount();
+		const sessionFile = join(dir, "session.jsonl");
+		writeFileSync(sessionFile, "");
+		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
+		expect(await btwFork.requestBtwFork(h.fake.events, { ctx: h.ctx, question: "What next", messages: [] })).toEqual({ error: "The session ended before the fork started." });
+		const listed = (await h.call("list_agents", {})) as { details: { agents: Array<{ name: string }> } };
+		expect(listed.details.agents.map((a) => a.name)).not.toContain("what-next");
+	});
+
 	it("builds no resident when shutdown begins while its worktree is created", async () => {
 		const runtime = fakeResident();
 		const build = vi.spyOn(runtime.runner, "runResident");
@@ -238,6 +264,23 @@ describe("the main-session call that started a run's turn", () => {
 		expect(runtime.options().mainToolCallId?.()).toBe("send-call");
 		runtime.finish([{ toolName: "bash", input: { command: "ls" } }]);
 		expect(reviews.at(-1)?.startedBy).toBe("send-call");
+	});
+
+	it("forgets the starting call of a run that did not launch", async () => {
+		// The same id twice, so a later run without a starting call would read a stale one.
+		vi.spyOn(taskRegistry, "generateTaskId").mockReturnValue("a-reused");
+		vi.spyOn(btwFork, "btwForkTaskId").mockReturnValue("a-reused");
+		const runtime = fakeResident();
+		vi.spyOn(worktrees, "isGitRepo").mockResolvedValue(true);
+		vi.spyOn(worktrees, "createWorktree").mockRejectedValue(new Error("no space"));
+		const h = await mount();
+		const sessionFile = join(dir, "session.jsonl");
+		writeFileSync(sessionFile, "");
+		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
+		const failed = (await h.fake.tools.get("Agent")!.execute("agent-call", { subagent_type: "general-purpose", task: "Count", isolation: "worktree" }, undefined, undefined, h.ctx)) as { isError?: boolean };
+		expect(failed.isError).toBe(true);
+		expect(await btwFork.requestBtwFork(h.fake.events, { ctx: h.ctx, question: "What next", messages: [] })).toMatchObject({ taskId: "a-reused" });
+		expect(runtime.options().mainToolCallId?.()).toBeUndefined();
 	});
 
 	it("judges a nested spawn against its top-level run's starting call", async () => {
@@ -400,6 +443,32 @@ describe("subagent runtime build failure", () => {
 		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "couldNotStart", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
+		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
+	});
+
+	// A launch where no agent runs must not tell the model to wait for a
+	// notification that never comes.
+	it("fails a background launch whose only run could not start", async () => {
+		const runtime = fakeResident();
+		vi.spyOn(runtime.runner, "runResident").mockRejectedValue(new Error("boom"));
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		const line = subagentResultText().launchLine({ kind: "startFailed", name: "general-purpose-1", osMessage: "boom" });
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "noneLaunched", lines: [line] }));
+		expect(result.content[0].text).not.toContain("working in the background");
+		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
+	});
+
+	it("fails a background launch whose only worktree could not be created, and forgets the run", async () => {
+		fakeResident();
+		vi.spyOn(worktrees, "isGitRepo").mockResolvedValue(true);
+		vi.spyOn(worktrees, "createWorktree").mockRejectedValue(new Error("no space"));
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files", isolation: "worktree" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toMatch(/^✗ general-purpose-1: could not create a worktree: .*no space/);
+		expect(result.content[0].text).not.toContain("notified automatically");
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
 });

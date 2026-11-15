@@ -106,6 +106,35 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		h.advance(IDLE_NOTIFY_MS);
 		expect(h.sent).toHaveLength(1);
 	});
+
+	it("keeps the idle notification due when a described prompt opens while idle and closes on its own within 6 s", () => {
+		const h = harness();
+		h.notifier.submittedPrompt();
+		h.notifier.turnStarted();
+		h.notifier.turnSettled();
+		h.advance(10_000);
+		// A background agent's question, cancelled when the agent hits its time limit.
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.promptOpened();
+		h.advance(INTERACTION_THRESHOLD_MS - 1000);
+		h.notifier.promptClosed();
+		expect(h.sent).toEqual([]);
+		h.advance(IDLE_NOTIFY_MS);
+		expect(h.sent).toEqual([{ message: "Prod is waiting for your input", notificationType: "idle_prompt" }]);
+	});
+
+	it("counts a prompt's 6 s from its opening, not from an older keypress", () => {
+		const h = harness();
+		h.notifier.turnStarted();
+		h.notifier.interacted();
+		h.advance(30_000);
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.promptOpened();
+		h.advance(INTERACTION_THRESHOLD_MS - 1);
+		expect(h.sent).toEqual([]);
+		h.advance(1);
+		expect(h.sent).toEqual([{ message: "Prod needs your permission to use Bash", notificationType: "permission_prompt" }]);
+	});
 });
 
 describe("AttentionNotifier: the user is away after a turn", () => {

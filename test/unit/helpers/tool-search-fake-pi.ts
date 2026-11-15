@@ -60,10 +60,10 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 	};
 
 	/** Register a tool the way its owning extension would (active), then defer it. */
-	const addDeferred = (name: string) => {
+	const addDeferred = (name: string, hint?: string) => {
 		allTools.push({ name, description: `${name} tool` });
 		active = [...active, name];
-		pi.events.emit(DEFER_CHANNEL, { name });
+		pi.events.emit(DEFER_CHANNEL, { name, ...(hint ? { hint } : {}) });
 	};
 
 	/** Run a tool the extension registered (tool_search), as pi would. */

@@ -1813,6 +1813,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** Forget prepared runs that will not launch, so list_agents and SendMessage never offer them. */
+	const forgetRuns = (runs: PreparedRun[]) => {
+		for (const p of runs) registry.remove(p.record.taskId);
+	};
+
 	/**
 	 * Launch one prepared run as a background resident (Claude Code parity):
 	 * it returns as soon as the child starts, the report arrives as a steered
@@ -1828,10 +1833,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
-		const ended = () => {
+		// A run that did not launch is forgotten here, on every failure path, so
+		// neither list_agents nor SendMessage ever offers it, and no call stays
+		// mapped to it.
+		const failed = (line: string) => {
 			registry.remove(p.record.taskId);
-			return { launched: false, line: launchLine({ kind: "sessionEnded", name: p.record.name }) };
+			mainCallFor.delete(p.record.taskId);
+			return { launched: false, line };
 		};
+		const ended = () => failed(launchLine({ kind: "sessionEnded", name: p.record.name }));
 		if (shuttingDown) return ended();
 		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
 		// Captured as a string: onExit runs from a `.finally` long after this
@@ -1842,7 +1852,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			try {
 				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
-				return { launched: false, line: launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }) };
+				return failed(launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }));
 			}
 			// Shutdown can begin while git creates the worktree: build no child
 			// after its sweep, and remove the worktree within its grace.
@@ -1999,12 +2009,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			},
 		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
 		if (started instanceof Error) {
-			// The child never started: settle its panel row and forget the run, so
-			// neither the panel nor list_agents offers it.
+			// The child never started: settle its panel row and forget the run.
 			live.finish(true);
-			registry.remove(p.record.taskId);
 			if (worktree) void cleanupWorktree(parentCwd, worktree);
-			return { launched: false, line: launchLine({ kind: "startFailed", name: p.record.name, osMessage: started.message }) };
+			return failed(launchLine({ kind: "startFailed", name: p.record.name, osMessage: started.message }));
 		}
 		const handle = started;
 		resident.handle = handle;
@@ -2085,10 +2093,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// fork launched after shutdown's stop-all sweep would outlive it.
 		const runtime = await runtimeOrError(ctx);
 		if (typeof runtime === "string") {
-			registry.remove(taskId);
+			forgetRuns([prepared]);
 			return { error: `Cannot fork: ${runtime}` };
 		}
-		if (shuttingDown) return { error: "The session ended before the fork started." };
+		if (shuttingDown) {
+			forgetRuns([prepared]);
+			return { error: "The session ended before the fork started." };
+		}
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
 			void stopAgent(taskId);
@@ -2376,26 +2387,29 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const lines: string[] = [...renamed, ...modelNotes];
 			const runtime = await runtimeOrError(ctx);
 			if (typeof runtime === "string") {
-				// Nothing launched: forget the runs so list_agents and SendMessage never offer them.
-				for (const p of prepared) registry.remove(p.record.taskId);
+				// Nothing launched.
+				forgetRuns(prepared);
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
 			let outputFile = false;
-			let running = 0;
+			const launchedRecords: AgentRunRecord[] = [];
 			for (const p of prepared) {
 				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
-				if (launched) running++;
+				if (launched) launchedRecords.push(p.record);
 				if (logPath) outputFile = true;
 			}
+			// Nothing runs, so no notification will come: fail the call rather
+			// than tell the model to wait (launchResident already forgot the runs).
+			if (launchedRecords.length === 0) return refuseCall({ kind: "noneLaunched", lines });
 			return {
 				content: [
 					{
 						type: "text",
-						text: subagentResultText().launched({ lines, running, outputFile }),
+						text: subagentResultText().launched({ lines, running: launchedRecords.length, outputFile }),
 					},
 				],
-				details: { agentRuns: records, background: true },
+				details: { agentRuns: launchedRecords, background: true },
 			};
 		},
 	});
