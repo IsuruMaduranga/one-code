@@ -286,19 +286,28 @@ if (lateTool !== undefined) {
 		(p.messages ?? []).some(
 			(m) => m?.role === "system" && Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_addition" && b.tool?.name === lateTool),
 		);
-	// The addendum lists the tools one per line after its first line, each line
-	// the name alone or `name: hint`.
-	const addendumIn = (p) => (p.messages ?? []).some((m) => JSON.stringify(m.content ?? "").includes(ADDENDUM_START) && JSON.stringify(m.content).includes(`\\n${lateTool}`));
-	/** The addendum's line for the tool: the name alone, or `name: hint`. */
+	/**
+	 * A message content's text: a string, or an array of blocks whose `text`
+	 * or nested `content` (a tool result's string or block array) is read in
+	 * turn. The addendum can ride a user message or a tool result.
+	 */
+	const textOf = (content) =>
+		typeof content === "string" ? content : Array.isArray(content) ? content.map((b) => (typeof b?.text === "string" ? b.text : textOf(b?.content))).join("\n") : "";
+	/**
+	 * The addendum's line for the tool in request `p`. The addendum lists the
+	 * tools one per line after its first line, each line the name alone or
+	 * `name: hint`.
+	 */
 	const addendumLine = (p) => {
 		for (const m of p.messages ?? []) {
-			const text = typeof m?.content === "string" ? m.content : Array.isArray(m?.content) ? m.content.map((b) => b?.text ?? "").join("\n") : "";
+			const text = textOf(m?.content);
 			if (!text.includes(ADDENDUM_START)) continue;
 			const line = text.split("\n").find((l) => l === lateTool || l.startsWith(`${lateTool}:`));
 			if (line !== undefined) return line;
 		}
 		return undefined;
 	};
+	const addendumIn = (p) => addendumLine(p) !== undefined;
 	const form = requests.some(additionIn) ? "tool_addition" : requests.some(addendumIn) ? "addendum" : undefined;
 	const called = responses.some((m) => (m.content ?? []).some((c) => c?.type === "toolCall" && c.name === lateTool));
 	console.log(`late tool ${lateTool}: first in request ${firstWith === -1 ? "none" : firstWith + 1}, announced by ${form ?? "nothing"}, ${called ? "called" : "not called"}`);
