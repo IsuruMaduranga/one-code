@@ -1832,7 +1832,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
-	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
+	): Promise<{ launched: boolean; line: string; logPath?: string; sessionEnded?: boolean }> => {
 		// A run that did not launch is forgotten here, on every failure path, so
 		// neither list_agents nor SendMessage ever offers it, and no call stays
 		// mapped to it.
@@ -1841,7 +1841,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			mainCallFor.delete(p.record.taskId);
 			return { launched: false, line };
 		};
-		const ended = () => failed(launchLine({ kind: "sessionEnded", name: p.record.name }));
+		const ended = () => ({ ...failed(launchLine({ kind: "sessionEnded", name: p.record.name })), sessionEnded: true });
 		if (shuttingDown) return ended();
 		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
 		// Captured as a string: onExit runs from a `.finally` long after this
@@ -2393,15 +2393,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}
 			let outputFile = false;
 			const launchedRecords: AgentRunRecord[] = [];
+			let sessionEnded = true;
 			for (const p of prepared) {
-				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
-				lines.push(line);
-				if (launched) launchedRecords.push(p.record);
-				if (logPath) outputFile = true;
+				const launch = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
+				lines.push(launch.line);
+				if (launch.launched) launchedRecords.push(p.record);
+				if (!launch.sessionEnded) sessionEnded = false;
+				if (launch.logPath) outputFile = true;
 			}
 			// Nothing runs, so no notification will come: fail the call rather
 			// than tell the model to wait (launchResident already forgot the runs).
-			if (launchedRecords.length === 0) return refuseCall({ kind: "noneLaunched", lines });
+			// When the session is ending every run says so, and a retry cannot help.
+			if (launchedRecords.length === 0) return refuseCall({ kind: "noneLaunched", lines, sessionEnded });
 			return {
 				content: [
 					{

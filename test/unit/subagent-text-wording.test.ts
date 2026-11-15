@@ -67,6 +67,14 @@ describe("the subagent result text", () => {
 		);
 	});
 
+	it("tells the model not to retry when every run failed because the session is ending", () => {
+		const text = subagentResultText().refused({ kind: "noneLaunched", lines: ["✗ x-1: the session ended before the agent started."], sessionEnded: true });
+		expect(text).toBe(
+			"✗ x-1: the session ended before the agent started.\n\nNo agent started, so no notification will arrive: the session is ending. Do not call Agent again; finish without it and tell the user what is left.",
+		);
+		expect(text).not.toContain("call Agent again,");
+	});
+
 	it("heads the agent catalog as Claude Code does and words each row", () => {
 		const row = subagentResultText().catalogRow({ name: "editor", description: "Edits prose", tools: { kind: "all", builtIn: false } });
 		expect(row.startsWith("- editor: Edits prose")).toBe(true);
