@@ -182,7 +182,10 @@ function hooksExtension(pi: ExtensionAPI) {
 		if (hasProjectHooks) {
 			projectAllowed = await projectHooksApproved(ctx.cwd, projectSources, {
 				hasUI: ctx.hasUI,
-				noPrompt: ctx.sessionEnded,
+				// A Notification fires when the user is away (a prompt waiting, the
+				// session idle): no consent dialog there, so unapproved project hooks
+				// are skipped until another event's prompt or a stored approval allows them.
+				noPrompt: ctx.sessionEnded || event === "Notification",
 				signal: ctx.signal,
 				confirm: (title, message) => consentDialog(pi.events, (signal) => ctx.ui.confirm(title, message, { signal: signal && ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal ?? ctx.signal })),
 				notify: (message) => notify(ctx, message),

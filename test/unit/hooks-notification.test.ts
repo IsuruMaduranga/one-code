@@ -1,32 +1,38 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import { runHookCommand } from "../../extensions/safety/hooks/executor.ts";
 import { DESKTOP_NOTIFICATION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 vi.mock("../../extensions/safety/hooks/executor.ts", () => ({ runHookCommand: vi.fn() }));
-vi.mock("../../extensions/safety/hooks/settings.ts", () => ({
-	loadHookSettings: () => ({
-		diagnostics: [],
-		sources: [
-			{
-				scope: "user",
-				config: {
-					Notification: [
-						{ matcher: "permission_prompt", hooks: [{ type: "command", command: "on-permission" }] },
-						{ hooks: [{ type: "command", command: "on-any" }] },
-					],
-				},
-			},
-		],
-	}),
-}));
+const USER_SOURCES = [
+	{
+		scope: "user",
+		config: {
+			Notification: [
+				{ matcher: "permission_prompt", hooks: [{ type: "command", command: "on-permission" }] },
+				{ hooks: [{ type: "command", command: "on-any" }] },
+			],
+		},
+	},
+];
+const settings = vi.hoisted(() => ({ sources: [] as unknown[] }));
+vi.mock("../../extensions/safety/hooks/settings.ts", () => ({ loadHookSettings: () => ({ diagnostics: [], sources: settings.sources }) }));
 vi.mock("../../extensions/safety/hooks/plugin-hooks.ts", () => ({ loadPluginHooks: () => [] }));
 
 const hook = vi.mocked(runHookCommand);
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+// The consent store lives under the product's state dir: keep it in a temp dir.
+const stateDir = mkdtempSync(join(tmpdir(), "oc-hooks-notification-"));
+afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
+
 beforeEach(() => {
+	settings.sources = USER_SOURCES;
 	hook.mockReset();
 	hook.mockResolvedValue({ exitCode: 0, timedOut: false, stdout: "", stderr: "", durationMs: 1 });
 });
@@ -59,5 +65,36 @@ describe("Notification hooks", () => {
 		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "late", notificationType: "idle_prompt" });
 		await settle();
 		expect(hook).not.toHaveBeenCalled();
+	});
+
+	it("never ask for project-hook consent: unapproved project hooks are skipped until another event's prompt approves them", async () => {
+		vi.stubEnv(envName("STATE_DIR"), stateDir);
+		settings.sources = [
+			{ scope: "project", path: "/p/.claude/settings.json", config: { Notification: [{ hooks: [{ type: "command", command: "project-notify" }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: "project-prompt" }] }] } },
+		];
+		const fake = createFakePi();
+		hooksExtension(fake.pi as never);
+		const confirm = vi.fn(async () => true);
+		const ctx = createFakeCtx({ hasUI: true, cwd: mkdtempSync(join(stateDir, "project-")) });
+		(ctx.ui as { confirm: unknown }).confirm = confirm;
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		await settle();
+
+		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "Prod is waiting for your input", notificationType: "idle_prompt" });
+		await settle();
+		expect(confirm).not.toHaveBeenCalled();
+		expect(hook).not.toHaveBeenCalled();
+
+		// The normal route: a prompt's UserPromptSubmit asks, the user approves.
+		await fake.fire("input", { text: "hi", source: "interactive" }, ctx);
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(hook.mock.calls.map((call) => call[0])).toEqual(["project-prompt"]);
+
+		hook.mockClear();
+		fake.events.emit(DESKTOP_NOTIFICATION_CHANNEL, { message: "Prod is waiting for your input", notificationType: "idle_prompt" });
+		await settle();
+		expect(hook.mock.calls.map((call) => call[0])).toEqual(["project-notify"]);
+		expect(confirm).toHaveBeenCalledTimes(1);
+		vi.unstubAllEnvs();
 	});
 });
