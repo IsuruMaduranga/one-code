@@ -32,7 +32,9 @@
  * standalone shape (the doomed span alone, trimmed to the window) is used.
  *
  * Any failure returns nothing, so pi's own compaction serves — a different
- * summary style, never a broken compaction. Turning the `compaction` feature off opts out.
+ * summary style, never a broken compaction. Each fallback is written to the
+ * side-call log, and a credential, provider or code failure is shown to the
+ * user once per session (fallback.ts). Turning the `compaction` feature off opts out.
  */
 
 import { sessionView } from "../../lib/agents/child-extensions.ts";
@@ -68,6 +70,8 @@ import { withoutThinking } from "../../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { compactionResultText } from "./text.ts";
+import { type CompactionFallback, fallbackNotice, fallbackReason, replyFallback, thrownFallback } from "./fallback.ts";
+import { logSideCallFailure } from "../../lib/side-calls/side-call-usage.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -134,9 +138,12 @@ function compactionExtension(pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });
 	});
+	/** Whether this session's user has been told a compaction fell back (once per session). */
+	let fallbackNoticed = false;
 	pi.on("session_start", () => {
 		captured = undefined;
 		publish(undefined);
+		fallbackNoticed = false;
 	});
 
 	// After a compaction the capture describes the pre-compaction request. A
@@ -175,9 +182,20 @@ function compactionExtension(pi: ExtensionAPI) {
 		// exactly what lies before it (cut.ts).
 		const { preparation, firstKeptEntryId } = claudeCodeCut(event.branchEntries as (SessionEntry & CutEntry)[], event.preparation, sessionEntryToContextMessages);
 
+		/** pi's compaction serves instead: log why, and tell the user once per session when they can act on it. */
+		const fallBack = (fallback: CompactionFallback): undefined => {
+			logSideCallFailure({ kind: "compaction", model, sessionId: ctx.sessionManager.getSessionId() }, fallbackReason(fallback));
+			const notice = fallbackNotice(fallback, `${model.provider}/${model.id}`);
+			if (notice && !fallbackNoticed) {
+				fallbackNoticed = true;
+				ctx.ui.notify(notice, "warning");
+			}
+			return undefined;
+		};
+
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) return undefined;
+			if (!auth.ok) return fallBack({ kind: "credentials", detail: auth.error });
 
 			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
 
@@ -270,14 +288,17 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			// A failed or capped stream can carry partial text. Never replace the
 			// conversation with that incomplete checkpoint; let pi retry its summary.
-			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") return undefined;
+			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
+				const fallback = replyFallback(result, event.signal.aborted, COMPACTION_TIMEOUT_MS);
+				return fallback ? fallBack(fallback) : undefined;
+			}
 
 			const text = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")
 				.map((block) => block.text)
 				.join("\n");
 			const summary = extractSummary(text);
-			if (!summary) return undefined;
+			if (!summary) return fallBack({ kind: "noSummary" });
 
 			return {
 				compaction: {
@@ -288,9 +309,10 @@ function compactionExtension(pi: ExtensionAPI) {
 					usage: result.usage,
 				},
 			};
-		} catch {
+		} catch (error) {
 			// pi's default compaction runs instead: degraded style, never broken.
-			return undefined;
+			if (event.signal.aborted) return undefined;
+			return fallBack(thrownFallback(error));
 		}
 	});
 }
