@@ -1842,6 +1842,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			try {
 				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
+				registry.remove(p.record.taskId);
 				return { launched: false, line: launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }) };
 			}
 			// Shutdown can begin while git creates the worktree: build no child
@@ -2381,15 +2382,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
 			let outputFile = false;
-			let running = 0;
+			const launchedRecords: AgentRunRecord[] = [];
 			for (const p of prepared) {
 				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
-				if (launched) running++;
+				if (launched) launchedRecords.push(p.record);
 				if (logPath) outputFile = true;
 			}
 			// Nothing runs, so no notification will come: fail the call rather
 			// than tell the model to wait, and forget the runs as above.
+			const running = launchedRecords.length;
 			if (running === 0) {
 				for (const p of prepared) registry.remove(p.record.taskId);
 				return refuseCall({ kind: "noneLaunched", lines });
@@ -2401,7 +2403,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						text: subagentResultText().launched({ lines, running, outputFile }),
 					},
 				],
-				details: { agentRuns: records, background: true },
+				details: { agentRuns: launchedRecords, background: true },
 			};
 		},
 	});
