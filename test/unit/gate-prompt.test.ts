@@ -1,21 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
 import { openGatePrompt } from "../../extensions/lib/consent/gate-prompt.ts";
-import { PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import {
+	AttentionNotifier,
+	type DesktopNotification,
+	INTERACTION_THRESHOLD_MS,
+	PROMPT_ATTENTION_CHANNEL,
+	PROMPT_ATTENTION_WITHDRAWN_CHANNEL,
+	type PromptAttention,
+	type PromptAttentionWithdrawn,
+} from "../../extensions/lib/notify/desktop.ts";
 
-/** A bus that records every emit as `channel: message` (or the bare channel). */
-function bus() {
+/** A bus that records descriptions and withdrawals, and forwards both to `listener`. */
+function bus(listener?: (channel: string, data: unknown) => void) {
 	const log: string[] = [];
 	const events = {
 		emit: (channel: string, data: unknown) => {
-			const message = (data as { message?: string } | undefined)?.message;
-			log.push(channel === PROMPT_ATTENTION_CHANNEL ? `described: ${message}` : channel);
+			if (channel === PROMPT_ATTENTION_CHANNEL) log.push(`described: ${(data as PromptAttention).message}`);
+			else if (channel === PROMPT_ATTENTION_WITHDRAWN_CHANNEL) log.push("withdrawn");
+			else log.push(channel);
+			listener?.(channel, data);
 		},
 	};
 	return { events, log };
 }
 
 describe("openGatePrompt", () => {
-	it("announces the description, then opens the prompt and returns its answer", async () => {
+	it("announces the description, opens the prompt, returns its answer, then withdraws the description", async () => {
 		const { events, log } = bus();
 		const answer = await openGatePrompt({
 			events,
@@ -26,11 +36,19 @@ describe("openGatePrompt", () => {
 			},
 		});
 		expect(answer).toBe("Yes");
-		expect(log[0]).toBe("described: Prod needs your permission to use Bash");
-		expect(log[1]).toBe("opened");
+		expect(log).toEqual(["described: Prod needs your permission to use Bash", "opened", "withdrawn"]);
 	});
 
-	it("opens an undescribed prompt without announcing anything", async () => {
+	it("withdraws the description it announced, and only that one", async () => {
+		const ids: unknown[] = [];
+		const { events } = bus((channel, data) => ids.push((data as { id: unknown }).id));
+		await openGatePrompt({ events, attention: "described", open: async () => "Yes" });
+		expect(ids).toHaveLength(2);
+		expect(typeof ids[0]).toBe("object");
+		expect(ids[1]).toBe(ids[0]);
+	});
+
+	it("opens an undescribed prompt without announcing or withdrawing anything", async () => {
 		const { events, log } = bus();
 		const open = vi.fn(async () => "typed");
 		expect(await openGatePrompt({ events, attention: undefined, open })).toBe("typed");
@@ -48,6 +66,23 @@ describe("openGatePrompt", () => {
 		expect(log).toEqual([]);
 	});
 
+	it("withdraws the description when the signal aborts while the prompt is open", async () => {
+		const { events, log } = bus();
+		const controller = new AbortController();
+		const answer = await openGatePrompt({
+			events,
+			attention: "described",
+			signal: controller.signal,
+			open: () =>
+				new Promise<string | undefined>((resolve) => {
+					controller.signal.addEventListener("abort", () => resolve(undefined));
+					controller.abort();
+				}),
+		});
+		expect(answer).toBeUndefined();
+		expect(log).toEqual(["described: described", "withdrawn"]);
+	});
+
 	it("neither announces nor opens with no UI (the gate fails closed)", async () => {
 		const { events, log } = bus();
 		const open = vi.fn(async () => "Yes");
@@ -56,7 +91,7 @@ describe("openGatePrompt", () => {
 		expect(log).toEqual([]);
 	});
 
-	it("lets a throwing UI check propagate without opening (a stale context)", async () => {
+	it("lets a throwing UI check propagate without announcing or opening (a stale context)", async () => {
 		const { events, log } = bus();
 		const open = vi.fn(async () => "Yes");
 		await expect(openGatePrompt({ events, attention: "described", hasUI: () => { throw new Error("stale ctx"); }, open })).rejects.toThrow("stale ctx");
@@ -64,8 +99,107 @@ describe("openGatePrompt", () => {
 		expect(log).toEqual([]);
 	});
 
-	it("passes an opener's rejection through", async () => {
-		const { events } = bus();
-		await expect(openGatePrompt({ events, attention: undefined, open: async () => { throw new Error("boom"); } })).rejects.toThrow("boom");
+	it("withdraws the description when the opener rejects, and passes the rejection through", async () => {
+		const { events, log } = bus();
+		await expect(openGatePrompt({ events, attention: "described", open: async () => { throw new Error("boom"); } })).rejects.toThrow("boom");
+		expect(log).toEqual(["described: described", "withdrawn"]);
+	});
+
+	it("withdraws the description when the opener throws before returning a promise", async () => {
+		const { events, log } = bus();
+		const open = (): Promise<string> => {
+			throw new Error("This extension ctx is stale");
+		};
+		await expect(openGatePrompt({ events, attention: "described", open })).rejects.toThrow("stale");
+		expect(log).toEqual(["described: described", "withdrawn"]);
+	});
+});
+
+/** The desktop notifier on a hand-driven clock, fed from the bus as the desktop-notify extension feeds it. */
+function notifierOnBus() {
+	let now = 1_000_000;
+	const timers: Array<{ at: number; every: number; fn: () => void; live: boolean }> = [];
+	const sent: DesktopNotification[] = [];
+	const notifier = new AttentionNotifier(
+		{
+			now: () => now,
+			every: (ms, fn) => {
+				const timer = { at: now + ms, every: ms, fn, live: true };
+				timers.push(timer);
+				return () => void (timer.live = false);
+			},
+			after: (ms, fn) => {
+				const timer = { at: now + ms, every: 0, fn, live: true };
+				timers.push(timer);
+				return () => void (timer.live = false);
+			},
+			notify: (n) => sent.push(n),
+		},
+		"Prod",
+	);
+	const advance = (ms: number) => {
+		now += ms;
+		for (const timer of timers) {
+			while (timer.live && timer.at <= now) {
+				if (timer.every) timer.at += timer.every;
+				else timer.live = false;
+				timer.fn();
+			}
+		}
+	};
+	const { events } = bus((channel, data) => {
+		if (channel === PROMPT_ATTENTION_CHANNEL) notifier.describeNextPrompt((data as PromptAttention).message, (data as PromptAttention).id);
+		if (channel === PROMPT_ATTENTION_WITHDRAWN_CHANNEL) notifier.withdrawPrompt((data as PromptAttentionWithdrawn).id);
+	});
+	return { notifier, events, sent, advance };
+}
+
+describe("openGatePrompt and the desktop notifier", () => {
+	// The bug: a described prompt that never opened left its description behind,
+	// and the next prompt to open (a panel the user opened while idle) took it,
+	// notifying "needs your permission" 6 s later for the user's own panel.
+	it("a described prompt that never opened leaves no description for the user's next panel", async () => {
+		const h = notifierOnBus();
+		await expect(
+			openGatePrompt({
+				events: h.events,
+				attention: "Prod needs your permission to use Bash",
+				open: () => {
+					throw new Error("This extension ctx is stale");
+				},
+			}),
+		).rejects.toThrow();
+		h.notifier.promptOpened(); // the user opens /permissions while idle
+		h.advance(60_000);
+		expect(h.sent).toEqual([]);
+	});
+
+	it("a described prompt pi never reported opening (nested in another prompt) leaves no description behind", async () => {
+		const h = notifierOnBus();
+		await openGatePrompt({ events: h.events, attention: "Prod needs your permission to use Bash", open: async () => "Yes" });
+		h.notifier.promptOpened();
+		h.advance(60_000);
+		expect(h.sent).toEqual([]);
+	});
+
+	it("a described prompt that opens still notifies by its description while it waits", async () => {
+		const h = notifierOnBus();
+		let answer!: (choice: string) => void;
+		const pending = openGatePrompt({
+			events: h.events,
+			attention: "Prod needs your permission to use Bash",
+			open: () =>
+				new Promise<string>((resolve) => {
+					h.notifier.promptOpened(); // pi's ui_prompt_start
+					answer = (choice) => {
+						h.notifier.promptClosed(); // pi's ui_prompt_end
+						resolve(choice);
+					};
+				}),
+		});
+		h.advance(INTERACTION_THRESHOLD_MS);
+		expect(h.sent).toEqual([{ message: "Prod needs your permission to use Bash", notificationType: "permission_prompt" }]);
+		answer("Yes");
+		expect(await pending).toBe("Yes");
 	});
 });

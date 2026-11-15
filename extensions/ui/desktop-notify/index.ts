@@ -22,7 +22,9 @@ import {
 	notificationChannel,
 	notificationWrites,
 	PROMPT_ATTENTION_CHANNEL,
+	PROMPT_ATTENTION_WITHDRAWN_CHANNEL,
 	type PromptAttention,
+	type PromptAttentionWithdrawn,
 } from "../../lib/notify/desktop.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
@@ -74,8 +76,12 @@ function desktopNotifyExtension(pi: ExtensionAPI) {
 		if (event.source === "interactive") notifier?.submittedPrompt();
 	});
 	pi.events.on(PROMPT_ATTENTION_CHANNEL, (data) => {
-		const message = (data as Partial<PromptAttention> | undefined)?.message;
-		if (typeof message === "string") notifier?.describeNextPrompt(message);
+		const { message, id } = (data as Partial<PromptAttention> | undefined) ?? {};
+		if (typeof message === "string") notifier?.describeNextPrompt(message, typeof id === "object" && id !== null ? id : undefined);
+	});
+	pi.events.on(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, (data) => {
+		const id = (data as Partial<PromptAttentionWithdrawn> | undefined)?.id;
+		if (typeof id === "object" && id !== null) notifier?.withdrawPrompt(id);
 	});
 	pi.on("agent_start", () => notifier?.turnStarted());
 	pi.on("agent_settled", () => notifier?.turnSettled());

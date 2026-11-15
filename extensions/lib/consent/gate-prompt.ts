@@ -8,7 +8,8 @@
  * hand: an aborted signal or a session with no UI resolves `undefined` without
  * opening anything (the caller reads that as dismissed, so the gate fails
  * closed), and the description the desktop notifier names the prompt by is
- * announced only right before the prompt opens.
+ * announced only right before the prompt opens and withdrawn once it settles,
+ * however it settles (answered, dismissed, aborted, or the opener threw).
  *
  * The caller keeps everything else: its queue (call this from inside it, so
  * the announcement follows the wait), the exact `ctx.ui` call in `open` (same
@@ -40,6 +41,12 @@ export async function openGatePrompt<T>(options: GatePromptOptions<T>): Promise<
 	const { events, attention, signal, hasUI, open } = options;
 	if (signal?.aborted) return undefined;
 	if (hasUI && !hasUI()) return undefined;
-	if (attention !== undefined) announcePrompt(events, attention);
-	return open();
+	const withdraw = attention !== undefined ? announcePrompt(events, attention) : undefined;
+	try {
+		return await open();
+	} finally {
+		// A prompt that opened took its description already (pi's
+		// ui_prompt_start); one that never did must not describe the next.
+		withdraw?.();
+	}
 }
