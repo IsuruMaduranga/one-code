@@ -53,8 +53,11 @@ mkdir -p "$PROJECT"
 git -C "$PROJECT" init -q
 printf '# Probe\n\nThrowaway project for the late-tool cache probe.\n' > "$PROJECT/CLAUDE.md"
 
-# The sleep keeps the first request's turn open until the tool has arrived.
-PROMPT='Run the shell command sleep 3 with the bash tool. After it finishes, if a tool named late_echo is available, call it with text hi (load it with tool_search first if it is deferred). Then run echo after-late with the bash tool. Then reply with exactly the word done.'
+# The first bash call keeps the first request's turn open until the tool has
+# arrived (the fixture registers it 200 ms after the first request). It leads
+# with echo because the bash tool refuses a foreground command that leads with
+# sleep, which made the old `sleep 3` return at once without waiting.
+PROMPT='Run the shell command echo before-late && sleep 1 with the bash tool. After it finishes, if a tool named late_echo is available, call it with text hi (load it with tool_search first if it is deferred). Then run echo after-late with the bash tool. Then reply with exactly the word done.'
 
 echo "model:   $MODEL"
 echo "pi:      $(node "$PI_BIN" --version 2>/dev/null | tail -1)"
