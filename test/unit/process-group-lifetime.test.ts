@@ -5,14 +5,8 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { detachedSpawnOptions, rememberProcessGroup, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow, spawnShellCommand } from "../../extensions/lib/shell-run/shell-spawn.ts";
+import { alive, until } from "./helpers/process-alive.ts";
 
-const alive = (pid: number) => {
-	try { process.kill(pid, 0); return true; } catch { return false; }
-};
-const until = async (condition: () => boolean) => {
-	for (let i = 0; i < 60 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
-	return condition();
-};
 
 describe.skipIf(process.platform === "win32")("remembered process groups", () => {
 	it.each(["quit", "natural", "SIGINT", "SIGTERM", "SIGHUP"] as const)("a completed shell's child survives until its owner exits (%s)", async (how) => {

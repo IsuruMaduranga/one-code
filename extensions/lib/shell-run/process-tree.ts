@@ -43,7 +43,7 @@ import { type ChildProcess, execFile } from "node:child_process";
 import { system32Path } from "../profile/paths.ts";
 import { envName } from "../profile/brand.mjs";
 
-/** SIGTERM → SIGKILL grace for a stopped background tree (bash tasks, monitors). */
+/** SIGTERM → SIGKILL grace for a stopped tree (bash tasks, monitors, what a language server leaves). */
 export const KILL_GRACE_MS = 2_000;
 
 /** After `exit`, how long buffered stdio may keep arriving before the wait settles. */

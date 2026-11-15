@@ -16,14 +16,10 @@
  *   sleeping a fixed interval, with a timeout and a last-known fallback.
  * - Child handles are unref'd and shut down explicitly, so a one-shot `pi -p`
  *   run still exits.
- * - The server runs in its own process group, owned until this process exits.
- *   A server is often a script in front of the real process (a launcher
- *   script that starts a JVM), and many servers ignore both a closed stdin
- *   and the `processId` they were given, so only a signal to the whole group
- *   ends them: the fallback kill in `stop()` reaches the real process, and a
- *   process that exits without a `session_shutdown` (a crash: pi calls
- *   `process.exit` from its uncaught-exception handler) still ends the
- *   group from its `exit` hook. Only a SIGKILL of this process leaves it.
+ * - The server runs in its own process group, owned until this process exits
+ *   (`lib/shell-run/process-tree.ts`): a server is often a launcher script in
+ *   front of the real process, and may ignore a closed stdin and `processId`,
+ *   so `stop()` and a crash (no `session_shutdown`) signal the whole group.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -34,7 +30,7 @@ import type { LspDiagnostic } from "./format.ts";
 import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../../lib/app/app-launch.mjs";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { detachedSpawnOptions, killProcessTree, rememberProcessGroup, unrefHandle } from "../../lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, killProcessTree, rememberedGroupAlive, rememberProcessGroup, stopProcessTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -444,6 +440,8 @@ export class LspClient {
 			timer.unref?.();
 			child.once("exit", () => {
 				clearTimeout(timer);
+				// A launcher can exit and leave the server it started running.
+				if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
 				resolve();
 			});
 		});

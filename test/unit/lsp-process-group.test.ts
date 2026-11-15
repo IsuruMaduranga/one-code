@@ -1,62 +1,27 @@
 /**
  * A server behind a launcher script, that ignores `exit` and a closed stdin
  * (as a JVM server started by a shell script does): the client must end the
- * real process, not only the script, both when `stop()` falls back to a kill
- * and when this process exits without stopping it (a crash, where pi calls
- * `process.exit` without a `session_shutdown`).
+ * real process, not only the script, when `stop()` falls back to a kill,
+ * when the script exits and leaves the server running, and when this
+ * process exits without stopping it (a crash, where pi calls `process.exit`
+ * without a `session_shutdown`).
  */
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient } from "../../extensions/tools/lsp/client.ts";
-
-/** Answers `initialize` and `shutdown`, writes its pid, and never exits on its own. */
-const STUBBORN_SERVER = `
-const { writeFileSync } = require("node:fs");
-writeFileSync(process.env.PID_FILE, String(process.pid));
-setInterval(() => {}, 1000);
-let buffer = Buffer.alloc(0);
-const send = (message) => {
-	const body = Buffer.from(JSON.stringify({ jsonrpc: "2.0", ...message }));
-	process.stdout.write(Buffer.concat([Buffer.from("Content-Length: " + body.length + "\\r\\n\\r\\n"), body]));
-};
-process.stdin.on("data", (chunk) => {
-	buffer = Buffer.concat([buffer, chunk]);
-	for (;;) {
-		const end = buffer.indexOf("\\r\\n\\r\\n");
-		if (end < 0) return;
-		const length = Number(/Content-Length: (\\d+)/i.exec(buffer.subarray(0, end).toString())[1]);
-		if (buffer.length < end + 4 + length) return;
-		const message = JSON.parse(buffer.subarray(end + 4, end + 4 + length).toString());
-		buffer = buffer.subarray(end + 4 + length);
-		if (message.method === "initialize" || message.method === "shutdown") send({ id: message.id, result: message.method === "initialize" ? { capabilities: {} } : null });
-	}
-});
-process.stdin.on("error", () => {});
-`;
+import { alive, until } from "./helpers/process-alive.ts";
+import { RECORDING_SERVER } from "./helpers/recording-lsp-server.ts";
 
 /** `; :` keeps the shell from replacing itself with node: the server is the script's child. */
-const launcher = (pidFile: string) => ({
-	config: { command: "/bin/sh", args: ["-c", `"${process.execPath}" -e "$STUBBORN_SERVER"; :`] },
-	env: { STUBBORN_SERVER: STUBBORN_SERVER, PID_FILE: pidFile },
+const launcher = (pidFile: string, stubborn: "1" | "launcher" = "1") => ({
+	config: { command: "/bin/sh", args: ["-c", `"${process.execPath}" -e "$SERVER"; :`] },
+	env: { SERVER: RECORDING_SERVER, PID_FILE: pidFile, STUBBORN: stubborn },
 });
-
-const alive = (pid: number) => {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch {
-		return false;
-	}
-};
-const until = async (condition: () => boolean, tries = 80) => {
-	for (let i = 0; i < tries && !condition(); i++) await new Promise((done) => setTimeout(done, 50));
-	return condition();
-};
 
 describe.skipIf(process.platform === "win32")("a language server behind a launcher script", () => {
 	let dir: string;
@@ -73,16 +38,24 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("is ended by stop() when it ignores exit", async () => {
-		const { config, env } = launcher(pidFile);
-		const client = new LspClient(config, dir, { env });
-		await client.start();
+	const readServerPid = async () => {
 		expect(await until(() => existsSync(pidFile))).toBe(true);
 		serverPid = Number(readFileSync(pidFile, "utf8"));
 		expect(alive(serverPid)).toBe(true);
+		return serverPid;
+	};
+
+	it.each([
+		["ignores exit", "1"],
+		["outlives its launcher", "launcher"],
+	] as const)("is ended by stop() when it %s", async (_, stubborn) => {
+		const { config, env } = launcher(pidFile, stubborn);
+		const client = new LspClient(config, dir, { env });
+		await client.start();
+		const pid = await readServerPid();
 
 		await client.stop();
-		expect(await until(() => !alive(serverPid!))).toBe(true);
+		expect(await until(() => !alive(pid))).toBe(true);
 	});
 
 	it("is ended when its owner crashes without stopping it", async () => {
@@ -110,14 +83,12 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		try {
 			const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${stderr}`)))]);
 			expect(String(chunk)).toContain("ready");
-			expect(await until(() => existsSync(pidFile))).toBe(true);
-			serverPid = Number(readFileSync(pidFile, "utf8"));
-			expect(alive(serverPid)).toBe(true);
+			const pid = await readServerPid();
 
 			owner.stdin.write("crash\n");
 			const [code] = await exited;
 			expect(code).toBe(1);
-			expect(await until(() => !alive(serverPid!))).toBe(true);
+			expect(await until(() => !alive(pid))).toBe(true);
 		} finally {
 			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
 		}
