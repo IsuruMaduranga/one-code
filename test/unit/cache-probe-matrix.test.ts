@@ -74,7 +74,7 @@ describe("cache-probe matrix login leg (offline CLI)", () => {
 			});
 			expect(result.error).toBeUndefined();
 			expect(result.stdout).toContain("--- late-tool phase");
-			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).toContain("--- credential and model check (session, auto-mode and late-tool phases)");
 			const calls = readFileSync(invocations, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
 			const late = calls.find((args) => args.some((arg) => arg.endsWith("late-tool-fixture.ts")));
 			expect(late).toBeDefined();
@@ -83,5 +83,31 @@ describe("cache-probe matrix login leg (offline CLI)", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("cache-probe credential check (offline CLI)", () => {
+	it("checks only the credential on a run that does not pin its side models", () => {
+		const root = mkdtempSync(join(tmpdir(), "cache-probe-key-"));
+		try {
+			const cli = join(root, "fake-pi.mjs");
+			writeFileSync(cli, fakePi);
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--expect-auth", "key", "--no-classifier", "--no-review", "--no-reader", "--no-late-tool"], {
+				encoding: "utf8",
+				timeout: 30_000,
+				env: { ...process.env, PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: join(root, "invocations.jsonl") },
+			});
+			expect(result.error).toBeUndefined();
+			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).not.toContain("model check");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses the one-model check without the credential record it reads", () => {
+		const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--expect-one-model"], { encoding: "utf8", timeout: 30_000 });
+		expect(result.status).toBe(2);
+		expect(result.stderr).toContain("--expect-one-model");
 	});
 });

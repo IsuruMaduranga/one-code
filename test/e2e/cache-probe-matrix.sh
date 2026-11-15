@@ -109,7 +109,7 @@ elif login_dir="$(login_agent_dir)"; then
 	echo "login:   $login_dir/auth.json (anthropic login)"
 	if env -u ANTHROPIC_API_KEY -u ANTHROPIC_OAUTH_TOKEN -u CLAUDE_CODE_SUBAGENT_MODEL \
 		PI_CODING_AGENT_DIR="$login_dir" ONECODE_SUBAGENT_MODEL="$login_model" \
-		bash "$REPO/test/e2e/cache-probe.sh" "$login_model" --repo-only --expect-auth login --no-review --no-reader --late-tool-form tool_addition; then
+		bash "$REPO/test/e2e/cache-probe.sh" "$login_model" --repo-only --expect-auth login --expect-one-model --no-review --no-reader --late-tool-form tool_addition; then
 		summary+=("PASS  $login_model on the Anthropic login")
 	else
 		summary+=("FAIL  $login_model on the Anthropic login")
