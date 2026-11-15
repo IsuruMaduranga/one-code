@@ -161,10 +161,9 @@ export interface SubagentsResultText {
  * The anti-fabrication sentence, carried by the RESULT of a background spawn
  * and of a message to a running agent, not only by the Agent tool's
  * description: the model reads it at the point of action. It ends on what to
- * do instead (keep working or answer the user), never on fetching the result:
- * an earlier clause that sent the model to a blocking task_output whenever the
- * request asked for the agent's findings turned nearly every delegation into a
- * poll (decisions/subagents-workflows.md).
+ * do instead (keep working or answer the user), never on fetching the result,
+ * so the model waits for the notification rather than polling
+ * (decisions/subagents-workflows.md).
  */
 const PENDING_RESULT =
 	"You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.";
