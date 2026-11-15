@@ -54,6 +54,15 @@ describe("cache-probe-classifier on history breakpoints", () => {
 		expect(status).toBe(0);
 	});
 
+	it("checks an unmarked request after a marked one on another model under the implicit rule, with a WARN", () => {
+		// The classifier moved to a model whose payload has no hook: nothing skipped, nothing marked.
+		const unhooked = { ...row(second, 0, 0), model: "openai/gpt-older", cacheBreakpoints: false };
+		const { status, out } = probe([row(first, 0, 2), unhooked]);
+		expect(out).not.toContain("FAIL");
+		expect(out).toContain("WARN  classifier call 2 read 0 cached tokens");
+		expect(status).toBe(0);
+	});
+
 	it("checks a log without the cache-hook fields under the implicit rule", () => {
 		const older = (history: string) => {
 			const { cacheBreakpoints: _b, cacheEdited: _e, cacheMarks: _m, systemChars: _s, historyChars: _h, ...rest } = row(history, 0, 2);

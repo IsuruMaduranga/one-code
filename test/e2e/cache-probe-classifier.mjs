@@ -20,9 +20,10 @@
  *      GPT-5.6 and later): at least request N's history (the row's
  *      `systemChars` plus `historyChars`, its system prompt and transcript up
  *      to the pending action), estimated as that share of its tokens, less one
- *      cache block; a miss is a FAIL. A request whose hook left the payload
- *      alone (`cacheEdited` false), and the request after it, are checked as
- *      an implicit cache, with a WARN. A skipped request's implicit
+ *      cache block; a miss is a FAIL. A request without history breakpoints
+ *      (its hook left the payload alone, `cacheEdited` false, or its model
+ *      has no hook), and the request after it, are checked as an implicit
+ *      cache, with a WARN. A skipped request's implicit
  *      breakpoint also writes the action and stage text, which no later
  *      request repeats, so read + write overshoots there.
  *      Implicit caches (Codex, OpenRouter): at least the share of request N's
@@ -110,9 +111,11 @@ for (let i = 0; i < calls.length; i++) {
 			const at = firstDiff(prevTranscript, cur.user);
 			failures.push(`transcript of call ${i + 1} does not extend call ${i}'s (first difference at char ${at}: …${JSON.stringify(prevTranscript.slice(at, at + 60))})`);
 		}
-		// A request the hook left alone carries no history breakpoints: the one
-		// after it has none to read back to, and it cannot read the marked ones.
-		const marked = historyMarks && prev.historyMarks && !cur.skipped;
+		// Only a marked request after a marked one is held to the marked
+		// history: a request without breakpoints (its hook left it alone, or
+		// its model has no hook) cannot read the marked prefix, and the one
+		// after it has none to read back to.
+		const marked = historyMarks && prev.historyMarks && cur.historyMarks;
 		if (historyMarks && prev.skipped) warnings.push(`classifier call ${i} had the cache hook but its payload was left alone (a blank part or an unexpected shape); call ${i + 1} is checked as an implicit cache`);
 		if (historyMarks && cur.skipped) warnings.push(`classifier call ${i + 1} had the cache hook but it left this request unmarked (a blank part or an unexpected shape); it is checked as an implicit cache`);
 		need = explicit
