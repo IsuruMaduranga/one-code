@@ -1816,7 +1816,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
-	): Promise<{ launched: boolean; line: string }> => {
+	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
 		const ended = () => {
 			registry.remove(p.record.taskId);
 			return { launched: false, line: launchLine({ kind: "sessionEnded", name: p.record.name }) };
@@ -2024,6 +2024,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return {
 			launched: true,
 			line: launchLine({ kind: "running", name: p.record.name, taskId: p.record.taskId, ...(logPath ? { logPath } : {}) }),
+			...(logPath ? { logPath } : {}),
 		};
 	};
 
@@ -2367,15 +2368,17 @@ function subagentsExtension(pi: ExtensionAPI) {
 				for (const p of prepared) registry.remove(p.record.taskId);
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
+			let outputFile = false;
 			for (const p of prepared) {
-				const { line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
+				const { line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
+				if (logPath) outputFile = true;
 			}
 			return {
 				content: [
 					{
 						type: "text",
-						text: subagentResultText().launched({ lines }),
+						text: subagentResultText().launched({ lines, outputFile }),
 					},
 				],
 				details: { agentRuns: records, background: true },

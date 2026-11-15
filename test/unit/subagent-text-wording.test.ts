@@ -31,14 +31,19 @@ describe("the subagent result text", () => {
 	it("words a background launch, line by line", () => {
 		expect(subagentResultText().launchLine({ kind: "running", name: "x-1", taskId: "t", logPath: "/l" })).toBe("⏳ x-1 (task t) running in background — output file: /l");
 		expect(subagentResultText().launchLine({ kind: "startFailed", name: "x-1", osMessage: "boom" })).toBe("✗ x-1: could not start: boom");
-		expect(subagentResultText().launched({ lines: ["L"] })).toBe(
-			"L\n\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work — avoid working with the same files or topics it is using.\nDo NOT Read or tail the output file while it runs. If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).",
+		expect(subagentResultText().launched({ lines: ["L"], outputFile: true })).toBe(
+			"L\n\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work — avoid working with the same files or topics it is using.\nDo NOT read or tail the output file while it runs. If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).",
 		);
-		expect(subagentResultText().launched({ lines: ["L1", "L2"] })).toContain("The agents are working in the background. You will be notified automatically when each one completes.");
+		// No launch line names an output file: the result does not mention one.
+		expect(subagentResultText().launched({ lines: ["L"], outputFile: false })).toBe(
+			"L\n\nThe agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.\nDo not duplicate this agent's work — avoid working with the same files or topics it is using.\nIf the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).",
+		);
+		expect(subagentResultText().launched({ lines: ["L1", "L2"], outputFile: true })).toContain("The agents are working in the background. You will be notified automatically when each one completes.");
+		expect(subagentResultText().launched({ lines: ["L1", "L2"], outputFile: true })).toContain("Do NOT read or tail the output file while they run.");
 		expect(subagentResultText().sentToResident({ name: "x", taskId: "t" })).toBe(
 			"Message sent to resident agent x (task t). The reply will arrive as a task notification on its own. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.",
 		);
-		for (const text of [subagentResultText().launched({ lines: ["L"] }), subagentResultText().sent({ name: "x", taskId: "t" }), subagentResultText().nextTurn({ name: "x" })]) {
+		for (const text of [subagentResultText().launched({ lines: ["L"], outputFile: true }), subagentResultText().sent({ name: "x", taskId: "t" }), subagentResultText().nextTurn({ name: "x" })]) {
 			expect(text).not.toContain("task_output");
 		}
 	});

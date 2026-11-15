@@ -132,8 +132,8 @@ export interface SubagentsResultText {
 	stats(p: { toolCalls: number; tokens?: string; cost?: number }): string;
 	/** A one-shot session's inline report; `note` is the shared one-shot note. */
 	inlineReport(p: { name: string; taskId: string; note: string }): string;
-	/** A background launch's result. */
-	launched(p: { lines: string[] }): string;
+	/** A background launch's result; `outputFile`: some launched agent writes an output file (its line names it). */
+	launched(p: { lines: string[]; outputFile: boolean }): string;
 	launchLine(line: LaunchLine): string;
 	/** SendMessage results. */
 	steered(p: { name: string }): string;
@@ -281,6 +281,7 @@ const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${
 
 /** The task tools in the results and notes of a run: what still holds when one is off. */
 const RESULT_PASSAGES: ToolPassages = {
+	read: [["Do NOT read or tail the output file", "Do NOT tail the output file"]],
 	task_output: [[", and task_output does not know this id.", "."]],
 	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], " Use task_stop to end one."],
 };
@@ -317,10 +318,12 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			results(`${name} (task ${taskId}): ${note} Its report follows here; there is no background task to poll, and task_output does not know this id.`),
 		// The agent's own launch result in the reference wording, plus what only
 		// One Code has (several runs per call, task_stop, steering by SendMessage).
-		launched: ({ lines }) => {
+		launched: ({ lines, outputFile }) => {
 			const many = lines.length > 1;
+			// One Code's own read tool, and only for a file a launch line names.
+			const noRead = outputFile ? `Do NOT read or tail the output file while ${many ? "they run" : "it runs"}. ` : "";
 			return results(
-				`${lines.join("\n")}\n\n${many ? "The agents are" : "The agent is"} working in the background. You will be notified automatically when ${many ? "each one completes" : "it completes"}. ${PENDING_RESULT}\nDo not duplicate ${many ? "these agents'" : "this agent's"} work — avoid working with the same files or topics ${many ? "they are" : "it is"} using.\nDo NOT Read or tail the output file while ${many ? "they run" : "it runs"}. If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+				`${lines.join("\n")}\n\n${many ? "The agents are" : "The agent is"} working in the background. You will be notified automatically when ${many ? "each one completes" : "it completes"}. ${PENDING_RESULT}\nDo not duplicate ${many ? "these agents'" : "this agent's"} work — avoid working with the same files or topics ${many ? "they are" : "it is"} using.\n${noRead}If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
 			);
 		},
 		launchLine,
