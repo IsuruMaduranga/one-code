@@ -110,6 +110,24 @@ describe("/btw in RPC", () => {
 		expect(t.ui.notify).toHaveBeenCalledWith("Side question failed: Connection closed", "error");
 	});
 
+	it("names pi's credential error, not a generic missing key", async () => {
+		const t = setup();
+		(t.ctx.modelRegistry as { getApiKeyAndHeaders: unknown }).getApiKeyAndHeaders = async () => ({ ok: false, error: "OAuth refresh failed for anthropic" });
+		await t.ask("A question?");
+		expect(complete).not.toHaveBeenCalled();
+		expect(t.ui.notify).toHaveBeenCalledWith(
+			"Side question failed: No usable credentials for anthropic/test: OAuth refresh failed for anthropic. Log in with /login or set the provider's API key.",
+			"error",
+		);
+	});
+
+	it("reports the error pi's runtime returns for a call it cannot send", async () => {
+		const t = setup();
+		complete.mockResolvedValue({ content: [], stopReason: "error", errorMessage: "Provider is not configured: anthropic", usage: {} } as never);
+		await t.ask("A question?");
+		expect(t.ui.notify).toHaveBeenCalledWith("Side question failed: Provider is not configured: anthropic", "error");
+	});
+
 	it("aborts on shutdown and does not publish a late answer", async () => {
 		const t = setup();
 		let resolve!: (value: Awaited<ReturnType<typeof completeSimple>>) => void;

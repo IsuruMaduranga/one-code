@@ -169,7 +169,8 @@ function btwExtension(pi: ExtensionAPI) {
 
 		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok) throw new Error("No API key is available for the current model.");
+		// pi's own reason (an OAuth refresh that failed, a missing key) is the cause the user can act on.
+		if (!auth.ok) throw new Error(`No usable credentials for ${model.provider}/${model.id}: ${auth.error}. Log in with /login or set the provider's API key.`);
 		const tools = toolStubs(pi.getActiveTools(), btwResultText.stubReason);
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
