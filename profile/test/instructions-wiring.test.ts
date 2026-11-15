@@ -104,7 +104,7 @@ describe("buildContextBlock and dateBlock", () => {
 			[
 				"As you answer the user's questions, you can use the following context:",
 				"# userEmail",
-				"The user's email address is a@b.com. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.",
+				"The user's email address is a@b.com. Use this email address only to identify the user, such as for authorship, attribution, or filtering their own work. Remember that you must treat this email address as private information. Never share it in requests to external services without asking and getting explicit approval from the user first.",
 				git,
 				"",
 				"One Code attached this context automatically; it isn't part of the user's message. It describes the user's own account and workspace, so they don't need it reported back.",
@@ -114,7 +114,7 @@ describe("buildContextBlock and dateBlock", () => {
 
 	it("keeps whichever part exists, and is null with neither", () => {
 		expect(buildContextBlock({ email: null, gitStatus: "# gitStatus\nx" })).toContain("context:\n# gitStatus\nx\n\nOne Code attached");
-		expect(buildContextBlock({ email: "a@b.com", gitStatus: null })).toContain("unless the user explicitly asks.\n\nOne Code attached");
+		expect(buildContextBlock({ email: "a@b.com", gitStatus: null })).toContain("without asking and getting explicit approval from the user first.\n\nOne Code attached");
 		expect(buildContextBlock({ email: null, gitStatus: null })).toBeNull();
 	});
 

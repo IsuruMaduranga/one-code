@@ -91,8 +91,9 @@ export const contextText = (_live: LiveTools, product: ContextText) => ({
 	// Claude Code's sentence after the email.
 	email: ({ email }: { email: string }): string =>
 		`# userEmail\nThe user's email address is ${email}. ` +
-		"Use it only to identify the user, such as for authorship, attribution, or filtering their own work. " +
-		"Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.",
+		"Use this email address only to identify the user, such as for authorship, attribution, or filtering their own work. " +
+		"Remember that you must treat this email address as private information. " +
+		"Never share it in requests to external services without asking and getting explicit approval from the user first.",
 	/** Closes the context block. */
 	contextFooter:
 		`${brand.name} attached this context automatically; it isn't part of the user's message. ` +
@@ -110,7 +111,7 @@ export const contextText = (_live: LiveTools, product: ContextText) => ({
 		lines.push(` - Platform: ${env.platform}`, ` - Shell: ${env.shell}`, ` - OS Version: ${env.osVersion}`);
 		if (env.scratchpadDir) {
 			lines.push(
-				` - Scratchpad directory: ${env.scratchpadDir} — always use it for temporary files (intermediate results, scripts, outputs that don't belong in the project) instead of \`/tmp\` or other system temp directories; it is session-specific, isolated from the project, and can generally be used without permission prompts. Only use \`/tmp\` if the user explicitly asks.`,
+				` - Scratchpad directory: ${env.scratchpadDir} — always use it for temporary files (intermediate results, scripts, outputs that don't belong in the project) instead of \`/tmp\` or other system temp directories; it is session-specific, isolated from the project, and can generally be used without permission prompts. A reboot or routine cleanup can clear it, so anything the user will want to keep belongs somewhere durable instead. Only use \`/tmp\` if the user explicitly asks. Whenever you name a file in it to the user, write the file's complete absolute path in one piece, not a bare filename, a path that starts at the scratchpad folder, or the directory followed by filenames: a shortened path is read against the working directory and leads nowhere.`,
 			);
 		}
 		return lines.join("\n");
