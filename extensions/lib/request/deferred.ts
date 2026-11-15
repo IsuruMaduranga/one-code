@@ -395,8 +395,9 @@ export function stabilizeDeferredTools(
 			else return undefined;
 			continue;
 		}
-		// A renamed tool is only ever eager here, so the demotion below (keyed on
-		// wire names, as the tool calls and loads are) never touches one.
+		// A renamed tool is only ever eager here, so the demotion below never
+		// touches one. The demotion matches tool calls and loads by wire name and
+		// asks `isDeferred` and `eagerNames` by registry name (`registryName`).
 		if (own !== tool.name && (tool.defer_loading === true || isDeferred(own))) return undefined;
 		if (tool.defer_loading !== true) {
 			eager.push(tool);
@@ -404,10 +405,12 @@ export function stabilizeDeferredTools(
 		}
 	}
 
+	/** The registry name of an eager tool's wire name. */
+	const registryName = (wire: string) => registryNameOf(wire) ?? wire;
 	const messages: WireMessage[] = Array.isArray(payload.messages) ? (payload.messages as WireMessage[]) : [];
 	const referencesAt = new Map<string, string[]>();
 	const demoted = new Set<string>();
-	if (loads.size > 0 && eager.some((tool) => isDeferred(tool.name))) {
+	if (loads.size > 0 && eager.some((tool) => isDeferred(registryName(tool.name)))) {
 		// Message index of each tool's first use and of each tool result: a
 		// reference is valid only ahead of every use of the tool.
 		const firstUse = new Map<string, number>();
@@ -424,7 +427,7 @@ export function stabilizeDeferredTools(
 		});
 		const loaderOf = earliestLoads(loads, (callId) => resultAt.get(callId));
 		for (const tool of eager) {
-			if (!isDeferred(tool.name)) continue;
+			if (!isDeferred(registryName(tool.name))) continue;
 			const loader = loaderOf.get(tool.name);
 			if (loader === undefined) continue;
 			const use = firstUse.get(tool.name);
@@ -439,7 +442,7 @@ export function stabilizeDeferredTools(
 		}
 	}
 
-	for (const tool of eager) if (additions.has(tool.name) && isDeferred(tool.name)) demoted.add(tool.name);
+	for (const tool of eager) if (additions.has(tool.name) && isDeferred(registryName(tool.name))) demoted.add(tool.name);
 
 	// pi puts the tools breakpoint on the last eager tool; if that one is demoted
 	// the breakpoint moves to the new last one, otherwise nothing moves.
@@ -449,7 +452,7 @@ export function stabilizeDeferredTools(
 		last !== undefined && demoted.has(last.name) ? last.cache_control : undefined,
 	);
 	if (keptEager.length === 0) return undefined;
-	for (const name of demoted) eagerNames.delete(name);
+	for (const name of demoted) eagerNames.delete(registryName(name));
 	const deferred = tools
 		.filter((t) => isDeferred(t.name) && !eagerNames.has(t.name))
 		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))

@@ -17,6 +17,7 @@ import { VERSION_VAR } from "../../lib/app/app-launch.mjs";
 import { knobValue } from "../../lib/profile/knobs.ts";
 import { brand, profileSelection } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
+import { unrefEvery } from "../../lib/core/timer-ops.ts";
 import { PRODUCT_DIR } from "../../lib/profile/profile.ts";
 import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../../lib/ui/argument-hints.ts";
@@ -360,11 +361,7 @@ function brandingExtension(pi: ExtensionAPI) {
 	// Claude Code's leading glyph: ✳ at rest, ⠂/⠐ while a turn runs, held on ✳
 	// while a prompt waits for the user (title-animation.ts).
 	const titleGlyph = new TitleAnimation({
-		every: (ms, tick) => {
-			const timer = setInterval(tick, ms);
-			timer.unref?.();
-			return () => clearInterval(timer);
-		},
+		every: unrefEvery,
 		write: () => {
 			try {
 				if (titleCtx) retitle(titleCtx);

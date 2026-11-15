@@ -50,6 +50,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../lib/models/subagent-model.ts";
+import { configuredDefaultLine, knobsNotApplied } from "../../lib/models/subagent-model-text.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../../lib/models/model-picker.ts";
 import { chosenModelWarnings } from "../../lib/models/model-choice-warnings.ts";
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
@@ -2972,11 +2973,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	/** "X and Y are not applied": the environment knobs a `subagentModel: "auto"` setting hides. */
-	const knobsNotApplied = () => {
-		const names = knobNames(SUBAGENT_MODEL_KNOB);
-		return `${names.join(" and ")} ${names.length > 1 ? "are" : "is"} not applied`;
-	};
+	const subagentKnobs = () => ({ names: knobNames(SUBAGENT_MODEL_KNOB), limit: knobLimit(SUBAGENT_MODEL_KNOB) });
 
 	const showSubagentModelStatus = (ctx: ExtensionContext) => {
 		const configured = loadSubagentDefault(os.homedir());
@@ -2990,14 +2987,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		});
 		ctx.ui.notify(
 			[
-				configured
-					? configured.source === "env"
-						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
-							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}`)
-						: configured.spec.toLowerCase() === AUTO_SUBAGENT_MODEL
-							? `subagentModel: auto (from the subagentModel setting): chosen automatically on every provider; ${knobsNotApplied()}`
-							: `subagentModel: ${configured.spec} (from the subagentModel setting)`
-					: "subagentModel: (not set)",
+				configuredDefaultLine(configured, applicable !== undefined, subagentKnobs()),
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
 				...(resolution.source === "default" && resolution.model
@@ -3038,7 +3028,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}
 			emitModelStatus(ctx);
 			ctx.ui.notify(
-				`Subagent default set to automatic selection on every provider ("auto", saved to ${SETTINGS_DISPLAY}); ${knobsNotApplied()}.`,
+				`Subagent default set to automatic selection on every provider ("auto", saved to ${SETTINGS_DISPLAY}); ${knobsNotApplied(subagentKnobs().names)}.`,
 				"info",
 			);
 			return;

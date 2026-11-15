@@ -188,7 +188,10 @@ export function buildCatalogIndex(sources: CatalogSources): CatalogIndex {
 	// A gateway row models.dev leaves unlinked whose vendor lists the same
 	// model under the id plus or minus a version tag, released the same day
 	// (OpenRouter's `meta/muse-ember` for Meta's `muse-ember-1.0`), is that
-	// model, not a gateway-only one.
+	// model, not a gateway-only one. The vendor is looked up by the gateway id's
+	// prefix, so this holds only where that prefix is the vendor's models.dev
+	// key (`meta`); a vendor named differently there (`x-ai`, `z-ai`,
+	// `mistralai`, `qwen` on OpenRouter) keeps the gateway row as it was.
 	const vendorTwin = (id: string, row: ModelsDevModel): string | undefined => {
 		const [vendor, rest] = id.split("/");
 		const own = modelsDev[vendor]?.models;
