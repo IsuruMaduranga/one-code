@@ -16,9 +16,12 @@ describe("deferring like the parent", () => {
 		toolSearchExtension(parent.pi as any);
 		parent.pi.events.emit(DEFER_CHANNEL, { name: "mcp__fixture__lookup", keywords: ["ticket"] });
 		parent.pi.events.emit(DEFER_CHANNEL, { name: "cron_create" });
+		parent.pi.events.emit(DEFER_CHANNEL, { name: "late_echo", hint: "When you echo, use it." });
 		const query: DeferredQuery = { tools: [] };
 		parent.pi.events.emit(DEFERRED_QUERY_CHANNEL, query);
-		expect(query.tools).toEqual(expect.arrayContaining([{ name: "mcp__fixture__lookup", keywords: ["ticket"] }, { name: "cron_create", keywords: [] }]));
+		expect(query.tools).toEqual(
+			expect.arrayContaining([{ name: "mcp__fixture__lookup", keywords: ["ticket"] }, { name: "cron_create", keywords: [] }, { name: "late_echo", keywords: [], hint: "When you echo, use it." }]),
+		);
 	});
 
 	it("defers in the child, at load, only the tools injected into it, and its tool-search lists the ones it has", () => {

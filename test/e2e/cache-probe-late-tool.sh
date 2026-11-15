@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Live late-tool cache probe. A test-only extension (late-tool-fixture.ts)
-# registers and defers `late_echo` while the first bash call runs, so the tool
-# arrives mid-session the way a late MCP server's tools do. The probe then
+# registers and defers `late_echo`, with a listing hint, while the first bash
+# call runs, so the tool arrives mid-session the way a late MCP server's tools
+# do and its addendum line is `late_echo: <hint>`. The probe then
 # checks the usual prefix rules (cache-probe.mjs) plus how the tool was
 # announced: a reference-form `tool_addition` in a system message on a model
 # that takes one, the deferred-tool addendum elsewhere. Either way the tool

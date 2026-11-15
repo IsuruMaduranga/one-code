@@ -7,14 +7,16 @@
  *
  * The name is the fixture's own, so no tool the run loads (an MCP server's
  * resource tools, for one) can take it first or in its place. The profile has
- * no listing hint for it, so its addendum line is the bare name; a hinted late
- * tool's `name: hint` line is covered by test/unit/tool-additions.test.ts.
+ * no listing hint for it, so the fixture gives its own (`DeferRequest.hint`),
+ * and its addendum line is `name: hint` as a real hinted late tool's is.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 
 export const LATE_TOOL_NAME = "late_echo";
+/** The fixture's listing hint: its addendum line is `late_echo: <this>`. */
+export const LATE_TOOL_HINT = "When you are about to echo a piece of text back unchanged, use it.";
 
 export default function lateToolFixture(pi: ExtensionAPI): void {
 	let scheduled = false;
@@ -31,7 +33,7 @@ export default function lateToolFixture(pi: ExtensionAPI): void {
 					return { content: [{ type: "text", text: `echo: ${params.text}` }], details: {} };
 				},
 			});
-			pi.events.emit(DEFER_CHANNEL, { name: LATE_TOOL_NAME, keywords: ["echo"] });
+			pi.events.emit(DEFER_CHANNEL, { name: LATE_TOOL_NAME, keywords: ["echo"], hint: LATE_TOOL_HINT });
 		}, 200);
 	});
 }

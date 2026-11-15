@@ -88,6 +88,8 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	const words = sessionView(pi).text("toolSearch");
 	// Owned here (see lib/request/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
+	/** A listing line's hint from the tool's owner, used where the profile has none. */
+	const ownerHints = (name: string) => deferredRegistry.hintFor(name);
 	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct
 	// call to one still gets an explanation (tool_execution_end below) instead
 	// of a bare "not found": the registry itself can't answer that, since
@@ -137,7 +139,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			key: "deferred-tools",
-			text: deferredReminderText(available, words),
+			text: deferredReminderText(available, words, ownerHints),
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.deferredTools,
 			facts: [{ kind: "tools", names: available.map((tool) => tool.name) }],
@@ -188,7 +190,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		const added = [...loadable].filter((name) => !told.has(name));
 		if (added.length === 0) return;
 		if (!supportsToolAdditions(request.model)) {
-			request.blocks.push({ text: deferredAddendumText(added, words), facts: [{ kind: "tools", names: added }] });
+			request.blocks.push({ text: deferredAddendumText(added, words, ownerHints), facts: [{ kind: "tools", names: added }] });
 			return;
 		}
 		// Here an addendum is a tool_addition, callable at once: only a tool the
@@ -196,7 +198,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// announced; one that arrived since waits for the next request.
 		const active = new Set(pi.getActiveTools());
 		const callable = added.filter((name) => active.has(name));
-		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable, words), facts: [{ kind: "tools", names: callable, callable: true }] });
+		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable, words, ownerHints), facts: [{ kind: "tools", names: callable, callable: true }] });
 	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (request/tool-search/tool-additions.ts). */
@@ -344,7 +346,10 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.events.on(DEFERRED_QUERY_CHANNEL, (data) => {
 		const query = data as DeferredQuery;
-		for (const name of deferredRegistry.names) query.tools.push({ name, keywords: deferredRegistry.keywordsFor(name) });
+		for (const name of deferredRegistry.names) {
+			const hint = deferredRegistry.hintFor(name);
+			query.tools.push({ name, keywords: deferredRegistry.keywordsFor(name), ...(hint ? { hint } : {}) });
+		}
 	});
 
 	pi.events.on(DEFER_CHANNEL, (data) => {

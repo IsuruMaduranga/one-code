@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import lateToolFixture, { LATE_TOOL_HINT, LATE_TOOL_NAME } from "../e2e/late-tool-fixture.ts";
 import { DEFER_CHANNEL, deferredAddendumText, deferredRemovedText, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
 import { makeRecord, RECORD } from "../../extensions/lib/request/ledger/records.ts";
@@ -64,6 +65,33 @@ describe("tool-search listing and render-time addenda", () => {
 		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
 		expect(blocks).toEqual([{ text: deferredAddendumText(["mcp__a__x", "mcp__a__y"]), facts: [{ kind: "tools", names: ["mcp__a__x", "mcp__a__y"] }] }]);
 		expect(fake.render({ told: { tools: ["web_fetch", "mcp__a__x", "mcp__a__y"] } })).toEqual([]);
+	});
+
+	it("lists and announces a tool by its owner's hint, the batch's names from its facts; a profile hint wins", () => {
+		const fake = mount();
+		const listed = () => listings(fake.reminders).at(-1)?.text?.split("\n") ?? [];
+		const profileLine = listed().find((line) => line.startsWith("web_fetch"));
+		expect(profileLine).toMatch(/^web_fetch: When you/);
+		fake.addDeferred("late_echo", "When you echo, use it.");
+		// The profile's hint for web_fetch holds when its owner offers one.
+		fake.pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", hint: "Owner's words." });
+		expect(listed()).toContain("late_echo: When you echo, use it.");
+		expect(listed()).toContain(profileLine);
+		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+		expect(blocks).toEqual([{ text: [toolSearchResultText.addendumHead, "late_echo: When you echo, use it."].join("\n"), facts: [{ kind: "tools", names: ["late_echo"] }] }]);
+	});
+
+	it("lists the cache probe's late-tool fixture by its own hint, so the live probe sends a hinted line", () => {
+		vi.useFakeTimers();
+		try {
+			const fake = mount();
+			lateToolFixture(fake.pi as never);
+			fake.pi.fire("before_provider_request", { payload: {} }, {});
+			vi.advanceTimersByTime(200);
+			expect(listings(fake.reminders).at(-1)?.text?.split("\n")).toContain(`${LATE_TOOL_NAME}: ${LATE_TOOL_HINT}`);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("says once that a tool the epoch was told about is gone, when its absence is known", () => {

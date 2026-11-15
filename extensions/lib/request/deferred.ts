@@ -7,7 +7,7 @@
  * and keep the cached prompt prefix intact.
  *
  * Any extension can defer its own tools by emitting on DEFER_CHANNEL with
- * `{ name, keywords? }` while extensions are loading (before session_start).
+ * `{ name, keywords?, hint? }` while extensions are loading (before session_start).
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -86,11 +86,14 @@ export interface SearchableTool {
 
 export class DeferredRegistry {
 	private entries = new Map<string, string[]>();
+	/** The hint each tool's owner gave (`DeferRequest.hint`); a later one replaces it. */
+	private hints = new Map<string, string>();
 
 	add(request: DeferRequest): void {
 		if (!request?.name) return;
 		const existing = this.entries.get(request.name) ?? [];
 		this.entries.set(request.name, [...new Set([...existing, ...(request.keywords ?? [])])]);
+		if (request.hint) this.hints.set(request.name, request.hint);
 	}
 
 	get names(): string[] {
@@ -101,11 +104,17 @@ export class DeferredRegistry {
 		return this.entries.get(name) ?? [];
 	}
 
+	/** The owner's listing hint for a tool, if it gave one. */
+	hintFor(name: string): string | undefined {
+		return this.hints.get(name);
+	}
+
 	has(name: string): boolean {
 		return this.entries.has(name);
 	}
 
 	remove(name: string): boolean {
+		this.hints.delete(name);
 		return this.entries.delete(name);
 	}
 }
@@ -120,17 +129,20 @@ export interface ListingWords {
 	listingClose?: string;
 }
 
-/** One listing line: the name, then its hint when the profile has one. */
-const listingLine = (name: string, words: ListingWords): string => {
-	const hint = words.listingHints?.[name];
+/** A tool owner's own listing hint (`DeferRequest.hint`), by name. */
+export type OwnerHints = (name: string) => string | undefined;
+
+/** One listing line: the name, then the profile's hint, or else the tool owner's. */
+const listingLine = (name: string, words: ListingWords, ownerHints?: OwnerHints): string => {
+	const hint = words.listingHints?.[name] || ownerHints?.(name);
 	return hint ? `${name}: ${hint}` : name;
 };
 
 /**
  * The every-turn reminder telling the model which tools exist but are not
  * loaded — Claude Code's shape: one fixed sentence, then one line per tool,
- * its name and, for a tool the profile has a hint for, one line on when to
- * load it, then the profile's closing paragraph. No schemas or full
+ * its name and, for a tool the profile (or else its owner) has a hint for,
+ * one line on when to load it, then the profile's closing paragraph. No schemas or full
  * descriptions: the model searches by keyword through `tool_search` (which
  * does see descriptions); the description form grew by several KB per MCP
  * server and was the single largest block after `# claudeMd`. The head is
@@ -138,8 +150,12 @@ const listingLine = (name: string, words: ListingWords): string => {
  * byte-identical after a load (as CC's does) so the cached prefix holds — a
  * loaded tool is simply callable, and the sentence says as much.
  */
-export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>, words: ListingWords = {}): string {
-	const listing = [toolSearchResultText.listingHead, ...tools.map((t) => listingLine(t.name, words))].join("\n");
+export function deferredReminderText(
+	tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>,
+	words: ListingWords = {},
+	ownerHints?: OwnerHints,
+): string {
+	const listing = [toolSearchResultText.listingHead, ...tools.map((t) => listingLine(t.name, words, ownerHints))].join("\n");
 	return words.listingClose ? `${listing}\n\n${words.listingClose}` : listing;
 }
 
@@ -149,8 +165,8 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  * standing listing on message 1 is frozen once cached (tool-search/announce.ts);
  * this rides the tail instead, so the cached prefix holds.
  */
-export function deferredAddendumText(added: readonly string[], words: ListingWords = {}): string {
-	return [toolSearchResultText.addendumHead, ...added.map((name) => listingLine(name, words))].join("\n");
+export function deferredAddendumText(added: readonly string[], words: ListingWords = {}, ownerHints?: OwnerHints): string {
+	return [toolSearchResultText.addendumHead, ...added.map((name) => listingLine(name, words, ownerHints))].join("\n");
 }
 
 /**

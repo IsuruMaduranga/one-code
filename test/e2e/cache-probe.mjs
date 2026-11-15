@@ -283,7 +283,8 @@ if (lateTool !== undefined) {
 		(p.messages ?? []).some(
 			(m) => m?.role === "system" && Array.isArray(m.content) && m.content.some((b) => b?.type === "tool_addition" && b.tool?.name === lateTool),
 		);
-	// The addendum lists the names one per line after its first line.
+	// The addendum lists the tools one per line after its first line, each line
+	// the name alone or `name: hint`.
 	const addendumIn = (p) => (p.messages ?? []).some((m) => JSON.stringify(m.content ?? "").includes(ADDENDUM_START) && JSON.stringify(m.content).includes(`\\n${lateTool}`));
 	const form = requests.some(additionIn) ? "tool_addition" : requests.some(addendumIn) ? "addendum" : undefined;
 	const called = responses.some((m) => (m.content ?? []).some((c) => c?.type === "toolCall" && c.name === lateTool));

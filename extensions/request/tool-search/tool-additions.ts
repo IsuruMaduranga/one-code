@@ -15,7 +15,7 @@
  * (a one-shot pinned there). Only an addendum this request carries counts, and
  * its tool names come from the facts it was built with (the ledger plan's
  * `carried`, `carriedAddenda`), never from its lines: a line is a name and the
- * profile's hint for it (lib/request/deferred.ts `listingLine`).
+ * profile's or the tool owner's hint for it (lib/request/deferred.ts `listingLine`).
  */
 
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
