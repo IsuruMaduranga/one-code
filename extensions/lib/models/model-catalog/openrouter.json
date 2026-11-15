@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-14T18:18:26.984Z",
+	"fetchedAt": "2026-11-15T11:45:37.821Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -673,8 +673,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000571",
-					"completion": "0.000002286"
+					"prompt": "0.0000005",
+					"completion": "0.00000215"
 				}
 			},
 			{
@@ -805,8 +805,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000038",
-					"completion": "0.0000005"
+					"prompt": "0.00000002",
+					"completion": "0.000000108"
 				}
 			},
 			{
@@ -817,8 +817,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000005",
-					"completion": "0.00000015"
+					"prompt": "0.000000023",
+					"completion": "0.0000002"
 				}
 			},
 			{
@@ -1844,8 +1844,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.0000003"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -2214,8 +2214,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000002",
-					"completion": "0.00001"
+					"prompt": "0.0000002403",
+					"completion": "0.0000084023"
 				}
 			},
 			{
@@ -2223,8 +2223,8 @@
 				"created": 1792778188,
 				"hugging_face_id": "moonshotai/Kimi-K3.1-Pro",
 				"pricing": {
-					"prompt": "0.0000007",
-					"completion": "0.000006"
+					"prompt": "0.000000275",
+					"completion": "0.000004125"
 				}
 			},
 			{
@@ -2427,7 +2427,7 @@
 				],
 				"pricing": {
 					"prompt": "0.00000015",
-					"completion": "0.00000047"
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -3082,8 +3082,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000004",
-					"completion": "0.00002"
+					"prompt": "0.0000044",
+					"completion": "0.000022"
 				}
 			},
 			{
@@ -4024,8 +4024,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000077",
-					"completion": "0.000000114"
+					"prompt": "0.000000025",
+					"completion": "0.000000036"
 				}
 			},
 			{
@@ -4477,8 +4477,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000825",
-					"completion": "0.00000033"
+					"prompt": "0.000000132",
+					"completion": "0.000000528"
 				}
 			},
 			{
@@ -4513,8 +4513,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000007506",
-					"completion": "0.0000022509"
+					"prompt": "0.000000834",
+					"completion": "0.000002501"
 				}
 			},
 			{
@@ -4921,8 +4921,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000006",
-					"completion": "0.0000022"
+					"prompt": "0.0000004",
+					"completion": "0.00000175"
 				}
 			},
 			{
@@ -4982,18 +4982,6 @@
 				"pricing": {
 					"prompt": "0.000000007",
 					"completion": "0.0000068"
-				}
-			},
-			{
-				"id": "z-ai/glm-5.2:batch",
-				"created": 1781631930,
-				"hugging_face_id": "zai-org/GLM-5.2",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.000000322",
-					"completion": "0.000000989"
 				}
 			},
 			{
@@ -5073,8 +5061,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000045",
-					"completion": "0.000002"
+					"prompt": "0.000000322",
+					"completion": "0.000000989"
 				}
 			},
 			{
@@ -5139,8 +5127,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000038",
-					"completion": "0.0000005"
+					"prompt": "0.00000002",
+					"completion": "0.000000108"
 				}
 			},
 			{

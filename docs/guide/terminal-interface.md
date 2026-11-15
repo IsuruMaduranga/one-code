@@ -148,8 +148,10 @@ and [Plan mode](permissions-modes-and-auto-mode.md#plan-mode).
 
 **ctrl+c** closes any panel.
 
-PgUp and PgDn don't reach these panels in full-screen mode, because pi uses
-them for its own scrollback; use the keys the panel's footer names.
+In full-screen mode, PgUp and PgDn page a panel that scrolls, such as
+`/permissions`, `/plugins`, `/doctor` and the agent view. The other panels
+leave those keys to the transcript behind them, so use the keys the panel's
+footer names.
 
 ## Full-screen mode
 
