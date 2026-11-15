@@ -129,12 +129,14 @@ export function promptCommandText(name: string, args: string, prompt: string): s
 }
 
 /**
- * The hidden message a `/skill:` command is delivered as. `details.input` is
- * the text the user typed, so an extension that saw that text at `input` (the
- * hooks extension's UserPromptSubmit context) can find the message that
- * replaced it.
+ * The custom message a typed skill is delivered as after the session's first
+ * turn (the first one is a user message); the skill extension draws it as
+ * the user's command line. `details.input` is the text the user typed, so an extension
+ * that saw that text at `input` (the hooks extension's UserPromptSubmit
+ * context) can find the message that replaced it.
  */
 export const SKILL_INVOCATION_TYPE = brandedId("skill-invocation");
+
 export interface SkillInvocationDetails {
 	skill: string;
 	args: string;

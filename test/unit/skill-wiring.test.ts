@@ -14,7 +14,9 @@ import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type Sla
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { skillResultText } from "../../extensions/tools/skill/text.ts";
-import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
+import { SKILL_INVOCATION_TYPE, typedSkillContent, withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
+import { USER_MARKDOWN_CHANNEL, type UserMarkdownQuery, userRowTransform } from "../../extensions/lib/ui/user-message.ts";
+import { initTheme } from "@earendil-works/pi-coding-agent";
 
 /** A skill's text with its folder named first, in the profile's words. */
 const withDir = (dir: string, text: string) => withBaseDir({ dir, text });
@@ -49,8 +51,36 @@ async function mount() {
 	return { fake, ctx };
 }
 
+/** A rendered row as the terminal shows it: no OSC or SGR sequences, no trailing padding. */
+const visibleText = (row: string): string => row.replace(/\x1b\][^\x07]*\x07/g, "").replace(/\x1b\[[0-9;]*m/g, "").trimEnd();
+type RowRenderer = (message: unknown, options: { expanded: boolean; outputPad: number }, theme: unknown) => { render(width: number): string[] } | undefined;
+
+describe("skill wiring: the row of a skill typed after the first turn", () => {
+	const [breadcrumb, text] = typedSkillContent("greet", "Alice", "Reply with exactly one line: hello Alice");
+	const message = { role: "custom", customType: SKILL_INVOCATION_TYPE, content: [{ type: "text", text: breadcrumb }, { type: "text", text }], display: true };
+	const rows = (fake: ReturnType<typeof createFakePi>) => {
+		const render = fake.messageRenderers.get(SKILL_INVOCATION_TYPE) as RowRenderer | undefined;
+		expect(render).toBeDefined();
+		return render!(message, { expanded: false, outputPad: 1 }, undefined)!.render(80).map(visibleText).filter(Boolean);
+	};
+	beforeAll(() => initTheme("dark"));
+
+	it("goes through the user-message rewrite its owner answers with, never showing the skill's text", async () => {
+		const { fake } = await mount();
+		fake.events.on(USER_MARKDOWN_CHANNEL, (data) => {
+			(data as UserMarkdownQuery).transform = (markdown) => `» ${userRowTransform({})(markdown)}`;
+		});
+		expect(rows(fake)).toEqual([" » /greet Alice"]);
+	});
+
+	it("shows the command line alone when the user-message extension is not loaded", async () => {
+		const { fake } = await mount();
+		expect(rows(fake)).toEqual([" /greet Alice"]);
+	});
+});
+
 describe("skill wiring: scheduled work", () => {
-	it("sends a session's first skill turn as a user message, later ones as the hidden custom message", async () => {
+	it("sends a session's first skill turn as a user message, later ones as a displayed custom message", async () => {
 		const { fake, ctx } = await mount();
 		await fake.commands.get("demo")!.handler("now", ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
@@ -64,6 +94,15 @@ describe("skill wiring: scheduled work", () => {
 		await fake.commands.get("demo")!.handler("again", ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
 		expect(fake.sentMessages).toHaveLength(1);
+		// Same bytes for the model; displayed, so its renderer draws the `❯ /demo again` row.
+		expect(fake.sentMessages[0].message).toMatchObject({
+			display: true,
+			content: [
+				{ type: "text", text: "<command-message>demo</command-message>\n<command-name>/demo</command-name>\n<command-args>again</command-args>\n" },
+				{ type: "text", text: `${withDir(skillDir, "Do the demo.\n\nARGUMENTS: again")}\n` },
+			],
+			details: { skill: "demo", args: "again" },
+		});
 	});
 
 	it("uses a generated body, which carries its own arguments", async () => {

@@ -17,6 +17,7 @@
  * Display only: the transform runs inside pi's component at render time, so
  * the stored entry and every request keep the text the user sent.
  */
+import { brandedId } from "../profile/brand.mjs";
 import { commandDisplayLine } from "../plugins/skill-invoke.ts";
 import { opensMarkdownBlock } from "./markdown-blocks.ts";
 import { notificationUserMarkdown } from "./tui-render.ts";
@@ -73,4 +74,25 @@ export function userMessageMarkdown(markdown: string, marker?: string): string {
 	if (notification !== undefined) return notification;
 	const shown = commandDisplayLine(markdown) ?? markdown;
 	return marker === undefined ? shown : markUserMarkdown(shown, marker);
+}
+
+/**
+ * Asks the user-message extension for its display rewrite, so a row another
+ * extension draws as a user message (a skill typed after the first turn,
+ * tools/skill) shows what a user message with the same text shows: the
+ * command line, with the pointer while branding is on. The extension sets
+ * `transform`.
+ */
+export const USER_MARKDOWN_CHANNEL = brandedId("user-markdown");
+export interface UserMarkdownQuery {
+	transform?: (markdown: string) => string;
+}
+
+/**
+ * The rewrite a user row's text goes through: the owner's answer, else this
+ * pipeline with no pointer (the extension not loaded, as in a bare test
+ * harness). Display only.
+ */
+export function userRowTransform(query: UserMarkdownQuery): (markdown: string) => string {
+	return query.transform ?? ((markdown) => userMessageMarkdown(markdown));
 }
