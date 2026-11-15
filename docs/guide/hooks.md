@@ -24,6 +24,13 @@ stored in `~/.onecode/hooks/project-approvals.json` with a hash of the hook
 configuration, so any change asks again. Declining is remembered for the
 session only. User, managed, and plugin hooks never prompt.
 
+A `Notification` hook never opens that dialog. It fires when you're away
+from the terminal, so asking then would keep the hook waiting until you
+came back. Until the project's hooks are approved, by the dialog another
+event opens or by an approval stored earlier, the project's `Notification`
+hooks are skipped. Your user, managed, and plugin `Notification` hooks run
+as usual.
+
 Set `disableAllHooks: true` in your user settings to skip user, project, and
 plugin hooks. Managed hooks still run unless managed settings also disable
 hooks, and a managed value always takes precedence. In a project's
