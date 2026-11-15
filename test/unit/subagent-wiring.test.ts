@@ -1037,4 +1037,20 @@ describe("agent view scrolling without branding's editor", () => {
 		expect(view.render(80)).toEqual(bottom);
 		expect(tui.viewportTop).toBe(90);
 	});
+
+	it("in fullscreen, alternating direct scrolls up with downward moves on main keeps the view and main in step", async () => {
+		const tui = new FakeTui();
+		const { view } = await openViewIn(tui, Array.from({ length: 80 }, (_, i) => `step ${i + 1}`).join("\n"));
+		const mouse = view as unknown as { handleMouse(event: unknown): unknown };
+		const bottom = view.render(80);
+		for (let round = 0; round < 3; round++) {
+			mouse.handleMouse({ type: "wheel", wheelDelta: -10 });
+			expect(view.render(80)).not.toEqual(bottom);
+			expect(tui.viewportTop).toBeLessThan(90);
+			// pi-tui moves main down by more than the view has scrolled; the view returns to its bottom.
+			tui.scrollBy(26);
+			expect(view.render(80)).toEqual(bottom);
+			expect(tui.viewportTop).toBe(90);
+		}
+	});
 });
