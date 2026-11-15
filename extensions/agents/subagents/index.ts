@@ -1828,10 +1828,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
-		const ended = () => {
+		// A run that did not launch is forgotten here, on every failure path, so
+		// neither list_agents nor SendMessage ever offers it.
+		const failed = (line: string) => {
 			registry.remove(p.record.taskId);
-			return { launched: false, line: launchLine({ kind: "sessionEnded", name: p.record.name }) };
+			return { launched: false, line };
 		};
+		const ended = () => failed(launchLine({ kind: "sessionEnded", name: p.record.name }));
 		if (shuttingDown) return ended();
 		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
 		// Captured as a string: onExit runs from a `.finally` long after this
@@ -1842,8 +1845,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			try {
 				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
-				registry.remove(p.record.taskId);
-				return { launched: false, line: launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }) };
+				return failed(launchLine({ kind: "worktreeFailed", name: p.record.name, osMessage: (error as Error).message }));
 			}
 			// Shutdown can begin while git creates the worktree: build no child
 			// after its sweep, and remove the worktree within its grace.
@@ -2000,12 +2002,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			},
 		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
 		if (started instanceof Error) {
-			// The child never started: settle its panel row and forget the run, so
-			// neither the panel nor list_agents offers it.
+			// The child never started: settle its panel row and forget the run.
 			live.finish(true);
-			registry.remove(p.record.taskId);
 			if (worktree) void cleanupWorktree(parentCwd, worktree);
-			return { launched: false, line: launchLine({ kind: "startFailed", name: p.record.name, osMessage: started.message }) };
+			return failed(launchLine({ kind: "startFailed", name: p.record.name, osMessage: started.message }));
 		}
 		const handle = started;
 		resident.handle = handle;
@@ -2390,17 +2390,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (logPath) outputFile = true;
 			}
 			// Nothing runs, so no notification will come: fail the call rather
-			// than tell the model to wait, and forget the runs as above.
-			const running = launchedRecords.length;
-			if (running === 0) {
-				for (const p of prepared) registry.remove(p.record.taskId);
-				return refuseCall({ kind: "noneLaunched", lines });
-			}
+			// than tell the model to wait (launchResident already forgot the runs).
+			if (launchedRecords.length === 0) return refuseCall({ kind: "noneLaunched", lines });
 			return {
 				content: [
 					{
 						type: "text",
-						text: subagentResultText().launched({ lines, running, outputFile }),
+						text: subagentResultText().launched({ lines, running: launchedRecords.length, outputFile }),
 					},
 				],
 				details: { agentRuns: launchedRecords, background: true },
