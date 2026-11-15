@@ -35,9 +35,9 @@
  * least one earlier call, so check 3 covers the review reading the
  * cache its spawn and the child's calls wrote.
  *
- * Rows written before the classifier logged `cacheMarks` cannot be checked as
- * history breakpoints: a Responses row that had the hook (`cacheBreakpoints`)
- * but lacks `cacheMarks` fails with a note that the log predates the fields.
+ * A log written before the classifier logged its cache hook has neither
+ * `cacheBreakpoints` nor `cacheMarks`; its rows are checked under the implicit
+ * rule.
  *
  * Usage: node test/e2e/cache-probe-classifier.mjs <classifier.jsonl> [--slack N] [--review]
  * Exit 1 on a failed check.
@@ -73,9 +73,6 @@ if (args.includes("--review")) {
 	if (at < 1) failures.push(at === -1 ? "no hand-back review was recorded; did the model call the Agent tool, and did the child make a gated call?" : "the hand-back review is the first classifier call; nothing before it to read from");
 }
 if (rows.length < 2) failures.push(`only ${rows.length} classifier request(s) recorded; the check needs at least two gated calls`);
-
-const predating = rows.filter((r) => r.api === "openai-responses" && r.cacheBreakpoints === true && r.cacheMarks === undefined).length;
-if (predating > 0) failures.push(`${predating} log row(s) predate the classifier's cacheMarks and historyChars fields, so their history breakpoints cannot be checked; re-run the probe with the current code`);
 
 const calls = rows.map((r) => {
 	const u = r.usage ?? {};

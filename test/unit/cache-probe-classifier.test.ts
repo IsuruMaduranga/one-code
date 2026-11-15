@@ -53,4 +53,15 @@ describe("cache-probe-classifier on history breakpoints", () => {
 		expect(out).toContain("WARN  classifier call 2 read 0 cached tokens");
 		expect(status).toBe(0);
 	});
+
+	it("checks a log without the cache-hook fields under the implicit rule", () => {
+		const older = (history: string) => {
+			const { cacheBreakpoints: _b, cacheEdited: _e, cacheMarks: _m, systemChars: _s, historyChars: _h, ...rest } = row(history, 0, 2);
+			return rest;
+		};
+		const { status, out } = probe([older(first), older(second)]);
+		expect(out).toContain("(implicit cache)");
+		expect(out).toContain("WARN  classifier call 2 read 0 cached tokens");
+		expect(status).toBe(0);
+	});
 });
