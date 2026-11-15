@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	deferredMissReminderText,
 	DeferredRegistry,
+	deferredAddendumText,
 	deferredReminderText,
 	resultText,
 	searchTools,
@@ -182,5 +183,12 @@ describe("deferredReminderText", () => {
 		const tools = [{ name: "a", description: "x" }, { name: "b", description: "y" }];
 		expect(deferredReminderText(tools)).toBe(deferredReminderText(tools));
 		expect(deferredReminderText(tools)).not.toMatch(/cannot be called yet/);
+	});
+
+	it("puts the profile's hint after a tool's name and its closing paragraph after the names", () => {
+		const words = { listingHints: { monitor: "When you watch, use it." }, listingClose: "Load what the next step needs." };
+		const text = deferredReminderText([{ name: "web_fetch" }, { name: "monitor" }, { name: "mcp__s__t" }], words);
+		expect(text).toBe([toolSearchResultText.listingHead, "web_fetch", "monitor: When you watch, use it.", "mcp__s__t", "", "Load what the next step needs."].join("\n"));
+		expect(deferredAddendumText(["monitor", "x"], words)).toBe([toolSearchResultText.addendumHead, "monitor: When you watch, use it.", "x"].join("\n"));
 	});
 });

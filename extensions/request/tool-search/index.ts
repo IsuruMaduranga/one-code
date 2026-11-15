@@ -136,7 +136,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			key: "deferred-tools",
-			text: deferredReminderText(available),
+			text: deferredReminderText(available, words),
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.deferredTools,
 			facts: [{ kind: "tools", names: available.map((tool) => tool.name) }],
@@ -182,7 +182,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		const added = [...loadable].filter((name) => !told.has(name));
 		if (added.length === 0) return;
 		if (!supportsToolAdditions(request.model)) {
-			request.blocks.push({ text: deferredAddendumText(added), facts: [{ kind: "tools", names: added }] });
+			request.blocks.push({ text: deferredAddendumText(added, words), facts: [{ kind: "tools", names: added }] });
 			return;
 		}
 		// Here an addendum is a tool_addition, callable at once: only a tool the
@@ -190,7 +190,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// announced; one that arrived since waits for the next request.
 		const active = new Set(pi.getActiveTools());
 		const callable = added.filter((name) => active.has(name));
-		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable), facts: [{ kind: "tools", names: callable, callable: true }] });
+		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable, words), facts: [{ kind: "tools", names: callable, callable: true }] });
 	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (request/tool-search/tool-additions.ts). */
