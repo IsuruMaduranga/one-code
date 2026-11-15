@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { buildPayload, type ClassifyRequest } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
+
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
 
 const completeMock = vi.mocked(completeSimple);
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
@@ -31,7 +33,7 @@ const base: ClassifyRequest = {
 
 function deps() {
 	return {
-		registry: { getAvailable: () => [main, screener], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key" }) } as any,
+		registry: { getAvailable: () => [main, screener], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key" }) } as any,
 		sessionModel: main,
 		config,
 		state: createClassifierState(),
@@ -82,7 +84,7 @@ describe("classifier provider context overflow", () => {
 		const smallMain = { ...main, contextWindow: 42_000 };
 		const state = deps();
 		state.sessionModel = smallMain;
-		state.registry = { getAvailable: () => [smallMain, small], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key" }) } as any;
+		state.registry = { getAvailable: () => [smallMain, small], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "key" }) } as any;
 		const verdict = await classify(long, state);
 		expect(verdict).toMatchObject({ noVerdict: true, transcriptTooLong: true });
 		expect(completeMock).toHaveBeenCalledTimes(1);

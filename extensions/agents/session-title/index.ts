@@ -22,7 +22,6 @@
  */
 
 import { feature } from "../../lib/profile/feature.ts";
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeThreadless } from "../../lib/request/anthropic-stream.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../../lib/models/model-policy.ts";
@@ -83,22 +82,19 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 			if (!choice) return;
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
 			if (!auth.ok) return;
-			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 			const result = await withReasoningFallback(
 				choice.model,
 				(reasoning) => {
 					const timeout = AbortSignal.timeout(TITLE_TIMEOUT_MS);
 					return completeThreadless(
-						baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+						ctx.modelRegistry,
+						choice.model,
 						{
 							systemPrompt: words.system,
 							messages: [{ role: "user", content: sessionTitleInput(words, text), timestamp: Date.now() }],
 							tools: [],
 						},
 						{
-							apiKey: auth.apiKey,
-							headers: auth.headers,
-							env: auth.env,
 							signal: AbortSignal.any([controller.signal, timeout]),
 							maxTokens: TITLE_MAX_TOKENS,
 							...(reasoning ? { reasoning } : {}),

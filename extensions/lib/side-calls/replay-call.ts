@@ -47,15 +47,13 @@ export async function replaySideCall(
 	if (cap === undefined) return undefined;
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) return undefined;
-	const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 	const timeout = AbortSignal.timeout(options.timeoutMs);
 	const result = await completeThreadless(
-		baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
+		ctx.modelRegistry,
+		model,
 		{ systemPrompt: "", messages: tail, tools: [] },
 		{
-			apiKey: auth.apiKey,
-			headers: sessionRequestHeaders(model, auth.headers),
-			env: auth.env,
+			headers: sessionRequestHeaders(model, undefined),
 			signal: AbortSignal.any([options.signal, timeout]),
 			maxTokens: cap,
 			sessionId: ctx.sessionManager.getSessionId(),

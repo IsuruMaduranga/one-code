@@ -2,15 +2,15 @@
  * The side calls (btw, recap, the web_fetch reader) must put the same request
  * on the wire as the inline code they shared before `runSideCall`: the same
  * per-session cache key, the same cache breakpoints, the same base URL. Each
- * case drives the extension with `completeSimple` mocked, then sends both the
- * arguments it received and the ones the earlier inline code built (frozen
- * below as the reference) through pi-ai's real provider adapter, and compares
- * the bytes each would send.
+ * case drives the extension with the model registry's stream faked (resolving
+ * the auth as pi's runtime does, helpers/side-call-registry.ts), then sends
+ * both the arguments the provider would receive and the ones the earlier
+ * inline code built (frozen below as the reference) through pi-ai's real
+ * provider adapter, and compares the bytes each would send.
  */
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { streamSimple as anthropicStream } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { streamSimple as completionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
@@ -19,12 +19,12 @@ import recapExtension from "../../extensions/agents/recap/index.ts";
 import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../../extensions/lib/side-calls/side-call-cache.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { registryStream } from "./helpers/side-call-registry.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
-const complete = vi.mocked(completeSimple);
-const answer = { content: [{ type: "text", text: "An answer." }], stopReason: "stop", usage: {} } as Awaited<ReturnType<typeof completeSimple>>;
+const complete = vi.fn<(model: Model<Api>, context: Context, options?: SimpleStreamOptions) => Promise<unknown>>();
+const answer = { content: [{ type: "text", text: "An answer." }], stopReason: "stop", usage: {} };
 const auth = { ok: true, apiKey: "test-key", headers: { "x-test": "yes" }, env: { PI_CACHE_RETENTION: "short" }, baseUrl: "https://proxy.example/v1" };
 const SESSION = "wire-session";
 
@@ -85,7 +85,7 @@ function baseCtx(model: Model<Api>) {
 		hasUI: true,
 		model,
 		sessionManager: { getSessionId: () => SESSION, getBranch: () => branch },
-		modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => auth },
+		modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => auth, streamSimple: registryStream(complete, auth) },
 	});
 }
 

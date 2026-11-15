@@ -111,7 +111,7 @@ function recapExtension(pi: ExtensionAPI) {
 		const result = await runSideCall({
 			kind: "recap",
 			model: choice.model,
-			auth,
+			registry: ctx.modelRegistry,
 			sessionId: ctx.sessionManager.getSessionId(),
 			context: { systemPrompt: "", messages: recapMessages, tools },
 			signal,

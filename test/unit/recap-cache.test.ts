@@ -1,9 +1,12 @@
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
@@ -34,6 +37,7 @@ async function scheduleRecap(model = { api: "anthropic-messages", provider: "ant
 		model,
 		modelRegistry: {
 			getAvailable: () => [model],
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }),
 		},
 		sessionManager: { getBranch: () => [{ type: "message", id: "m1", parentId: null, message: earlier }] },
@@ -109,7 +113,7 @@ describe("the standalone recap follows the current branch", () => {
 		const ctx = createFakeCtx({
 			hasUI: true,
 			model,
-			modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			modelRegistry: { getAvailable: () => [model], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
 			sessionManager: { getSessionId: () => "s", getBranch: () => [], buildSessionProjection: () => ({ messages: branchMessages }) },
 		});
 		await fake.fire("session_start", {}, ctx);

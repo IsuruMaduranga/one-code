@@ -116,7 +116,7 @@ async function answerFromPage(
 		const result = await runSideCall({
 			kind: "reader",
 			model: choice.model,
-			auth,
+			registry: ctx.modelRegistry,
 			sessionId: ctx.sessionManager.getSessionId(),
 			context: {
 				systemPrompt: messages.system,

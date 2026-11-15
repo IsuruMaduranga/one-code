@@ -185,7 +185,7 @@ function btwExtension(pi: ExtensionAPI) {
 		const result = await runSideCall({
 			kind: "btw",
 			model,
-			auth,
+			registry: ctx.modelRegistry,
 			sessionId: ctx.sessionManager.getSessionId(),
 			context: { systemPrompt: "", messages, tools },
 			signal,
@@ -194,7 +194,7 @@ function btwExtension(pi: ExtensionAPI) {
 			cache: CONVERSATION_CACHE_PLACEMENT,
 			onUsage: (usage) => recordUsage(pi, "btw", usage),
 		});
-		// completeSimple reports a failure (a network error, a timeout) in the
+		// A side call reports a failure (a network error, a timeout) in the
 		// reply instead of throwing; its empty text is not an answer.
 		if (signal.aborted) return "";
 		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);

@@ -1,40 +1,35 @@
 /**
- * The streams One Code hands Anthropic Messages requests to with message
- * threads off (lib/request/message-threads.ts), sending exactly the
- * credentials pi's own provider would have sent.
+ * The streams One Code hands model requests to with Anthropic message threads
+ * off (lib/request/message-threads.ts), sending exactly the credentials pi's
+ * own provider would have sent.
  *
- * pi-ai's compat `streamSimple` and `completeSimple` fill an empty
- * `options.apiKey` from the environment (`withEnvApiKey`: `ANTHROPIC_OAUTH_TOKEN`
- * or `ANTHROPIC_API_KEY` for the `anthropic` provider). pi's provider never
- * does: it resolves the credential once and dispatches straight to the API
- * implementation. So with `ANTHROPIC_AUTH_TOKEN` (a bearer header, no key) and
- * `ANTHROPIC_API_KEY` both exported, a compat call sent the bearer header and
- * an `x-api-key` header too, leaking the key to the token's gateway. Neither
- * stream here goes through that fill:
- *
- * - the session loop and in-process children: `threadlessAnthropicRegistration`
+ * - The session loop and in-process children: `threadlessAnthropicRegistration`
  *   wraps pi-ai's `anthropicMessagesApi()`, the implementation pi's built-in
- *   `anthropic` provider dispatches to (pi-ai providers/anthropic.js);
- * - side calls: `completeThreadless` sends a request that has no key of its
- *   own to the registered `anthropic-messages` API, the one compat itself
- *   would pick, and every other request to compat `completeSimple`.
+ *   `anthropic` provider dispatches to (pi-ai providers/anthropic.js), and is
+ *   registered for the `anthropic` provider (request/ledger/wire.ts).
+ * - Side calls: `completeThreadless` sends through pi's model runtime
+ *   (`ctx.modelRegistry.streamSimple`, pi 0.86 and later), which resolves the
+ *   credential the session itself would use, routes virtual models, and
+ *   dispatches to extension-registered providers (the threadless `anthropic`
+ *   one included). pi-ai's compat entry point, used before, knew only its
+ *   built-in APIs and filled an empty key from the environment, which pi's
+ *   provider never does.
  *
- * Both exports exist on every pi-ai in the peer range (1.0.0 to 1.5.2, through
- * `/compat`); one the running pi-ai lacks reads as undefined, and then pi's
- * own provider or compat stays in charge.
+ * `anthropicMessagesApi` exists on every pi-ai in the peer range (1.0.0 to
+ * 1.5.2, through `/compat`); when the running pi-ai lacks it, it reads as
+ * undefined and pi's own provider stays in charge.
  */
 
 import * as compat from "@earendil-works/pi-ai/compat";
 import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
-import { THREADED_API, type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMessageThreads } from "./message-threads.ts";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMessageThreads } from "./message-threads.ts";
 
 type Stream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 
 /** pi-ai's exports, read as optional: a name the running pi-ai lacks is undefined. */
 const piAi = compat as unknown as {
 	anthropicMessagesApi?: () => { streamSimple: Stream };
-	getApiProvider?: (api: Api) => { streamSimple: Stream } | undefined;
-	normalizeContext?: (context: Context) => TranscriptContext;
 };
 
 /**
@@ -48,24 +43,22 @@ export function threadlessAnthropicRegistration(): ThreadlessProviderConfig<Mode
 	return threadlessAnthropicProvider(piAi.anthropicMessagesApi().streamSimple);
 }
 
-/** Whether compat would fill this request's key from the environment, the step pi's provider never takes. */
-function wouldFillEnvKey(model: Model<Api>, options: SimpleStreamOptions): boolean {
-	if (model.api !== THREADED_API) return false;
-	// Cloudflare's providers resolve their own auth inside compat; they stay there.
-	if (model.provider.startsWith("cloudflare-")) return false;
-	return !(typeof options.apiKey === "string" && options.apiKey.trim().length > 0);
-}
+/** The slice of pi's model registry a side call sends through. */
+export type SideCallRegistry = Pick<ModelRegistry, "streamSimple">;
 
 /**
- * A side call's `completeSimple`, with message threads off and no credential
- * from the environment that pi's resolution did not choose. Every side call
- * goes through here (message-threads.test.ts).
+ * A side call's options. No `apiKey` or `env`: pi resolves the model's
+ * credential itself, and `headers` are only the extra headers the call needs
+ * (pi merges them over the resolved ones by name).
  */
-export function completeThreadless(model: Model<Api>, context: Context, options: SimpleStreamOptions): Promise<AssistantMessage> {
-	const target = withoutMessageThreads(model);
-	if (wouldFillEnvKey(target, options) && typeof piAi.getApiProvider === "function" && typeof piAi.normalizeContext === "function") {
-		const api = piAi.getApiProvider(THREADED_API);
-		if (api) return api.streamSimple(target, piAi.normalizeContext(context), options).result();
-	}
-	return compat.completeSimple(target, context, options);
+export type SideCallOptions = Omit<SimpleStreamOptions, "apiKey" | "env">;
+
+/**
+ * A side call: one request through pi's model runtime with message threads
+ * off. A failure (no credentials, a provider error, an unknown api) comes back
+ * as a reply with `stopReason: "error"` and pi's message, never as a throw.
+ * Every side call goes through here (message-threads.test.ts).
+ */
+export async function completeThreadless(registry: SideCallRegistry, model: Model<Api>, context: Context, options: SideCallOptions): Promise<AssistantMessage> {
+	return registry.streamSimple(withoutMessageThreads(model), context, options).result();
 }

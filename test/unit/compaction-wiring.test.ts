@@ -1,9 +1,12 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import compactionExtension from "../../extensions/context/compaction/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 const complete = vi.mocked(completeSimple);
 const model = { api: "openai-completions", provider: "openrouter", id: "test-model", contextWindow: 200_000, maxTokens: 16_384 };
 const user = (text: string, timestamp = 1) => ({ role: "user", content: text, timestamp });
@@ -21,7 +24,7 @@ function setup() {
 		model,
 		thinkingLevel: "off",
 		getSystemPrompt: () => "Session system prompt",
-		modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
+		modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
 	});
 	const messages = [user("Current session task"), reply("Current session reply")];
 	const branchEntries = messages.map((message, index) => ({ type: "message", id: `entry-${index}`, message }));

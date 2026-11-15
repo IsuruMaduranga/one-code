@@ -8,11 +8,11 @@
  *
  * The request cannot be rebuilt from pi's APIs: tool-search reshapes the wire
  * `tools` array and context-management edits the body inside pi's request
- * pipeline, which `completeSimple` bypasses, and one differing byte in `tools`
+ * pipeline, which a side call (`completeThreadless`) bypasses, and one differing byte in `tools`
  * or `system` misses the whole cache. So the compaction extension (the last to
  * see `before_provider_request`) publishes the final payload on
  * LAST_REQUEST_CHANNEL, and a side call sends it back with its tail spliced on
- * through `completeSimple`'s `onPayload`. pi-ai converts the tail itself (the
+ * through the call's `onPayload`. pi-ai converts the tail itself (the
  * call's own context is just the tail), so its wire shape matches the rest by
  * construction.
  *

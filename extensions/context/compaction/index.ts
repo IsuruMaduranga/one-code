@@ -24,7 +24,7 @@
  *     proven to accept the level, and pi clamps an unsupported level down.
  *   - On Anthropic, the context-management beta + `clear_thinking` body edit that
  *     the session's requests carry (added by the context-management extension via
- *     hooks completeSimple bypasses). Without them the session caches its message
+ *     hooks a side call bypasses). Without them the session caches its message
  *     prefix thinking-cleared while this call sends full thinking blocks, and the
  *     mismatch invalidates the message-block cache (system+tools still read).
  *
@@ -178,7 +178,6 @@ function compactionExtension(pi: ExtensionAPI) {
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 			if (!auth.ok) return undefined;
-			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
 			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
 
@@ -210,7 +209,7 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			// When context-management (clear_thinking) is active for this session,
 			// the agent loop's cached message prefix has old thinking blocks cleared
-			// and every request carries the context-management beta. completeSimple
+			// and every request carries the context-management beta. A side call
 			// bypasses our before_provider_headers/before_provider_request handlers,
 			// so the compaction request would omit both — and on Anthropic that
 			// mismatch invalidates the *message* cache (system+tools still read, but
@@ -223,7 +222,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
 			const clearThinking = clearThinkingEnabled(knobValue("CLEAR_THINKING"), cmModel);
-			const headers = sessionRequestHeaders(cmModel, auth.headers);
+			const headers = sessionRequestHeaders(cmModel, undefined);
 
 			// A replay sends the captured body (which already carries the
 			// clear_thinking edit) with the tail pi-ai just built appended.
@@ -243,10 +242,8 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			const timeout = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
 			const callContext: Context = plan ? { systemPrompt: "", messages: plan.tail, tools: [] } : request;
-			const result = await completeThreadless(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, callContext, {
-				apiKey: auth.apiKey,
+			const result = await completeThreadless(ctx.modelRegistry, model, callContext, {
 				headers,
-				env: auth.env,
 				signal: AbortSignal.any([event.signal, timeout]),
 				maxTokens: plan?.maxTokens ?? maxTokens,
 				// The session id is the prompt-cache key / routing affinity on the

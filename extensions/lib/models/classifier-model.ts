@@ -263,13 +263,3 @@ export function replyText(reply: AssistantMessage): string {
 		.map((block) => block.text)
 		.join("");
 }
-
-/**
- * Some pi builds resolve a per-provider baseUrl alongside the API key; it is
- * not in every published version of the auth type, so it is read defensively
- * and, when present, carried onto the model for the call.
- */
-export function withAuthBaseUrl(model: Model<Api>, auth: unknown): Model<Api> {
-	const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-	return baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model;
-}

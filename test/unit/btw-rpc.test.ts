@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 let btwExtension: typeof import("../../extensions/agents/btw/index.ts").default;
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
@@ -22,7 +25,7 @@ function setup(model = { api: "anthropic-messages", provider: "anthropic", id: "
 	const ctx = createFakeCtx({
 		mode: "rpc", hasUI: true,
 		model,
-		modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+		modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
 	});
 	const ui = ctx.ui as { custom: ReturnType<typeof vi.fn>; notify: ReturnType<typeof vi.fn> };
 	const ask = (question: string) => fake.commands.get("btw")!.handler(question, ctx);
@@ -133,7 +136,7 @@ describe("/btw's standalone context follows the current branch", () => {
 			mode: "rpc",
 			hasUI: true,
 			model: { api: "anthropic-messages", provider: "anthropic", id: "test" },
-			modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
 			sessionManager: { getSessionId: () => "s", getBranch: () => [], buildSessionProjection: () => ({ messages: branchMessages }) },
 		});
 		await fake.fire("session_start", {}, ctx);
@@ -158,7 +161,7 @@ describe("/btw's standalone context follows the current branch", () => {
 			mode: "rpc",
 			hasUI: true,
 			model: { api: "anthropic-messages", provider: "anthropic", id: "test" },
-			modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
 			sessionManager: { getSessionId: () => "s", getBranch: () => branch },
 		});
 		await fake.fire("session_start", {}, ctx);

@@ -10,11 +10,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({
-	completeSimple: vi.fn(),
-}));
-
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import {
 	classify,
 	createClassifierState,
@@ -30,6 +27,9 @@ import type { ClassifierBlock } from "../../extensions/safety/permissions/auto-m
 import { actionLength, MAX_ACTION_CHARS } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
+
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
 
 /** The profile's words for a block the classifier could not judge. */
 const blockText = (block: ClassifierBlock) => autoModeResultText.classifierBlock(block);
@@ -78,6 +78,7 @@ function makeDeps(overrides: Partial<Parameters<typeof classify>[1]> = {}) {
 	const deps = {
 		registry: {
 			getAvailable: () => [sessionModel, miniModel, tinyModel],
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
 		} as any,
 		sessionModel,
@@ -167,6 +168,7 @@ describe("classify: pinning and fallback", () => {
 				catalogReads++;
 				return [sessionModel, miniModel, tinyModel];
 			},
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
 		} as any;
 		const deps = { registry, sessionModel, config, state: createClassifierState(), onNotice: () => {} };
@@ -254,6 +256,7 @@ describe("classify: pinning and fallback", () => {
 		const { deps } = makeDeps({
 			registry: {
 				getAvailable: () => [sessionModel, miniModel, tinyModel],
+				streamSimple: registryStream(completeSimple),
 				getApiKeyAndHeaders: async (m: any) =>
 					m.id === "gpt-5-mini" ? { ok: false as const, error: "no key" } : { ok: true as const, apiKey: "key" },
 			} as any,
@@ -554,6 +557,7 @@ describe("classify: a provider that refuses the classifier's prompt", () => {
 		const { deps, notices } = makeDeps({
 			registry: {
 				getAvailable: () => [sessionModel],
+				streamSimple: registryStream(completeSimple),
 				getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
 			} as any,
 		});

@@ -142,7 +142,7 @@ export function clearThinkingEnabled(flag: string | undefined, model: Anthropici
 /**
  * The headers a side call on the session model needs so its request matches the
  * session's: the auth headers plus, where clear_thinking is on, the beta header
- * the session's requests carry (completeSimple bypasses our header hook).
+ * the session's requests carry (a side call bypasses our header hook).
  */
 export function sessionRequestHeaders<H extends Record<string, string | null>>(
 	model: { api?: string; provider?: string; baseUrl?: string; compat?: unknown } | undefined,

@@ -52,10 +52,11 @@ describe("threadlessAnthropicProvider", () => {
 });
 
 describe("side calls", () => {
-	// A side call goes straight to pi-ai, past the provider registration, so it
-	// must turn threads off itself and must not take pi-ai compat's key from the
-	// environment: lib/request/anthropic-stream.ts completeThreadless does both.
-	// No other file under extensions/ or profile/ may call a pi-ai stream entry.
+	// A side call goes through pi's model runtime, where only the `anthropic`
+	// provider passes the threadless registration, so it must turn threads off
+	// itself: lib/request/anthropic-stream.ts completeThreadless does. No other
+	// file under extensions/ or profile/ may call a pi-ai stream entry or the
+	// registry's.
 	const STREAM_ENTRY = /\b(complete|completeSimple|stream|streamSimple)\b/;
 	const PI_AI_IMPORT = /import\s+(?!type\b)(\{[^}]*\}|\*\s+as\s+\w+)\s+from\s+["']@earendil-works\/pi-ai(?:\/[^"']*)?["']/g;
 	const OWNER = join("extensions", "lib", "request", "anthropic-stream.ts");
@@ -76,7 +77,20 @@ describe("side calls", () => {
 		expect(offenders).toEqual([]);
 	});
 
-	it("the side calls reach pi-ai through completeThreadless", () => {
+	it("only anthropic-stream.ts sends through the model registry's streams", () => {
+		const REGISTRY_STREAM = /\b(?:modelRegistry|registry)\s*\.\s*(?:complete|completeSimple|stream|streamSimple)\s*\(/;
+		const offenders: string[] = [];
+		for (const root of ["extensions", "profile"]) {
+			for (const file of sourceFiles(join(repo, root))) {
+				const path = relative(repo, file);
+				if (path === OWNER || path.split(/[\\/]/).includes("test")) continue;
+				if (REGISTRY_STREAM.test(readFileSync(file, "utf8"))) offenders.push(path);
+			}
+		}
+		expect(offenders).toEqual([]);
+	});
+
+	it("the side calls reach pi through completeThreadless", () => {
 		const callers = sourceFiles(join(repo, "extensions")).filter((file) => /\bcompleteThreadless\(/.test(readFileSync(file, "utf8")));
 		expect(callers.length).toBeGreaterThanOrEqual(6);
 	});
