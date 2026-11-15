@@ -28,12 +28,11 @@ export interface AgentViewAnnouncement {
 	target?: AgentViewTarget;
 }
 
-/** The slice of a live run the target is built from. */
 /**
- * A scroll of the open agent view, sent by the prompt editor
- * (`AgentViewScroll`). In fullscreen the editor claims pi-tui's viewport keys
- * while a view is open (`capturesViewportInput`), so they scroll the view
- * instead of the main transcript hidden under it; the wheel arrives as lines.
+ * A scroll of the open agent view sent by the prompt editor: the wheel over
+ * the editor's rows, in lines, which would otherwise scroll the main
+ * transcript hidden under the view. The viewport keys reach the subagents
+ * extension's own input listener (`viewportScrollFor`).
  */
 export const AGENT_VIEW_SCROLL_CHANNEL = brandedId("agent-view-scroll");
 
@@ -95,6 +94,7 @@ export function scrolledView(current: number, maxScroll: number, height: number,
 	return Math.max(0, Math.min(Math.max(0, maxScroll), current + delta));
 }
 
+/** The slice of a live run the target is built from. */
 export interface ViewedRun {
 	name: string;
 	agentType: string;

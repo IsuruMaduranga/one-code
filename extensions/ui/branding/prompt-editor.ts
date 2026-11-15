@@ -11,7 +11,7 @@
  */
 
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
-import { type AgentViewScroll, applyBorderBadge, fitBadge, viewportScrollFor } from "../../lib/agents/agent-view.ts";
+import { type AgentViewScroll, applyBorderBadge, fitBadge } from "../../lib/agents/agent-view.ts";
 import { applyArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { visibleWidth } from "../../lib/ui/text-width.ts";
 import { applyPromptMarker } from "./prompt-marker.ts";
@@ -61,10 +61,11 @@ export class PromptEditor extends CustomEditor {
 	}
 
 	/**
-	 * While an agent view is open the editor takes pi-tui's fullscreen viewport
-	 * keys (PageUp/PageDown and the rest), which would otherwise scroll the
-	 * main transcript hidden under the view; handleInput hands them to the
-	 * view. An open autocomplete menu keeps them, as in pi's editor.
+	 * While an agent view is open the editor asks pi-tui (1.5) to hand on its
+	 * fullscreen viewport keys (PageUp/PageDown and the rest) instead of
+	 * scrolling the main transcript hidden under the view. The subagents
+	 * extension's input listener then scrolls the view; it owns that routing,
+	 * and its viewport mirror covers a pi-tui that ignores this flag.
 	 */
 	get capturesViewportInput(): boolean {
 		return super.capturesViewportInput || this.#scrollView() !== undefined;
@@ -72,14 +73,6 @@ export class PromptEditor extends CustomEditor {
 
 	/** ↑ on the first line restores queued messages, as in Claude Code (queued-edit.ts). */
 	handleInput(data: string): void {
-		const scrollView = this.#scrollView();
-		if (scrollView && !super.capturesViewportInput) {
-			const scroll = viewportScrollFor((binding) => this.#keys.matches(data, binding as never));
-			if (scroll) {
-				scrollView(scroll);
-				return;
-			}
-		}
 		const dequeue = this.actionHandlers.get("app.message.dequeue");
 		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this, this.#queued(), this.#layoutWidth)) {
 			dequeue();
