@@ -39,6 +39,27 @@ jobs:
           # Log taskkill's verdicts (lib/shell-run/process-tree.ts) so a kill that misses shows why.
           ONECODE_DEBUG_KILL: ${{ runner.os == 'Windows' && '1' || '' }}
 
+  # Nothing One Code starts may outlive it: test/e2e/exit-probe.mjs runs pi
+  # offline (a scripted model, no provider key) once per way a run can end,
+  # with deliberately stubborn language and MCP servers, background shells,
+  # a monitor, a hook and a subagent, and fails on any process left behind or
+  # a pi that does not exit. Signal and pty endings run on macOS and Linux.
+  exit-probe:
+    name: exit probe (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node test/e2e/exit-probe.mjs
+
   # A product replaces profile/ with its own, so the base must typecheck and
   # pass its tests on any profile that fills the contract. This runs them on
   # a copy of the repository with the fixture profile (test/fixtures/profile/)
