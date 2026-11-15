@@ -15,7 +15,8 @@ import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
-import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
 import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 const planMode = requireText("planMode");
@@ -377,6 +378,39 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		modeRequests.length = 0;
 		await fake.tools.get("exit_plan_mode")!.execute("t9", {}, controller.signal, undefined, ctx);
 		expect(closedWith).toEqual([null]);
+		expect(modeRequests).toHaveLength(0);
+	});
+
+	// Described, so the desktop notifier names it, and only when it opens.
+	it("describes the approval to the desktop notifier just before it opens", async () => {
+		const events: string[] = [];
+		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const confirm = confirmPreselected([]);
+		const custom = vi.fn(async (factory: ViewerFactory) => {
+			events.push("opened");
+			return confirm(factory);
+		});
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		await fake.tools.get("exit_plan_mode")!.execute("t10", {}, undefined, undefined, ctx);
+		expect(events).toEqual([`described: ${desktopNotificationText.planApproval(brand.name)}`, "opened"]);
+	});
+
+	it("a turn already aborted neither describes nor opens the approval, and rejects the plan", async () => {
+		const events: string[] = [];
+		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const custom = vi.fn(async () => 0);
+		const controller = new AbortController();
+		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		modeRequests.length = 0;
+		controller.abort();
+		const result = (await fake.tools.get("exit_plan_mode")!.execute("t11", {}, controller.signal, undefined, ctx)) as ExitResult;
+		expect(custom).not.toHaveBeenCalled();
+		expect(events).toEqual([]);
+		expect(result.details.approved).toBe(false);
 		expect(modeRequests).toHaveLength(0);
 	});
 
