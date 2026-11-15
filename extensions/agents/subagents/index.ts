@@ -71,7 +71,7 @@ import { type DescriptionForm, followDescriptionForm, registerVariantTool } from
 import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../../lib/profile/sources.ts";
 import { instructionFileNames } from "../../lib/context/instructions.ts";
-import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
+import { runningAfterCompactionReminder } from "./running-after-compaction.ts";
 import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../../lib/request/reminders.ts";
@@ -318,13 +318,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return undefined;
 	};
-	/**
-	 * Task ids of background runs spawned during the agent loop now in flight.
-	 * Cleared at `agent_start`; read at `agent_end` to notice a turn that ended
-	 * with an agent still pending, which is the shape of the fabricated-result
-	 * failure (pending-claim.ts, WEAK-MODEL-REVIEW-2026-09-06 H1).
-	 */
-	const spawnedThisLoop = new Set<string>();
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
 	// of every in-process child fed by the runner's live sink, a below-editor
@@ -736,43 +729,17 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	let shuttingDown = false;
 
-	/**
-	 * The fabricated-result backstop (pending-claim.ts). Only the tiers that were
-	 * measured to need it: a frontier model that correctly said "I'm waiting"
-	 * would get the reminder on every delegating turn for nothing, and the
-	 * trigger fires on correct behaviour as readily as on the failure.
-	 */
-	const backstopApplies = () => {
-		const tier = requestTier();
-		return tier === "cheap" || tier === "tiny";
-	};
 	/** A run that is still working: a live child, or a resident with a turn pending. */
 	const stillRunning = (taskId: string): boolean => {
 		const resident = residents.get(taskId);
 		return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
 	};
 	pi.on("agent_start", () => {
-		spawnedThisLoop.clear();
 		parentBusy = true;
 		return undefined;
 	});
 	pi.on("agent_settled", () => {
 		parentBusy = false;
-	});
-	pi.on("agent_end", () => {
-		const spawned = [...spawnedThisLoop];
-		spawnedThisLoop.clear();
-		// Tier check first: on a frontier session the backstop never fires, so the
-		// lookups below would be discarded work on every turn that delegated.
-		if (!backstopApplies()) return undefined;
-		const pending = spawned
-			.filter(stillRunning)
-			.map((taskId) => registry.resolve(taskId))
-			.filter((record): record is AgentRunRecord => record !== undefined)
-			.map((record) => ({ name: record.name, taskId: record.taskId }));
-		const text = pendingClaimReminder(pending);
-		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
-		return undefined;
 	});
 
 	pi.on("session_start", (_event, ctx) => {
@@ -2394,8 +2361,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
 			for (const p of prepared) {
-				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
-				if (launched) spawnedThisLoop.add(p.record.taskId);
+				const { line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
 			}
 			return {
@@ -2478,7 +2444,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 				}
 				// The turn had just ended (settle window): the message rides the next
 				// turn, whose reply nobody has claimed yet — announce it as an update.
-				spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 				return {
 					content: [
 						{
@@ -2536,10 +2501,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 			});
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 			void resident.handle.send(params.message);
-			// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
-			// the reply arrives as a notification, so forbid predicting it and arm
-			// the agent_end backstop (keyed by the agent's persistent id).
-			spawnedThisLoop.add(record.taskId);
 			return {
 				content: [
 					{
@@ -2715,7 +2676,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 			});
 		});
 
-		spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 		return {
 			content: [
 				{

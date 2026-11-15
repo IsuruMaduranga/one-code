@@ -51,7 +51,6 @@ function texts(live: LiveTools): NamedText[] {
 	push("SendMessage next turn", "subagents", subagents.nextTurn({ name: "a" }));
 	push("SendMessage to resident", "subagents", subagents.sentToResident({ name: "a", taskId: "t1" }));
 	push("SendMessage sent", "subagents", subagents.sent({ name: "a", taskId: "t1" }));
-	push("pending claim", "subagents", subagents.pendingClaim({ runs }));
 	push("running after compaction", "subagents", subagents.runningAfterCompaction({ runs }));
 	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));

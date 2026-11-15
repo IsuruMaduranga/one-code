@@ -151,8 +151,6 @@ export interface SubagentsResultText {
 	fromSubagent(p: { name: string; summary?: string; body: string }): string;
 	/** A fork told the parent's permission mode changed. */
 	parentMode(p: { mode: string }): string;
-	/** A turn ended while runs it started were still going. */
-	pendingClaim(p: { runs: PendingRun[] }): string;
 	/** Background runs still going after a compaction. */
 	runningAfterCompaction(p: { runs: PendingRun[] }): string;
 	/** Auto mode's review of a resident's actions did not finish in time. */
@@ -342,13 +340,6 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		fromSubagent: ({ name, summary, body }) => `Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`,
 		parentMode: ({ mode }) =>
 			`The main session's permission mode is now "${mode}", and your tool calls are checked against it from here on.${mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : ""}`,
-		// CONDITIONAL on purpose: the trigger also fires on correct behaviour (a
-		// model that only said "I'm waiting for the agent"), so the text must not
-		// accuse (agents/subagents/pending-claim.ts).
-		pendingClaim: ({ runs }) =>
-			`You ended that turn while ${namedRuns(runs)} ${runs.length === 1 ? "was" : "were"} still running. ${runs.length === 1 ? "It has" : "They have"} not reported yet, ` +
-			"so anything you stated about the result did not come from the agent — if you gave the user a result, say plainly in your next message that it was not the agent's and correct it. " +
-			"Wait for the notification.",
 		runningAfterCompaction: ({ runs }) =>
 			results(
 				`Background agents you started before this conversation was compacted are still running: ${namedRuns(runs)}. Each one notifies you when it finishes; do not start the same work again. Use task_stop to end one.`,

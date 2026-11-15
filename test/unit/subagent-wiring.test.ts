@@ -404,48 +404,21 @@ describe("subagent runtime build failure", () => {
 	});
 });
 
-// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4: the pending-claim backstop (cheap
-// and tiny tiers) fires only for an agent whose report has not gone out.
-describe("subagent pending-claim backstop", () => {
-	const cheap = model("gpt-5.6-luna", ["text"], 0.1);
-	const pendingReminders = (h: Awaited<ReturnType<typeof mount>>) => {
+// A turn that ends with an agent still running gets no reminder: the launch
+// result already says the notification brings the report.
+describe("a turn that ends with an agent pending", () => {
+	it("queues no reminder, on the cheap tier either", async () => {
+		fakeResident();
+		const h = await mount([], model("gpt-5.6-luna", ["text"], 0.1));
 		const texts: string[] = [];
 		h.fake.events.on(REMINDER_CHANNEL, (data) => {
 			const reminder = data as { text?: string; key?: string };
 			if (reminder.text && !reminder.key) texts.push(reminder.text);
 		});
-		return texts;
-	};
-
-	it("stays quiet for an agent that reported inside the loop", async () => {
-		const runtime = fakeResident();
-		const h = await mount([], cheap);
-		const reminders = pendingReminders(h);
 		await h.fake.fire("agent_start", {}, h.ctx);
 		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
-		runtime.finish();
-		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		await h.fake.fire("agent_end", {}, h.ctx);
-		expect(reminders).toEqual([]);
-	});
-
-	it("fires for an agent still running, or whose report still waits on its review", async () => {
-		const runtime = fakeResident();
-		const h = await mount([], cheap, "tui", undefined, { answerReviews: false });
-		const reminders = pendingReminders(h);
-		await h.fake.fire("agent_start", {}, h.ctx);
-		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { details: { agentRuns: AgentRunRecord[] } };
-		await h.fake.fire("agent_end", {}, h.ctx);
-		const pending = subagentResultText().pendingClaim({ runs: [{ name: "general-purpose-1", taskId: spawned.details.agentRuns[0].taskId }] });
-		expect(reminders).toEqual([pending]);
-
-		reminders.length = 0;
-		await h.fake.fire("agent_start", {}, h.ctx);
-		await h.call("SendMessage", { to: "general-purpose-1", message: "And the folders?" });
-		// Finished, but nobody answers the review yet, so the report has not gone out.
-		runtime.finish([{ toolName: "bash", input: { command: "ls" } }]);
-		await h.fake.fire("agent_end", {}, h.ctx);
-		expect(reminders).toEqual([pending]);
+		expect(texts).toEqual([]);
 	});
 });
 
