@@ -1495,10 +1495,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** Session dir for a run's persisted child session; undefined → child runs --no-session. */
+	/**
+	 * Session dir for a run's persisted child session and output log; undefined
+	 * → child runs --no-session. Under the session's harness dir
+	 * (`sessionResultsDir`): a session-less parent's is its private temp dir,
+	 * where the bare session dir ("") put `subagents/` in the project.
+	 */
 	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
 		try {
-			const dir = join(ctx.sessionManager.getSessionDir(), "subagents", taskId);
+			const dir = join(sessionResultsDir(ctx), "subagents", taskId);
 			mkdirSync(dir, { recursive: true });
 			return dir;
 		} catch {

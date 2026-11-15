@@ -1,11 +1,14 @@
 /**
  * A session-less run (`--no-session`, every workflow agent) persists oversized
  * outputs to its own private temp dir, never to one folder shared by every
- * session, project and user on the machine.
+ * session, project and user on the machine. The same dir holds the other
+ * folders the harness keeps per session (subagent runs, workflow runs, auto
+ * mode's decision log), so none of them lands in the project: pi's session
+ * dir is "" there, and a path joined onto it is relative to the project.
  */
-import { statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { persistIfLarge, sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
@@ -42,5 +45,27 @@ describe("sessionResultsDir without a session dir", () => {
 		const file = join(dir, "tool-results", "t1.txt");
 		expect(text).toContain(toolResultsText.persisted({ size: "60.0KB", file }));
 		expect(statSync(file).size).toBe(60 * 1024);
+	});
+});
+
+describe("the session's harness folders", () => {
+	it("sit outside the project in a session-less run", () => {
+		const project = resolve(tmpdir(), "session-results-project");
+		const dir = sessionResultsDir(inMemory("no-session-run", project));
+		expect(isAbsolute(dir)).toBe(true);
+		for (const folder of [join(dir, "subagents", "task-1"), join(dir, "workflows", "run-1"), join(dir, "auto-mode-decisions.jsonl")]) {
+			expect(relative(project, folder).startsWith("..")).toBe(true);
+		}
+	});
+
+	it("are derived only through sessionResultsDir, never from pi's bare session dir", () => {
+		// pi's session dir is "" in a session-less run. The reads left are a
+		// readable root, a snapshot handed to sessionResultsDir, and /doctor's text.
+		const allowed = new Set(["lib/request/persisted-output.ts", "safety/permissions/index.ts", "safety/hooks/index.ts", "commands/doctor/index.ts"]);
+		const root = resolve(__dirname, "../../extensions");
+		const offenders = (readdirSync(root, { recursive: true }) as string[])
+			.filter((file) => file.endsWith(".ts") && !allowed.has(file.split("\\").join("/")))
+			.filter((file) => readFileSync(join(root, file), "utf8").includes("getSessionDir()"));
+		expect(offenders).toEqual([]);
 	});
 });

@@ -24,6 +24,7 @@
  */
 
 import { brandedId } from "../../lib/profile/brand.mjs";
+import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { prepareWorkflowArguments } from "./args.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
@@ -192,7 +193,9 @@ function workflowExtension(pi: ExtensionAPI) {
 		parameters: workflowParams(text),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
-			const sessionDir = ctx.sessionManager.getSessionDir();
+			// Runs persist under the session's harness dir; a session-less run's is its
+			// private temp dir (pi's session dir is "" there, which named the project).
+			const sessionDir = sessionResultsDir(ctx);
 
 			let script: string | undefined;
 			try {
