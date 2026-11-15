@@ -12,8 +12,15 @@ export interface FixPromptInput {
 	productVersion: string;
 	/** pi's sessions root, `<agentDir>/sessions` (other projects' directories live here — out of scope). */
 	sessionsDir: string;
-	/** THIS project's session directory under it — the only transcripts the permission gate lets a session read (Claude Code's own rule). */
+	/**
+	 * THIS run's session directory: the project's directory under it, the only
+	 * transcripts the permission gate lets a session read (Claude Code's own
+	 * rule); with no saved session (`--no-session`), the run's private folder
+	 * the gate reads instead (lib/request/persisted-output.ts sessionResultsDir).
+	 */
 	sessionDir: string;
+	/** False when the run saves no session, so `sessionDir` holds no transcripts. */
+	sessionPersisted: boolean;
 	productSettingsPath: string;
 	productProjectSettingsPath: string;
 	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */

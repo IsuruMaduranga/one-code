@@ -17,6 +17,7 @@ const input: FixPromptInput = {
 	productVersion: "9.9.9",
 	sessionsDir: "/agent/sessions",
 	sessionDir: "/agent/sessions/--proj--",
+	sessionPersisted: true,
 	productSettingsPath: "/home/u/.onecode/settings.json",
 	productProjectSettingsPath: "/home/u/.onecode/projects/x/settings.json",
 	decisionLogEnabled: false,
@@ -32,6 +33,13 @@ describe("One Code's /doctor fix prompt", () => {
 		expect(text).toContain("`npm i -g pkg` (or `brew upgrade pkg` for a Homebrew install)");
 		expect(text).toContain("change the mode with shift+tab");
 		expect(doctor.fixPrompt({ ...input, install: "pi-package" })).toContain("`pi update`");
+	});
+
+	it("names the run's own folder under --no-session and says it holds no earlier transcripts", () => {
+		expect(doctor.fixPrompt(input)).not.toContain("--no-session");
+		const text = doctor.fixPrompt({ ...input, sessionDir: "/tmp/onecode-501/proj/abc", sessionPersisted: false });
+		expect(text).toContain("under `/tmp/onecode-501/proj/abc/*.jsonl`");
+		expect(text).toContain("This run saves no session (it was started with `--no-session`)");
 	});
 
 	it("says One Code never writes Claude Code's files", () => {

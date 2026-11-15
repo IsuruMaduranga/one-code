@@ -33,6 +33,7 @@ const FIX_INPUT: FixPromptInput = {
 	productVersion: "1.0.0",
 	sessionsDir: "/s",
 	sessionDir: "/s/p",
+	sessionPersisted: true,
 	productSettingsPath: "/u.json",
 	productProjectSettingsPath: "/p.json",
 	decisionLogEnabled: false,
