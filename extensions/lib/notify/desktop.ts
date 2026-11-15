@@ -52,6 +52,10 @@ export interface PromptAttention {
 export const desktopNotificationText = {
 	permission: (product: string, tool: string) => `${product} needs your permission to use ${tool}`,
 	planApproval: (product: string) => `${product} needs your approval for the plan`,
+	/** Auto mode's one-time question before its first read outside the working directories. */
+	outsideRead: (product: string) => `${product} needs your permission to read outside the working directories`,
+	/** The manual approval auto mode falls back to when its review of the call could not run. */
+	reviewFallback: (product: string, tool: string) => `${product} needs your permission to use ${tool} (auto mode could not review it)`,
 	attention: (product: string) => `${product} needs your attention`,
 	idle: (product: string) => `${product} is waiting for your input`,
 };

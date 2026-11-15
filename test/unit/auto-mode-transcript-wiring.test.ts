@@ -11,6 +11,8 @@ import { stubHome } from "./helpers/home.ts";
 import { productStateDir } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
+import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { brand } from "../../extensions/lib/profile/brand.mjs";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
@@ -162,6 +164,18 @@ describe("classifier history in the permissions gate", () => {
 		// Approval is for this call, not a persistent allow rule or a mode change.
 		expect(await call("bash", { command: "rm probe.*" })).toBeUndefined();
 		expect(select).toHaveBeenCalledTimes(2);
+	});
+
+	it("describes the overflow approval to the desktop notifier before it opens", async () => {
+		overflow = true;
+		ctx.hasUI = true;
+		ctx.mode = "rpc";
+		const events: string[] = [];
+		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const select = (ctx.ui as { select: ReturnType<typeof vi.fn> }).select;
+		select.mockImplementation(async () => { events.push("opened"); return "Yes"; });
+		expect(await call("bash", { command: "rm probe.*" })).toBeUndefined();
+		expect(events).toEqual([`described: ${desktopNotificationText.reviewFallback(brand.name, "Bash")}`, "opened"]);
 	});
 
 	it("does not credit extension-generated user turns after resume", async () => {
