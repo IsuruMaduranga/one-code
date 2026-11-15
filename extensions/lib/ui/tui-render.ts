@@ -1020,19 +1020,34 @@ interface RowClick {
  * Which messages the user expanded or collapsed with a click, keyed by the
  * message object pi hands the renderer on every rebuild (custom message
  * renderers get no entry id). A click overrides the ctrl+o state it was made
- * under; pressing ctrl+o again puts every row back under it, as pi's tool
- * rows do.
+ * under; once ctrl+o changes that state every row is back under it, as pi's
+ * tool rows are, even if a second ctrl+o restores the old value.
+ *
+ * pi rebuilds every custom row with the new state when ctrl+o flips it, so
+ * the first rebuild that sees a different state starts a new generation, and
+ * an override counts only in the generation it was made in.
  */
 export class ClickToggles {
-	private readonly state = new WeakMap<object, { expanded: boolean; underGlobal: boolean }>();
+	private readonly state = new WeakMap<object, { expanded: boolean; generation: number }>();
+	private generation = 0;
+	private lastGlobal: boolean | undefined;
+
+	/** Observe the ctrl+o state a row is built under: a change ends every earlier override. */
+	private observe(globalExpanded: boolean): number {
+		if (this.lastGlobal !== undefined && this.lastGlobal !== globalExpanded) this.generation++;
+		this.lastGlobal = globalExpanded;
+		return this.generation;
+	}
 
 	expanded(message: object, globalExpanded: boolean): boolean {
+		const generation = this.observe(globalExpanded);
 		const own = this.state.get(message);
-		return own && own.underGlobal === globalExpanded ? own.expanded : globalExpanded;
+		return own && own.generation === generation ? own.expanded : globalExpanded;
 	}
 
 	toggle(message: object, globalExpanded: boolean): void {
-		this.state.set(message, { expanded: !this.expanded(message, globalExpanded), underGlobal: globalExpanded });
+		const expanded = !this.expanded(message, globalExpanded);
+		this.state.set(message, { expanded, generation: this.generation });
 	}
 }
 
@@ -1041,6 +1056,12 @@ export class ClickToggles {
  * routes mouse events to the transcript's components (pi-tui 0.85.0); pi
  * gives its own tool rows and thinking the same click (0.84.2) but not
  * custom messages. ctrl+o stays the keyboard path, so no key is hidden.
+ *
+ * The row leaves the press unclaimed, so a press on it still starts pi-tui's
+ * text selection (the rows' text stays copyable); when the button comes up on
+ * the cell it went down on, pi-tui ends that selection with a `click` to the
+ * component under the pointer (pi-tui 1.0 to 1.5, `handleSelectionMouseEvent`),
+ * and the row toggles on that. A drag selects text and toggles nothing.
  */
 export function clickToExpand(toggles: ClickToggles, message: object, globalExpanded: boolean, build: (expanded: boolean) => TuiComponent): TuiComponent & { handleMouse(event: RowClick): { handled: true } | undefined } {
 	let inner = build(toggles.expanded(message, globalExpanded));
