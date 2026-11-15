@@ -402,6 +402,32 @@ describe("subagent runtime build failure", () => {
 		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "couldNotStart", problem: subagentResultText().runtimeProblem({ kind: "failed", osMessage: "models.json: Unexpected token" }) }));
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
+
+	// A launch where no agent runs must not tell the model to wait for a
+	// notification that never comes.
+	it("fails a background launch whose only run could not start", async () => {
+		const runtime = fakeResident();
+		vi.spyOn(runtime.runner, "runResident").mockRejectedValue(new Error("boom"));
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		const line = subagentResultText().launchLine({ kind: "startFailed", name: "general-purpose-1", osMessage: "boom" });
+		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "noneLaunched", lines: [line] }));
+		expect(result.content[0].text).not.toContain("working in the background");
+		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
+	});
+
+	it("fails a background launch whose only worktree could not be created, and forgets the run", async () => {
+		fakeResident();
+		vi.spyOn(worktrees, "isGitRepo").mockResolvedValue(true);
+		vi.spyOn(worktrees, "createWorktree").mockRejectedValue(new Error("no space"));
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files", isolation: "worktree" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toMatch(/^✗ general-purpose-1: could not create a worktree: .*no space/);
+		expect(result.content[0].text).not.toContain("notified automatically");
+		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
+	});
 });
 
 // A turn that ends with an agent still running gets no reminder: the launch

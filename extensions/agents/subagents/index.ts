@@ -2388,6 +2388,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (launched) running++;
 				if (logPath) outputFile = true;
 			}
+			// Nothing runs, so no notification will come: fail the call rather
+			// than tell the model to wait, and forget the runs as above.
+			if (running === 0) {
+				for (const p of prepared) registry.remove(p.record.taskId);
+				return refuseCall({ kind: "noneLaunched", lines });
+			}
 			return {
 				content: [
 					{
