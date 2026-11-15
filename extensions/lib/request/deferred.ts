@@ -84,6 +84,12 @@ export interface SearchableTool {
 	keywords: string[];
 }
 
+/**
+ * An owner's hint as one listing line: every run of whitespace, line breaks
+ * included, becomes one space, so it cannot read as another tool; blank is no hint.
+ */
+const oneLineHint = (hint: string | undefined): string | undefined => hint?.replace(/\s+/g, " ").trim() || undefined;
+
 export class DeferredRegistry {
 	/** Per tool: its keywords, and the hint its owner gave (`DeferRequest.hint`; a later one replaces it). */
 	private entries = new Map<string, { keywords: string[]; hint?: string }>();
@@ -92,7 +98,7 @@ export class DeferredRegistry {
 		if (!request?.name) return;
 		const existing = this.entries.get(request.name);
 		const keywords = [...new Set([...(existing?.keywords ?? []), ...(request.keywords ?? [])])];
-		const hint = request.hint || existing?.hint;
+		const hint = oneLineHint(request.hint) || existing?.hint;
 		this.entries.set(request.name, hint ? { keywords, hint } : { keywords });
 	}
 
@@ -136,9 +142,13 @@ export interface ListingWords {
 /** A tool owner's own listing hint (`DeferRequest.hint`), by name. */
 export type OwnerHints = (name: string) => string | undefined;
 
-/** One listing line: the name, then the profile's hint, or else the tool owner's. */
+/**
+ * One listing line: the name, then the profile's hint, or else the tool
+ * owner's. A profile entry always wins; an empty one lists the bare name.
+ */
 const listingLine = (name: string, words: ListingWords, ownerHints?: OwnerHints): string => {
-	const hint = words.listingHints?.[name] || ownerHints?.(name);
+	const profile = words.listingHints;
+	const hint = profile && Object.hasOwn(profile, name) ? profile[name] : ownerHints?.(name);
 	return hint ? `${name}: ${hint}` : name;
 };
 

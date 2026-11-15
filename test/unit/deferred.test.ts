@@ -51,6 +51,17 @@ describe("DeferredRegistry", () => {
 		expect(r.hintFor("a")).toBeUndefined();
 	});
 
+	it("keeps an owner's hint on one line: whitespace runs and line breaks become one space, and a blank one is no hint", () => {
+		const r = new DeferredRegistry();
+		r.add({ name: "a", hint: "  When you echo,\n\n  use it.\r\n\tnot_a_tool: no " });
+		expect(r.hintFor("a")).toBe("When you echo, use it. not_a_tool: no");
+		r.add({ name: "a", hint: " \n\t " });
+		expect(r.hintFor("a")).toBe("When you echo, use it. not_a_tool: no");
+		r.add({ name: "b", hint: "\n \n" });
+		expect(r.hintFor("b")).toBeUndefined();
+		expect(r.requests()[1]).not.toHaveProperty("hint");
+	});
+
 	it("lists its tools as deferral requests, in order, with a hint only where one was given", () => {
 		const r = new DeferredRegistry();
 		r.add({ name: "a", keywords: ["x"], hint: "first" });
@@ -234,6 +245,17 @@ describe("deferredReminderText", () => {
 			const hints = owner({ monitor: "Owner's words." });
 			expect(deferredReminderText([{ name: "monitor" }], words, hints)).toBe([toolSearchResultText.listingHead, "monitor: When you watch, use it."].join("\n"));
 			expect(deferredAddendumText(["monitor"], words, hints)).toBe([toolSearchResultText.addendumHead, "monitor: When you watch, use it."].join("\n"));
+		});
+
+		it("gives way to an empty profile entry, which lists the bare name", () => {
+			const hints = owner({ late: "When you echo, use it." });
+			expect(deferredReminderText([{ name: "late" }], { listingHints: { late: "" } }, hints)).toBe([toolSearchResultText.listingHead, "late"].join("\n"));
+			expect(deferredAddendumText(["late"], { listingHints: { late: "" } }, hints)).toBe([toolSearchResultText.addendumHead, "late"].join("\n"));
+		});
+
+		it("is used for a tool whose name the profile's object only inherits", () => {
+			const hints = (name: string) => (name === "constructor" ? "When you build, use it." : undefined);
+			expect(deferredAddendumText(["constructor", "toString"], words, hints)).toBe([toolSearchResultText.addendumHead, "constructor: When you build, use it.", "toString"].join("\n"));
 		});
 
 		it("leaves the bare name when neither has one, byte for byte as without owner hints", () => {
