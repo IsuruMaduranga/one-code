@@ -591,6 +591,14 @@ function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		// RPC's new_session emits session_start twice on the same instance
+		// (lib/notify/session-lifecycle.ts): connect once. A second connect
+		// replaced each connection in `connections`, and the replaced one was
+		// never closed, so its server ran until the process exited.
+		if (connecting) {
+			if (!ctx.hasUI) await connecting;
+			return;
+		}
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire
 		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive
