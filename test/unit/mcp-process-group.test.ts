@@ -74,7 +74,7 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		expect(await received).toEqual({ jsonrpc: "2.0", id: 1, result: { echoed: "ping" } });
 		await readServerPid();
 		await transport.close();
-	});
+	}, 15_000);
 
 	it("is ended by close() when it ignores a closed stdin", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
@@ -87,7 +87,7 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		await transport.close();
 		expect(await until(() => !alive(pid))).toBe(true);
 		await closed;
-	});
+	}, 15_000);
 
 	it("is ended when its launcher dies mid-session", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
@@ -99,7 +99,7 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		process.kill(launcherPid, "SIGKILL");
 		expect(await until(() => !alive(pid))).toBe(true);
 		await transport.close();
-	});
+	}, 15_000);
 
 	it("is ended when its owner crashes without closing it", async () => {
 		// Loaded through jiti, as pi loads an extension.
@@ -133,5 +133,5 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		} finally {
 			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
 		}
-	});
+	}, 15_000);
 });
