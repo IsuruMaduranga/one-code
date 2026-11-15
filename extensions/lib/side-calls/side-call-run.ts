@@ -50,8 +50,8 @@ export interface SideCallRun {
 
 type SideCallKind = SideCallLogContext["kind"];
 
-/** A side call's cache key, which pi-ai also takes as its `sessionId`. */
-function sideCallKey(sessionId: string, kind: SideCallKind): string {
+/** A side call's cache key, `<session id>:<kind>`, which pi-ai also takes as its `sessionId`. */
+export function sideCallKey(sessionId: string, kind: SideCallKind): string {
 	return `${sessionId}:${kind}`;
 }
 

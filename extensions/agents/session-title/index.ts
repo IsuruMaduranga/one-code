@@ -23,6 +23,7 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import { completeThreadless } from "../../lib/request/anthropic-stream.ts";
+import { releaseSideCalls, sideCallKey } from "../../lib/side-calls/side-call-run.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../../lib/models/model-policy.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
@@ -50,7 +51,10 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 	// A new session (startup, /clear, a resume, a /tree switch) is a new
 	// naming opportunity; an in-flight request belonged to the old one.
 	pi.on("session_start", reset);
-	pi.on("session_shutdown", reset);
+	pi.on("session_shutdown", (_event, ctx) => {
+		reset();
+		releaseSideCalls(ctx.sessionManager.getSessionId());
+	});
 
 	pi.on("before_agent_start", (event, ctx) => {
 		if (attempted) return;
@@ -97,6 +101,9 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 						{
 							signal: AbortSignal.any([controller.signal, timeout]),
 							maxTokens: TITLE_MAX_TOKENS,
+							// Keyed to the session like every side call, so a provider that
+							// routes or caches on it (prompt_cache_key, affinity headers) can.
+							sessionId: sideCallKey(ctx.sessionManager.getSessionId(), "title"),
 							...(reasoning ? { reasoning } : {}),
 						},
 					);

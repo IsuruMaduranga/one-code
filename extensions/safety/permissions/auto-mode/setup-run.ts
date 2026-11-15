@@ -178,6 +178,8 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 export interface DraftDeps {
 	registry: ModelRegistry;
 	sessionModel: Model<Api> | undefined;
+	/** The session's side-call key for drafting (`<session>:setup`), sent as pi-ai's `sessionId`. */
+	cacheKey?: string;
 	config: AutoModeConfig;
 	defaultEnvironment: string[];
 	signal?: AbortSignal;
@@ -227,6 +229,7 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 				{
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens: DRAFT_MAX_TOKENS,
+					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
 					...(reasoning ? { reasoning } : {}),
 				},
 			);

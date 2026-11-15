@@ -3,7 +3,7 @@ import { knobValue } from "../profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 
 /** Every side-call kind; releaseSideCalls closes each one's pi-ai key. */
-export const SIDE_CALL_KINDS = ["reader", "btw", "recap"] as const;
+export const SIDE_CALL_KINDS = ["reader", "btw", "recap", "title", "setup"] as const;
 
 export interface SideCallLogContext {
 	kind: (typeof SIDE_CALL_KINDS)[number];

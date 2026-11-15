@@ -19,7 +19,7 @@ describe("releaseClassifierResources", () => {
 	});
 });
 
-// btw, recap and the web_fetch reader key their calls `<session id>:<kind>`.
+// btw, recap, the web_fetch reader, the session title and setup drafting key their calls `<session id>:<kind>`.
 describe("releaseSideCalls", () => {
 	it("closes every side-call kind's key for the session", () => {
 		releaseSideCalls("s2");

@@ -56,6 +56,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../../lib/rules/settings-cha
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
+import { releaseSideCalls, sideCallKey } from "../../lib/side-calls/side-call-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
 import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
@@ -1155,6 +1156,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Children screen through this session's key too (evaluateChildToolCall
 		// uses lastReviewCtx), so one release covers their calls.
 		releaseClassifierResources(ctx.sessionManager.getSessionId());
+		// The setup draft's key (any side-call kind's, harmlessly).
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -2416,6 +2419,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			draft = await draftSetup(facts, {
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
+				cacheKey: sideCallKey(ctx.sessionManager.getSessionId(), "setup"),
 				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
 				defaultEnvironment: defaultEnvironment(),
 				signal: ctx.signal,
