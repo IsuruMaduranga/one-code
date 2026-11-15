@@ -8,10 +8,12 @@
  * - **A prompt waits** (`permission_prompt`): a prompt opened during a turn
  *   (a permission question, the plan approval, a question to the user), or a
  *   described prompt opened at any time (a background subagent's permission
- *   question can arrive while the main session is idle). The prompt counts as
- *   an interaction when it opens; every 6 s the notifier checks for a keypress
- *   in the last 6 s and notifies once when there was none. A panel the user
- *   opened while idle is theirs and never notifies.
+ *   question can arrive while the main session is idle). Every 6 s the
+ *   notifier checks for a keypress in the last 6 s, counting from the prompt's
+ *   opening, and notifies once when there was none. The opening is not the
+ *   user's interaction, so a prompt that opens and closes on its own leaves the
+ *   idle notification due. A panel the user opened while idle is theirs and
+ *   never notifies.
  * - **The turn ended and the user is away** (`idle_prompt`): 60 s after a run
  *   settles, if the user submitted something this session, has not touched a
  *   key since the run ended, and no prompt is open.
@@ -76,6 +78,8 @@ export interface AttentionIo {
 /** When to notify. Fed by pi's events; writes nothing itself. */
 export class AttentionNotifier {
 	private lastInteraction: number;
+	/** When the outermost open prompt opened: its 6 s check counts from here too. */
+	private promptOpenedAt = 0;
 	private working = false;
 	private submitted = false;
 	private prompts = 0;
@@ -133,9 +137,11 @@ export class AttentionNotifier {
 		this.attention = undefined;
 		// While idle, only a described prompt counts: an undescribed one is a panel the user opened.
 		if (this.stopped || (!this.working && !described) || this.prompts > 1) return;
-		this.interacted();
+		// Not `interacted()`: the user did not open it, and a described prompt
+		// opened while idle (a background agent's) must not cancel the idle notice.
+		this.promptOpenedAt = this.io.now();
 		this.cancelPrompt = this.io.every(INTERACTION_THRESHOLD_MS, () => {
-			if (this.io.now() - this.lastInteraction < INTERACTION_THRESHOLD_MS) return;
+			if (this.io.now() - Math.max(this.lastInteraction, this.promptOpenedAt) < INTERACTION_THRESHOLD_MS) return;
 			this.cancelPrompt?.();
 			this.cancelPrompt = undefined;
 			if (!this.stopped) this.io.notify({ message, notificationType: "permission_prompt" });
