@@ -20,9 +20,11 @@
 # rejects tool changes), so one more late-tool probe runs on a model that takes
 # Claude Code's `tool_addition` and requires that form (findings §55 P1).
 #
-# A last leg runs the session (with its tool_search load) and classifier phases
-# on the Anthropic login rather than an API key: pi sends some tool names
-# differently on that path, so it needs its own wire check. It takes the login
+# A last leg runs the session (with its tool_search load), classifier and
+# late-tool phases on the Anthropic login rather than an API key: pi sends some
+# tool names differently on that path, so it needs its own wire check, and a
+# tool batch that arrives mid-session must be announced there as Claude Code's
+# `tool_addition` without a cache miss. It takes the login
 # from the first agent dir whose auth.json holds an Anthropic login:
 # CACHE_PROBE_LOGIN_AGENT_DIR, PI_CODING_AGENT_DIR, then the bundled app's
 # ($ONECODE_STATE_DIR or ~/.onecode, /agent). It loads only this repo's
@@ -107,7 +109,7 @@ elif login_dir="$(login_agent_dir)"; then
 	echo "login:   $login_dir/auth.json (anthropic login)"
 	if env -u ANTHROPIC_API_KEY -u ANTHROPIC_OAUTH_TOKEN -u CLAUDE_CODE_SUBAGENT_MODEL \
 		PI_CODING_AGENT_DIR="$login_dir" ONECODE_SUBAGENT_MODEL="$login_model" \
-		bash "$REPO/test/e2e/cache-probe.sh" "$login_model" --repo-only --expect-auth login --no-review --no-reader --no-late-tool; then
+		bash "$REPO/test/e2e/cache-probe.sh" "$login_model" --repo-only --expect-auth login --no-review --no-reader --late-tool-form tool_addition; then
 		summary+=("PASS  $login_model on the Anthropic login")
 	else
 		summary+=("FAIL  $login_model on the Anthropic login")

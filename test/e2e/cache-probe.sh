@@ -26,7 +26,8 @@
 # fixture (cache-probe-reader.sh). `--no-reader` skips it.
 # On a first-party Anthropic model a late-tool phase registers a tool mid-session
 # and checks it is announced without a cache miss (cache-probe-late-tool.sh).
-# `--no-late-tool` skips it.
+# `--no-late-tool` skips it; `--late-tool-form tool_addition|addendum` also
+# requires that announcement form.
 #
 # openai-codex models talk over WebSocket by default, which dump-requests.ts
 # cannot see; the probe project sets `transport: "sse"` and is trusted with
@@ -35,7 +36,7 @@
 # `--repo-only` loads only this repo's extensions (`--no-extensions -e <repo>`),
 # for an agent dir (PI_CODING_AGENT_DIR) whose settings name another package.
 # `--expect-auth login|key` records the credential shape of every request in the
-# session and classifier phases (dump-requests.ts WIRE_AUTH_DUMP, never a value)
+# session, classifier and late-tool phases (dump-requests.ts WIRE_AUTH_DUMP, never a value)
 # and fails unless each one used the Anthropic login (bearer, no x-api-key) or
 # the API key, and went to the probe's own model (test/e2e/cache-probe-auth.mjs).
 #
@@ -58,16 +59,23 @@ READER=1
 LATE_TOOL=0
 REPO_ARGS=()
 EXPECT_AUTH=""
+LATE_FORM=()
 case "$MODEL" in
 anthropic/*) LATE_TOOL=1 ;;
 esac
 expect_auth_next=0
+late_form_next=0
 for arg in "$@"; do
 	if [ "$expect_auth_next" = 1 ]; then
 		EXPECT_AUTH="$arg"
 		expect_auth_next=0
+	elif [ "$late_form_next" = 1 ]; then
+		LATE_FORM=(--form "$arg")
+		late_form_next=0
 	elif [ "$arg" = "--expect-auth" ]; then
 		expect_auth_next=1
+	elif [ "$arg" = "--late-tool-form" ]; then
+		late_form_next=1
 	elif [ "$arg" = "--repo-only" ]; then
 		REPO_ARGS=(--no-extensions -e "$REPO")
 	elif [ "$arg" = "--no-classifier" ]; then
@@ -152,16 +160,16 @@ fi
 if [ "$REVIEW" = 1 ]; then
 	auto_phase review 'Call the Agent tool exactly once, with subagent_type general-purpose and this prompt: "Run curl -sI https://example.com with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' --review
 fi
-if [ -n "$EXPECT_AUTH" ]; then
-	echo "--- credential check (session and auto-mode phases)"
-	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
-fi
 if [ "$READER" = 1 ]; then
 	echo "--- reader phase"
 	CACHE_PROBE_WORK_DIR="$WORK/reader" bash "$REPO/test/e2e/cache-probe-reader.sh" "$MODEL" || status=1
 fi
 if [ "$LATE_TOOL" = 1 ]; then
 	echo "--- late-tool phase"
-	CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" || status=1
+	WIRE_AUTH_DUMP="$AUTH_DUMP" CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" ${LATE_FORM[@]+"${LATE_FORM[@]}"} || status=1
+fi
+if [ -n "$EXPECT_AUTH" ]; then
+	echo "--- credential check (session, auto-mode and late-tool phases)"
+	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
 fi
 exit $status

@@ -53,3 +53,32 @@ describe("cache-probe matrix extension loading (offline CLI)", () => {
 		expect(calls.at(-1)).toContain("--no-extensions");
 	});
 });
+
+describe("cache-probe matrix login leg (offline CLI)", () => {
+	it("runs the late-tool phase on the login, requires tool_addition, and records its credentials", () => {
+		const root = mkdtempSync(join(tmpdir(), "cache-probe-login-"));
+		try {
+			const cli = join(root, "fake-pi.mjs");
+			const invocations = join(root, "invocations.jsonl");
+			writeFileSync(cli, fakePi);
+			const agentDir = join(root, "agent");
+			spawnSync("mkdir", ["-p", agentDir]);
+			writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ anthropic: { type: "oauth", refresh: "r", access: "a", expires: 0 } }));
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe-matrix.sh")], {
+				encoding: "utf8",
+				timeout: 30_000,
+				env: { ...process.env, PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: invocations, CACHE_PROBE_ONLY: "login", CACHE_PROBE_LOGIN_AGENT_DIR: agentDir },
+			});
+			expect(result.error).toBeUndefined();
+			expect(result.stdout).toContain("--- late-tool phase");
+			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			const calls = readFileSync(invocations, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+			const late = calls.find((args) => args.some((arg) => arg.endsWith("late-tool-fixture.ts")));
+			expect(late).toBeDefined();
+			expect(late).toContain("--no-extensions");
+			expect(late).toContain("anthropic/claude-haiku-5-5");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
