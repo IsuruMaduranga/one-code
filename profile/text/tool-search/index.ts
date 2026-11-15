@@ -9,7 +9,7 @@
  * artifact, lsp_diagnostics) and MCP tools have none and are listed by name.
  */
 
-import type { LiveTools, ToolSearchText } from "../../../extensions/sdk/profile.ts";
+import type { DeferrableTool, LiveTools, ToolSearchText } from "../../../extensions/sdk/profile.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const DESCRIPTION =
@@ -24,7 +24,7 @@ const DESCRIPTION_PASSAGES: ToolPassages = {
 };
 
 /** When to load each deferred tool, one line after its name in the listing. */
-const LISTING_HINTS: Readonly<Record<string, string>> = {
+const LISTING_HINTS: Readonly<Partial<Record<DeferrableTool, string>>> = {
 	cron_create:
 		"When you are about to agree to do something at a set time or at fixed intervals, use it and not a promise in your reply, which nothing would carry out; to catch a change as it happens, use monitor.",
 	cron_delete: "When you are about to stop a job that cron_create scheduled, use it.",
@@ -68,6 +68,7 @@ export const toolSearchText = (live: LiveTools): ToolSearchText => ({
 		query: "Tool names (`select:a,b`) or keywords describing the capability needed",
 		maxResults: "Maximum tools to load (default 5)",
 	},
-	listingHints: Object.fromEntries(Object.entries(LISTING_HINTS).map(([tool, hint]) => [tool, withoutOff(hint, live, HINT_PASSAGES)])),
+	// The entries come from the typed table above, so its keys are the base's deferrable tools.
+	listingHints: Object.fromEntries(Object.entries(LISTING_HINTS).map(([tool, hint]) => [tool, withoutOff(hint, live, HINT_PASSAGES)])) as Partial<Record<DeferrableTool, string>>,
 	listingClose: LISTING_CLOSE,
 });

@@ -46,6 +46,7 @@ export type { SubagentsText } from "../agents/subagents/text.ts";
 export type { SystemPromptText } from "../request/system-prompt/text.ts";
 export type { TasksText } from "../tools/tasks/text.ts";
 export type { ToolSearchText } from "../request/tool-search/text.ts";
+export type { DeferrableTool } from "../lib/request/deferrable-tools.ts";
 export type { ToolStyleText } from "../tools/tool-style/text.ts";
 export type { WebFetchText } from "../tools/web-fetch/text.ts";
 export type { WebSearchText } from "../tools/web/text.ts";

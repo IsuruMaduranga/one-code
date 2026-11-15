@@ -20,6 +20,7 @@ import os from "node:os";
 import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { MCP_RESOURCE_TOOLS } from "../../lib/request/deferrable-tools.ts";
 import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
@@ -584,7 +585,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		for (const name of ["list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]) {
+		for (const name of MCP_RESOURCE_TOOLS) {
 			pi.events.emit(DEFER_CHANNEL, { name, keywords: text.resources.searchKeywords });
 		}
 		pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });

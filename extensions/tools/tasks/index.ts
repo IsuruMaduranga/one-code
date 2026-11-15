@@ -20,6 +20,7 @@ import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
+import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
@@ -44,7 +45,7 @@ interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
 }
 
-const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
+const TASK_TOOLS = new Set<DeferrableTool>(["task_create", "task_get", "task_list", "task_update"]);
 
 function tasksExtension(pi: ExtensionAPI) {
 	const text = requireText("tasks");
