@@ -34,7 +34,10 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/lib/context/git-status.ts": { kind: "awaited", how: "git, synchronous with a timeout" },
 	"extensions/lib/context/git.ts": { kind: "awaited", how: "git, with a timeout" },
 	"extensions/lib/shell-run/bash-background.ts": { kind: "registered", how: "background shells: remembered from spawn, stopped with stopProcessTree" },
-	"extensions/lib/shell-run/process-tree.ts": { kind: "exception", how: "taskkill.exe is the kill itself; unref'd so a quit is not held, and it ends on its own" },
+	"extensions/lib/shell-run/process-tree.ts": {
+		kind: "exception",
+		how: "the kills themselves: taskkill.exe, unref'd, ends on its own; the exit watchdog SIGKILLs what outlasts SIGTERM and exits within KILL_GRACE_MS",
+	},
 	"extensions/lib/shell-run/shell-spawn.ts": {
 		kind: "exception",
 		how: "defines spawnShellCommand (its callers own the lifetime); the PowerShell tool's operations are awaited; the PowerShell parser server lives in pi's own group, unref'd, and ends when its stdin closes",

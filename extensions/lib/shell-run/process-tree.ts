@@ -39,7 +39,7 @@
  * wait for it (pi's `waitForChildProcess` has the same shape and reason).
  */
 
-import { type ChildProcess, execFile } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { system32Path } from "../profile/paths.ts";
 import { envName } from "../profile/brand.mjs";
 
@@ -182,13 +182,55 @@ function releaseGroupListeners(): void {
 	groupSignalHandlers.clear();
 }
 
-/** Exit handlers cannot await a grace period. Existing explicit stops retain their TERM/KILL escalation below. */
-function terminateRememberedGroups(): void {
-	for (const child of rememberedGroups) {
-		if (rememberedGroupAlive(child)) killProcessTree(child, "SIGTERM");
+/**
+ * The watchdog `killAfterExit` starts, as a `node -e` script: argv is the
+ * grace in ms, then the group ids. It exits as soon as every group is gone,
+ * and SIGKILLs what is left when the grace runs out.
+ */
+const EXIT_WATCHDOG = [
+	"const [grace, ...groups] = process.argv.slice(1).map(Number);",
+	"const alive = (g) => { try { process.kill(-g, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };",
+	"const poll = setInterval(() => { if (!groups.some(alive)) process.exit(0); }, 50);",
+	"setTimeout(() => { clearInterval(poll); for (const g of groups) { try { process.kill(-g, 'SIGKILL'); } catch {} } }, grace);",
+].join("\n");
+
+/**
+ * The process is exiting and the groups in `children` were just sent SIGTERM.
+ * An exit handler cannot wait out a grace period, so a member that ignores or
+ * outlasts SIGTERM (a server stuck in its shutdown handler) would outlive the
+ * process: a small detached watchdog, started synchronously (the spawn
+ * happens before `spawn` returns), SIGKILLs the groups still there after
+ * `KILL_GRACE_MS` and exits as soon as none is. It names groups only: a group
+ * id stays reserved while any member lives, so it cannot reach a stranger.
+ * POSIX only; Windows' taskkill /F is already forceful.
+ */
+function killAfterExit(children: ChildProcess[]): void {
+	const groups = children.map((child) => child.pid).filter((pid): pid is number => pid != null);
+	if (process.platform === "win32" || groups.length === 0) return;
+	try {
+		const watchdog = spawn(process.execPath, ["-e", EXIT_WATCHDOG, String(KILL_GRACE_MS), ...groups.map(String)], {
+			detached: true,
+			stdio: "ignore",
+			env: {},
+		});
+		watchdog.unref();
+	} catch {
+		// Best effort at exit: the SIGTERM above has gone out regardless.
 	}
+}
+
+/**
+ * SIGTERM every remembered group still running, at exit or on a terminating
+ * signal, and leave a watchdog to SIGKILL what outlasts the grace (an exit
+ * handler cannot await it). Explicit stops keep their own TERM/KILL
+ * escalation below.
+ */
+function terminateRememberedGroups(): void {
+	const live = [...rememberedGroups].filter(rememberedGroupAlive);
+	for (const child of live) killProcessTree(child, "SIGTERM");
 	rememberedGroups.clear();
 	releaseGroupListeners();
+	killAfterExit(live);
 }
 
 /**
