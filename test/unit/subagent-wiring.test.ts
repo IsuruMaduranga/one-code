@@ -863,7 +863,7 @@ describe("agent view scrolling without branding's editor", () => {
 		}
 	}
 
-	async function openViewIn(tui: object) {
+	async function openViewIn(tui: object, task = "Check the code") {
 		fakeResident();
 		const h = await mount([], session, "tui", undefined, { hasUI: true });
 		let view: { render(width: number): string[] } | undefined;
@@ -873,7 +873,7 @@ describe("agent view scrolling without branding's editor", () => {
 			view = factory(tui, {}, keys, (result: null) => done?.(result));
 			return new Promise((resolve) => (done = resolve));
 		});
-		await h.call("Agent", { subagent_type: "general-purpose", task: "Check the code", run_in_background: true });
+		await h.call("Agent", { subagent_type: "general-purpose", task, run_in_background: true });
 		await h.fake.commands.get("agents")!.handler("", h.ctx);
 		await vi.waitFor(() => expect(view).toBeDefined());
 		// The strip's widget learns the TUI and its focused editor when it mounts.
@@ -911,6 +911,21 @@ describe("agent view scrolling without branding's editor", () => {
 		// Esc in the empty editor closes the view; main is restored.
 		input("\x1b");
 		expect(tui.isFollowingOutput).toBe(true);
+		expect(tui.viewportTop).toBe(90);
+	});
+
+	it("in fullscreen, after a direct scroll up (the wheel over the view), a PageDown pi-tui consumes still brings the view back down", async () => {
+		const tui = new FakeTui();
+		// A task long enough that the view has room to scroll.
+		const { view } = await openViewIn(tui, Array.from({ length: 80 }, (_, i) => `step ${i + 1}`).join("\n"));
+		const bottom = view.render(80);
+		(view as unknown as { handleMouse(event: unknown): unknown }).handleMouse({ type: "wheel", wheelDelta: -10 });
+		const scrolled = view.render(80);
+		expect(scrolled).not.toEqual(bottom);
+		// Main was parked to match the view, so pi-tui's PageDown has room to move it.
+		expect(tui.viewportTop).toBeLessThan(90);
+		tui.scrollBy(26);
+		expect(view.render(80)).toEqual(bottom);
 		expect(tui.viewportTop).toBe(90);
 	});
 });

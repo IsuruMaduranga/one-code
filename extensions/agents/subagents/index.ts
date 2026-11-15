@@ -970,12 +970,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const next = scrolledView(scroll, maxScroll, shownHeight, move);
 				if (next === scroll) return;
 				scroll = next;
+				// Park main to match, so a move pi-tui makes to it next (a PageDown it
+				// consumed, a wheel over the strip) has room to register either way.
+				mirror?.park(next);
 				repaintFn?.();
 			},
 			close() {
 				if (closed) return;
 				closed = true;
-				if (view === entry) view = undefined;
+				if (view === entry) {
+					view = undefined;
+					viewKeys = undefined;
+				}
 				mirror?.restore();
 				mirror = undefined;
 				panel.setView(undefined);
