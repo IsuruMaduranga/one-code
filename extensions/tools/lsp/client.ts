@@ -17,9 +17,10 @@
  * - Child handles are unref'd and shut down explicitly, so a one-shot `pi -p`
  *   run still exits.
  * - The server runs in its own process group, owned until this process exits
- *   (`lib/shell-run/process-tree.ts`): a server is often a launcher script in
- *   front of the real process, and may ignore a closed stdin and `processId`,
- *   so `stop()` and a crash (no `session_shutdown`) signal the whole group.
+ *   (`lib/shell-run/process-tree.ts spawnOwnedTree`): a server is often a
+ *   launcher script in front of the real process, and may ignore a closed
+ *   stdin and `processId`, so `stop()`, the launcher's exit and a crash (no
+ *   `session_shutdown`) end the whole group.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -30,7 +31,7 @@ import type { LspDiagnostic } from "./format.ts";
 import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../../lib/app/app-launch.mjs";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, killProcessTree, rememberedGroupAlive, rememberProcessGroup, stopProcessTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
+import { type OwnedTree, spawnOwnedTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -99,7 +100,7 @@ function statOf(path: string): Stats | undefined {
 }
 
 export class LspClient {
-	private child?: ChildProcess;
+	private tree?: OwnedTree;
 	private reader = createReaderState();
 	private nextId = 1;
 	private pending = new Map<number, { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void }>();
@@ -115,6 +116,10 @@ export class LspClient {
 		private readonly root: string,
 		private readonly options: LspClientOptions = {},
 	) {}
+
+	private get child(): ChildProcess | undefined {
+		return this.tree?.child;
+	}
 
 	get isRunning(): boolean {
 		return this.ready && !!this.child && this.child.exitCode === null;
@@ -139,16 +144,22 @@ export class LspClient {
 		// On Windows an npm-installed server is a .cmd shim, which a bare spawn
 		// cannot start (lib/shell-run/command-launch.ts); failure messages keep naming the command.
 		const launch = commandLaunch(this.config.command, this.config.args, env);
-		const child = spawn(launch.command, launch.args, {
-			cwd: this.root,
-			stdio: ["pipe", "pipe", "pipe"],
-			env,
-			windowsHide: true,
-			windowsVerbatimArguments: launch.windowsVerbatimArguments,
-			...detachedSpawnOptions(),
-		});
-		this.child = child;
-		rememberProcessGroup(child);
+		// A launcher can exit, on stop or by itself, and leave the server it
+		// started running: its exit ends the rest of its group.
+		const tree = spawnOwnedTree(
+			(detached) =>
+				spawn(launch.command, launch.args, {
+					cwd: this.root,
+					stdio: ["pipe", "pipe", "pipe"],
+					env,
+					windowsHide: true,
+					windowsVerbatimArguments: launch.windowsVerbatimArguments,
+					...detached,
+				}),
+			{ endGroupWithLauncher: true },
+		);
+		this.tree = tree;
+		const child = tree.child;
 
 		// Don't hold the event loop open once the agent is done. The stdio pipes
 		// are sockets at runtime, so they carry unref() even though the stream
@@ -177,9 +188,6 @@ export class LspClient {
 		});
 		child.on("exit", (code, signal) => {
 			this.ready = false;
-			// A launcher can exit, on stop or by itself, and leave the server it
-			// started running: end the rest of its group.
-			if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
 			if (!this.failure && code !== 0) {
 				const detail = stderr.trim().split("\n").slice(-3).join(" ");
 				this.failure = { kind: "exited", command: this.config.command, ...(signal ? { signal } : { code }), ...(detail ? { detail } : {}) };
@@ -420,17 +428,18 @@ export class LspClient {
 	}
 
 	async stop(): Promise<void> {
-		const child = this.child;
-		if (!child) return;
+		const tree = this.tree;
+		if (!tree) return;
+		const child = tree.child;
 		this.ready = false;
 		try {
-			// Send while this.child is still set — send() writes through it.
+			// Send while this.tree is still set: send() writes through it.
 			this.send({ id: this.nextId++, method: "shutdown", params: null });
 			this.notify("exit", null);
 		} catch {
 			// Server may already be gone.
 		}
-		this.child = undefined;
+		this.tree = undefined;
 		// Already gone (a crash the session is respawning after): its exit
 		// handler has ended the group, and no exit event is left to wait for.
 		if (child.exitCode !== null || child.signalCode !== null) return;
@@ -440,7 +449,7 @@ export class LspClient {
 				// child of it, and on Windows a .cmd-shimmed server runs under the
 				// cmd.exe `commandLaunch` started; killing the leader alone would
 				// orphan the server on the inherited pipes.
-				killProcessTree(child, "SIGKILL");
+				tree.kill("SIGKILL");
 				resolve();
 			}, 1000);
 			timer.unref?.();

@@ -91,7 +91,7 @@ function spawnsIn(source: string, path: string): string[] {
 
 /** Whether the module's text shows the lifetime it declares. */
 function showsLifetime(kind: Lifetime["kind"], source: string): boolean {
-	if (kind === "registered") return source.includes("rememberProcessGroup(") && source.includes("detachedSpawnOptions(");
+	if (kind === "registered") return source.includes("spawnOwnedTree(");
 	if (kind === "awaited") return /waitForChildExit\(|timeout|promisify\(|Sync\(|create(Local)?Bash(Operations|ToolDefinition)\(/.test(source);
 	return true;
 }
@@ -131,7 +131,7 @@ describe("modules that start child processes", () => {
 	it("shows the declared lifetime in each module", () => {
 		const unshown = Object.entries(SPAWNERS)
 			.filter(([file, { kind }]) => sources.has(file) && !showsLifetime(kind, sources.get(file)!))
-			.map(([file, { kind }]) => `${file} is declared ${kind} but ${kind === "registered" ? "never calls detachedSpawnOptions() and rememberProcessGroup()" : "shows no wait or bound on its child"}`);
+			.map(([file, { kind }]) => `${file} is declared ${kind} but ${kind === "registered" ? "never calls spawnOwnedTree()" : "shows no wait or bound on its child"}`);
 		expect(unshown).toEqual([]);
 	});
 

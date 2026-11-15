@@ -11,22 +11,23 @@
  * ignore a closed stdin: closing reached only the launcher, and a crash or a
  * signal (pi exits without `session_shutdown`) never reached the server at all,
  * which then lived on, reparented to init (the exit probe, test/e2e/exit-probe.mjs,
- * measured both). Here the server runs in its own group, remembered from
- * spawn, so the process's exit and termination-signal hooks end it; `close()`
- * ends the whole group; and a launcher that exits by itself takes the rest of
- * its group with it, as a language server's does (tools/lsp/client.ts).
+ * measured both). Here the server is an owned tree (`spawnOwnedTree`): its own
+ * group, remembered from spawn, so the process's exit and termination-signal
+ * hooks end it; `close()` ends the whole group; and a launcher that exits by
+ * itself takes the rest of its group with it, as a language server's does
+ * (tools/lsp/client.ts).
  *
  * The close sequence keeps the SDK's shape: end stdin, give the server 2 s to
  * exit, then SIGTERM the group and SIGKILL it after `KILL_GRACE_MS`. On Windows
  * the kill is `taskkill /T` while the leader lives (process-tree.ts).
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, rememberedGroupAlive, rememberProcessGroup, stopProcessTree } from "../../lib/shell-run/process-tree.ts";
+import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
 
 /** How long `close()` lets a server exit on its own once its stdin is closed (the SDK's wait). */
 export const CLOSE_GRACE_MS = 2_000;
@@ -51,7 +52,7 @@ export class ProcessGroupStdioTransport implements Transport {
 
 	/** The server's stderr, readable before `start()` so its first bytes are not lost. */
 	readonly stderr = new PassThrough();
-	private child?: ChildProcess;
+	private tree?: OwnedTree;
 	private readonly readBuffer;
 
 	constructor(
@@ -62,35 +63,36 @@ export class ProcessGroupStdioTransport implements Transport {
 	}
 
 	get pid(): number | undefined {
-		return this.child?.pid;
+		return this.tree?.child.pid;
 	}
 
 	start(): Promise<void> {
-		if (this.child) throw new Error("ProcessGroupStdioTransport already started");
+		if (this.tree) throw new Error("ProcessGroupStdioTransport already started");
 		return new Promise((resolve, reject) => {
 			// On Windows an npm-installed server is a .cmd shim, started through cmd.exe (lib/shell-run/command-launch.ts).
 			const launch = commandLaunch(this.params.command, this.params.args ?? [], this.params.env);
-			const child = spawn(launch.command, launch.args, {
-				env: this.params.env,
-				cwd: this.params.cwd,
-				stdio: ["pipe", "pipe", "pipe"],
-				windowsHide: true,
-				windowsVerbatimArguments: launch.windowsVerbatimArguments,
-				...detachedSpawnOptions(),
-			});
-			this.child = child;
-			rememberProcessGroup(child);
+			// A launcher can exit, on close or by itself, and leave the server it started: its exit ends the rest of its group.
+			const tree = spawnOwnedTree(
+				(detached) =>
+					spawn(launch.command, launch.args, {
+						env: this.params.env,
+						cwd: this.params.cwd,
+						stdio: ["pipe", "pipe", "pipe"],
+						windowsHide: true,
+						windowsVerbatimArguments: launch.windowsVerbatimArguments,
+						...detached,
+					}),
+				{ endGroupWithLauncher: true },
+			);
+			this.tree = tree;
+			const child = tree.child;
 			child.on("error", (error) => {
 				reject(error);
 				this.onerror?.(error);
 			});
 			child.on("spawn", () => resolve());
-			// A launcher can exit, on close or by itself, and leave the server it started: end the rest of its group.
-			child.on("exit", () => {
-				if (rememberedGroupAlive(child)) stopProcessTree(child, KILL_GRACE_MS);
-			});
 			child.on("close", () => {
-				if (this.child === child) this.child = undefined;
+				if (this.tree === tree) this.tree = undefined;
 				this.onclose?.();
 			});
 			child.stdin?.on("error", (error) => this.onerror?.(error));
@@ -119,7 +121,7 @@ export class ProcessGroupStdioTransport implements Transport {
 
 	send(message: JSONRPCMessage): Promise<void> {
 		return new Promise((resolve) => {
-			const stdin = this.child?.stdin;
+			const stdin = this.tree?.child.stdin;
 			if (!stdin) throw new Error("Not connected");
 			if (stdin.write(this.framing.serializeMessage(message))) resolve();
 			else stdin.once("drain", resolve);
@@ -127,9 +129,10 @@ export class ProcessGroupStdioTransport implements Transport {
 	}
 
 	async close(): Promise<void> {
-		const child = this.child;
-		this.child = undefined;
-		if (child) {
+		const tree = this.tree;
+		this.tree = undefined;
+		if (tree) {
+			const child = tree.child;
 			const exited = new Promise<void>((resolve) => {
 				if (child.exitCode !== null || child.signalCode !== null) resolve();
 				else child.once("exit", () => resolve());
@@ -142,8 +145,8 @@ export class ProcessGroupStdioTransport implements Transport {
 			}
 			await within(CLOSE_GRACE_MS);
 			// The leader still running, or a group it left behind: TERM the group now, KILL it after the grace.
-			if (rememberedGroupAlive(child)) {
-				stopProcessTree(child, KILL_GRACE_MS);
+			if (tree.alive()) {
+				tree.stop(KILL_GRACE_MS);
 				await within(KILL_GRACE_MS);
 			}
 		}
