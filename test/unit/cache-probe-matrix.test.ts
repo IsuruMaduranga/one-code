@@ -41,7 +41,10 @@ describe("cache-probe matrix extension loading (offline CLI)", () => {
 		expect(calls.length).toBeGreaterThanOrEqual(4);
 		for (const args of calls) {
 			expect(args).toContain("--no-extensions");
-			expect(args[args.indexOf("-e") + 1]).toBe(resolve("."));
+			// Git Bash hands a native program its POSIX paths converted to the
+			// forward-slashed Windows form (`D:/a/x`); pi resolves an `-e` path
+			// with path.resolve, which reads that form and the native one alike.
+			expect(resolve(args[args.indexOf("-e") + 1])).toBe(resolve("."));
 		}
 	});
 
