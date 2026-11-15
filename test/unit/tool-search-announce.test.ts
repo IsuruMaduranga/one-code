@@ -7,6 +7,7 @@ import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import toolSearchExtension from "../../extensions/request/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
+import { activeProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 
 /**
  * The deferred-tools listing is live state: what a request that opens an epoch
@@ -68,17 +69,24 @@ describe("tool-search listing and render-time addenda", () => {
 	});
 
 	it("lists and announces a tool by its owner's hint, the batch's names from its facts; a profile hint wins", () => {
-		const fake = mount();
-		const listed = () => listings(fake.reminders).at(-1)?.text?.split("\n") ?? [];
-		const profileLine = listed().find((line) => line.startsWith("web_fetch"));
-		expect(profileLine).toMatch(/^web_fetch: When you/);
-		fake.addDeferred("late_echo", "When you echo, use it.");
-		// The profile's hint for web_fetch holds when its owner offers one.
-		fake.pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", hint: "Owner's words." });
-		expect(listed()).toContain("late_echo: When you echo, use it.");
-		expect(listed()).toContain(profileLine);
-		const blocks = fake.render({ told: { tools: ["web_fetch"] } });
-		expect(blocks).toEqual([{ text: [toolSearchResultText.addendumHead, "late_echo: When you echo, use it."].join("\n"), facts: [{ kind: "tools", names: ["late_echo"] }] }]);
+		// The profile's words are injected, so the rule holds on any profile (deferred.test.ts proves it on the helpers).
+		const active = activeProfile();
+		const toolSearch = { ...active.text.toolSearch!, listingHints: { web_fetch: "When you fetch, use it." } };
+		setActiveProfileForTest({ ...active, text: { ...active.text, toolSearch } });
+		try {
+			const fake = mount();
+			const listed = () => listings(fake.reminders).at(-1)?.text?.split("\n") ?? [];
+			expect(listed()).toContain("web_fetch: When you fetch, use it.");
+			fake.addDeferred("late_echo", "When you echo, use it.");
+			// The profile's hint for web_fetch holds when its owner offers one.
+			fake.pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", hint: "Owner's words." });
+			expect(listed()).toContain("late_echo: When you echo, use it.");
+			expect(listed()).toContain("web_fetch: When you fetch, use it.");
+			const blocks = fake.render({ told: { tools: ["web_fetch"] } });
+			expect(blocks).toEqual([{ text: [toolSearchResultText.addendumHead, "late_echo: When you echo, use it."].join("\n"), facts: [{ kind: "tools", names: ["late_echo"] }] }]);
+		} finally {
+			setActiveProfileForTest(active);
+		}
 	});
 
 	it("lists the cache probe's late-tool fixture by its own hint, so the live probe sends a hinted line", () => {
