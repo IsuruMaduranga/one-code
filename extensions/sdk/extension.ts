@@ -19,6 +19,8 @@
  *   connection the base already keeps for diagnostics. When the server
  *   refuses it, `lspErrorDetail(error)` gives the JSON-RPC code, message and
  *   data (`instanceof` cannot work: each extension has its own module copy).
+ *   `isMethodNotFound(detail)` tells a server that does not know the method
+ *   from one that failed on it, for lsp4j servers' "Internal error." too.
  * - `lspFilesChanged`: files that changed on disk outside the session's
  *   `edit` and `write` tools (the shell, a build tool, the user's editor),
  *   reported to that server so its answers and diagnostics follow the disk.
@@ -47,7 +49,7 @@ export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "
 export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
 export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";
 export { type LspFileChange, type LspFilesChanged, lspFilesChanged, type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";
-export { type LspErrorDetail, lspErrorDetail } from "../tools/lsp/failure.ts";
+export { isMethodNotFound, type LspErrorDetail, lspErrorDetail } from "../tools/lsp/failure.ts";
 export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/request/persisted-output.ts";
 export { toolRenderers } from "../lib/ui/tui-render.ts";
 export { productStateDir } from "../lib/profile/paths.ts";
