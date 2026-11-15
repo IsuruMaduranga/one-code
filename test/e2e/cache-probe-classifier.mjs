@@ -15,10 +15,16 @@
  *      (Anthropic, Bedrock, Claude on OpenRouter): cacheRead[N+1] >= cacheRead[N] + cacheWrite[N] - slack,
  *      which holds when the breakpoint sits on the transcript history and not
  *      after the stage instruction (the stage text and the action under review
- *      are never written). Implicit caches (OpenAI, OpenRouter): at least the
- *      share of request N's prompt that request N+1 repeats, less one cache
- *      block; a miss there is a WARN, since OpenRouter can route consecutive
- *      calls to different upstream providers.
+ *      are never written). OpenAI Responses with breakpoints on the history
+ *      (the log row's `cacheBreakpoints`; GPT-5.6 and later): at least request
+ *      N's history (its system prompt and transcript up to the pending action),
+ *      estimated as that share of its tokens, less one cache block; a miss is a
+ *      FAIL. Its implicit breakpoint also writes the action and stage text,
+ *      which no later request repeats, so read + write overshoots there.
+ *      Implicit caches (Codex, OpenRouter): at least the share of request N's
+ *      prompt that request N+1 repeats, less one cache block; a miss there is a
+ *      WARN, since OpenRouter can route consecutive calls to different upstream
+ *      providers.
  *
  * With `--review` (cache-probe.sh's review phase) the log must also hold a
  * subagent's hand-back review (a row whose tool is `subagent-review`) after at
@@ -60,17 +66,36 @@ if (args.includes("--review")) {
 }
 if (rows.length < 2) failures.push(`only ${rows.length} classifier request(s) recorded; the check needs at least two gated calls`);
 
+/**
+ * Characters of a request's system prompt plus its user text up to the end of
+ * the transcript history: the tail is the pending action and the harness facts
+ * (`{"meta":…}` lines) just before it (transcript.ts transcriptBlocks).
+ */
+const historyChars = (call) => {
+	const close = call.user.lastIndexOf("\n</transcript>");
+	if (close === -1) return 0;
+	let start = call.user.lastIndexOf("\n", close - 1);
+	while (start > 0) {
+		const before = call.user.lastIndexOf("\n", start - 1);
+		if (!call.user.slice(before + 1, start).startsWith('{"meta":')) break;
+		start = before;
+	}
+	return call.system.length + Math.max(0, start);
+};
+
 const calls = rows.map((r) => {
 	const u = r.usage ?? {};
 	// Explicit breakpoints: Anthropic Messages, Bedrock Converse, and Claude on
 	// OpenRouter (Chat Completions carrying Anthropic's cache_control).
 	const explicit = r.api === "anthropic-messages" || r.api === "bedrock-converse-stream" || (r.api === "openai-completions" && /^openrouter\/anthropic\//.test(r.model ?? ""));
+	const historyMarks = r.api === "openai-responses" && r.cacheBreakpoints === true;
 	const read = u.cacheRead ?? 0;
-	return { text: r.system + r.user, system: r.system, user: r.user, explicit, read, write: u.cacheWrite ?? 0, total: (u.input ?? 0) + read + (u.cacheWrite ?? 0) };
+	return { text: r.system + r.user, system: r.system, user: r.user, explicit, historyMarks, read, write: u.cacheWrite ?? 0, total: (u.input ?? 0) + read + (u.cacheWrite ?? 0) };
 });
 const explicit = calls.some((c) => c.explicit);
+const historyMarks = !explicit && calls.some((c) => c.historyMarks);
 
-console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : "implicit"} cache)`);
+console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : historyMarks ? "history breakpoints" : "implicit"} cache)`);
 console.log("call   total   cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < calls.length; i++) {
 	const cur = calls[i];
@@ -85,10 +110,10 @@ for (let i = 0; i < calls.length; i++) {
 		}
 		need = explicit
 			? prev.read + prev.write - slack
-			: Math.floor((prev.total * firstDiff(prev.text, cur.text)) / prev.text.length) - IMPLICIT_BLOCK - slack;
+			: Math.floor((prev.total * (historyMarks ? historyChars(prev) : firstDiff(prev.text, cur.text))) / prev.text.length) - IMPLICIT_BLOCK - slack;
 		if (cur.read < need) {
 			const msg = `classifier call ${i + 1} read ${cur.read} cached tokens; it should have read at least ${need} of what call ${i} sent (miss of ${need - cur.read})`;
-			(explicit ? failures : warnings).push(msg);
+			(explicit || historyMarks ? failures : warnings).push(msg);
 		}
 	}
 	console.log(`${String(i + 1).padStart(4)}  ${String(cur.total).padStart(6)}  ${String(cur.read).padStart(9)}  ${String(cur.write).padStart(10)}  ${String(need ?? "-").padStart(10)}`);

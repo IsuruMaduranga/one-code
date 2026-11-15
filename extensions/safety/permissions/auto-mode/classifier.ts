@@ -474,7 +474,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
-						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, cacheBreakpoints: classifierCarriesBreakpoints(model), tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
 					} catch {
 						// A probe log that cannot be written must not fail the gate.
 					}
