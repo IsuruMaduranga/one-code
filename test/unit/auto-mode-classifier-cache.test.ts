@@ -1,4 +1,8 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import type { AssistantMessage, Model, Api } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
@@ -207,6 +211,37 @@ describe("classifier transcript cache", () => {
 		expect(parts(sent[1])[first].prompt_cache_breakpoint).toEqual({ mode: "explicit" });
 		// The first call's history, marks included, is the second call's prefix.
 		expect(parts(sent[1]).slice(0, first + 1)).toEqual(parts(sent[0]).slice(0, first + 1));
+	});
+
+	it("logs the length of the marked history, the first MAX_RESPONSES_HISTORY_MARKS parts, past the cap", async () => {
+		vi.mocked(completeSimple).mockImplementation(async (_model, context, options) => {
+			const payload = {
+				input: [{ role: "developer", content: context.systemPrompt! }, { role: "user", content: [{ type: "input_text", text: context.messages[0].content as string }] }],
+				prompt_cache_options: { ttl: "30m" },
+			};
+			await options?.onPayload?.(payload, _model);
+			return { stopReason: "stop", content: [{ type: "text", text: "<severity>5</severity>" }], usage: {} } as unknown as AssistantMessage;
+		});
+		const long: ClassifyRequest = {
+			...request,
+			transcript: [...Array.from({ length: MAX_RESPONSES_HISTORY_MARKS + 200 }, (_, i): TranscriptEntry => ({ kind: "tool", tool: "bash", input: { command: `echo ${i}` } })), request.transcript.at(-1)!],
+		};
+		const history = buildPayload(long).history;
+		expect(history.length).toBeGreaterThan(MAX_RESPONSES_HISTORY_MARKS);
+		const dir = mkdtempSync(join(tmpdir(), "classifier-log-"));
+		const log = join(dir, "classifier.jsonl");
+		vi.stubEnv(envName("AUTO_MODE_LOG"), log);
+		try {
+			await classify(long, deps({ ...model, provider: "openai", id: "gpt-6.1-terra", api: "openai-responses", compat: { supportsExplicitPromptCacheMode: true } } as Model<Api>));
+			const row = JSON.parse(readFileSync(log, "utf8").split("\n")[0]);
+			expect(row.cacheMarks).toBe(MAX_RESPONSES_HISTORY_MARKS);
+			expect(row.historyChars).toBe(history.join("").length);
+			expect(row.markedHistoryChars).toBe(history.slice(0, MAX_RESPONSES_HISTORY_MARKS).join("").length);
+			expect(row.markedHistoryChars).toBeLessThan(row.historyChars);
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	// Their payloads carry explicit breakpoints on some models (OpenRouter's

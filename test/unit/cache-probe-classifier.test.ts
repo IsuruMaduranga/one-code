@@ -63,6 +63,16 @@ describe("cache-probe-classifier on history breakpoints", () => {
 		expect(status).toBe(0);
 	});
 
+	it("holds a request past the mark cap to the marked history only, not the unmarked tail", () => {
+		// The first 4,000 characters are the marked parts; the 4,000 after them pass the cap and stay unmarked.
+		const marked = "x".repeat(4000);
+		const capped = (history: string, read: number) => ({ ...row(history, read, 1000), markedHistoryChars: `<transcript>${marked}`.length });
+		const long = `${marked}${"y".repeat(4000)}`;
+		const { status, out } = probe([capped(long, 0), capped(`${long}z`, 6000)]);
+		expect(out).not.toContain("FAIL");
+		expect(status).toBe(0);
+	});
+
 	it("checks a log without the cache-hook fields under the implicit rule", () => {
 		const older = (history: string) => {
 			const { cacheBreakpoints: _b, cacheEdited: _e, cacheMarks: _m, systemChars: _s, historyChars: _h, ...rest } = row(history, 0, 2);

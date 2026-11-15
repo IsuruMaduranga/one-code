@@ -487,6 +487,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 								cacheMarks: cacheMarks ?? 0,
 								systemChars: system.length,
 								historyChars: history.join("").length,
+								// On Responses the marks run from the first history part, so the count
+								// ends the marked text, which past MAX_RESPONSES_HISTORY_MARKS is shorter.
+								...(model.api === "openai-responses" && cacheMarks ? { markedHistoryChars: history.slice(0, cacheMarks).join("").length } : {}),
 								tool: request.toolName,
 								stage,
 								system,

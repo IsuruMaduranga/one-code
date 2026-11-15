@@ -17,10 +17,11 @@
  *      after the stage instruction (the stage text and the action under review
  *      are never written). OpenAI Responses with breakpoints on the history
  *      (the log row's `cacheMarks`, the history parts the classifier marked;
- *      GPT-5.6 and later): at least request N's history (the row's
- *      `systemChars` plus `historyChars`, its system prompt and transcript up
- *      to the pending action), estimated as that share of its tokens, less one
- *      cache block; a miss is a FAIL. A request without history breakpoints
+ *      GPT-5.6 and later): at least request N's marked history (the row's
+ *      `systemChars` plus `markedHistoryChars`, its system prompt and the
+ *      transcript up to the last marked part; `historyChars`, the transcript
+ *      up to the pending action, on a row without it), estimated as that share
+ *      of its tokens, less one cache block; a miss is a FAIL. A request without history breakpoints
  *      (its hook left the payload alone, `cacheEdited` false, or its model
  *      has no hook), and the request after it, are checked as an implicit
  *      cache, with a WARN. A skipped request's implicit
@@ -89,7 +90,8 @@ const calls = rows.map((r) => {
 		explicit,
 		historyMarks,
 		skipped: r.cacheBreakpoints === true && r.cacheEdited === false,
-		history: (r.systemChars ?? 0) + (r.historyChars ?? 0),
+		// Past MAX_RESPONSES_HISTORY_MARKS only the marked parts are cached; an older row lacks the field.
+		history: (r.systemChars ?? 0) + (r.markedHistoryChars ?? r.historyChars ?? 0),
 		read,
 		write: u.cacheWrite ?? 0,
 		total: (u.input ?? 0) + read + (u.cacheWrite ?? 0),
