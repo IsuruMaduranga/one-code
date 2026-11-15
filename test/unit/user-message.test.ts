@@ -49,6 +49,10 @@ describe("markUserMarkdown", () => {
 		["a heading indented three spaces", "   # Title", ["heading"]],
 		["indented code (four spaces)", "    def foo():\n        return 1", ["code"]],
 		["indented code (a tab)", "\tdef foo():", ["code"]],
+		["a link reference definition", "[docs]: /guide\n\nSee [docs].", ["def", "paragraph"]],
+		["a link reference definition indented three spaces", "   [docs]: /guide\n\nSee [docs].", ["def", "paragraph"]],
+		["a link reference definition with its destination on the next line", "[docs]:\n/guide\n\nSee [docs].", ["def", "paragraph"]],
+		["a four-space indented definition (indented code)", "    [docs]: /guide", ["code"]],
 	])("puts the marker above %s and keeps its indentation and its blocks", (_kind, text, kinds) => {
 		expect(blocks(text)).toEqual(kinds);
 		const marked = markUserMarkdown(text);
@@ -66,6 +70,17 @@ describe("markUserMarkdown", () => {
 
 	it("still prefixes a line indented less than four spaces that opens no block", () => {
 		expect(markUserMarkdown("  just text")).toBe(`${USER_MARKER}   just text`);
+	});
+
+	it("still prefixes a first line that only starts with a bracket", () => {
+		expect(markUserMarkdown("[not a def] then text")).toBe(`${USER_MARKER} [not a def] then text`);
+		expect(markUserMarkdown("[] : x")).toBe(`${USER_MARKER} [] : x`);
+	});
+
+	it("resolves a reference from a definition on the first line", () => {
+		const lines = rendered(markUserMarkdown("[docs]: /guide\n\nSee [docs]."));
+		expect(lines[0]).toBe(USER_MARKER);
+		expect(lines.join("\n")).not.toContain("[docs]:");
 	});
 
 	it("drops leading blank lines before marking", () => {
