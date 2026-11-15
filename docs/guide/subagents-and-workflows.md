@@ -103,6 +103,7 @@ To set the default yourself:
 |---|---|
 | `/subagent <provider/model-id>` | Save a default for subagents and workflow agents. Short aliases such as `sonnet` or `haiku` work too: by name when your provider has that model, otherwise as that class within your provider. |
 | `/subagent inherit` | Use the main session's model. |
+| `/subagent auto` | Keep the automatic choice on every provider, even when one of the variables below is set. |
 | `/subagent status` | Show the configured default, the model it resolves to, and where the setting came from. |
 | `/subagent clear` | Remove the saved default and return to automatic selection. |
 | `/subagent` | Open a model picker. |
@@ -114,7 +115,9 @@ to the provider it was made on; after switching providers, run
 `ONECODE_SUBAGENT_MODEL` sets the default from the environment or from the
 `env` block of your user or managed settings. Claude Code's
 `CLAUDE_CODE_SUBAGENT_MODEL` works the same way, but only on a Claude
-session. The `/subagent` setting wins over either variable.
+session. The `/subagent` setting wins over either variable, so if one of
+them is set somewhere you'd rather not touch, `/subagent auto` puts the
+automatic choice back.
 
 An agent definition's own `model` field overrides the default for that
 agent.

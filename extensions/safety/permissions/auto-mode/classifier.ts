@@ -23,8 +23,7 @@
 import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { withoutMessageThreads } from "../../../lib/request/message-threads.ts";
+import { completeThreadless } from "../../../lib/request/anthropic-stream.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
@@ -438,8 +437,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				);
 			}
 			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
-			return completeSimple(
-				withoutMessageThreads(resolvedModel),
+			return completeThreadless(
+				resolvedModel,
 				{ systemPrompt: system, messages: [{ role: "user", content: userText, timestamp: Date.now() }] },
 				{
 					apiKey: auth.apiKey,

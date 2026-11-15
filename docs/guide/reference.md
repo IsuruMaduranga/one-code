@@ -19,6 +19,7 @@ that explains it.
 | `/agents` | Open the live subagent panel, or list the available agents. | [Subagents](subagents-and-workflows.md) |
 | `/subagent <provider/model-id>` | Save the default model for subagents and workflow agents. | [Subagents](subagents-and-workflows.md#choose-the-subagent-model) |
 | `/subagent inherit` | Use the main model for subagents. | |
+| `/subagent auto` | Choose automatically on every provider, ignoring the subagent model variables. | |
 | `/subagent status` | Show the configured default and what it resolves to. | |
 | `/subagent clear` | Return to automatic selection. | |
 | `/subagent` | Open a model picker. | |

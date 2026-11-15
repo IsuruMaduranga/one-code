@@ -34,15 +34,16 @@
  * What it records is what goes on the wire only while Anthropic message
  * threads stay off: a `continue` would send just the new messages. So it
  * registers the `anthropic` provider's stream with threads off
- * (lib/request/message-threads.ts). And pi warms only during a run, never
- * between runs (lib/request/cache-warming.ts), as on pi 1.5.0.
+ * (lib/request/message-threads.ts), sending the credentials pi's provider
+ * would (lib/request/anthropic-stream.ts). And unless the user set pi's
+ * `cacheWarming`, pi warms only during a run, never between runs
+ * (lib/request/cache-warming.ts), as on pi 1.5.0.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { streamSimple } from "@earendil-works/pi-ai/compat";
-import { threadlessAnthropicProvider } from "../../lib/request/message-threads.ts";
-import { cacheWarmingVeto } from "../../lib/request/cache-warming.ts";
+import { type ExtensionAPI, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { threadlessAnthropicRegistration } from "../../lib/request/anthropic-stream.ts";
+import { cacheWarmingVeto, userCacheWarmingMode } from "../../lib/request/cache-warming.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
@@ -60,8 +61,13 @@ import { brand, envName } from "../../lib/profile/brand.mjs";
 
 function ledgerWireExtension(pi: ExtensionAPI) {
 	const by = extensionVersion();
-	pi.registerProvider("anthropic", threadlessAnthropicProvider(streamSimple));
-	pi.on("cache_warming_decision", (_event, ctx) => cacheWarmingVeto(ctx.isIdle()));
+	const threadless = threadlessAnthropicRegistration();
+	if (threadless) pi.registerProvider("anthropic", threadless);
+	// Read at each decision: /settings can change the mode mid-session, and warms are minutes apart.
+	pi.on("cache_warming_decision", (_event, ctx) => {
+		if (!ctx.isIdle()) return undefined;
+		return cacheWarmingVeto(true, userCacheWarmingMode(SettingsManager.create(ctx.cwd, getAgentDir()).getGlobalSettings()));
+	});
 	/** The plan of the last `context` pass; a warm re-runs only this hook and reuses it. */
 	let plan: RequestPlan | undefined;
 	/**

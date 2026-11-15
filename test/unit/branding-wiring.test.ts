@@ -86,14 +86,13 @@ describe("branding's terminal title", () => {
 describe("branding's transcript transformer", () => {
 	afterEach(() => vi.unstubAllEnvs());
 
-	it("is the one user-message rewrite: the command line, marked; the assistant bullet; thinking untouched", () => {
+	it("marks assistant prose, and leaves user messages (the user-message extension's) and thinking untouched", () => {
 		vi.stubEnv(envName("NO_BANNER"), "1");
 		const { pi, transformers } = fakePi();
 		brandingExtension(pi as never);
 		expect(transformers).toHaveLength(1);
 		const [transform] = transformers;
-		expect(transform("<command-message>init</command-message>\n<command-name>/init</command-name>\nPlease analyze", { messageType: "user" })).toBe("❯ /init");
-		expect(transform("hello", { messageType: "user" })).toBe("❯ hello");
+		expect(transform("hello", { messageType: "user" })).toBe("hello");
 		expect(transform("Done.", { messageType: "assistant" })).toBe("● Done.");
 		expect(transform("hmm", { messageType: "assistant-thinking" })).toBe("hmm");
 	});

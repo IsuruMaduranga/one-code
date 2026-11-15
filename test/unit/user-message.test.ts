@@ -1,7 +1,7 @@
-import { Markdown } from "@earendil-works/pi-tui";
+import { Markdown, Marked } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import { commandBreadcrumb } from "../../extensions/lib/plugins/skill-invoke.ts";
-import { markUserMarkdown, paintedUserMarker, USER_MARKER, userMessageMarkdown } from "../../extensions/ui/branding/user-marker.ts";
+import { markUserMarkdown, paintedUserMarker, USER_MARKER, userMessageMarkdown } from "../../extensions/lib/ui/user-message.ts";
 
 /** pi's user message Markdown, plain theme, so a test reads what a user sees. */
 function rendered(markdown: string): string[] {
@@ -39,6 +39,34 @@ describe("markUserMarkdown", () => {
 		expect(markUserMarkdown(text)).toBe(`${USER_MARKER}\n\n${text}`);
 	});
 
+	/** The Markdown block kinds pi's parser makes of `markdown`, in order. */
+	const blocks = (markdown: string) => new Marked().lexer(markdown).filter((token) => token.type !== "space").map((token) => token.type);
+
+	it.each([
+		["a fence indented two spaces", "  ```js\nconst a = 1;\n  ```\nwhy?", ["code", "paragraph"]],
+		["a list indented one space", " - a\n - b", ["list"]],
+		["a heading indented three spaces", "   # Title", ["heading"]],
+		["indented code (four spaces)", "    def foo():\n        return 1", ["code"]],
+		["indented code (a tab)", "\tdef foo():", ["code"]],
+	])("puts the marker above %s and keeps its indentation and its blocks", (_kind, text, kinds) => {
+		expect(blocks(text)).toEqual(kinds);
+		const marked = markUserMarkdown(text);
+		expect(marked).toBe(`${USER_MARKER}\n\n${text}`);
+		expect(blocks(marked)).toEqual(["paragraph", ...kinds]);
+		expect(rendered(marked)[0]).toBe(USER_MARKER);
+	});
+
+	it("renders an indented fence as a code block followed by prose", () => {
+		const lines = rendered(markUserMarkdown("  ```js\nconst a = 1;\n  ```\nwhy?"));
+		expect(lines[0]).toBe(USER_MARKER);
+		expect(lines.filter((line) => line.includes("```"))).toHaveLength(2);
+		expect(lines.at(-1)).toBe("why?");
+	});
+
+	it("still prefixes a line indented less than four spaces that opens no block", () => {
+		expect(markUserMarkdown("  just text")).toBe(`${USER_MARKER}   just text`);
+	});
+
 	it("drops leading blank lines before marking", () => {
 		expect(markUserMarkdown("\n\nhello")).toBe(`${USER_MARKER} hello`);
 	});
@@ -55,19 +83,26 @@ describe("markUserMarkdown", () => {
 describe("userMessageMarkdown", () => {
 	it("shows a typed command by its marked command line", () => {
 		const text = `${commandBreadcrumb("simplify", "focus on the parser")}Review the changed code…`;
-		expect(userMessageMarkdown(text)).toBe(`${USER_MARKER} /simplify focus on the parser`);
-		expect(userMessageMarkdown(`${commandBreadcrumb("init", "")}Please analyze…`)).toBe(`${USER_MARKER} /init`);
+		expect(userMessageMarkdown(text, USER_MARKER)).toBe(`${USER_MARKER} /simplify focus on the parser`);
+		expect(userMessageMarkdown(`${commandBreadcrumb("init", "")}Please analyze…`, USER_MARKER)).toBe(`${USER_MARKER} /init`);
 	});
 
 	it("shows a notification that opened a turn by its headline, unmarked", () => {
 		const frame = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"ls\" completed (exit code 0)</summary>\n</task-notification>";
-		const out = userMessageMarkdown(frame);
+		const out = userMessageMarkdown(frame, USER_MARKER);
 		expect(out).toBe('✳ Background command "ls" completed (exit code 0)');
 		expect(out).not.toContain(USER_MARKER);
 	});
 
 	it("marks any other prompt", () => {
-		expect(userMessageMarkdown("!ls is a bash line")).toBe(`${USER_MARKER} !ls is a bash line`);
+		expect(userMessageMarkdown("!ls is a bash line", USER_MARKER)).toBe(`${USER_MARKER} !ls is a bash line`);
+	});
+
+	it("without a marker (branding off) still shows the command line and the notification headline, unmarked", () => {
+		expect(userMessageMarkdown(`${commandBreadcrumb("init", "")}Please analyze…`)).toBe("/init");
+		const frame = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Background command \"ls\" completed (exit code 0)</summary>\n</task-notification>";
+		expect(userMessageMarkdown(frame)).toBe('✳ Background command "ls" completed (exit code 0)');
+		expect(userMessageMarkdown("hello")).toBe("hello");
 	});
 });
 

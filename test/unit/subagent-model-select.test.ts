@@ -184,6 +184,31 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolveSubagentModel({ ...input, configuredDefault: setting("opus") }).model?.id).toBe("claude-opus-4-8");
 	});
 
+	it("reads a configured auto as the automatic pick, on every provider, with no notice", () => {
+		for (const [session, available] of [
+			[anthropic[0], [...anthropic, ...openai]],
+			[openai[0], [...anthropic, ...openai]],
+		] as const) {
+			const automatic = resolveSubagentModel({ sessionModel: session, available: [...available] });
+			const auto = resolveSubagentModel({ sessionModel: session, available: [...available], configuredDefault: setting("auto") });
+			expect(auto).toEqual(automatic);
+			expect(auto.source).toBe(automatic.source);
+			expect(auto.notices).toEqual([]);
+		}
+		// The product's knob set to auto reads the same.
+		const knob = { spec: "AUTO", source: "env", envVar: envName("SUBAGENT_MODEL"), borrowed: false } as const;
+		expect(resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic, configuredDefault: knob })).toEqual(
+			resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic }),
+		);
+	});
+
+	it("lets a per-call model and an agent file's model win over a configured auto", () => {
+		const input = { sessionModel: anthropic[0], available: [...anthropic, ...openai], configuredDefault: setting("auto") };
+		expect(resolveSubagentModel({ ...input, requested: "claude-haiku-4-5" })).toMatchObject({ source: "call", model: { id: "claude-haiku-4-5" } });
+		expect(resolveSubagentModel({ ...input, requested: "openai/gpt-5-mini" })).toMatchObject({ source: "call", model: { provider: "openai" } });
+		expect(resolveSubagentModel({ ...input, agentModel: "sonnet" })).toMatchObject({ source: "agent", model: { id: "claude-sonnet-5-5" } });
+	});
+
 	it("honors an exact cross-provider reference, with a notice — naming it is choosing it", () => {
 		const resolution = resolveSubagentModel({
 			requested: "openai/gpt-5-mini",
@@ -750,6 +775,16 @@ describe("loadSubagentDefault", () => {
 	it("returns undefined when nothing is configured", () => {
 		expect(loadSubagentDefault(home, {})).toBeUndefined();
 	});
+
+	it("lets a subagentModel of auto hide the variable, in the environment and the env block", () => {
+		writeProductSettings(home, { subagentModel: "auto", env: { [OWN]: "sonnet" } });
+		expect(loadSubagentDefault(home, { [OWN]: "opus" })).toEqual({ spec: "auto", source: "subagentModel setting" });
+	});
+
+	it("leaves the variable in charge while the setting is unset, as before auto existed", () => {
+		writeProductSettings(home, { env: { [OWN]: "sonnet" } });
+		expect(loadSubagentDefault(home, { [OWN]: "opus" })).toEqual({ spec: "opus", source: "env", envVar: OWN, borrowed: false });
+	});
 });
 
 describe("applicableSubagentDefault", () => {
@@ -864,6 +899,11 @@ describe("persistSubagentModel", () => {
 			source: "subagentModel setting",
 			setForContainment: "openai-codex",
 		});
+	});
+
+	it("does not stamp auto", () => {
+		persistSubagentModel("auto", home, "anthropic");
+		expect(readSettings()).toEqual({ subagentModel: "auto" });
 	});
 
 	it("does not stamp inherit, and clears a prior stamp on clear", () => {

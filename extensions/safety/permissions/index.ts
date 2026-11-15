@@ -610,7 +610,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (!autoConfig.logDecisions) return;
 		try {
-			const file = join(ctx.sessionManager.getSessionDir(), "auto-mode-decisions.jsonl");
+			// Beside the transcripts; a session-less run's private temp dir, never the project.
+			const file = join(sessionResultsDir(ctx), "auto-mode-decisions.jsonl");
 			appendDecision(file, decisionEntry({ sessionId: ctx.sessionManager.getSessionId?.(), ...entry }));
 		} catch {
 			// Logging must never break the gate.

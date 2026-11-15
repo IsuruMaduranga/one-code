@@ -26,6 +26,7 @@ import {
 } from "../../lib/notify/desktop.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
+import { unrefAfter, unrefEvery } from "../../lib/core/timer-ops.ts";
 import { productSettingsPath, readSettingsForWrite } from "../../lib/profile/product-settings.ts";
 
 /** The user's `preferredNotifChannel` from One Code's settings, read when a notification goes out. */
@@ -54,16 +55,8 @@ function desktopNotifyExtension(pi: ExtensionAPI) {
 		notifier = new AttentionNotifier(
 			{
 				now: () => Date.now(),
-				every: (ms, tick) => {
-					const timer = setInterval(tick, ms);
-					timer.unref?.();
-					return () => clearInterval(timer);
-				},
-				after: (ms, fire) => {
-					const timer = setTimeout(fire, ms);
-					timer.unref?.();
-					return () => clearTimeout(timer);
-				},
+				every: unrefEvery,
+				after: unrefAfter,
 				notify,
 			},
 			brand.name,

@@ -1,6 +1,6 @@
 /**
- * An injectable timer (pure), so an idle-timer state machine is unit-tested
- * with fake timers, and the real adapter both recap and idle-compact run on.
+ * Injectable timers (pure), so a timer-driven state machine is unit-tested
+ * with fake timers, and the real unref'd adapters the extensions run them on.
  */
 
 export interface TimerOps {
@@ -18,3 +18,17 @@ export const unrefTimers: TimerOps = {
 	},
 	clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+/** Run `tick` every `ms` on an unref'd interval; the returned function stops it. */
+export function unrefEvery(ms: number, tick: () => void): () => void {
+	const timer = setInterval(tick, ms);
+	timer.unref?.();
+	return () => clearInterval(timer);
+}
+
+/** Run `fire` once after `ms` on an unref'd timeout; the returned function cancels it. */
+export function unrefAfter(ms: number, fire: () => void): () => void {
+	const timer = setTimeout(fire, ms);
+	timer.unref?.();
+	return () => clearTimeout(timer);
+}

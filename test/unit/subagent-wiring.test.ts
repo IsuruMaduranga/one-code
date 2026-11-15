@@ -47,7 +47,7 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-async function mount(records: AgentRunRecord[] = [], sessionModel = session, mode = "tui", sessionFile?: string, { answerReviews = true } = {}) {
+async function mount(records: AgentRunRecord[] = [], sessionModel = session, mode = "tui", sessionFile?: string, { answerReviews = true, hasUI = false } = {}) {
 	const fake = createFakePi();
 	// A stand-in for the permission gate with auto mode off: every hand-back
 	// review is answered at once. A test that judges reviews itself turns it off.
@@ -60,7 +60,7 @@ async function mount(records: AgentRunRecord[] = [], sessionModel = session, mod
 	backgroundExtension(fake.pi as never);
 	subagentsExtension(fake.pi as never);
 	const ctx = createFakeCtx({
-		cwd: dir, mode, model: sessionModel,
+		cwd: dir, mode, model: sessionModel, hasUI,
 		modelRegistry: {
 			getAvailable: () => [session, textOnly, vision],
 			getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "test" })),
@@ -850,5 +850,94 @@ describe("background agents named after a compaction", () => {
 		// A /tree to a branch that does not hold the compaction: its history still shows the call.
 		await h.fake.fire("turn_start", {}, compacted(h, [{ type: "compaction", id: "c1" }]));
 		expect(notices).toHaveLength(1);
+	});
+});
+
+/**
+ * The agent view's scrolling is the subagents extension's own: its input
+ * listener scrolls an open view by the viewport keys under the user's
+ * bindings, whatever editor is installed (branding is not loaded here, as
+ * with ONECODE_FEATURES_OFF=branding or the input marker off), and in
+ * fullscreen its mirror folds any move pi-tui makes to the main transcript
+ * into the view and puts main back when the view closes (a pi-tui before 1.5
+ * that consumes the keys itself, or a wheel over the strip).
+ */
+describe("agent view scrolling without branding's editor", () => {
+	const PAGE_UP = "\x1b[5~";
+	const keys = { matches: (data: string, binding: string) => data === PAGE_UP && binding === "tui.altScreen.pageUp" };
+
+	/** pi-tui's fullscreen TUI, reduced to what the panel, the view and the mirror read. */
+	class FakeTui {
+		top = 90;
+		following = true;
+		readonly terminal = { rows: 30, columns: 80 };
+		readonly editor = { getText: () => "", isShowingAutocomplete: () => false };
+		getFocusedComponent = () => this.editor;
+		requestRender = () => {};
+		get viewportTop() {
+			return this.following ? 90 : this.top;
+		}
+		get isFollowingOutput() {
+			return this.following;
+		}
+		scrollBy(lines: number) {
+			this.top = Math.max(0, Math.min(90, this.viewportTop + lines));
+			this.following = this.top === 90;
+		}
+		scrollToBottom() {
+			this.top = 90;
+			this.following = true;
+		}
+	}
+
+	async function openViewIn(tui: object) {
+		fakeResident();
+		const h = await mount([], session, "tui", undefined, { hasUI: true });
+		let view: { render(width: number): string[] } | undefined;
+		let done: ((result: null) => void) | undefined;
+		const ui = h.ctx.ui as Record<string, ReturnType<typeof vi.fn>>;
+		ui.custom = vi.fn((factory: (...args: unknown[]) => { render(width: number): string[] }) => {
+			view = factory(tui, {}, keys, (result: null) => done?.(result));
+			return new Promise((resolve) => (done = resolve));
+		});
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Check the code", run_in_background: true });
+		await h.fake.commands.get("agents")!.handler("", h.ctx);
+		await vi.waitFor(() => expect(view).toBeDefined());
+		// The strip's widget learns the TUI and its focused editor when it mounts.
+		for (const [, factory] of ui.setWidget.mock.calls) if (typeof factory === "function") factory(tui, {});
+		const input = ui.onTerminalInput.mock.calls[0][0] as (data: string) => { consume?: boolean } | undefined;
+		// /agents focuses the strip; Esc hands focus back to the editor and keeps the view.
+		input("\x1b");
+		return { h, view: view!, input };
+	}
+
+	it("the page keys reach the view through the subagents listener and never pass on to the editor", async () => {
+		const editor = { getText: () => "", isShowingAutocomplete: () => false };
+		const { input } = await openViewIn({ terminal: { rows: 30, columns: 80 }, getFocusedComponent: () => editor, requestRender: () => {} });
+		expect(input(PAGE_UP)).toEqual({ consume: true });
+		expect(input("a")).toBeUndefined();
+	});
+
+	it("an open autocomplete menu keeps the page keys", async () => {
+		const editor = { getText: () => "/he", isShowingAutocomplete: () => true };
+		const { input } = await openViewIn({ terminal: { rows: 30, columns: 80 }, getFocusedComponent: () => editor, requestRender: () => {} });
+		expect(input(PAGE_UP)).toBeUndefined();
+	});
+
+	it("in fullscreen, a move pi-tui makes to main under the view is folded into it, and main is back at its bottom after the view closes", async () => {
+		const tui = new FakeTui();
+		const { view, input } = await openViewIn(tui);
+		view.render(80);
+		// pi-tui consumed a PageUp itself (pi 1.0 to 1.4, no capturing editor): main moved.
+		tui.scrollBy(-20);
+		expect(tui.viewportTop).toBe(70);
+		view.render(80);
+		// Parked again: back at the bottom (the view's range is short), not left 20 lines up.
+		expect(tui.viewportTop).toBe(90);
+		tui.scrollBy(-5);
+		// Esc in the empty editor closes the view; main is restored.
+		input("\x1b");
+		expect(tui.isFollowingOutput).toBe(true);
+		expect(tui.viewportTop).toBe(90);
 	});
 });

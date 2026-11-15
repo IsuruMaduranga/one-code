@@ -21,7 +21,7 @@ import os from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, getMarkdownTheme, UserMessageComponent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../../lib/notify/headless-output.ts";
 import { pluginRoot } from "../../lib/plugins/plugin-root.ts";
@@ -41,7 +41,7 @@ import {
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeIn, userSkillRoots } from "../../lib/plugins/skill-scan.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { readUsage, recordUsage, usageKey } from "../../lib/plugins/usage-tracker.ts";
-import { boundedDockHeight, toolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { boundedDockHeight, customMessageText, toolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import {
 	bareSkillMatches,
 	parseSkillCommand,
@@ -53,6 +53,7 @@ import {
 	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "../../lib/plugins/skill-invoke.ts";
+import { USER_MARKDOWN_CHANNEL, type UserMarkdownQuery, userRowTransform } from "../../lib/ui/user-message.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { frontmatterFlag, readableSkillLines, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
@@ -576,11 +577,12 @@ function skillExtension(pi: ExtensionAPI) {
 	 * expansion, which knows nothing of the overrides store and would run it; a
 	 * one-shot run gets the refusal on stderr instead of a UI notice, never as
 	 * silent execution), else deliver Claude Code's typed-skill message (the
-	 * command breadcrumb and the skill's text) as a hidden custom message: the
-	 * model receives it as a user message (convertToLlm maps a custom message
-	 * to one regardless of `display`), but nothing renders and no `skill` call
-	 * is needed. Shared by the `/skill:<name>` interception, the typed
-	 * `/<plugin>:<skill>` form and the bare `/<name>` commands.
+	 * command breadcrumb and the skill's text) as a custom message: the model
+	 * receives it as a user message (convertToLlm maps a custom message to one
+	 * regardless of `display`) and no `skill` call is needed. It is displayed,
+	 * drawn as the user row the session's first skill gets as a user message
+	 * (the renderer below); `display` reaches only the TUI and pi's HTML export. Shared by the `/skill:<name>` interception, the
+	 * typed `/<plugin>:<skill>` form and the bare `/<name>` commands.
 	 */
 	const deliverSkill = async (
 		found: IndexedSkill,
@@ -626,7 +628,7 @@ function skillExtension(pi: ExtensionAPI) {
 			{
 				customType: SKILL_INVOCATION_TYPE,
 				content,
-				display: false,
+				display: true,
 				details: { skill: found.name, args, ...(extra.input !== undefined ? { input: extra.input } : {}) } satisfies SkillInvocationDetails,
 			},
 			{ triggerTurn: true, ...(extra.streamingBehavior ? { deliverAs: extra.streamingBehavior } : {}) },
@@ -639,6 +641,17 @@ function skillExtension(pi: ExtensionAPI) {
 		await awaitOneShotTurn(ctx);
 		return "handled";
 	};
+
+	// A skill typed after the first turn is drawn with pi's own user-message
+	// component, its text through the user-message display rewrite
+	// (USER_MARKDOWN_CHANNEL), so it shows the row the first turn's user
+	// message shows: `❯ /<name> args`, or `/<name> args` with no marker step.
+	pi.registerMessageRenderer(SKILL_INVOCATION_TYPE, (message, options) => {
+		if (typeof UserMessageComponent !== "function") return undefined;
+		const query: UserMarkdownQuery = {};
+		pi.events.emit(USER_MARKDOWN_CHANNEL, query);
+		return new UserMessageComponent(customMessageText(message.content), getMarkdownTheme(), options.outputPad, [userRowTransform(query)]);
+	});
 
 	// A user-typed `/skill:<name>` normally runs pi's own expansion, which submits
 	// the skill's `<skill>` block as a *user message* — so loading a skill shows in

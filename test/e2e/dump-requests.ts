@@ -29,6 +29,10 @@
  * the session's own `before_provider_request` hooks (the main loop and pi's
  * cache warm), false for side calls made with completeSimple (compaction's
  * summarizer, recap, btw, the classifier). transition-probe uses it.
+ * With WIRE_AUTH_DUMP set, every request sent through fetch also gets one line
+ * there, `{"model":…,"bearer":bool,"apiKey":bool}`: whether it carried an
+ * `Authorization: Bearer` header and an `x-api-key` header. Never a header's
+ * value. cache-probe-auth.mjs reads it to show which credential a probe used.
  * A `/reload` re-runs this factory in the same process: the wrappers are
  * installed once per process, so a request is never dumped twice.
  */
@@ -53,6 +57,7 @@ type Marked = { [WRAPPED]?: { sessionRequest: boolean } };
 export default function dump(pi: ExtensionAPI) {
 	const out = process.env.WIRE_DUMP ?? "/tmp/wire-dump.jsonl";
 	const meta = process.env.WIRE_DUMP_META;
+	const auth = process.env.WIRE_AUTH_DUMP;
 	const installed = (globalThis.fetch as Marked)[WRAPPED];
 	const state = installed ?? { sessionRequest: false };
 	pi.on("before_provider_request", () => {
@@ -72,8 +77,15 @@ export default function dump(pi: ExtensionAPI) {
 			try {
 				const body = jsonRequestBody(init?.body, init?.headers);
 				if (body === undefined) return original(input, init);
-				const parsed = JSON.parse(body) as { messages?: unknown; input?: unknown };
-				if (Array.isArray(parsed.messages) || Array.isArray(parsed.input)) write(body);
+				const parsed = JSON.parse(body) as { messages?: unknown; input?: unknown; model?: unknown };
+				if (Array.isArray(parsed.messages) || Array.isArray(parsed.input)) {
+					write(body);
+					if (auth) {
+						const headers = new Headers(init?.headers);
+						const bearer = headers.get("authorization")?.startsWith("Bearer ") === true;
+						appendFileSync(auth, `${JSON.stringify({ model: parsed.model, bearer, apiKey: headers.has("x-api-key") })}\n`);
+					}
+				}
 			} catch {
 				// not JSON — not a model request
 			}

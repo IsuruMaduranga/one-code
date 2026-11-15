@@ -9,8 +9,9 @@
  * factory when the feature is off. `test/unit/features.test.ts` checks that
  * the registry, the manifest, the child list and the wrappers agree.
  *
- * `required` marks the safety core and the request pipeline: a profile that
- * turns one off fails at load. `guard` marks a feature that guards tool calls
+ * `required` marks the safety core, the request pipeline and the few parts a
+ * session cannot read right without: a profile that turns one off fails at
+ * load. `guard` marks a feature that guards tool calls
  * (the user's hooks, the hooks installed plugins bring, read-before-edit): a
  * product's profile may turn it off, the off-only environment variable may not.
  */
@@ -18,7 +19,7 @@
 export interface FeatureSpec {
 	/** Entry files, relative to `extensions/`. */
 	entries: readonly string[];
-	/** Part of the core every session needs (the safety gates, the request pipeline, a run's exit status); never off. */
+	/** Part of the core every session needs (the safety gates, the request pipeline, a run's exit status, how a user message reads); never off. */
 	required?: true;
 	/** Guards tool calls: only a profile, never the environment, turns it off. */
 	guard?: true;
@@ -26,6 +27,9 @@ export interface FeatureSpec {
 
 export const FEATURES = {
 	branding: { entries: ["ui/branding/index.ts"] },
+	// Required: how the harness's own text in a user message reads (a notification's
+	// headline, a typed command's line) must not depend on a cosmetic feature.
+	"user-message": { entries: ["ui/user-message/index.ts"], required: true },
 	"resources": { entries: ["commands/resources/index.ts"] },
 	"kept-thinking": { entries: ["request/kept-thinking/index.ts"], required: true },
 	ledger: { entries: ["request/ledger/index.ts", "request/ledger/wire.ts"], required: true },

@@ -8,6 +8,7 @@
  */
 
 import type { SubagentModelSource } from "./subagent-model.ts";
+import { AUTO_SUBAGENT_MODEL, type SubagentDefault } from "./subagent-default.ts";
 import type { LiveTools } from "../profile/live-tools.ts";
 
 /** Where a choice in the resolution chain came from, other than the automatic pick and the session. */
@@ -145,3 +146,25 @@ export const subagentModelWords = (live: LiveTools, product: SubagentModelsText)
 				"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",
 		].join("\n"),
 });
+
+/** "X and Y are not applied": the environment knobs a `subagentModel: "auto"` setting hides. */
+export function knobsNotApplied(names: readonly string[]): string {
+	return `${names.join(" and ")} ${names.length > 1 ? "are" : "is"} not applied`;
+}
+
+/**
+ * The `/subagent` status line for the configured default: where it came
+ * from, and why it does not apply when it does not. `knobs` names the
+ * environment variables that set it and the limit on another tool's spelling.
+ */
+export function configuredDefaultLine(configured: SubagentDefault | undefined, applied: boolean, knobs: { names: readonly string[]; limit: string }): string {
+	if (!configured) return "subagentModel: (not set)";
+	if (configured.source === "env") {
+		const line = `subagentModel: ${configured.spec} (from ${configured.envVar})`;
+		return applied ? line : `${line} — not applied: ${configured.envVar} is another tool's variable, ${knobs.limit}`;
+	}
+	if (configured.spec.toLowerCase() === AUTO_SUBAGENT_MODEL) {
+		return `subagentModel: auto (from the subagentModel setting): chosen automatically on every provider; ${knobsNotApplied(knobs.names)}`;
+	}
+	return `subagentModel: ${configured.spec} (from the subagentModel setting)`;
+}

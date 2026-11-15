@@ -39,7 +39,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib
 import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../../lib/agents/agent-catalog.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../../lib/models/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../../lib/models/model-unusable.ts";
-import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
+import { applicableSubagentDefault, AUTO_SUBAGENT_MODEL, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -50,6 +50,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../lib/models/subagent-model.ts";
+import { configuredDefaultLine, knobsNotApplied } from "../../lib/models/subagent-model-text.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../../lib/models/model-picker.ts";
 import { chosenModelWarnings } from "../../lib/models/model-choice-warnings.ts";
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
@@ -111,12 +112,13 @@ import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent } from "../../lib/agents/agent-view.ts";
+import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent, viewportScrollFor } from "../../lib/agents/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
 import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey, shellRows } from "./shell-panel.ts";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
+import { asScrollableViewport, ViewportMirror } from "./viewport-mirror.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { extendingCompletions } from "../../lib/ui/argument-hints.ts";
 import { readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -944,7 +946,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * back.
 	 */
 	let view: { retarget(taskId: string): void; scrollWith(move: AgentViewScroll): void; close(): void } | undefined;
-	// The prompt editor's viewport keys and wheel while a view is open (branding's PromptEditor).
+	/** pi's keybindings, from the view's factory: the viewport keys are read under the user's own bindings. */
+	let viewKeys: { matches(data: string, binding: string): boolean } | undefined;
+	// The wheel over the prompt editor while a view is open (branding's PromptEditor).
 	pi.events.on(AGENT_VIEW_SCROLL_CHANNEL, (data) => {
 		const move = data as AgentViewScroll | undefined;
 		if (move && typeof move.action === "string") view?.scrollWith(move);
@@ -981,11 +985,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 		let doneFn: ((result: null) => void) | undefined;
 		/** The view's height at its last render, for page-sized scrolls. */
 		let shownHeight = 8;
+		/** Fullscreen only: folds any move pi-tui makes to main under the view into the view (viewport-mirror.ts). */
+		let mirror: ViewportMirror | undefined;
 		const entry = {
 			retarget(id: string) {
 				if (currentId === id) return;
 				currentId = id;
 				scroll = 0;
+				mirror?.park(0);
 				panel.setView(id);
 				announceView(id);
 				repaintFn?.();
@@ -1001,6 +1008,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (closed) return;
 				closed = true;
 				if (view === entry) view = undefined;
+				mirror?.restore();
+				mirror = undefined;
 				panel.setView(undefined);
 				announceView(undefined);
 				doneFn?.(null);
@@ -1013,8 +1022,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const prose = await getProse(ctx);
 			if (closed) return;
 			await panelUi(pi.events, ctx.ui).custom<null>(
-				(tui, theme, _keybindings, done) => {
+				(tui, theme, keybindings, done) => {
 					doneFn = done;
+					viewKeys = keybindings as typeof viewKeys;
 					// close() raced ahead of the factory — dissolve as soon as we exist.
 					if (closed) queueMicrotask(() => done(null));
 					const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
@@ -1028,8 +1038,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 					);
 					repaintFn = live.repaint;
 					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
+					const viewport = asScrollableViewport(tui);
+					if (viewport && !closed) mirror = new ViewportMirror(viewport);
 					return {
 						render: (width: number) => {
+							// A move pi-tui made to main under this overlay is the view's.
+							if (mirror) {
+								const next = mirror.absorb(scroll, maxScroll);
+								if (next !== scroll) {
+									scroll = next;
+									cache = undefined;
+								}
+							}
 							// Keyed by height too: a resize or another strip changing size moves the room.
 							const viewHeight = height();
 							shownHeight = viewHeight;
@@ -1076,6 +1096,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			panel.setFocus(undefined);
 		};
 		const editorEmpty = () => (panel.editorBaseline as { getText?(): string } | undefined)?.getText?.() === "";
+		const editorMenuOpen = () => (panel.editorBaseline as { isShowingAutocomplete?(): boolean } | undefined)?.isShowingAutocomplete?.() === true;
 		type KeyResult = { consume: boolean } | undefined;
 		// Actions shared by both key modes (browse and read), declared once so the
 		// two switches below never drift. esc consumes only when idle — a streaming
@@ -1161,11 +1182,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && !panel.shellChipFocused) {
-					// Viewing an agent with the editor focused: Esc in an empty editor
-					// goes back to main. The editor itself hands the viewport keys and
-					// the wheel to the view (AGENT_VIEW_SCROLL_CHANNEL), under the
-					// user's own bindings.
+					// Viewing an agent with the editor focused: the viewport keys scroll
+					// the view under the user's own bindings (an open autocomplete menu
+					// keeps them), and Esc in an empty editor goes back to main. In
+					// fullscreen the keys get here only when the editor captures them
+					// (pi-tui 1.5, branding's PromptEditor); otherwise pi-tui moves
+					// main and the view's mirror takes the move.
 					if (view && panel.editorFocused()) {
+						const scroll = viewKeys && !editorMenuOpen() ? viewportScrollFor((binding) => viewKeys!.matches(data, binding)) : undefined;
+						if (scroll) {
+							view.scrollWith(scroll);
+							return { consume: true };
+						}
 						const id = keyId(data);
 						if (id === "escape" && editorEmpty()) {
 							closeView();
@@ -1467,10 +1495,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** Session dir for a run's persisted child session; undefined → child runs --no-session. */
+	/**
+	 * Session dir for a run's persisted child session and output log; undefined
+	 * → child runs --no-session. Under the session's harness dir
+	 * (`sessionResultsDir`): a session-less parent's is its private temp dir,
+	 * where the bare session dir ("") put `subagents/` in the project.
+	 */
 	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
 		try {
-			const dir = join(ctx.sessionManager.getSessionDir(), "subagents", taskId);
+			const dir = join(sessionResultsDir(ctx), "subagents", taskId);
 			mkdirSync(dir, { recursive: true });
 			return dir;
 		} catch {
@@ -2945,6 +2978,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const subagentKnobs = () => ({ names: knobNames(SUBAGENT_MODEL_KNOB), limit: knobLimit(SUBAGENT_MODEL_KNOB) });
+
 	const showSubagentModelStatus = (ctx: ExtensionContext) => {
 		const configured = loadSubagentDefault(os.homedir());
 		const applicable = applicableSubagentDefault(configured, ctx.model);
@@ -2957,26 +2992,22 @@ function subagentsExtension(pi: ExtensionAPI) {
 		});
 		ctx.ui.notify(
 			[
-				configured
-					? configured.source === "env"
-						? `subagentModel: ${configured.spec} (from ${configured.envVar})` +
-							(applicable ? "" : ` — not applied: ${configured.envVar} is another tool's variable, ${knobLimit(SUBAGENT_MODEL_KNOB)}`)
-						: `subagentModel: ${configured.spec} (from the subagentModel setting)`
-					: "subagentModel: (not set)",
+				configuredDefaultLine(configured, applicable !== undefined, subagentKnobs()),
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
 				...(resolution.source === "default" && resolution.model
 					? chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) }).map((warning) => `! ${warning.text} ${warning.fix}`)
 					: []),
-				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
+				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit|auto>, or clear with /subagent clear.",
 			].join("\n"),
 			"info",
 		);
 	};
 
 	/**
-	 * Persist a chosen subagent default. `inherit` is literal (session model,
-	 * no auth needed); any other spec is validated against the registry and its
+	 * Persist a chosen subagent default. `inherit` (session model) and `auto`
+	 * (the automatic pick on every provider, hiding an inherited variable) are
+	 * literal, no auth needed; any other spec is validated against the registry and its
 	 * auth checked before saving — a default with no credentials would fail
 	 * every subagent spawn. The value is saved as the literal spec, so an alias
 	 * like `sonnet` keeps per-session alias semantics (see model-select.ts).
@@ -2991,6 +3022,20 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}
 			emitModelStatus(ctx);
 			ctx.ui.notify(`Subagent default set to the session model ("inherit", saved to ${SETTINGS_DISPLAY}).`, "info");
+			return;
+		}
+		if (spec === AUTO_SUBAGENT_MODEL) {
+			try {
+				persistSubagentModel(AUTO_SUBAGENT_MODEL, os.homedir());
+			} catch (error) {
+				ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+				return;
+			}
+			emitModelStatus(ctx);
+			ctx.ui.notify(
+				`Subagent default set to automatic selection on every provider ("auto", saved to ${SETTINGS_DISPLAY}); ${knobsNotApplied(subagentKnobs().names)}.`,
+				"info",
+			);
 			return;
 		}
 
@@ -3053,9 +3098,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	registerLocalCommand(pi, "subagent", {
-		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
-		argumentHint: "[provider/model-id|inherit|status|clear]",
-		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", "status", "clear"].map((value) => ({ value, label: value }))),
+		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|auto|status|clear]",
+		argumentHint: "[provider/model-id|inherit|auto|status|clear]",
+		getArgumentCompletions: (prefix) => extendingCompletions(prefix, ["inherit", AUTO_SUBAGENT_MODEL, "status", "clear"].map((value) => ({ value, label: value }))),
 		handler: async (args, ctx) => {
 			const typed = args.trim();
 			if (typed === "clear") {
@@ -3072,8 +3117,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (typed === "inherit") {
-				await applySubagentModelChoice("inherit", ctx);
+			if (typed === "inherit" || typed === AUTO_SUBAGENT_MODEL) {
+				await applySubagentModelChoice(typed, ctx);
 				return;
 			}
 			if (typed === "status") {

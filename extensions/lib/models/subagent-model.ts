@@ -40,6 +40,9 @@
  *   own model and the configured default (running the subagent on its intended
  *   model, with a notice); only when nothing downstream resolves does it error,
  *   so the model can read the menu and retry.
+ * - A configured default of `auto` (the setting or a knob) is the automatic
+ *   same-provider pick on every provider, as if none were configured; set as
+ *   the setting, it hides an inherited knob such as Claude Code's variable.
  *
  * The menu keeps the main model informed without dumping a 300-model gateway
  * catalog into every request: vendor-contained, variant- and unpriced-filtered,
@@ -49,7 +52,7 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { SubagentDefault } from "./subagent-default.ts";
+import { AUTO_SUBAGENT_MODEL, type SubagentDefault } from "./subagent-default.ts";
 import { type MenuLabel, type SubagentModelNotice, type SubagentModelWords, subagentModelWords } from "./subagent-model-text.ts";
 import {
 	crossesProvider,
@@ -282,6 +285,10 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 
 	for (const entry of chain) {
 		const wanted = entry.value.trim();
+		// A configured "auto" is the automatic pick below, as if no default were
+		// configured: nothing after it in the chain, and the environment knob it
+		// hides was never loaded (subagent-default.ts AUTO_SUBAGENT_MODEL).
+		if (entry.source === "default" && wanted.toLowerCase() === AUTO_SUBAGENT_MODEL) break;
 		if (!wanted || wanted.toLowerCase() === "inherit") {
 			suppressAutomatic = true; // explicit "use the session model"
 			break;

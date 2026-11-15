@@ -589,7 +589,7 @@ export const DEFAULT_COALESCE_MS = 250;
  * no `prompt()` has run in this process, an idle notification is delivered as a
  * user message (`sendUserMessage`, source "extension"), which takes the full
  * prompt path; the cost is that this one notification renders as a user bubble
- * (the background extension's markdown transformer shows only its headline).
+ * (the user-message extension's markdown transformer shows only its headline).
  * The usual first-turn case avoids it: the command that started the work (the
  * `/btw` fork) announces pi's prompt options (lib/ui/prompt-options.ts), which
  * system-prompt builds from, and the notification goes the custom-message way
