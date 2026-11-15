@@ -78,8 +78,6 @@ export interface AttentionIo {
 /** When to notify. Fed by pi's events; writes nothing itself. */
 export class AttentionNotifier {
 	private lastInteraction: number;
-	/** When the outermost open prompt opened: its 6 s check counts from here too. */
-	private promptOpenedAt = 0;
 	private working = false;
 	private submitted = false;
 	private prompts = 0;
@@ -139,9 +137,10 @@ export class AttentionNotifier {
 		if (this.stopped || (!this.working && !described) || this.prompts > 1) return;
 		// Not `interacted()`: the user did not open it, and a described prompt
 		// opened while idle (a background agent's) must not cancel the idle notice.
-		this.promptOpenedAt = this.io.now();
+		// The 6 s check counts from the opening too.
+		const openedAt = this.io.now();
 		this.cancelPrompt = this.io.every(INTERACTION_THRESHOLD_MS, () => {
-			if (this.io.now() - Math.max(this.lastInteraction, this.promptOpenedAt) < INTERACTION_THRESHOLD_MS) return;
+			if (this.io.now() - Math.max(this.lastInteraction, openedAt) < INTERACTION_THRESHOLD_MS) return;
 			this.cancelPrompt?.();
 			this.cancelPrompt = undefined;
 			if (!this.stopped) this.io.notify({ message, notificationType: "permission_prompt" });
