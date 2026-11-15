@@ -61,7 +61,7 @@ import {
 	unavailableToolReminderText,
 } from "../../lib/request/deferred.ts";
 import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../../lib/request/anthropic-payload.ts";
-import { liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "./tool-additions.ts";
+import { carriedAddenda, type CarriedAddenda, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "./tool-additions.ts";
 import { inContextEntries } from "../../lib/request/compaction-boundary.ts";
 import { CALLABLE_TOOLS } from "../../lib/request/ledger/fold.ts";
 import { foldOnce, sameEntries } from "../../lib/request/ledger/fold-memo.ts";
@@ -69,6 +69,7 @@ import { recordedToolNames } from "../../lib/request/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import type { EntryLike } from "../../lib/request/ledger/records.ts";
+import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
@@ -157,6 +158,11 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	// in the meantime is never announced (the H1 class). Where the model takes
 	// Claude Code's tool_addition, the addendum becomes one (the context and
 	// payload hooks below) and the tool is callable at once.
+	/** The plan of the request being built (the ledger publishes one per `context` pass): its `carried` blocks name the addenda it sends. */
+	let requestPlan: RequestPlan | undefined;
+	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+		requestPlan = data as RequestPlan;
+	});
 	pi.events.on(RENDER_CHANNEL, (data) => {
 		const request = data as RenderRequest;
 		if (request.epoch) return;
@@ -195,10 +201,14 @@ function toolSearchExtension(pi: ExtensionAPI) {
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (request/tool-search/tool-additions.ts). */
 	let addendaByCall = new Map<string, string[]>();
+	/** The addenda the last `context` pass's request carries, with their names from the plan's facts. */
+	let addenda: CarriedAddenda = new Map();
 	pi.on("context", (event, ctx) => {
 		addendaByCall = new Map();
+		// system-reminder's context hook, earlier, rendered this request's blocks into the plan.
+		addenda = carriedAddenda(requestPlan?.carried);
 		if (!supportsToolAdditions(ctx?.model) || !Array.isArray(event?.messages)) return undefined;
-		const lifted = liftAddenda(event.messages);
+		const lifted = liftAddenda(event.messages, addenda);
 		addendaByCall = lifted.byCall;
 		return lifted.messages === event.messages ? undefined : { messages: lifted.messages };
 	});
@@ -316,14 +326,14 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// The context step lifted this request's addenda off their tool results;
 		// whatever happens below, they go out (request/tool-search/tool-additions.ts).
 		const announceAsText = () => {
-			const text = additions ? withToolAdditions(original, addendaByCall, false) : undefined;
+			const text = additions ? withToolAdditions(original, addendaByCall, addenda, false) : undefined;
 			return text ? withBetas(text.payload, [MID_CONVERSATION_SYSTEM_BETA]) : undefined;
 		};
 		if (!enabled || !supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined) || !looksLikeAnthropicRequest(original)) return announceAsText();
 		const isDeferred = (name: string) => deferredRegistry.has(name);
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one, declared deferred.
-		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
+		const lifted = additions ? withToolAdditions(original, addendaByCall, addenda) : undefined;
 		const stable = stabilizeDeferredTools(lifted?.payload ?? original, allTools, isDeferred, loads, new Set(lifted?.names ?? []));
 		// A request stabilize cannot match to the registry (an ambiguous name, a
 		// renamed tool that is deferred) keeps the tools pi rendered, and the

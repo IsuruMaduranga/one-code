@@ -7,7 +7,7 @@ import { deferredAddendumText } from "../../extensions/lib/request/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { subagentHandbackExtension } from "../../extensions/lib/agents/subagent-handback.ts";
 import { totalTokensBlock } from "../../extensions/lib/context/budget.ts";
-import { withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
+import { carriedAddenda, withToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
 import { withTurnBudgetMessages } from "../../extensions/request/system-reminder/turn-budget-layout.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -46,11 +46,12 @@ describe("a later prompt's marker carries pi's cache mark", () => {
 
 	it("keeps it when a pinned addendum ends the message, and never empties a message", () => {
 		const framed = wrapReminder(deferredAddendumText(["late"]));
-		const out = withToolAdditions({ messages: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: framed, cache_control: mark }] }] }, new Map())!;
+		const addenda = carriedAddenda([{ text: deferredAddendumText(["late"]), facts: [{ kind: "tools", names: ["late"], callable: true }] }]);
+		const out = withToolAdditions({ messages: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "text", text: framed, cache_control: mark }] }] }, new Map(), addenda)!;
 		const messages = out.payload.messages as Array<{ content: Array<Record<string, unknown>> }>;
 		expect(messages[0].content).toEqual([{ type: "text", text: "hi" }]);
 		expect(messages[1].content.at(-1)?.cache_control).toEqual(mark);
-		expect(withToolAdditions({ messages: [{ role: "user", content: [{ type: "text", text: framed }] }] }, new Map())).toBeUndefined();
+		expect(withToolAdditions({ messages: [{ role: "user", content: [{ type: "text", text: framed }] }] }, new Map(), addenda)).toBeUndefined();
 	});
 });
 
@@ -66,7 +67,7 @@ describe("call ids pi rewrote after a model switch", () => {
 
 	it("sends the addition as text when the tools cannot be referenced", () => {
 		const wire = { messages: [{ role: "user", content: [{ type: "tool_result", tool_use_id: "t", content: "ok" }] }] };
-		const out = withToolAdditions(wire, new Map([["t", ["late"]]]), false)!;
+		const out = withToolAdditions(wire, new Map([["t", ["late"]]]), new Map(), false)!;
 		expect((out.payload.messages as unknown[])[1]).toEqual({ role: "system", content: [{ type: "text", text: `${TOOLS_AVAILABLE}\nlate` }] });
 	});
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Live late-tool cache probe. A test-only extension (late-tool-fixture.ts)
-# registers and defers `late_echo` while the first bash call runs, so the tool
+# registers and defers an echo tool named `list_mcp_resources`, which the
+# deferred listing gives a hint, while the first bash call runs, so the tool
 # arrives mid-session the way a late MCP server's tools do. The probe then
 # checks the usual prefix rules (cache-probe.mjs) plus how the tool was
 # announced: a reference-form `tool_addition` in a system message on a model
@@ -53,7 +54,7 @@ git -C "$PROJECT" init -q
 printf '# Probe\n\nThrowaway project for the late-tool cache probe.\n' > "$PROJECT/CLAUDE.md"
 
 # The sleep keeps the first request's turn open until the tool has arrived.
-PROMPT='Run the shell command sleep 3 with the bash tool. After it finishes, if a tool named late_echo is available, call it with text hi (load it with tool_search first if it is deferred). Then run echo after-late with the bash tool. Then reply with exactly the word done.'
+PROMPT='Run the shell command sleep 3 with the bash tool. After it finishes, if a tool named list_mcp_resources is available, call it with text hi (load it with tool_search first if it is deferred). Then run echo after-late with the bash tool. Then reply with exactly the word done.'
 
 echo "model:   $MODEL"
 echo "pi:      $(node "$PI_BIN" --version 2>/dev/null | tail -1)"
@@ -71,5 +72,5 @@ status=0
 	status=1
 }
 touch "$WORK/wire.jsonl"
-node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" --late-tool late_echo ${FORM[@]+"${FORM[@]}"} || status=1
+node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" --late-tool list_mcp_resources ${FORM[@]+"${FORM[@]}"} || status=1
 exit "$status"

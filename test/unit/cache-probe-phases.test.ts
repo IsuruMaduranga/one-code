@@ -65,7 +65,7 @@ describe("cache-probe late-tool phase wiring (offline CLI)", () => {
 				// The driver spells the repo path in its shell's form (`/d/a/…` in Git Bash).
 				expect(calls[1].args.some((arg: string) => arg.replaceAll("\\", "/").endsWith("/test/e2e/late-tool-fixture.ts"))).toBe(true);
 				expect(calls[1].args).toContain(model);
-				expect(result.stdout).toContain("late_echo never reached a request's tools");
+				expect(result.stdout).toContain("list_mcp_resources never reached a request's tools");
 			}
 		} finally {
 			rmSync(root, { recursive: true, force: true });
