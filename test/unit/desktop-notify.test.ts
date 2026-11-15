@@ -91,6 +91,21 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		h.advance(60_000);
 		expect(h.sent).toEqual([]);
 	});
+
+	it("notifies for a described prompt that opens while idle, as a background subagent's permission question does", () => {
+		const h = harness();
+		h.notifier.submittedPrompt();
+		h.notifier.turnStarted();
+		h.notifier.turnSettled();
+		h.advance(10_000);
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.promptOpened();
+		h.advance(INTERACTION_THRESHOLD_MS);
+		expect(h.sent).toEqual([{ message: "Prod needs your permission to use Bash", notificationType: "permission_prompt" }]);
+		// The open prompt holds back the idle notification.
+		h.advance(IDLE_NOTIFY_MS);
+		expect(h.sent).toHaveLength(1);
+	});
 });
 
 describe("AttentionNotifier: the user is away after a turn", () => {

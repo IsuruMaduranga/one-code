@@ -18,14 +18,14 @@ import { sha } from "./helpers/sha.ts";
 
 describe("the shipped texts", () => {
 	it.each([
-		["Bash short, auto mode", bashDescription("short", true), 1021, "ffaa03fd9f7cc324"],
-		["Bash short, other modes", bashDescription("short", false), 1331, "3c6af5ed508abb0f"],
+		["Bash short, auto mode", bashDescription("short", true), 1383, "e03a867af7d49b2d"],
+		["Bash short, other modes", bashDescription("short", false), 1693, "3a9ad4dc1b7c13f6"],
 		["Bash long", BASH_LONG_DESCRIPTION, 10117, "150cfe7f15de9c0f"],
-		["Agent short (Claude Code's part)", AGENT_SHORT_DESCRIPTION, 1796, "00816e142144127f"],
+		["Agent short (Claude Code's part)", AGENT_SHORT_DESCRIPTION, 3034, "3a10343eed1321c7"],
 		["Agent long (Claude Code's part)", AGENT_LONG_DESCRIPTION, 7054, "8688abf39f02eb87"],
 		["Write short", WRITE_SHORT_DESCRIPTION, 240, "6b258dbec215234d"],
 		["Write long", WRITE_LONG_DESCRIPTION, 618, "abb9cbaad9e678a9"],
-		["AskUserQuestion short", ASK_SHORT_DESCRIPTION, 1760, "28629d142d565b3f"],
+		["AskUserQuestion short", ASK_SHORT_DESCRIPTION, 2057, "801ba18ce9bf6b73"],
 		["AskUserQuestion long", ASK_LONG_DESCRIPTION, 1505, "0251bfa975d4b3f9"],
 		["WebFetch long", WEB_FETCH_LONG_DESCRIPTION, 1653, "332637519274c002"],
 		["WebSearch long", WEB_SEARCH_LONG_DESCRIPTION, 1473, "e552812379795d9b"],
@@ -58,7 +58,10 @@ describe("the shipped texts", () => {
 	it("Agent: One Code's paragraph follows Claude Code's text in both forms", () => {
 		expect(agentDescription("short")).toBe(`${AGENT_SHORT_DESCRIPTION}\n\n${AGENT_HOW_AGENTS_RUN}`);
 		expect(agentDescription("long")).toBe(`${AGENT_LONG_DESCRIPTION.trimEnd()}\n\n${AGENT_HOW_AGENTS_RUN}`);
-		expect(AGENT_HOW_AGENTS_RUN).toContain("task_output");
+		expect(AGENT_HOW_AGENTS_RUN).toContain("- Stop a run with task_stop (deferred — load it with tool_search first).");
+		// An agent's report arrives by notification only: the description never sends the model to poll.
+		expect(agentDescription("short")).not.toContain("task_output");
+		expect(agentDescription("long")).not.toContain("task_output");
 		expect(AGENT_HOW_AGENTS_RUN).toContain('`action: "list"`');
 	});
 

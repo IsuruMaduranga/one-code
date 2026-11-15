@@ -8,7 +8,8 @@
 // `login` (an Anthropic login): every request bearer, none with x-api-key.
 // `key`: every request with x-api-key, none bearer. `--model`: every request
 // on that model id, so a classifier, title or subagent call that went to
-// another model fails the probe. Exits non-zero on any failure or no requests.
+// another model fails the probe. Exits non-zero on any failure, on no requests,
+// and on a passed file that cannot be read (named on stderr).
 import { readFileSync } from "node:fs";
 
 const args = process.argv.slice(2);
@@ -25,11 +26,14 @@ if (!["login", "key"].includes(auth) || files.length === 0) {
 	process.exit(2);
 }
 
+let failed = 0;
 const rows = files.flatMap((file) => {
 	let text = "";
 	try {
 		text = readFileSync(file, "utf8");
-	} catch {
+	} catch (error) {
+		console.error(`cannot read ${file}: ${error instanceof Error ? error.message : error}`);
+		failed++;
 		return [];
 	}
 	return text
@@ -38,7 +42,6 @@ const rows = files.flatMap((file) => {
 		.map((line) => JSON.parse(line));
 });
 
-let failed = 0;
 const fail = (message) => {
 	console.log(`FAIL  ${message}`);
 	failed++;

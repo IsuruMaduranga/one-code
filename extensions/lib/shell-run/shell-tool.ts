@@ -17,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefiniti
 import type { Static, TObject } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, type TaskStatus, taskNotification } from "../notify/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
@@ -283,7 +283,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							summary: shellSummary(description, status, summary.exitCode, detail),
 							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim() || undefined,
 						}),
-						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath },
+						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath, [TASK_COMPLETION_KEY]: true },
 					);
 				},
 			});
@@ -295,7 +295,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: words().backgroundStarted({ label: spec.ccLabel, id, description, ...(logPath ? { logPath } : {}) }),
+						text: words().backgroundStarted({ id, ...(logPath ? { logPath } : {}) }),
 					},
 				],
 				details: { taskId: id, logPath },

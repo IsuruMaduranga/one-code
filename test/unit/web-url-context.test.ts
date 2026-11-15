@@ -60,6 +60,8 @@ function harness() {
 }
 
 const listings = (reminders: Reminder[]) => reminders.filter((r) => r.key === "deferred-tools");
+/** The tool names a listing tells: one per line after the head, each before its hint, up to the closing paragraph. */
+const listedNames = (text: string) => text.split("\n\n")[0].split("\n").slice(1).map((line) => line.split(": ")[0]);
 
 describe("url_context model-scoped deferral", () => {
 	beforeEach(() => vi.useFakeTimers());
@@ -69,7 +71,7 @@ describe("url_context model-scoped deferral", () => {
 		it(`${event}: withdraws a Gemini tool from search, and the epoch announces nothing about it`, async () => {
 			const fake = harness();
 			await fake.start(gemini);
-			const told = (listings(fake.reminders).at(-1)?.text ?? "").split("\n").slice(1);
+			const told = listedNames(listings(fake.reminders).at(-1)?.text ?? "");
 			expect(told).toContain("url_context");
 			expect(fake.getActiveTools()).not.toContain("url_context");
 
@@ -88,7 +90,7 @@ describe("url_context model-scoped deferral", () => {
 		it(`${event}: announces Gemini as a late arrival when starting elsewhere`, async () => {
 			const fake = harness();
 			await fake.start(other);
-			const told = (listings(fake.reminders).at(-1)?.text ?? "").split("\n").slice(1);
+			const told = listedNames(listings(fake.reminders).at(-1)?.text ?? "");
 			expect(told).not.toContain("url_context");
 			expect((await fake.search()).details.matches).toEqual([]);
 

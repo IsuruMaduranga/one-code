@@ -71,7 +71,7 @@ import { type DescriptionForm, followDescriptionForm, registerVariantTool } from
 import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../../lib/profile/sources.ts";
 import { instructionFileNames } from "../../lib/context/instructions.ts";
-import { pendingClaimReminder, runningAfterCompactionReminder } from "./pending-claim.ts";
+import { runningAfterCompactionReminder } from "./running-after-compaction.ts";
 import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../../lib/request/reminders.ts";
@@ -92,6 +92,7 @@ import {
 	agentMessage,
 	agentSummary,
 	createTaskNotifier,
+	TASK_COMPLETION_KEY,
 	type HandBackVerdict,
 	handBackPointer,
 	handBackWarning,
@@ -318,13 +319,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return undefined;
 	};
-	/**
-	 * Task ids of background runs spawned during the agent loop now in flight.
-	 * Cleared at `agent_start`; read at `agent_end` to notice a turn that ended
-	 * with an agent still pending, which is the shape of the fabricated-result
-	 * failure (pending-claim.ts, WEAK-MODEL-REVIEW-2026-09-06 H1).
-	 */
-	const spawnedThisLoop = new Set<string>();
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
 	// of every in-process child fed by the runner's live sink, a below-editor
@@ -736,43 +730,17 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	let shuttingDown = false;
 
-	/**
-	 * The fabricated-result backstop (pending-claim.ts). Only the tiers that were
-	 * measured to need it: a frontier model that correctly said "I'm waiting"
-	 * would get the reminder on every delegating turn for nothing, and the
-	 * trigger fires on correct behaviour as readily as on the failure.
-	 */
-	const backstopApplies = () => {
-		const tier = requestTier();
-		return tier === "cheap" || tier === "tiny";
-	};
 	/** A run that is still working: a live child, or a resident with a turn pending. */
 	const stillRunning = (taskId: string): boolean => {
 		const resident = residents.get(taskId);
 		return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
 	};
 	pi.on("agent_start", () => {
-		spawnedThisLoop.clear();
 		parentBusy = true;
 		return undefined;
 	});
 	pi.on("agent_settled", () => {
 		parentBusy = false;
-	});
-	pi.on("agent_end", () => {
-		const spawned = [...spawnedThisLoop];
-		spawnedThisLoop.clear();
-		// Tier check first: on a frontier session the backstop never fires, so the
-		// lookups below would be discarded work on every turn that delegated.
-		if (!backstopApplies()) return undefined;
-		const pending = spawned
-			.filter(stillRunning)
-			.map((taskId) => registry.resolve(taskId))
-			.filter((record): record is AgentRunRecord => record !== undefined)
-			.map((record) => ({ name: record.name, taskId: record.taskId }));
-		const text = pendingClaimReminder(pending);
-		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
-		return undefined;
 	});
 
 	pi.on("session_start", (_event, ctx) => {
@@ -1002,12 +970,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const next = scrolledView(scroll, maxScroll, shownHeight, move);
 				if (next === scroll) return;
 				scroll = next;
+				// Park main to match, so a move pi-tui makes to it next (a PageDown it
+				// consumed, a wheel over the strip) has room to register either way.
+				mirror?.park(next);
 				repaintFn?.();
 			},
 			close() {
 				if (closed) return;
 				closed = true;
-				if (view === entry) view = undefined;
+				if (view === entry) {
+					view = undefined;
+					viewKeys = undefined;
+				}
 				mirror?.restore();
 				mirror = undefined;
 				panel.setView(undefined);
@@ -1283,9 +1257,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 		});
 	}
 
-	// A hand-back the model already read through task_output (block: true on the
-	// agent's task) is withdrawn — One Code's task_output returns the full report,
-	// so the message and its pointer would only repeat it (see decisions).
+	// task_output on a finished agent returns its report, and the hand-back is
+	// withdrawn where pi does not hold it yet; one pi already queued lands as
+	// well (lib/notify/notifications.ts TASK_OUTPUT_DELIVERED_CHANNEL).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
 	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {
@@ -1378,7 +1352,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
 		const record = registry.resolve(opts.from);
-		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined };
+		// task_output may withdraw only a hand-back its own result repeats: not
+		// one carrying auto mode's flag, and not a later turn's update, since
+		// task_output returns the first turn's report for that task id.
+		const withdrawable = warning === undefined && opts.details?.update !== true;
+		const details = {
+			...opts.details,
+			taskId: opts.taskId,
+			name: opts.name,
+			failed: status === "failed",
+			reviewed: opts.review !== undefined,
+			...(withdrawable ? { [TASK_COMPLETION_KEY]: true } : {}),
+		};
 		const envelope = (result: string) =>
 			taskNotification({
 				kind: "agent",
@@ -1842,7 +1827,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
-	): Promise<{ launched: boolean; line: string }> => {
+	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
 		const ended = () => {
 			registry.remove(p.record.taskId);
 			return { launched: false, line: launchLine({ kind: "sessionEnded", name: p.record.name }) };
@@ -1892,6 +1877,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
+			task.reviewWarning = review ? handBackWarning(review) : undefined;
 			firstTurnOutput = outcome.output;
 			finish();
 			notifyHandBack({
@@ -2050,6 +2036,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return {
 			launched: true,
 			line: launchLine({ kind: "running", name: p.record.name, taskId: p.record.taskId, ...(logPath ? { logPath } : {}) }),
+			...(logPath ? { logPath } : {}),
 		};
 	};
 
@@ -2393,16 +2380,19 @@ function subagentsExtension(pi: ExtensionAPI) {
 				for (const p of prepared) registry.remove(p.record.taskId);
 				return refuseCall({ kind: "couldNotStart", problem: runtime });
 			}
+			let outputFile = false;
+			let running = 0;
 			for (const p of prepared) {
-				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
-				if (launched) spawnedThisLoop.add(p.record.taskId);
+				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				lines.push(line);
+				if (launched) running++;
+				if (logPath) outputFile = true;
 			}
 			return {
 				content: [
 					{
 						type: "text",
-						text: subagentResultText().launched({ lines }),
+						text: subagentResultText().launched({ lines, running, outputFile }),
 					},
 				],
 				details: { agentRuns: records, background: true },
@@ -2478,7 +2468,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 				}
 				// The turn had just ended (settle window): the message rides the next
 				// turn, whose reply nobody has claimed yet — announce it as an update.
-				spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 				return {
 					content: [
 						{
@@ -2515,6 +2504,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			resident.turnHandlers.push((outcome, review, stopped) => {
 				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
+				task.reviewWarning = review ? handBackWarning(review) : undefined;
 				replyOutput = outcome.output;
 				finish();
 				// `<task-id>` is this message's task (what task_output resolves); `from=`
@@ -2536,10 +2526,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 			});
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 			void resident.handle.send(params.message);
-			// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
-			// the reply arrives as a notification, so forbid predicting it and arm
-			// the agent_end backstop (keyed by the agent's persistent id).
-			spawnedThisLoop.add(record.taskId);
 			return {
 				content: [
 					{
@@ -2701,6 +2687,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			settledOutput = `${relocationNote}${outcome.output}`;
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
+			task.reviewWarning = review ? handBackWarning(review) : undefined;
 			finish();
 			notifyHandBack({
 				from: record.taskId,
@@ -2715,7 +2702,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 			});
 		});
 
-		spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 		return {
 			content: [
 				{

@@ -28,6 +28,12 @@ export interface BackgroundTask {
 	logPath?: string;
 	/** Output accumulated so far (or final output once finished). */
 	output(): string;
+	/**
+	 * An agent task only: auto mode's warning on the turn this task ran, set
+	 * when the task settles if the hand-back review flagged it. task_output
+	 * returns it with the output, as the hand-back notification does.
+	 */
+	reviewWarning?: string;
 	stop(): void;
 	/** Settles when the task reaches a terminal status; never rejects. */
 	finished: Promise<void>;

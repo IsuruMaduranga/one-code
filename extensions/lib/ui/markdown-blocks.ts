@@ -16,6 +16,7 @@ export const BLOCK_START = [
 	/^\|/, // table row
 	/^(?:-{3,}|\*{3,}|_{3,})\s*$/, // horizontal rule
 	/^</, // raw HTML / tag
+	/^\[(?:[^\]\\]|\\.)+\]:/, // link reference definition (a destination may follow on the next line)
 ];
 
 /** Four columns of indentation open an indented code block (a tab reaches the next stop of four). */

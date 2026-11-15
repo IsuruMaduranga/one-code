@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createTaskNotifier,
 	NOTIFICATION_ID_KEY,
+	TASK_COMPLETION_KEY,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	taskNotification,
 } from "../../extensions/lib/notify/notifications.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const completion = (taskId: string) => taskNotification({ kind: "shell", taskId, status: "completed", summary: `${taskId} finished` });
+/** A completion's details, as its producer marks them. */
+const completes = (taskId: string) => ({ taskId, [TASK_COMPLETION_KEY]: true });
 const textAt = (fake: FakePi, index: number) => (fake.sentMessages[index].message.content as Array<{ text: string }>)[0].text;
 const interrupt = async (fake: FakePi) => {
 	await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
@@ -61,8 +64,8 @@ describe("notification lifecycle races", () => {
 		await fake.fire("before_agent_start", {});
 		await fake.fire("agent_start", {});
 		if (arrival === "arrived during hold") await interrupt(fake);
-		notify("task-notification", completion("first"), { taskId: "first" });
-		notify("task-notification", completion("second"), { taskId: "second" });
+		notify("task-notification", completion("first"), completes("first"));
+		notify("task-notification", completion("second"), completes("second"));
 		await vi.advanceTimersByTimeAsync(250);
 		if (arrival === "discarded mid-turn") await interrupt(fake);
 		// A finished task_output delivers the first task before the held group is released.
@@ -75,29 +78,49 @@ describe("notification lifecycle races", () => {
 		expect(released).toContain("<task-id>second</task-id>");
 	});
 
-	it("withdraws a task from a sent completion still awaiting confirmation, so an interrupt does not resend it", async () => {
+	it("leaves a sent completion in pi's queue, never sends it again after an interrupt, and withdraws one still coalescing", async () => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
 		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 250, withdrawOnDelivery: true });
 		await fake.fire("before_agent_start", {});
 		await fake.fire("agent_start", {});
-		notify("task-notification", completion("first"), { taskId: "first" });
-		notify("task-notification", completion("second"), { taskId: "second" });
-		notify("task-notification", completion("lone"), { taskId: "lone" });
+		notify("task-notification", completion("first"), completes("first"));
+		notify("task-notification", completion("second"), completes("second"));
 		await vi.advanceTimersByTimeAsync(250);
-		notify("task-notification", completion("lone"), { taskId: "lone" });
-		await vi.advanceTimersByTimeAsync(250);
-		// task_output delivers two tasks while their completions wait in pi's
-		// queue; then Esc discards that queue.
-		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "first" });
-		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "lone" });
-		await interrupt(fake);
+		notify("task-notification", completion("third"), completes("third"));
 		const sentBefore = fake.sentMessages.length;
+		// task_output returns the output of a task whose completion already waits
+		// in pi's queue (it lands as well: a duplicate, accepted) and of one still
+		// in the coalescing window (withdrawn).
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "first" });
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "third" });
+		await vi.advanceTimersByTimeAsync(250);
+		expect(fake.sentMessages).toHaveLength(sentBefore);
+		// Esc discards pi's queue: the resend keeps its peer and drops the completion task_output returned.
+		await interrupt(fake);
+		const afterInterrupt = fake.sentMessages.length;
 		await fake.fire("before_agent_start", {});
-		expect(fake.sentMessages).toHaveLength(sentBefore + 1);
-		const released = textAt(fake, sentBefore);
+		expect(fake.sentMessages).toHaveLength(afterInterrupt + 1);
+		const released = textAt(fake, afterInterrupt);
 		expect(released).not.toContain("<task-id>first</task-id>");
-		expect(released).not.toContain("<task-id>lone</task-id>");
 		expect(released).toContain("<task-id>second</task-id>");
+		expect(released).not.toContain("<task-id>third</task-id>");
+	});
+
+	it("withdraws only the task's completion: its progress message and other tasks' notifications stay", async () => {
+		vi.useFakeTimers();
+		const fake = createFakePi();
+		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 250, withdrawOnDelivery: true });
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		notify("subagent-message", "<agent-message from=\"a1\">checking one last file</agent-message>", { taskId: "a1", name: "a1" });
+		notify("task-notification", completion("a1"), completes("a1"));
+		notify("task-notification", completion("other"), completes("other"));
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "a1" });
+		await vi.advanceTimersByTimeAsync(250);
+		const sent = fake.sentMessages.map((_, index) => textAt(fake, index)).join("\n");
+		expect(sent).toContain("checking one last file");
+		expect(sent).toContain("<task-id>other</task-id>");
+		expect(sent).not.toContain("<task-id>a1</task-id>");
 	});
 });

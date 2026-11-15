@@ -3,8 +3,8 @@
  * description and parameter texts (pure).
  *
  * The short form goes to frontier and workhorse models; the long form, the
- * same text without the "Reserve this for decisions…" paragraph, to cheap
- * and tiny ones (lib/profile/tool-variants.ts). The plan-mode note names One Code's
+ * same text without the "Reserve this for decisions…" and "The user may see
+ * only the question dialog…" paragraphs, to cheap and tiny ones (lib/profile/tool-variants.ts). The plan-mode note names One Code's
  * tools and drops "the user cannot see the plan until you call ExitPlanMode":
  * One Code's plan is a file the user can open at any time.
  */
@@ -21,6 +21,8 @@ Usage notes:
 Plan mode note: To switch into plan mode, use enter_plan_mode (not this tool). Once in plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask "Is my plan ready?", "Should I proceed?", or otherwise reference "the plan" in questions — plan approval goes through exit_plan_mode.
 
 Reserve this for decisions where the user's answer changes what you do next — not for choices with a conventional default or facts you can verify in the codebase yourself. In those cases pick the obvious option, mention it in your response, and proceed.
+
+The user may see only the question dialog: tool results and text you wrote earlier in this turn may not be on their screen while it is open. Make each question stand on its own: if it depends on something you found, say so briefly, and name the items you are asking about in the question itself.
 
 Preview feature:
 Use the optional \`preview\` field on options when presenting concrete artifacts that users need to visually compare:

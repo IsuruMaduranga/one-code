@@ -4,6 +4,11 @@
  * arrives mid-session the way a late MCP server's tools do. tool-search then
  * announces it, as a reference-form `tool_addition` on a model that takes one
  * (request/tool-search/tool-additions.ts) and as the deferred-tool addendum elsewhere.
+ *
+ * The name is the fixture's own, so no tool the run loads (an MCP server's
+ * resource tools, for one) can take it first or in its place. The profile has
+ * no listing hint for it, so its addendum line is the bare name; a hinted late
+ * tool's `name: hint` line is covered by test/unit/tool-additions.test.ts.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";

@@ -44,14 +44,13 @@ function texts(live: LiveTools): NamedText[] {
 		{ kind: "consolePrompt", command: "Read-Host" },
 	];
 	for (const block of blocks) push(`shell blocked ${block.kind}`, "bash", shellResultWords(live).blocked(block));
-	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ label: "Bash", id: "b1", description: "d", logPath: "/l" }));
+	push("shell background started", "bash", shellResultWords(live).backgroundStarted({ id: "b1", logPath: "/l" }));
 	const runs = [{ name: "a", taskId: "t1" }];
-	push("Agent launched", "subagents", subagents.launched({ lines: ["x"] }));
+	push("Agent launched", "subagents", subagents.launched({ lines: ["x"], running: 1, outputFile: true }));
 	push("Agent inline report", "subagents", subagents.inlineReport({ name: "a", taskId: "t1", note: "n" }));
 	push("SendMessage next turn", "subagents", subagents.nextTurn({ name: "a" }));
 	push("SendMessage to resident", "subagents", subagents.sentToResident({ name: "a", taskId: "t1" }));
 	push("SendMessage sent", "subagents", subagents.sent({ name: "a", taskId: "t1" }));
-	push("pending claim", "subagents", subagents.pendingClaim({ runs }));
 	push("running after compaction", "subagents", subagents.runningAfterCompaction({ runs }));
 	push("plan mode entered", "plan-mode", planModeResultWords(live).entered("/p.md"));
 	push("plan mode refusal", undefined, permissions.refused({ kind: "planMode" }));

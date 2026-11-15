@@ -114,19 +114,33 @@ export class DeferredRegistry {
 // a shared export here would be a distinct object in every other extension's
 // jiti module graph, and a tool deferred through that copy would steer nothing.
 
+/** The listing's profile words: a hint per tool, and the closing paragraph. */
+export interface ListingWords {
+	listingHints?: Readonly<Record<string, string>>;
+	listingClose?: string;
+}
+
+/** One listing line: the name, then its hint when the profile has one. */
+const listingLine = (name: string, words: ListingWords): string => {
+	const hint = words.listingHints?.[name];
+	return hint ? `${name}: ${hint}` : name;
+};
+
 /**
  * The every-turn reminder telling the model which tools exist but are not
- * loaded — Claude Code's shape (cc-haiku.json, message 1, block 1): one fixed
- * sentence, then bare names one per line. No descriptions: the model searches
- * by keyword through `tool_search` (which does see descriptions), and a name-
- * only list is ~7x smaller — the description form grew by several KB per MCP
- * server and was the single largest block after `# claudeMd`. The wording is
+ * loaded — Claude Code's shape: one fixed sentence, then one line per tool,
+ * its name and, for a tool the profile has a hint for, one line on when to
+ * load it, then the profile's closing paragraph. No schemas or full
+ * descriptions: the model searches by keyword through `tool_search` (which
+ * does see descriptions); the description form grew by several KB per MCP
+ * server and was the single largest block after `# claudeMd`. The head is
  * CC's with our tool name and our dispatcher's actual error text; it stays
  * byte-identical after a load (as CC's does) so the cached prefix holds — a
  * loaded tool is simply callable, and the sentence says as much.
  */
-export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>): string {
-	return [toolSearchResultText.listingHead, ...tools.map((t) => t.name)].join("\n");
+export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>, words: ListingWords = {}): string {
+	const listing = [toolSearchResultText.listingHead, ...tools.map((t) => listingLine(t.name, words))].join("\n");
+	return words.listingClose ? `${listing}\n\n${words.listingClose}` : listing;
 }
 
 /**
@@ -135,8 +149,8 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  * standing listing on message 1 is frozen once cached (tool-search/announce.ts);
  * this rides the tail instead, so the cached prefix holds.
  */
-export function deferredAddendumText(added: readonly string[]): string {
-	return [toolSearchResultText.addendumHead, ...added].join("\n");
+export function deferredAddendumText(added: readonly string[], words: ListingWords = {}): string {
+	return [toolSearchResultText.addendumHead, ...added.map((name) => listingLine(name, words))].join("\n");
 }
 
 /**

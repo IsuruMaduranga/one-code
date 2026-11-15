@@ -63,6 +63,8 @@ import {
 } from "../../lib/agents/cron.ts";
 import {
 	createTaskNotifier,
+	handBackFlagBlock,
+	TASK_COMPLETION_KEY,
 	monitorEndedSummary,
 	monitorEventSummary,
 	oneShotNote,
@@ -484,11 +486,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 				}
 				const batch = pending;
 				pending = emptyBatch();
-				// CC's mid-run monitor batch: no status, the lines in `<event>`.
+				// CC's mid-run monitor batch: no status, the lines in `<event>`. The
+				// batch forced out as the monitor ends belongs to its completion: the
+				// end's own recent tail and task_output's result hold those lines.
 				notify(
 					"task-notification",
 					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch, text.monitor.moreLines) }),
-					{ taskId: id, events: batchSize(batch) },
+					{ taskId: id, events: batchSize(batch), ...(force ? { [TASK_COMPLETION_KEY]: true } : {}) },
 				);
 			};
 
@@ -537,7 +541,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
 							result: recent || undefined,
 						}),
-						{ taskId: id, status: finalStatus },
+						{ taskId: id, status: finalStatus, [TASK_COMPLETION_KEY]: true },
 					);
 				};
 				if (log && !log.closed) {
@@ -708,6 +712,17 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const task = registry.get(params.task_id);
 			if (!task) return unknownTask(params.task_id);
 
+			// An agent reports through its task notification only: a call on a
+			// running one returns at once and says so, whatever `block` asks,
+			// so a wait for the report never becomes a poll.
+			if (task.kind === "subagent" && task.status === "running") {
+				updateWidget();
+				return {
+					content: [{ type: "text", text: `${text.tasks.taskLine(shownTask(task))}\n\n${text.tasks.agentStillRunning}` }],
+					details: { taskId: task.id, status: task.status, logPath: task.logPath },
+				};
+			}
+
 			if (params.block !== false && task.status === "running") {
 				const timeoutMs = Math.min(params.timeout ?? 30_000, MAX_BLOCK_TIMEOUT_MS);
 				let timer: ReturnType<typeof setTimeout> | undefined;
@@ -729,12 +744,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 
 			updateWidget();
 			const header = text.tasks.taskLine(shownTask(task));
-			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
-			// The model now holds a finished task's output: a completion notification
-			// still waiting to go out for it is redundant (lib/notify/notifications.ts).
+			// A finished task's output is always returned here; its completion
+			// notification is withdrawn where pi does not hold it yet
+			// (lib/notify/notifications.ts TASK_OUTPUT_DELIVERED_CHANNEL).
 			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
+			const body = taskOutputBody(task, ctx, text.tasks) || text.tasks.noOutputYet;
+			// A flagged agent turn: auto mode's warning comes with the report, as
+			// on the hand-back and the foreground Agent result.
+			const flag = task.reviewWarning ? [{ type: "text" as const, text: handBackFlagBlock(task.reviewWarning) }] : [];
 			return {
-				content: [{ type: "text", text: `${header}\n\n${body}` }],
+				content: [...flag, { type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },
 			};
 		},

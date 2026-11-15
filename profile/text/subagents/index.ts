@@ -11,12 +11,8 @@ import { agentDescription } from "./agent-description.ts";
 import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
-/** Names both task tools: cut when either is off. */
-const TASK_TOOLS_PASSAGE = ["- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.\n"] as const;
-
 const AGENT_PASSAGES: ToolPassages = {
-	task_output: TASK_TOOLS_PASSAGE,
-	task_stop: TASK_TOOLS_PASSAGE,
+	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
 };
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */

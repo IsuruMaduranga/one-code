@@ -9,7 +9,7 @@ import type { TaskToolsText } from "../../../extensions/sdk/profile.ts";
 
 export const tasks: TaskToolsText = {
 	outputDescription:
-		"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a task notification naming the output file; call this for the output itself, when your next step needs the result now, or for a mid-run peek.",
+		"Retrieve output from a running or finished background task (monitor or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a task notification naming the output file; call this for the output itself, when your next step needs the result now, or for a mid-run peek. Not for background agents: an agent's report arrives as its task notification, and this tool does not wait for one.",
 	outputParams: {
 		taskId: "The task id to get output from",
 		block: "Wait for completion (default true)",

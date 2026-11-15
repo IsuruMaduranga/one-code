@@ -164,6 +164,14 @@ doesn't re-send the whole conversation. Subagents, workflow agents, and
 `PI_CACHE_RETENTION` yourself to take over the choice. The footer shows the
 cache-hit rate of the latest turn.
 
+pi can also keep the cache warm while you're away, by re-sending the last
+request with a one-token reply just before the cache runs out. One Code
+lets pi warm the cache during a turn but stops the warms pi would send
+while the session sits idle. If you set `cacheWarming` yourself in pi's
+global settings (`~/.pi/agent/settings.json`, or
+`~/.onecode/agent/settings.json` in the `onecode` app), One Code leaves
+every warm to pi and your choice stands.
+
 Changing the reasoning effort or the model re-caches the conversation, so
 one request after such a change costs more than usual.
 

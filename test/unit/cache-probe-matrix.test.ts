@@ -12,6 +12,16 @@ if (process.argv.includes('--version')) { console.log('offline-probe-cli'); }
 else { appendFileSync(process.env.PROBE_INVOCATIONS, JSON.stringify(process.argv.slice(2))+'\\n'); }
 `;
 
+/**
+ * The test process's environment without the probe's own controls (every
+ * CACHE_PROBE_* variable: model overrides, leg selection, registered mode,
+ * login settings), so a person's exported probe settings never reach the
+ * script; each test sets the ones it means to. Everything else (PATH) stays.
+ */
+function inheritedEnv(): NodeJS.ProcessEnv {
+	return Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("CACHE_PROBE_")));
+}
+
 /** The matrix's OpenRouter leg alone against the fake CLI: every pi launch's arguments. */
 function launches(env: Record<string, string>): string[][] {
 	const root = mkdtempSync(join(tmpdir(), "cache-probe-matrix-"));
@@ -22,7 +32,7 @@ function launches(env: Record<string, string>): string[][] {
 		const result = spawnSync("bash", [resolve("test/e2e/cache-probe-matrix.sh")], {
 			encoding: "utf8",
 			timeout: 30_000,
-			env: { ...process.env, ...env, PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: invocations, CACHE_PROBE_ONLY: "openrouter/deepseek" },
+			env: { ...inheritedEnv(), ...env, PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: invocations, CACHE_PROBE_ONLY: "openrouter/deepseek" },
 		});
 		expect(result.error).toBeUndefined();
 		expect(result.stdout).toContain("FAIL  openrouter/deepseek/deepseek-v4.1-flash");
@@ -70,11 +80,11 @@ describe("cache-probe matrix login leg (offline CLI)", () => {
 			const result = spawnSync("bash", [resolve("test/e2e/cache-probe-matrix.sh")], {
 				encoding: "utf8",
 				timeout: 30_000,
-				env: { ...process.env, PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: invocations, CACHE_PROBE_ONLY: "login", CACHE_PROBE_LOGIN_AGENT_DIR: agentDir },
+				env: { ...inheritedEnv(), PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: invocations, CACHE_PROBE_ONLY: "login", CACHE_PROBE_LOGIN_AGENT_DIR: agentDir },
 			});
 			expect(result.error).toBeUndefined();
 			expect(result.stdout).toContain("--- late-tool phase");
-			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).toContain("--- credential and model check (session, auto-mode and late-tool phases)");
 			const calls = readFileSync(invocations, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
 			const late = calls.find((args) => args.some((arg) => arg.endsWith("late-tool-fixture.ts")));
 			expect(late).toBeDefined();
@@ -83,5 +93,31 @@ describe("cache-probe matrix login leg (offline CLI)", () => {
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("cache-probe credential check (offline CLI)", () => {
+	it("checks only the credential on a run that does not pin its side models", () => {
+		const root = mkdtempSync(join(tmpdir(), "cache-probe-key-"));
+		try {
+			const cli = join(root, "fake-pi.mjs");
+			writeFileSync(cli, fakePi);
+			const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--expect-auth", "key", "--no-classifier", "--no-review", "--no-reader", "--no-late-tool"], {
+				encoding: "utf8",
+				timeout: 30_000,
+				env: { ...inheritedEnv(), PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: join(root, "invocations.jsonl") },
+			});
+			expect(result.error).toBeUndefined();
+			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).not.toContain("model check");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses the one-model check without the credential record it reads", () => {
+		const result = spawnSync("bash", [resolve("test/e2e/cache-probe.sh"), "anthropic/claude-sonnet-5", "--expect-one-model"], { encoding: "utf8", timeout: 30_000 });
+		expect(result.status).toBe(2);
+		expect(result.stderr).toContain("--expect-one-model");
 	});
 });

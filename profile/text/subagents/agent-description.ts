@@ -8,8 +8,8 @@
  * (lib/profile/tool-variants.ts). Changes from Claude Code's text: a fork rejects a
  * `model` override rather than ignoring it, agent definitions come from
  * `.claude/agents/*.md` only, and tool names are One Code's. The closing
- * paragraph describes what only One Code has: `task_output` and `task_stop`,
- * the one-shot print session, run names and `action: "list"`.
+ * paragraph describes what only One Code has: `task_stop` for a run, the
+ * one-shot print session, run names and `action: "list"`.
  */
 
 import type { DescriptionForm } from "../../../extensions/sdk/profile.ts";
@@ -22,7 +22,13 @@ When using the Agent tool, specify a subagent_type to select an agent: \`"fork"\
 
 ## When to use
 
-Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.
+A fresh agent costs more than it looks. It knows only what you put in the prompt, and you see only the summary it sends back — both handoffs drop detail, and neither of you can tell what the other missed. You can't watch it work, only wait or cancel. Its mistakes come back in the same confident register as its findings, and an agent handed your hypothesis tends to return it confirmed. Several at once spend tokens in a burst the user didn't ask for. Weigh those tokens against the accuracy they buy: the user pays for agents you did not need, and pays again for work you redo because you skipped one.
+
+Reach for this when you have independent work to run in parallel, when the user asks for a side quest that shouldn't block your main thread, or when answering would mean reading across several files — delegate that and you keep the conclusion, not the file dumps.
+
+Do the work yourself when it is a handful of tool calls or a lookup whose target you already know; don't delegate a check you could run inline. Delegate review only when you want a read that isn't anchored on yours — then give it the code, not your conclusion. Once you've delegated something, don't also run it yourself; wait for the result. When in doubt, don't spawn.
+
+When you do spawn one, brief it like the peer it is: state the goal and what you have already ruled out, point it at the files and docs worth reading instead of retyping them, and keep the scope explicit and narrow. That brief is the only context it will have, so it is your first lever on every cost above — and if you cannot write a clear one, you do not understand the task well enough to hand it off.
 
 A fork runs in the background and keeps its tool output out of your context. If you are the fork, execute directly — don't re-delegate. Subagents run in the background; you'll be notified when one completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running.
 
@@ -120,7 +126,7 @@ Agent({
 /** One Code's own part, after Claude Code's text in both forms. */
 export const AGENT_HOW_AGENTS_RUN = `## How agents run
 
-- Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first.
+- Stop a run with task_stop (deferred — load it with tool_search first).
 - In a one-shot print session the call blocks and returns the report directly — no notification follows.
 - Give a complete, self-contained task: the agent cannot ask follow-up questions.
 - Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. \`action: "list"\` re-prints the agent catalog.`;

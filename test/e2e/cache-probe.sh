@@ -38,7 +38,10 @@
 # `--expect-auth login|key` records the credential shape of every request in the
 # session, classifier and late-tool phases (dump-requests.ts WIRE_AUTH_DUMP, never a value)
 # and fails unless each one used the Anthropic login (bearer, no x-api-key) or
-# the API key, and went to the probe's own model (test/e2e/cache-probe-auth.mjs).
+# the API key (test/e2e/cache-probe-auth.mjs). `--expect-one-model`, with it,
+# also fails unless every one went to the probe's own model: only for a run
+# that pins its side models to the probe model (the matrix's login leg), since
+# a plain run's classifier and subagents pick their own.
 #
 # It runs the repo's own pi (node_modules), the version One Code ships against,
 # not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
@@ -59,6 +62,7 @@ READER=1
 LATE_TOOL=0
 REPO_ARGS=()
 EXPECT_AUTH=""
+ONE_MODEL=0
 LATE_FORM=()
 case "$MODEL" in
 anthropic/*) LATE_TOOL=1 ;;
@@ -74,6 +78,8 @@ for arg in "$@"; do
 		late_form_next=0
 	elif [ "$arg" = "--expect-auth" ]; then
 		expect_auth_next=1
+	elif [ "$arg" = "--expect-one-model" ]; then
+		ONE_MODEL=1
 	elif [ "$arg" = "--late-tool-form" ]; then
 		late_form_next=1
 	elif [ "$arg" = "--repo-only" ]; then
@@ -92,10 +98,24 @@ for arg in "$@"; do
 		CHECK_ARGS+=("$arg")
 	fi
 done
+if [ "$expect_auth_next" = 1 ]; then
+	echo "--expect-auth needs a value: login or key" >&2
+	exit 2
+fi
+if [ "$late_form_next" = 1 ]; then
+	echo "--late-tool-form needs a value: tool_addition or addendum" >&2
+	exit 2
+fi
 case "$EXPECT_AUTH" in
 "" | login | key) ;;
 *)
 	echo "--expect-auth takes login or key, not '$EXPECT_AUTH'" >&2
+	exit 2
+	;;
+esac
+case "$ONE_MODEL:$EXPECT_AUTH" in
+1:)
+	echo "--expect-one-model reads the requests --expect-auth records; pass both" >&2
 	exit 2
 	;;
 esac
@@ -168,8 +188,11 @@ if [ "$LATE_TOOL" = 1 ]; then
 	echo "--- late-tool phase"
 	WIRE_AUTH_DUMP="$AUTH_DUMP" CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" ${LATE_FORM[@]+"${LATE_FORM[@]}"} || status=1
 fi
-if [ -n "$EXPECT_AUTH" ]; then
-	echo "--- credential check (session, auto-mode and late-tool phases)"
+if [ -n "$EXPECT_AUTH" ] && [ "$ONE_MODEL" = 1 ]; then
+	echo "--- credential and model check (session, auto-mode and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
+elif [ -n "$EXPECT_AUTH" ]; then
+	echo "--- credential check (session, auto-mode and late-tool phases)"
+	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" || status=1
 fi
 exit $status

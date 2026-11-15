@@ -12,13 +12,18 @@
  * An addendum is matched as a whole block, never inside other text: in a tool
  * result at `context` time, while the result's blocks are still separate and
  * keyed by its call id (`liftAddenda`), and on a user message as a whole part
- * (a one-shot pinned there).
+ * (a one-shot pinned there). Only an addendum this request carries counts, and
+ * its tool names come from the facts it was built with (the ledger plan's
+ * `carried`, `carriedAddenda`), never from its lines: a line is a name and the
+ * profile's hint for it (lib/request/deferred.ts `listingLine`).
  */
 
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "../../lib/request/anthropic-payload.ts";
 import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "../../lib/request/system-role.ts";
 import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
+import { wrapReminder } from "../../lib/request/reminders.ts";
+import type { ToldFact } from "../../lib/request/ledger/records.ts";
 
 
 /** Claude Code's betas for a reference-form tool addition in a system message. */
@@ -35,16 +40,27 @@ export function supportsToolAdditions(model: { id?: string; provider?: string; a
 	return (model.compat as { supportsMidConvoToolChanges?: boolean } | undefined)?.supportsMidConvoToolChanges === true;
 }
 
-const CLOSE = "\n</system-reminder>";
+/** The addenda a request carries: each framed block's text, with the tool names it announces. */
+export type CarriedAddenda = ReadonlyMap<string, readonly string[]>;
 
-/** The names a whole framed addendum block lists (its head line is the profile's); undefined for any other text. */
-export function addendumNames(text: string): string[] | undefined {
-	const open = `<system-reminder>\n${toolSearchResultText.addendumHead}\n`;
-	if (!text.startsWith(open) || !text.endsWith(CLOSE)) return undefined;
-	return text
-		.slice(open.length, -CLOSE.length)
-		.split("\n")
-		.filter((line) => line.length > 0);
+/**
+ * The addenda among a request's carried blocks (the ledger plan's `carried`:
+ * each block's text with the facts it tells), keyed by the framed text they
+ * ride the wire as, with the names of their `tools` facts.
+ */
+export function carriedAddenda(carried: readonly { text: string; facts: readonly ToldFact[] }[] | undefined): Map<string, string[]> {
+	const out = new Map<string, string[]>();
+	for (const block of carried ?? []) {
+		if (!block.text.startsWith(`${toolSearchResultText.addendumHead}\n`)) continue;
+		const names = block.facts.flatMap((fact) => (fact.kind === "tools" && !fact.removed ? fact.names : []));
+		if (names.length > 0) out.set(wrapReminder(block.text), names);
+	}
+	return out;
+}
+
+/** The names a whole framed addendum block the request carries announces; undefined for any other text. */
+export function addendumNames(text: string, addenda: CarriedAddenda): readonly string[] | undefined {
+	return addenda.get(text);
 }
 
 type StoredBlock = { type?: string; text?: string };
@@ -55,14 +71,14 @@ type StoredMessage = { role: string; toolCallId?: string; content?: unknown };
  * its names kept under the call id, for the payload step to send as an
  * addition after that result. Returns the input when nothing changed.
  */
-export function liftAddenda<T extends StoredMessage>(messages: T[]): { messages: T[]; byCall: Map<string, string[]> } {
+export function liftAddenda<T extends StoredMessage>(messages: T[], addenda: CarriedAddenda): { messages: T[]; byCall: Map<string, string[]> } {
 	const byCall = new Map<string, string[]>();
 	let changed = false;
 	const out = messages.map((message) => {
 		if (message.role !== "toolResult" || !Array.isArray(message.content) || !message.toolCallId) return message;
 		const names: string[] = [];
 		const kept = (message.content as StoredBlock[]).filter((block) => {
-			const found = block?.type === "text" && typeof block.text === "string" ? addendumNames(block.text) : undefined;
+			const found = block?.type === "text" && typeof block.text === "string" ? addendumNames(block.text, addenda) : undefined;
 			if (found) names.push(...found);
 			return !found;
 		});
@@ -87,6 +103,7 @@ export function liftAddenda<T extends StoredMessage>(messages: T[]): { messages:
 export function withToolAdditions(
 	payload: Record<string, unknown>,
 	byCall: ReadonlyMap<string, readonly string[]>,
+	addenda: CarriedAddenda = new Map(),
 	references = true,
 ): { payload: Record<string, unknown>; names: string[] } | undefined {
 	const messages = payload.messages;
@@ -104,7 +121,7 @@ export function withToolAdditions(
 			const called = part?.type === "tool_result" && typeof part.tool_use_id === "string" ? byWireCallId(byCall, part.tool_use_id) : undefined;
 			if (called) names.push(...called);
 		}
-		const pinnedNames = (part: WirePart) => (part?.type === "text" && typeof part.text === "string" ? addendumNames(part.text) : undefined);
+		const pinnedNames = (part: WirePart) => (part?.type === "text" && typeof part.text === "string" ? addendumNames(part.text, addenda) : undefined);
 		// A pinned addendum part goes, keeping pi's cache mark; a message it would empty keeps it.
 		const kept = withoutParts(parts, (part) => pinnedNames(part) !== undefined) ?? parts;
 		if (kept !== parts) for (const part of parts) names.push(...(pinnedNames(part) ?? []));
