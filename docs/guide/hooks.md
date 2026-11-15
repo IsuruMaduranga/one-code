@@ -19,11 +19,16 @@ Hooks are read from the `hooks` block of these files:
 
 A project's hooks can run arbitrary code, so they run only after you
 approve them once. One Code lists each command from the project's files
-and asks "Run this project's hooks?": at startup when the project has a
-`SessionStart` hook, otherwise when you send your next prompt. The approval is
-stored in `~/.onecode/hooks/project-approvals.json` with a hash of the hook
+and asks "Run this project's hooks?". It asks at startup when the project has a
+`SessionStart` hook, and otherwise when you send your next prompt. A turn you
+didn't start by typing (a finished background task or a scheduled prompt, say)
+asks at the first project hook it would run. The approval is stored in
+`~/.onecode/hooks/project-approvals.json` with a hash of the hook
 configuration, so any change asks again. Declining is remembered for the
 session only. User, managed, and plugin hooks never prompt.
+
+A `-p` or `--mode json` run never asks. It runs the project hooks you've
+already approved and skips the rest with a notice.
 
 A `Notification` hook never opens that dialog itself. It fires when you're
 away from the terminal, so asking then would keep the hook waiting until you

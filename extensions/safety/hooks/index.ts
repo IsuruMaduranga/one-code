@@ -187,8 +187,9 @@ function hooksExtension(pi: ExtensionAPI) {
 		const projectSources = loaded.sources.filter((s) => s.scope === "project" || s.scope === "local");
 		// The user's own prompt asks for consent to the project's hooks of every
 		// event: a hook for an event that never asks (Notification) is approved
-		// here, while the user is present.
-		const hasProjectHooks = projectSources.some((s) => (matchValue.consentForEveryEvent ? Object.values(s.config).some((entries) => (entries as unknown[] | undefined)?.length) : s.config[event]?.length));
+		// here, while the user is present. A loaded source always holds some
+		// event's hooks (settings.ts keeps no empty one).
+		const hasProjectHooks = projectSources.some((s) => matchValue.consentForEveryEvent || s.config[event]?.length);
 		let projectAllowed = true;
 		if (hasProjectHooks) {
 			projectAllowed = await projectHooksApproved(ctx.cwd, projectSources, {
