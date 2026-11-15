@@ -7,11 +7,12 @@
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
  *   transcript byte-for-byte. Where the request carries explicit breakpoints
  *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
- *   Bedrock Converse), onPayload splits the user text at stable history-entry
- *   boundaries and moves the user cache marker before the pending action and
- *   stage instruction (cache.ts). Both stages and later gated calls can read
- *   that prefix; the system markers stay intact. Other APIs keep the single
- *   string and their provider's prefix caching.
+ *   Bedrock Converse, and OpenAI Responses on a model that takes explicit
+ *   breakpoints), onPayload splits the user text at stable history-entry
+ *   boundaries and puts the breakpoint before the pending action and stage
+ *   instruction (cache.ts). Both stages and later gated calls can read that
+ *   prefix; the system markers stay intact. Other APIs keep the single string
+ *   and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -29,7 +30,7 @@ import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choi
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
 import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../../lib/models/model-policy.ts";
 import type { AutoModeConfig } from "../../../lib/rules/auto-mode-config.ts";
-import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
+import { cacheClassifierHistory, classifierCarriesBreakpoints } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -193,7 +194,7 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
-	/** Previous history boundary on a breakpoint API, a cache lookup hint only (cache.ts). */
+	/** Previous history boundary, a cache lookup hint for the marker shapes only (cache.ts). */
 	cacheHistoryEnd?: number;
 }
 
@@ -449,7 +450,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
+					...(classifierCarriesBreakpoints(model) ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							// A review's history ends in the subagent's calls, which the next gate

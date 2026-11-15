@@ -7,7 +7,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { buildPayload, type ClassifyRequest, stage1User, stage2User } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
-import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { cacheClassifierHistory, MAX_RESPONSES_HISTORY_MARKS } from "../../extensions/safety/permissions/auto-mode/cache.ts";
 import { classifierText, instructionsFraming } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { transcriptBlocks, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 
@@ -169,6 +169,46 @@ describe("classifier transcript cache", () => {
 		expect(options?.onPayload).toBeUndefined();
 	});
 
+	it.each(["openai-responses", "openai-codex-responses"])("leaves %s as a single string on a model without explicit breakpoints", async (api) => {
+		const flagged = api === "openai-codex-responses";
+		await classify(request, deps({ ...model, provider: "openai", id: "gpt-6.1-terra", api, ...(flagged ? { compat: { supportsExplicitPromptCacheMode: true } } : {}) } as Model<Api>));
+		const [, context, options] = vi.mocked(completeSimple).mock.calls[0];
+		expect(context.messages[0].content).toBe(stage1User(buildPayload(request).userPrefix));
+		expect(options?.onPayload).toBeUndefined();
+	});
+
+	it("splits the OpenAI Responses transcript and marks every history entry on a model with explicit breakpoints", async () => {
+		type Part = { type: string; text: string; prompt_cache_breakpoint?: { mode: string } };
+		type ResponsesPayload = { input: { role: string; content: string | Part[] }[]; prompt_cache_options: { ttl: string } };
+		const sent: ResponsesPayload[] = [];
+		vi.mocked(completeSimple).mockImplementation(async (_model, context, options) => {
+			const payload: ResponsesPayload = {
+				input: [{ role: "developer", content: context.systemPrompt! }, { role: "user", content: [{ type: "input_text", text: context.messages[0].content as string }] }],
+				prompt_cache_options: { ttl: "30m" },
+			};
+			await options?.onPayload?.(payload, _model);
+			sent.push(payload);
+			return { stopReason: "stop", content: [{ type: "text", text: "<severity>5</severity>" }], usage: {} } as unknown as AssistantMessage;
+		});
+		const dependencies = deps({ ...model, provider: "openai", id: "gpt-6.1-terra", api: "openai-responses", compat: { supportsExplicitPromptCacheMode: true } } as Model<Api>);
+		await classify(request, dependencies);
+		const next: ClassifyRequest = { ...request, transcript: [...request.transcript, { kind: "tool", tool: "bash", input: { command: "curl -sI https://example.org" } }] };
+		await classify(next, dependencies);
+		const parts = (payload: ResponsesPayload) => payload.input[1].content as Part[];
+		const marked = (payload: ResponsesPayload) => parts(payload).flatMap((part, i) => (part.prompt_cache_breakpoint ? [i] : []));
+		expect(sent[0].input[0]).toEqual({ role: "developer", content: buildPayload(request).system });
+		expect(parts(sent[0]).map((part) => part.text).join("")).toBe(stage1User(buildPayload(request).userPrefix));
+		expect(parts(sent[1]).map((part) => part.text).join("")).toBe(stage1User(buildPayload(next).userPrefix));
+		const first = buildPayload(request).history.length - 1;
+		const second = buildPayload(next).history.length - 1;
+		const upTo = (end: number) => Array.from({ length: end + 1 }, (_, i) => i);
+		expect(marked(sent[0])).toEqual(upTo(first));
+		expect(marked(sent[1])).toEqual(upTo(second));
+		expect(parts(sent[1])[first].prompt_cache_breakpoint).toEqual({ mode: "explicit" });
+		// The first call's history, marks included, is the second call's prefix.
+		expect(parts(sent[1]).slice(0, first + 1)).toEqual(parts(sent[0]).slice(0, first + 1));
+	});
+
 	// Their payloads carry explicit breakpoints on some models (OpenRouter's
 	// anthropic/*, Claude on Bedrock); the hook places them there and finds
 	// nothing to move elsewhere (classifier-cache-providers.test.ts).
@@ -306,6 +346,89 @@ describe("Anthropic wire layout", () => {
 	])("leaves transformed or unsupported payloads intact", (payload) => {
 		const before = structuredClone(payload);
 		cacheClassifierHistory(payload, ["history", "tail", "stage"], 0);
+		expect(payload).toEqual(before);
+	});
+});
+
+describe("OpenAI Responses wire layout", () => {
+	type Part = { type: string; text: string; prompt_cache_breakpoint?: { mode: string } };
+	const parts = ["header", "history", "new", "tail", "stage"];
+	const breakpoint = { mode: "explicit" };
+	const responses = (extra: Record<string, unknown> = {}, instructions: Record<string, unknown>[] = [{ role: "developer", content: "rules" }]) => ({
+		model: "gpt-6.1-terra", stream: true, store: false, prompt_cache_key: "session:auto-mode", prompt_cache_options: { ttl: "30m" },
+		input: [...instructions, { role: "user", content: [{ type: "input_text", text: parts.join("") }] }] as { role: string; content: string | Part[] }[],
+		...extra,
+	});
+	const userParts = (payload: ReturnType<typeof responses>) => payload.input.at(-1)!.content as Part[];
+	const marked = (payload: ReturnType<typeof responses>) => userParts(payload).flatMap((part, i) => (part.prompt_cache_breakpoint ? [part.text] : []));
+
+	it("splits the user part per entry and marks every history part, never the action or stage", () => {
+		const payload = responses();
+		cacheClassifierHistory(payload, parts, 2, 1);
+		expect(userParts(payload)).toEqual([
+			{ type: "input_text", text: "header", prompt_cache_breakpoint: breakpoint },
+			{ type: "input_text", text: "history", prompt_cache_breakpoint: breakpoint },
+			{ type: "input_text", text: "new", prompt_cache_breakpoint: breakpoint },
+			{ type: "input_text", text: "tail" },
+			{ type: "input_text", text: "stage" },
+		]);
+		expect(payload.input[0]).toEqual({ role: "developer", content: "rules" });
+		expect(payload.prompt_cache_options).toEqual({ ttl: "30m" });
+	});
+
+	it("marks the same set whatever the previous-boundary hint or breakpoints elsewhere", () => {
+		const placed = [{ role: "developer", content: Array.from({ length: 4 }, (_, i) => ({ type: "input_text", text: `rule ${i}`, prompt_cache_breakpoint: breakpoint })) }];
+		for (const [payload, previous] of [[responses(), undefined], [responses(), 0], [responses(), 2], [responses({}, placed), 1]] as const) {
+			cacheClassifierHistory(payload, parts, 2, previous);
+			expect(marked(payload)).toEqual(["header", "history", "new"]);
+		}
+	});
+
+	const history = (n: number) => ["<transcript>", ...Array.from({ length: n - 1 }, (_, i) => `\n{"Bash":"echo ${i}"}`)];
+	const markedIndexes = (entries: string[]) => {
+		const all = [...entries, "\n{\"Bash\":\"pending\"}\n</transcript>", "\n\nstage"];
+		const payload = responses();
+		userParts(payload)[0].text = all.join("");
+		cacheClassifierHistory(payload, all, entries.length - 1);
+		expect(userParts(payload).map((part) => part.text).join("")).toBe(all.join(""));
+		return userParts(payload).flatMap((part, i) => (part.prompt_cache_breakpoint ? [i] : []));
+	};
+
+	it("marks exactly the first MAX_RESPONSES_HISTORY_MARKS boundaries of a longer history", () => {
+		const marks = markedIndexes(history(MAX_RESPONSES_HISTORY_MARKS + 250));
+		expect(marks).toEqual(Array.from({ length: MAX_RESPONSES_HISTORY_MARKS }, (_, i) => i));
+		expect(MAX_RESPONSES_HISTORY_MARKS).toBe(1000);
+	});
+
+	it("marks a prefix of what the same history marks once it has grown", () => {
+		for (const [shorter, longer] of [[3, 4], [10, 60], [999, 1000], [1000, 1001], [1200, 1300]]) {
+			const before = markedIndexes(history(shorter));
+			const after = markedIndexes(history(longer));
+			expect(before).toHaveLength(Math.min(shorter, MAX_RESPONSES_HISTORY_MARKS));
+			expect(after.slice(0, before.length)).toEqual(before);
+		}
+	});
+
+	it.each([
+		["the text differs from the parts joined", () => { const p = responses(); userParts(p)[0].text = "provider-normalized text"; return p; }],
+		["the request carries no prompt_cache_options", () => { const p: Record<string, unknown> = responses(); delete p.prompt_cache_options; return p; }],
+		["another input item is present", () => { const p = responses(); p.input.push({ role: "assistant", content: [{ type: "output_text", text: "earlier" }] }); return p; }],
+		["a second user item is present", () => { const p = responses(); p.input.unshift({ role: "user", content: [{ type: "input_text", text: "earlier" }] }); return p; }],
+		["the user item has two parts", () => { const p = responses(); userParts(p).push({ type: "input_text", text: "more" }); return p; }],
+		["the user part carries another field", () => { const p = responses(); userParts(p)[0].prompt_cache_breakpoint = breakpoint; return p; }],
+	])("leaves the payload alone when %s", (_label, build) => {
+		const payload = build();
+		const before = structuredClone(payload);
+		cacheClassifierHistory(payload, parts, 2, 1);
+		expect(payload).toEqual(before);
+	});
+
+	it.each([["an empty part", ""], ["a whitespace-only part", "\n\n"]])("leaves the payload alone when the split would make %s", (_label, blank) => {
+		const blanked = ["header", "history", blank, "tail", "stage"];
+		const payload = responses();
+		userParts(payload)[0].text = blanked.join("");
+		const before = structuredClone(payload);
+		cacheClassifierHistory(payload, blanked, 2, 1);
 		expect(payload).toEqual(before);
 	});
 });
