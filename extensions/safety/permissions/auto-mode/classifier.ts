@@ -430,7 +430,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// reasoning-mandatory retry below) gets its lowest supported level — the
 		// off-request would 400 and the gate would fail closed on every call.
 		const reasoning = deps.state.forcedReasoning.get(key) ?? forcedReasoningLevel(model);
+		/** What the payload hook did to the latest request, for the probe log: parts marked, or undefined when it left the payload alone. */
+		let cacheMarks: number | undefined;
 		const runCall = (userText: string, maxTokens: number, stage: number) => {
+			cacheMarks = undefined;
 			if (debug === "2") {
 				process.stderr.write(
 					`\n[auto-mode payload] stage=${stage} model=${key} maxTokens=${maxTokens} systemLen=${system.length} userLen=${userText.length}\n` +
@@ -452,7 +455,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
 					...(classifierCarriesBreakpoints(model) ? {
 						onPayload: (payload: unknown) => {
-							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
+							cacheMarks = cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							// A review's history ends in the subagent's calls, which the next gate
 							// call's transcript does not hold, so it leaves the session's boundary.
 							if (!deps.reviewOnly) deps.state.cacheHistoryEnd = history.length - 1;
@@ -474,7 +477,24 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
-						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, cacheBreakpoints: classifierCarriesBreakpoints(model), tool: request.toolName, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+						appendFileSync(
+							usageLog,
+							`${JSON.stringify({
+								model: key,
+								api: model.api,
+								cacheBreakpoints: classifierCarriesBreakpoints(model),
+								cacheEdited: cacheMarks !== undefined,
+								cacheMarks: cacheMarks ?? 0,
+								systemChars: system.length,
+								historyChars: history.join("").length,
+								tool: request.toolName,
+								stage,
+								system,
+								user: userText,
+								usage: reply.usage,
+								stopReason: reply.stopReason,
+							})}\n`,
+						);
 					} catch {
 						// A probe log that cannot be written must not fail the gate.
 					}

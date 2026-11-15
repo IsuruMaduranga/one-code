@@ -63,30 +63,31 @@ export function classifierCarriesBreakpoints(model: { api: string; compat?: unkn
  *   Completions when the model takes Anthropic's format);
  * - one `{ text }` block then a `{ cachePoint }` block (Bedrock Converse);
  * - one `input_text` part in the `input` list (OpenAI Responses, below).
+ *
+ * Returns how many parts it marked, or `undefined` when it left the payload
+ * alone (for the classifier's probe log; the edit does not depend on it).
  */
-export function cacheClassifierHistory(payload: unknown, parts: readonly string[], historyEnd: number, previousEnd?: number): void {
-	if (!isPlainObject(payload)) return;
-	if (Array.isArray(payload.input)) {
-		cacheResponsesHistory(payload, payload.input, parts, historyEnd);
-		return;
-	}
-	if (!Array.isArray(payload.messages)) return;
+export function cacheClassifierHistory(payload: unknown, parts: readonly string[], historyEnd: number, previousEnd?: number): number | undefined {
+	if (!isPlainObject(payload)) return undefined;
+	if (Array.isArray(payload.input)) return cacheResponsesHistory(payload, payload.input, parts, historyEnd);
+	if (!Array.isArray(payload.messages)) return undefined;
 	const message = onlyUserMessage(payload.messages);
-	if (message === undefined) return;
+	if (message === undefined) return undefined;
 	const content = message.content;
-	if (!Array.isArray(content) || !content.every(isPlainObject)) return;
+	if (!Array.isArray(content) || !content.every(isPlainObject)) return undefined;
 	const text = parts.join("");
 	const marker = anthropicMarker(content, text);
 	const point = marker === undefined ? bedrockCachePoint(content, text, parts) : undefined;
-	if (marker === undefined && point === undefined) return;
+	if (marker === undefined && point === undefined) return undefined;
 	// The user message's own marker is replaced, so its slot is ours to reuse.
 	const free = MAX_SIDE_CALL_CACHE_MARKERS - markersOutside(payload, message);
-	if (free < 1) return;
+	if (free < 1) return undefined;
 	const markPrevious = free >= 2 && previousEnd !== undefined && previousEnd < historyEnd;
 	const marked = (i: number) => i === historyEnd || (markPrevious && i === previousEnd);
 	message.content = marker !== undefined
 		? parts.map((part, i) => ({ type: "text", text: part, ...(marked(i) ? { cache_control: marker } : {}) }))
 		: parts.flatMap((part, i) => [{ text: part }, ...(marked(i) ? [{ cachePoint: point }] : [])]);
+	return countMarked(parts, marked);
 }
 
 /**
@@ -110,14 +111,19 @@ export function cacheClassifierHistory(payload: unknown, parts: readonly string[
  * them. Whether the API takes a blank part is unconfirmed, so parts that would
  * make one keep the single part.
  */
-function cacheResponsesHistory(payload: WireRecord, input: unknown[], parts: readonly string[], historyEnd: number): void {
-	if (!isPlainObject(payload.prompt_cache_options) || parts.some((part) => part.trim() === "")) return;
+function cacheResponsesHistory(payload: WireRecord, input: unknown[], parts: readonly string[], historyEnd: number): number | undefined {
+	if (!isPlainObject(payload.prompt_cache_options) || parts.some((part) => part.trim() === "")) return undefined;
 	const message = onlyUserMessage(input);
-	if (message === undefined || !Array.isArray(message.content) || message.content.length !== 1) return;
+	if (message === undefined || !Array.isArray(message.content) || message.content.length !== 1) return undefined;
 	const [part] = message.content;
-	if (!isPlainObject(part) || Object.keys(part).length !== 2 || part.type !== "input_text" || part.text !== parts.join("")) return;
+	if (!isPlainObject(part) || Object.keys(part).length !== 2 || part.type !== "input_text" || part.text !== parts.join("")) return undefined;
 	const marked = (i: number) => i <= historyEnd && i < MAX_RESPONSES_HISTORY_MARKS;
 	message.content = parts.map((text, i) => ({ type: "input_text", text, ...(marked(i) ? { prompt_cache_breakpoint: { mode: "explicit" } } : {}) }));
+	return countMarked(parts, marked);
+}
+
+function countMarked(parts: readonly string[], marked: (i: number) => boolean): number {
+	return parts.reduce((count, _part, i) => count + (marked(i) ? 1 : 0), 0);
 }
 
 /** The single user message of a list whose other entries are only system or developer instructions. */

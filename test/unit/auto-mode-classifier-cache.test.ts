@@ -264,7 +264,7 @@ describe("classifier text preservation", () => {
 			const expected = render(prefix);
 			const parts = [...built.history, built.tail, render(built.userPrefix).slice(built.userPrefix.length)];
 			const wire = { messages: [{ role: "user", content: [{ type: "text" as const, text: expected, cache_control: cacheControl }] }] };
-			cacheClassifierHistory(wire, parts, built.history.length - 1);
+			expect(cacheClassifierHistory(wire, parts, built.history.length - 1)).toBe(1);
 			expect(wire.messages[0].content.map((block) => block.text).join("")).toBe(expected);
 			const marked = wire.messages[0].content.filter((block) => block.cache_control);
 			expect(marked).toHaveLength(1);
@@ -308,7 +308,7 @@ describe("Anthropic wire layout", () => {
 			messages: [{ role: "user", content: [{ type: "text", text: "headerhistorynewtailstage", cache_control: cacheControl }] }],
 		};
 		const systemBefore = structuredClone(payload.system);
-		cacheClassifierHistory(payload, ["header", "history", "new", "tail", "stage"], 2, 1);
+		expect(cacheClassifierHistory(payload, ["header", "history", "new", "tail", "stage"], 2, 1)).toBe(2);
 		expect(payload.system).toEqual(systemBefore);
 		expect(payload.messages[0].content.filter((block) => block.cache_control)).toHaveLength(2);
 		expect(payload.messages[0].content.map((block) => block.text).join("")).toBe("headerhistorynewtailstage");
@@ -321,18 +321,18 @@ describe("Anthropic wire layout", () => {
 		const system = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "text", text: `s${i}`, cache_control: cacheControl }));
 		const parts = ["header", "history", "new", "tail", "stage"];
 		const three = { system: system(3), messages: [message()] };
-		cacheClassifierHistory(three, parts, 2, 1);
+		expect(cacheClassifierHistory(three, parts, 2, 1)).toBe(1);
 		expect(three.messages[0].content.filter((block) => block.cache_control).map((block) => block.text)).toEqual(["new"]);
 		const four = { system: system(4), messages: [message()] };
 		const before = structuredClone(four.messages);
-		cacheClassifierHistory(four, parts, 2, 1);
+		expect(cacheClassifierHistory(four, parts, 2, 1)).toBeUndefined();
 		expect(four.messages).toEqual(before);
 	});
 
 	it("inherits the provider's cache duration instead of inventing a different one", () => {
 		const short = { type: "ephemeral" };
 		const payload = { messages: [{ role: "user", content: [{ type: "text", text: "historytailstage", cache_control: short }] }] };
-		cacheClassifierHistory(payload, ["history", "tail", "stage"], 0, 100);
+		expect(cacheClassifierHistory(payload, ["history", "tail", "stage"], 0, 100)).toBe(1);
 		expect(payload.messages[0].content[0].cache_control).toEqual(short);
 		expect(payload.messages[0].content.filter((block) => block.cache_control)).toHaveLength(1);
 	});
@@ -345,7 +345,7 @@ describe("Anthropic wire layout", () => {
 		{ contents: [] },
 	])("leaves transformed or unsupported payloads intact", (payload) => {
 		const before = structuredClone(payload);
-		cacheClassifierHistory(payload, ["history", "tail", "stage"], 0);
+		expect(cacheClassifierHistory(payload, ["history", "tail", "stage"], 0)).toBeUndefined();
 		expect(payload).toEqual(before);
 	});
 });
@@ -364,7 +364,7 @@ describe("OpenAI Responses wire layout", () => {
 
 	it("splits the user part per entry and marks every history part, never the action or stage", () => {
 		const payload = responses();
-		cacheClassifierHistory(payload, parts, 2, 1);
+		expect(cacheClassifierHistory(payload, parts, 2, 1)).toBe(3);
 		expect(userParts(payload)).toEqual([
 			{ type: "input_text", text: "header", prompt_cache_breakpoint: breakpoint },
 			{ type: "input_text", text: "history", prompt_cache_breakpoint: breakpoint },
@@ -379,7 +379,7 @@ describe("OpenAI Responses wire layout", () => {
 	it("marks the same set whatever the previous-boundary hint or breakpoints elsewhere", () => {
 		const placed = [{ role: "developer", content: Array.from({ length: 4 }, (_, i) => ({ type: "input_text", text: `rule ${i}`, prompt_cache_breakpoint: breakpoint })) }];
 		for (const [payload, previous] of [[responses(), undefined], [responses(), 0], [responses(), 2], [responses({}, placed), 1]] as const) {
-			cacheClassifierHistory(payload, parts, 2, previous);
+			expect(cacheClassifierHistory(payload, parts, 2, previous)).toBe(3);
 			expect(marked(payload)).toEqual(["header", "history", "new"]);
 		}
 	});
@@ -389,9 +389,11 @@ describe("OpenAI Responses wire layout", () => {
 		const all = [...entries, "\n{\"Bash\":\"pending\"}\n</transcript>", "\n\nstage"];
 		const payload = responses();
 		userParts(payload)[0].text = all.join("");
-		cacheClassifierHistory(payload, all, entries.length - 1);
+		const count = cacheClassifierHistory(payload, all, entries.length - 1);
 		expect(userParts(payload).map((part) => part.text).join("")).toBe(all.join(""));
-		return userParts(payload).flatMap((part, i) => (part.prompt_cache_breakpoint ? [i] : []));
+		const marks = userParts(payload).flatMap((part, i) => (part.prompt_cache_breakpoint ? [i] : []));
+		expect(count).toBe(marks.length);
+		return marks;
 	};
 
 	it("marks exactly the first MAX_RESPONSES_HISTORY_MARKS boundaries of a longer history", () => {
@@ -419,7 +421,7 @@ describe("OpenAI Responses wire layout", () => {
 	])("leaves the payload alone when %s", (_label, build) => {
 		const payload = build();
 		const before = structuredClone(payload);
-		cacheClassifierHistory(payload, parts, 2, 1);
+		expect(cacheClassifierHistory(payload, parts, 2, 1)).toBeUndefined();
 		expect(payload).toEqual(before);
 	});
 
@@ -428,7 +430,7 @@ describe("OpenAI Responses wire layout", () => {
 		const payload = responses();
 		userParts(payload)[0].text = blanked.join("");
 		const before = structuredClone(payload);
-		cacheClassifierHistory(payload, blanked, 2, 1);
+		expect(cacheClassifierHistory(payload, blanked, 2, 1)).toBeUndefined();
 		expect(payload).toEqual(before);
 	});
 });
