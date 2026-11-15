@@ -27,10 +27,8 @@ import { type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMess
 
 type Stream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 
-/** pi-ai's exports, read as optional: a name the running pi-ai lacks is undefined. */
-const piAi = compat as unknown as {
-	anthropicMessagesApi?: () => { streamSimple: Stream };
-};
+/** pi-ai's `anthropicMessagesApi`, read as optional: undefined when the running pi-ai lacks it. */
+const piAi = compat as { anthropicMessagesApi?: () => { streamSimple: Stream } };
 
 /**
  * The `pi.registerProvider("anthropic", …)` config that keeps message threads
@@ -59,6 +57,6 @@ export type SideCallOptions = Omit<SimpleStreamOptions, "apiKey" | "env">;
  * as a reply with `stopReason: "error"` and pi's message, never as a throw.
  * Every side call goes through here (message-threads.test.ts).
  */
-export async function completeThreadless(registry: SideCallRegistry, model: Model<Api>, context: Context, options: SideCallOptions): Promise<AssistantMessage> {
+export function completeThreadless(registry: SideCallRegistry, model: Model<Api>, context: Context, options: SideCallOptions): Promise<AssistantMessage> {
 	return registry.streamSimple(withoutMessageThreads(model), context, options).result();
 }
