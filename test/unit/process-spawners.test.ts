@@ -11,10 +11,13 @@
  * - `awaited`: short-lived; the caller waits for it (a synchronous call,
  *   `waitForChildExit`, a promisified call or a callback) and bounds it with a
  *   timeout or a kill on abort.
- * - `registered`: long-lived; spawned in its own group (`detachedSpawnOptions`)
- *   and remembered with `rememberProcessGroup`, so the exit and signal hooks in
- *   lib/shell-run/process-tree.ts end it with the process, and stopped with
- *   `stopProcessTree`.
+ * - `registered`: long-lived; started with `spawnOwnedTree`
+ *   (lib/shell-run/process-tree.ts), which spawns it in its own group and
+ *   remembers the group, so the exit and signal hooks there end it with the
+ *   process, and stopped through the tree it returns. No module but
+ *   process-tree.ts remembers or stops a group by hand: one helper keeps one
+ *   stop policy, where hand-written copies drifted apart (a language server's
+ *   launcher once exited without ending the rest of its group).
  * - `exception`: neither, with the reason. The list only shrinks.
  */
 import { readFileSync } from "node:fs";
@@ -33,7 +36,7 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/lib/agents/agent-worktree.ts": { kind: "awaited", how: "git, promisified" },
 	"extensions/lib/context/git-status.ts": { kind: "awaited", how: "git, synchronous with a timeout" },
 	"extensions/lib/context/git.ts": { kind: "awaited", how: "git, with a timeout" },
-	"extensions/lib/shell-run/bash-background.ts": { kind: "registered", how: "background shells: remembered from spawn, stopped with stopProcessTree" },
+	"extensions/lib/shell-run/bash-background.ts": { kind: "registered", how: "background shells: an owned tree, stopped on task_stop or the timeout; a finished shell's leftovers live until the process exits" },
 	"extensions/lib/shell-run/process-tree.ts": {
 		kind: "exception",
 		how: "the kills themselves: taskkill.exe, unref'd, ends on its own; the exit watchdog SIGKILLs what outlasts SIGTERM and exits within KILL_GRACE_MS",
@@ -46,10 +49,10 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/safety/hooks/executor.ts": { kind: "awaited", how: "waitForChildExit with a timeout that kills the hook's group; a SessionEnd hook is fire-and-forget by design" },
 	"extensions/safety/permissions/auto-mode/setup-run.ts": { kind: "awaited", how: "probe commands with a timeout" },
 	"extensions/safety/worktree/index.ts": { kind: "awaited", how: "git, promisified" },
-	"extensions/tools/background/index.ts": { kind: "registered", how: "monitors: remembered from spawn, stopped with stopProcessTree" },
+	"extensions/tools/background/index.ts": { kind: "registered", how: "monitors: an owned tree, stopped on task_stop or the deadline" },
 	"extensions/tools/bash/index.ts": { kind: "awaited", how: "pi's bash tool waits for its command and kills the tree on abort or timeout" },
-	"extensions/tools/lsp/client.ts": { kind: "registered", how: "language servers: remembered from spawn, stopped with stopProcessTree" },
-	"extensions/tools/mcp/stdio-transport.ts": { kind: "registered", how: "stdio MCP servers: remembered from spawn, the group stopped on close and when its launcher exits" },
+	"extensions/tools/lsp/client.ts": { kind: "registered", how: "language servers: an owned tree, killed on stop, the group ended when its launcher exits" },
+	"extensions/tools/mcp/stdio-transport.ts": { kind: "registered", how: "stdio MCP servers: an owned tree, stopped on close, the group ended when its launcher exits" },
 	"extensions/tools/plugins/marketplace/git.ts": { kind: "awaited", how: "git, with a timeout" },
 	"extensions/tools/plugins/shell-expand.ts": { kind: "awaited", how: "waitForChildExit with a timeout that kills the group" },
 	"extensions/ui/footer/pr.ts": { kind: "awaited", how: "gh, with a timeout" },
@@ -96,8 +99,18 @@ function showsLifetime(kind: Lifetime["kind"], source: string): boolean {
 	return true;
 }
 
+/** How to start a long-lived child: the fix every `registered` failure names. */
+const OWNED_TREE_FIX =
+	"start it with spawnOwnedTree((detached) => spawn(…, { …, ...detached })) from lib/shell-run/process-tree.ts and end it through the tree it returns (tree.stop(KILL_GRACE_MS), tree.kill(signal)); pass { endGroupWithLauncher: true } when the child is a launcher whose exit should end the rest of its group";
+
 const FIX =
-	"declare it in SPAWNERS in test/unit/process-spawners.test.ts: `awaited` (short-lived: wait for it with waitForChildExit or a promisified call, bound it with a timeout, kill it with killProcessTree on abort) or `registered` (long-lived: spawn with detachedSpawnOptions(), call rememberProcessGroup(child), stop with stopProcessTree); see lib/shell-run/process-tree.ts and decisions/tools.md \"Nothing outlives its session\"";
+	"declare it in SPAWNERS in test/unit/process-spawners.test.ts: `awaited` (short-lived: wait for it with waitForChildExit or a promisified call, bound it with a timeout, kill it with killProcessTree on abort) or `registered` (long-lived: " +
+	OWNED_TREE_FIX +
+	"); see lib/shell-run/process-tree.ts and decisions/tools.md \"Nothing outlives its session\"";
+
+/** The parts of an owned tree that only spawnOwnedTree, in process-tree.ts, may call. */
+const TREE_PARTS = ["rememberProcessGroup(", "stopProcessTree("];
+const PROCESS_TREE = "extensions/lib/shell-run/process-tree.ts";
 
 describe("modules that start child processes", () => {
 	const spawners = new Map<string, string[]>();
@@ -131,8 +144,23 @@ describe("modules that start child processes", () => {
 	it("shows the declared lifetime in each module", () => {
 		const unshown = Object.entries(SPAWNERS)
 			.filter(([file, { kind }]) => sources.has(file) && !showsLifetime(kind, sources.get(file)!))
-			.map(([file, { kind }]) => `${file} is declared ${kind} but ${kind === "registered" ? "never calls spawnOwnedTree()" : "shows no wait or bound on its child"}`);
+			.map(([file, { kind }]) =>
+				kind === "registered" ? `${file} is declared registered but never calls spawnOwnedTree(): ${OWNED_TREE_FIX}` : `${file} is declared ${kind} but shows no wait or bound on its child`,
+			);
 		expect(unshown).toEqual([]);
+	});
+
+	it("owns long-lived trees only through spawnOwnedTree", () => {
+		const byHand: string[] = [];
+		for (const dir of ["extensions", "profile"]) {
+			for (const file of sourceFiles(join(ROOT, dir), ROOT)) {
+				if (file === PROCESS_TREE || file.includes("/test/")) continue;
+				const source = readFileSync(join(ROOT, file), "utf8");
+				const parts = TREE_PARTS.filter((part) => source.includes(part));
+				if (parts.length > 0) byHand.push(`${file} calls ${parts.map((part) => `${part})`).join(" and ")} by hand: ${OWNED_TREE_FIX}`);
+			}
+		}
+		expect(byHand).toEqual([]);
 	});
 
 	it("keeps the declarations sorted", () => {
