@@ -16,6 +16,14 @@
  *   sleeping a fixed interval, with a timeout and a last-known fallback.
  * - Child handles are unref'd and shut down explicitly, so a one-shot `pi -p`
  *   run still exits.
+ * - The server runs in its own process group, owned until this process exits.
+ *   A server is often a script in front of the real process (a launcher
+ *   script that starts a JVM), and many servers ignore both a closed stdin
+ *   and the `processId` they were given, so only a signal to the whole group
+ *   ends them: the fallback kill in `stop()` reaches the real process, and a
+ *   process that exits without a `session_shutdown` (a crash: pi calls
+ *   `process.exit` from its uncaught-exception handler) still ends the
+ *   group from its `exit` hook. Only a SIGKILL of this process leaves it.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
@@ -26,7 +34,7 @@ import type { LspDiagnostic } from "./format.ts";
 import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../../lib/app/app-launch.mjs";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { killProcessTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, killProcessTree, rememberProcessGroup, unrefHandle } from "../../lib/shell-run/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -141,8 +149,10 @@ export class LspClient {
 			env,
 			windowsHide: true,
 			windowsVerbatimArguments: launch.windowsVerbatimArguments,
+			...detachedSpawnOptions(),
 		});
 		this.child = child;
+		rememberProcessGroup(child);
 
 		// Don't hold the event loop open once the agent is done. The stdio pipes
 		// are sockets at runtime, so they carry unref() even though the stream
@@ -424,9 +434,10 @@ export class LspClient {
 		this.child = undefined;
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {
-				// The tree, not the leader: on Windows a .cmd-shimmed server runs
-				// under the cmd.exe `commandLaunch` started, and killing cmd.exe
-				// alone would orphan the server on the inherited pipes.
+				// The tree, not the leader: a launcher script's real server is a
+				// child of it, and on Windows a .cmd-shimmed server runs under the
+				// cmd.exe `commandLaunch` started; killing the leader alone would
+				// orphan the server on the inherited pipes.
 				killProcessTree(child, "SIGKILL");
 				resolve();
 			}, 1000);

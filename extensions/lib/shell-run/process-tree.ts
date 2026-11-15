@@ -1,7 +1,7 @@
 /**
  * Process-tree termination for the shells One Code spawns in the background
- * (`bash run_in_background`, `monitor`), and the one way to wait for such a
- * child to finish.
+ * (`bash run_in_background`, `monitor`) and for language servers
+ * (`tools/lsp/client.ts`), and the one way to wait for such a child to finish.
  *
  * A `$SHELL -c "cmd"` child is only the leader: with zsh (macOS default) a
  * `cmd; echo` or a pipeline runs the command in further processes, and
@@ -24,8 +24,9 @@
  * and the grace timer is unref'd) is SIGKILLed from a `process.on("exit")`
  * hook, so nothing One Code stopped outlives it.
  *
- * `rememberProcessGroup` owns a background shell's group for the lifetime of
- * this process, including descendants left by a successfully exited leader.
+ * `rememberProcessGroup` owns a background shell's or a language server's
+ * group for the lifetime of this process, including descendants left by a
+ * successfully exited leader.
  * Session replacement must not kill those intentionally launched daemons.
  * Each module instance keeps its own groups through process listeners (never
  * through a session context or cross-extension module state), reaps empty
