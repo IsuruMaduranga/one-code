@@ -29,8 +29,19 @@ export const DEFAULT_BLOCK = 256;
  * OpenInference, 2026-11-16 (working-docs/findings/93): session reads plus 33
  * were whole 512-token blocks (28,639, 29,151, 29,663), and a classifier
  * prompt's identical repeat read 31,744, a whole number with no offset.
+ * Morph, 2026-11-16: classifier prompts that grew read 31,232, 30,720 and
+ * 30,208 of 31,607, 31,084 and 30,610 (61, 60 and 59 blocks of 512), where
+ * 1,024-token blocks would have read 30,720, 30,720 and 29,696.
  */
-export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] } };
+export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] } };
+
+/**
+ * Waits before each retry of a lookup that 404'd (OpenRouter records a
+ * generation some seconds after the reply, at times past 12 s), and the most
+ * one `lookupHosts` call waits in all; past it the remaining ids fail fast.
+ */
+const RETRY_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 12000];
+const TOTAL_WAIT_MS = 60_000;
 
 /** Whether a response id is an OpenRouter generation id. */
 export const isGenerationId = (id) => typeof id === "string" && id.startsWith("gen-");
@@ -48,31 +59,36 @@ function openRouterKey() {
 
 /**
  * The serving host of each generation id, as `{ host }` or `{ error }`.
- * OpenRouter records a generation a few seconds after the reply, so a 404 is
- * retried.
+ * OpenRouter records a generation some seconds after the reply, so a 404 is
+ * retried (RETRY_DELAYS_MS, at most TOTAL_WAIT_MS in all per call).
  */
 export async function lookupHosts(ids) {
 	const out = new Map();
 	const wanted = [...new Set(ids.filter(isGenerationId))];
 	if (wanted.length === 0) return out;
 	const key = openRouterKey();
+	let waited = 0;
 	for (const id of wanted) {
 		if (!key) {
 			out.set(id, { error: "no OpenRouter key to look the host up" });
 			continue;
 		}
 		let result;
-		for (let attempt = 0; attempt < 6 && !result; attempt++) {
+		for (let attempt = 0; !result; attempt++) {
+			const last = attempt === RETRY_DELAYS_MS.length || waited + (RETRY_DELAYS_MS[attempt] ?? 0) > TOTAL_WAIT_MS;
 			try {
 				const res = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
 				if (res.ok) {
 					const host = (await res.json())?.data?.provider_name;
 					result = host ? { host } : { error: "the generation names no host" };
-				} else if (res.status !== 404 || attempt === 5) result = { error: `generation lookup returned ${res.status}` };
+				} else if (res.status !== 404 || last) result = { error: `generation lookup returned ${res.status}${res.status === 404 ? ` after ${Math.round(waited / 1000)} s of retries` : ""}` };
 			} catch (error) {
-				if (attempt === 5) result = { error: `generation lookup failed: ${error?.message ?? error}` };
+				if (last) result = { error: `generation lookup failed: ${error?.message ?? error}` };
 			}
-			if (!result) await new Promise((resolve) => setTimeout(resolve, 2000));
+			if (!result) {
+				await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+				waited += RETRY_DELAYS_MS[attempt];
+			}
 		}
 		out.set(id, result);
 	}
