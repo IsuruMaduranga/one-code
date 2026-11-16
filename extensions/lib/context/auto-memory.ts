@@ -17,9 +17,10 @@ import { knobValue, readKnob } from "../profile/knobs.ts";
 import { featureEnabled } from "../profile/profile.ts";
 import os from "node:os";
 import { readSettingsFile, settingsSources } from "../profile/settings-files.ts";
+import { AUTO_MEMORY_KEY } from "../profile/settings-keys.ts";
 
-/** The settings key, as Claude Code spells it. */
-export const AUTO_MEMORY_KEY = "autoMemoryEnabled";
+/** The settings key, as Claude Code spells it; its home is the base's list of settings keys. */
+export { AUTO_MEMORY_KEY };
 /** The knob that overrides the setting (lib/profile/knobs.ts): `<envPrefix>_DISABLE_AUTO_MEMORY`, or the provider's alias. */
 export const AUTO_MEMORY_KNOB = "DISABLE_AUTO_MEMORY";
 

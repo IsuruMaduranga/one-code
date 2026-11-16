@@ -4,8 +4,9 @@
  * passage naming a tool by the tools the session can have, a reminder, a
  * deferred tool of its own, a secret value, a report of a file it wrote to
  * the profile's language server, a page in the product's state folder opened
- * in the browser, a notice when the session model sits below a tier) the way
- * a product's extension would. The base
+ * in the browser, a notice when the session model sits below a tier, which
+ * a setting the profile declares switches off) the way a product's extension
+ * would. The base
  * suite copies this profile into place, so the manifest's product entry loads
  * it there (`product-extension.test.ts`).
  */
@@ -21,6 +22,7 @@ import {
 	lspFilesChanged,
 	notifyOrPrint,
 	openInBrowser,
+	productSetting,
 	productStateDir,
 	queueNotice,
 	REMINDER_CHANNEL,
@@ -51,6 +53,8 @@ export const PROBE_FILE = "probe.fixturelang";
 /** The tier the probe asks for: a session model below it gets `PROBE_TIER_NOTICE`. */
 export const PROBE_TIER_FLOOR: PromptTier = "workhorse";
 export const PROBE_TIER_NOTICE = "[fixture:below-tier-floor]";
+/** The setting the profile declares for the notice (`settings` in ../../index.ts): false keeps it quiet. */
+export const PROBE_TIER_SETTING = "fixtureTierNotice";
 /** A command that writes a page into the product's state folder and opens it. */
 export const PROBE_COMMAND = "fixture-page";
 
@@ -60,6 +64,8 @@ export default function probe(pi: ExtensionAPI) {
 	/** The user's notice, at the session's start and at each switch of model; never in the request. */
 	const tierNotice = (ctx: ExtensionContext) => {
 		if (tiersBelow(tier(), PROBE_TIER_FLOOR) <= 0) return;
+		// Read at each boundary: the user may have switched it off since the last one.
+		if (productSetting(PROBE_TIER_SETTING, ctx.cwd) === false) return;
 		// Joined with the other startup and model-switch notices; stderr in print and JSON modes.
 		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", PROBE_TIER_NOTICE);
 		else notifyOrPrint(ctx, PROBE_TIER_NOTICE, "warning");

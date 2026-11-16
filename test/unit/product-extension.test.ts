@@ -5,9 +5,11 @@
  * `extensions/sdk/extension.ts` re-exports. One Code ships none, so the
  * loading cases run in the base suite, on the fixture profile's `probe`.
  */
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { productSetting as baseProductSetting } from "../../extensions/lib/profile/declared-settings.ts";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHILD_EXTENSIONS, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
@@ -73,20 +75,23 @@ describe("a product's own extensions", () => {
 		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
 	});
 
-	it("offer the session's tier and the notice helpers the base itself uses", () => {
+	it("offer the session's tier, the notice helpers and the settings reader the base itself uses", () => {
 		// The same functions, so a product's tier is the one the request was built for and its notices join the base's.
-		expect([sdk.sessionModelTier, sdk.tiersBelow, sdk.queueNotice, sdk.notifyOrPrint]).toEqual([sessionModelTier, tiersBelow, queueNotice, notifyOrPrint]);
+		expect([sdk.sessionModelTier, sdk.tiersBelow, sdk.queueNotice, sdk.notifyOrPrint, sdk.productSetting]).toEqual([sessionModelTier, tiersBelow, queueNotice, notifyOrPrint, baseProductSetting]);
 		expect(sdk.tiersBelow("cheap", "workhorse")).toBe(1);
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe tells the user when the session model sits below its tier, in the TUI and in print mode", async () => {
 		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TIER_NOTICE: string };
+		const state = mkdtempSync(join(tmpdir(), "probe-tier-"));
+		const cwd = mkdtempSync(join(tmpdir(), "probe-tier-cwd-"));
 		const start = async (tier: string, hasUI: boolean) => {
+			vi.stubEnv(envName("STATE_DIR"), state);
 			vi.stubEnv(envName("PROMPT_TIER"), tier);
 			const fake = createFakePi();
 			module.default(fake.pi as never);
 			const notices: Array<[string, string]> = [];
-			await fake.fire("session_start", {}, createFakeCtx({ hasUI, ui: { notify: (text: string, level: string) => notices.push([text, level]) } }));
+			await fake.fire("session_start", {}, createFakeCtx({ cwd, hasUI, ui: { notify: (text: string, level: string) => notices.push([text, level]) } }));
 			// The lifecycle notices close their batch on the next macrotask.
 			await new Promise((resolve) => setTimeout(resolve, 0));
 			return notices;
@@ -100,6 +105,38 @@ describe("a product's own extensions", () => {
 		} finally {
 			stderr.mockRestore();
 			vi.unstubAllEnvs();
+			rmSync(state, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
+
+	it.skipIf(!existsSync(probe))("the fixture's probe stays quiet while its declared setting is off, the project's value winning", async () => {
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TIER_NOTICE: string; PROBE_TIER_SETTING: string };
+		const state = mkdtempSync(join(tmpdir(), "probe-setting-"));
+		const cwd = mkdtempSync(join(tmpdir(), "probe-setting-cwd-"));
+		vi.stubEnv(envName("STATE_DIR"), state);
+		vi.stubEnv(envName("PROMPT_TIER"), "cheap");
+		const write = (path: string, value: boolean) => {
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, JSON.stringify({ [module.PROBE_TIER_SETTING]: value }));
+		};
+		const start = async () => {
+			const fake = createFakePi();
+			module.default(fake.pi as never);
+			const notices: string[] = [];
+			await fake.fire("session_start", {}, createFakeCtx({ cwd, hasUI: true, ui: { notify: (text: string) => notices.push(text) } }));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			return notices;
+		};
+		try {
+			write(productSettingsPath(homedir()), false);
+			expect(await start()).toEqual([]);
+			write(productProjectSettingsPath(cwd, homedir()), true);
+			expect(await start()).toEqual([module.PROBE_TIER_NOTICE]);
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(state, { recursive: true, force: true });
+			rmSync(cwd, { recursive: true, force: true });
 		}
 	});
 

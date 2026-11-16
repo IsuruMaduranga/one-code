@@ -63,6 +63,19 @@
  * level)` writes it to stderr, never into the JSON event stream on stdout.
  * A notice is for the user only and never goes into the request.
  *
+ * A user switches the product's behavior through a setting the profile
+ * declares (`Profile.settings`: its type, whether the per-project file may
+ * set it, and a description /doctor shows). `productSetting(key, cwd)` reads
+ * it: from the product's user settings file, then, for a setting declared
+ * with `project`, its per-project file, which wins; never a repository's
+ * file, another tool's or the managed one. A missing file, malformed JSON or
+ * a value of another type reads as unset (undefined), and a key the profile
+ * does not declare throws. Read it where it applies, at `session_start` and
+ * `model_select` (the user edits the file between sessions; nothing announces
+ * a change). Deliberately not here: a writer, the files' paths, a
+ * settings-changed channel, and any reader of the base's own keys (a key the
+ * base reads, `permissions` or `autoMode` among them, cannot be declared).
+ *
  * A product tool registers through pi like any tool. Two helpers keep it in
  * line with the base's own tools: `persistIfLarge` bounds a large text result
  * (the full text goes to a file the model can read back; never truncate),
@@ -86,3 +99,4 @@ export { sessionModelTier } from "../lib/models/session-model-tier.ts";
 export { tiersBelow } from "../lib/models/model-tier.ts";
 export { type NoticeLevel, queueNotice } from "../lib/notify/notices.ts";
 export { notifyOrPrint } from "../lib/notify/headless-output.ts";
+export { productSetting, type ProductSettingValue } from "../lib/profile/declared-settings.ts";

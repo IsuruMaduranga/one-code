@@ -13,6 +13,7 @@
 import type { ProductLanguageServer } from "./language-servers.ts";
 import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
+import type { ProductSetting } from "./settings-keys.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
 import type { AutoModeSetupText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
@@ -187,6 +188,15 @@ export interface Profile {
 	 * same connection (`lspRequest`, `extensions/sdk/extension.ts`).
 	 */
 	languageServers?: Readonly<Record<string, ProductLanguageServer>>;
+	/**
+	 * Settings the product's own extensions read, by key
+	 * (`lib/profile/settings-keys.ts`): `{ tierNotice: { type: "boolean",
+	 * project: true, description: "…" } }`. A product extension reads one with
+	 * `productSetting(key, cwd)` (`extensions/sdk/extension.ts`), from the
+	 * product's user file and, with `project`, its per-project file; /doctor
+	 * lists them as read. A key the base reads itself is refused at load.
+	 */
+	settings?: Readonly<Record<string, ProductSetting>>;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features
