@@ -9,8 +9,7 @@
  * byte-identical repeat included, and read the cache once the breakpoints were
  * there; Alibaba, Qwen's own host, reads further with them. Hosts that cache by
  * themselves (Wafer, Modal, InferenceNet, MiniMax) read the same with or
- * without them (working-docs/findings, "OpenRouter hosts that cache only with
- * breakpoints", 2026-11-16).
+ * without them (findings §93, measured 2026-11-16).
  *
  * pi-ai already has the placement: `compat.cacheControlFormat: "anthropic"`
  * marks the system prompt, the last tool and the last conversation message, as
