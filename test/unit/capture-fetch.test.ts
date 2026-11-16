@@ -114,6 +114,8 @@ describe("capture-fetch preload and summary", () => {
 		expect(lines[6]).toMatch(/\/down {2}error /);
 	});
 
+	// Guards only where Node writes stdout to a pipe asynchronously (macOS): on Linux and Windows the
+	// write is synchronous, so the old `process.exit` passed there too. CI runs it on macOS.
 	it("prints every row to a reader slower than the pipe before it exits", async () => {
 		const row = JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", method: "POST", host: "h", path: "/p", status: 200, bytes: 1, body: { model: "m" } });
 		writeFileSync(out, `${row}\n`.repeat(5000));

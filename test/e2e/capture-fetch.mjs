@@ -64,11 +64,13 @@ function readBody(input, init) {
 	}
 }
 
+/** The base a relative target parses against, so its query, fragment and userinfo drop out as an absolute one's do. */
+const RELATIVE = "http://relative.invalid";
+
 function target(input) {
-	const href = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
-	// A relative URL (the call itself then fails) parses against a placeholder base, so its query,
-	// fragment and userinfo drop out the same way; whatever still does not parse is never written raw.
-	const RELATIVE = "http://relative.invalid";
+	// A Request carries `url`; anything else fetch accepts is stringified, as fetch does.
+	const href = typeof input === "string" ? input : (input?.url ?? String(input));
+	// A relative URL makes the call itself fail; whatever still does not parse is never written raw.
 	try {
 		const url = new URL(href, RELATIVE);
 		return { host: url.origin === RELATIVE ? "" : url.host, path: url.pathname };
