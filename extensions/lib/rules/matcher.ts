@@ -417,7 +417,8 @@ export function isShellTool(toolName: string): boolean {
  * cat k` needs a rule for `cat`. The read-only shortcut
  * is off when the line moves directory first (`cd /etc && git commit -m
  * "$(cat passwd)"`), since the check resolves paths from the working
- * directory. An unparseable line, or one with a construct the pre-gate does
+ * directory, and when it runs a command in the background (`cat k & ln -sf
+ * ~/.ssh/id_rsa k`), which runs alongside the commands after it. An unparseable line, or one with a construct the pre-gate does
  * not model, is not covered. The rule returned is the first one that covered
  * a subcommand (for the "allowed by rule …" note).
  */
@@ -464,7 +465,11 @@ export function findBashAllowRule(
 	// any read-only proof, which runs the whole pre-gate per command.
 	const first = segmentRules.find((rule) => rule !== undefined);
 	if (!first) return undefined;
-	const topLevelMoves = topLevel.some(movesDirectory);
+	// The read-only proof is off after a `cd` on the line, whose later relative
+	// paths it would resolve from the wrong directory, and on a line with a
+	// background command (`cat k & ln -sf ~/.ssh/id_rsa k`), which runs
+	// alongside the commands after it, so no order holds that the proof can lean on.
+	const proofOff = parsed.background || topLevel.some(movesDirectory);
 	// The pipeline members that run a rule's command, and, for each member,
 	// the members after it in its pipeline.
 	const ruled = new Set(topLevel.flatMap((seg, index) => (segmentRules[index] ? seg.scopes : [])));
@@ -483,11 +488,10 @@ export function findBashAllowRule(
 		if (segmentRules[index]) continue;
 		// A command the pre-gate proves read-only by itself needs no rule of its
 		// own (`gh api … | head`), as Claude Code allows a read-only subcommand
-		// on its own. Off after a `cd` on the line, whose later relative paths
-		// the proof would resolve from the wrong directory, and for a command
-		// whose output a rule's command reads later in the pipeline: that
-		// command may run it (`echo 'rm -rf ~' | sudo bash` under `Bash(sudo bash)`).
-		if (topLevelMoves || feedsRule(seg) || !readOnlyAt(index)) return undefined;
+		// on its own. Never for a command whose output a rule's command reads
+		// later in the pipeline: that command may run it (`echo 'rm -rf ~' |
+		// sudo bash` under `Bash(sudo bash)`).
+		if (proofOff || feedsRule(seg) || !readOnlyAt(index)) return undefined;
 		// The proof judged the files as they are before the line runs, so it
 		// holds only while nothing before this command can have changed them:
 		// every ruled command before it is itself proved read-only (`cat a && gh
@@ -499,7 +503,7 @@ export function findBashAllowRule(
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
 		if (inner.every((seg) => ruleFor(seg.raw))) continue;
-		if (!topLevelMoves && opts.readOnly?.(text)) continue;
+		if (!proofOff && opts.readOnly?.(text)) continue;
 		return undefined;
 	}
 	return first;

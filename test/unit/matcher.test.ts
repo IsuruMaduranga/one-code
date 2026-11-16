@@ -223,6 +223,17 @@ describe("read-only commands need no rule of their own", () => {
 			}
 		});
 
+		it("never covers a read-only command on a line that runs a command in the background, which runs alongside the rest", () => {
+			for (const mode of ["default", "auto"] as const) {
+				for (const subject of ["cat k & ln -sf ~/.ssh/id_rsa k", "sleep 1 && cat k & ln -sf ~/.ssh/id_rsa k", 'git commit -m "$(cat k)" & ln -sf ~/.ssh/id_rsa k']) {
+					expect(covered(mode, subject, ["Bash(ln -sf:*)", "Bash(git commit:*)"]), `${mode}: ${subject}`).toBe(false);
+				}
+			}
+			// Every command still covered by a rule of its own.
+			expect(findBashAllowRule(rules(["Bash(cat:*)", "Bash(ln -sf:*)"]), "cat k & ln -sf ~/.ssh/id_rsa k")?.raw).toBe("Bash(cat:*)");
+			expect(findBashAllowRule(rules(["Bash(ln -sf:*)"]), "cat k & ln -sf ~/.ssh/id_rsa k", "bash", { readOnly: () => true })).toBeUndefined();
+		});
+
 		it("covers a read-only command that runs before every command the proof could not clear", () => {
 			for (const mode of ["default", "auto"] as const) {
 				expect(covered(mode, "cat README.md && gh pr view 1", ["Bash(gh pr view:*)"]), mode).toBe(true);
