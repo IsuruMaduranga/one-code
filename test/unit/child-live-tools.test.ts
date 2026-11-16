@@ -5,10 +5,11 @@
  * the main session's words would send it to tools it lacks.
  */
 import { describe, expect, it } from "vitest";
-import { childLive, childText, markChildBus, sessionView } from "../../extensions/lib/agents/child-extensions.ts";
+import { childExtensionPaths, childLive, childText, markChildBus, sessionView } from "../../extensions/lib/agents/child-extensions.ts";
+import { EXTENSIONS_DIR } from "../../extensions/lib/core/package-root.ts";
 import { shellResultText } from "../../extensions/lib/shell-run/shell-text.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
-import { TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
+import { FEATURE_IDS, featureOfEntry, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import { activeProfile } from "../../extensions/lib/profile/profile.ts";
 import { bashGuardReason } from "../../extensions/lib/shell/bash-guards.ts";
 import { mentions } from "./helpers/tool-mentions.ts";
@@ -57,5 +58,19 @@ describe("a child session's tools", () => {
 		expect(view.child).toBe(true);
 		expect(view.live).toBe(childLive());
 		expect(view.text("toolSearch")).toBe(childText().toolSearch);
+	});
+
+	it("run the features a child loads an entry of, among those the profile turns on", () => {
+		const main = sessionView(createFakePi().pi as never);
+		const child = createFakePi();
+		markChildBus(child.events as never);
+		const view = sessionView(child.pi as never);
+		const loaded = new Set(childExtensionPaths().map((path) => featureOfEntry(path.slice(EXTENSIONS_DIR.length + 1).replaceAll("\\", "/"))).filter((id) => id !== undefined));
+		for (const id of FEATURE_IDS) {
+			expect(main.features.has(id), id).toBe(activeProfile().features.has(id));
+			expect(view.features.has(id), id).toBe(activeProfile().features.has(id) && loaded.has(id));
+		}
+		// No child loads lsp (its language servers would outlive the child), so a child's section never says diagnostics follow an edit.
+		expect(view.features.has("lsp")).toBe(false);
 	});
 });

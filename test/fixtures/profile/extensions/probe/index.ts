@@ -45,6 +45,8 @@ export const PROBE_SECTION_TOOL = ` Call ${PROBE_TOOL} to probe.`;
  * and a passage following the active list would change the prompt when it loads.
  */
 const SECTION_PASSAGES: ToolPassages = { [PROBE_TOOL]: [PROBE_SECTION_TOOL] };
+/** The section's passage on a fact the lsp feature adds (diagnostics after an edit), whether or not its tool is registered: keyed on the feature. */
+export const PROBE_SECTION_DIAGNOSTICS = " Diagnostics follow each edit.";
 export const PROBE_REMINDER = "[fixture:product-reminder]";
 /** A value the probe registers as secret; a tool result that carries it shows `[secret:fixture]` instead. */
 export const PROBE_SECRET = "fixture-secret-value";
@@ -105,7 +107,7 @@ export default function probe(pi: ExtensionAPI) {
 		},
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: PROBE_TOOL } satisfies DeferRequest);
-	pi.events.emit(SYSTEM_PROMPT_SECTION_CHANNEL, { id: "fixture-probe", place: "tail", render: ({ live }) => withoutOff(`${PROBE_SECTION}${PROBE_SECTION_TOOL}`, live, SECTION_PASSAGES) } satisfies SystemPromptSection);
+	pi.events.emit(SYSTEM_PROMPT_SECTION_CHANNEL, { id: "fixture-probe", place: "tail", render: ({ live, features }) => withoutOff(`${PROBE_SECTION}${PROBE_SECTION_TOOL}`, live, SECTION_PASSAGES) + (features.has("lsp") ? PROBE_SECTION_DIAGNOSTICS : "") } satisfies SystemPromptSection);
 	setSecretValues("fixture-probe", [{ value: PROBE_SECRET, name: "fixture" }]);
 	pi.on("session_start", () => {
 		pi.events.emit(REMINDER_CHANNEL, { key: "fixture-probe", text: PROBE_REMINDER, placement: "last-append" } satisfies ReminderPayload);

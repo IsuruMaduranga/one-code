@@ -15,12 +15,15 @@
  *   while the extension loads. A child session ignores it. Its `render` gets
  *   a `SectionSession`: the tier, whether the task tools run, `tools` (the
  *   active tools now, which change when a deferred tool loads, so a passage
- *   keyed on them can change the prompt mid-session and miss the cache) and
- *   `live` (the tools the session can have, fixed for the process). Key
- *   passages on `live`: list them per tool as `ToolPassages` and cut them
- *   with `withoutOff` (both from `extensions/sdk/profile.ts`), and test the
- *   section with `stalePassages`, `toolLeaks` and `deferralChanges` from
- *   `test/unit/helpers/tool-mentions.ts`.
+ *   keyed on them can change the prompt mid-session and miss the cache),
+ *   `live` (the tools the session can have, fixed for the process) and
+ *   `features` (the features that run in it, as fixed: `features.has("lsp")`
+ *   for a fact a feature adds whether or not its tool is registered, such as
+ *   the diagnostics after an edit). Key passages on `live` and `features`:
+ *   list a tool's as `ToolPassages` and cut them with `withoutOff` (both from
+ *   `extensions/sdk/profile.ts`), and test the section with `stalePassages`,
+ *   `toolLeaks` and `deferralChanges` from `test/unit/helpers/tool-mentions.ts`
+ *   (the last fails when its bytes move inside a session).
  * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
  * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
  * - `lspRequest`: a request on a language server the profile declares, on the
@@ -97,6 +100,8 @@
  */
 export { DEFER_CHANNEL, type DeferRequest } from "../lib/request/deferred-channel.ts";
 export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "../lib/request/reminders.ts";
+export type { LiveFeatures } from "../lib/profile/live-tools.ts";
+export type { FeatureId } from "../lib/profile/features.ts";
 export { type SectionSession, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
 export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";
 export { type LspFileChange, type LspFilesChanged, lspFilesChanged, type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";

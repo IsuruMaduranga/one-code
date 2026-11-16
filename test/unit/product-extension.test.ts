@@ -61,7 +61,7 @@ describe("a product's own extensions", () => {
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reaches the request through the SDK's channels", async () => {
-		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_SECTION_TOOL: string; PROBE_REMINDER: string; PROBE_SECRET: string };
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_SECTION_TOOL: string; PROBE_SECTION_DIAGNOSTICS: string; PROBE_REMINDER: string; PROBE_SECRET: string };
 		const fake = createFakePi();
 		const seen = { deferred: [] as unknown[], sections: [] as SystemPromptSection[], reminders: [] as unknown[] };
 		fake.events.on(DEFER_CHANNEL, (data) => seen.deferred.push(data));
@@ -73,10 +73,15 @@ describe("a product's own extensions", () => {
 		expect(fake.tools.get(module.PROBE_TOOL)?.renderShell).toBe("self");
 		expect(seen.deferred).toEqual([{ name: module.PROBE_TOOL }]);
 		// The section cuts the passage naming its tool when the session cannot have it, whatever the active list says.
-		const rendered = (has: boolean) => seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: [], live: { has: () => has } })]);
-		expect(rendered(true)).toEqual([["tail", `${module.PROBE_SECTION}${module.PROBE_SECTION_TOOL}`]]);
-		expect(rendered(false)).toEqual([["tail", module.PROBE_SECTION]]);
-		expect(deferralChanges((session) => seen.sections[0].render(session), { deferred: [module.PROBE_TOOL] })).toEqual([]);
+		const rendered = (has: boolean, lsp = true) =>
+			seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: [], live: { has: () => has }, features: { has: (id) => id !== "lsp" || lsp } })]);
+		expect(rendered(true)).toEqual([["tail", `${module.PROBE_SECTION}${module.PROBE_SECTION_TOOL}${module.PROBE_SECTION_DIAGNOSTICS}`]]);
+		expect(rendered(false)).toEqual([["tail", `${module.PROBE_SECTION}${module.PROBE_SECTION_DIAGNOSTICS}`]]);
+		// The diagnostics passage follows the lsp feature, not its tool.
+		expect(rendered(false, false)).toEqual([["tail", module.PROBE_SECTION]]);
+		for (const lsp of [true, false]) {
+			expect(deferralChanges((session) => seen.sections[0].render(session), { deferred: [module.PROBE_TOOL], features: { has: (id) => id !== "lsp" || lsp } })).toEqual([]);
+		}
 		expect(redactSecretValues(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
