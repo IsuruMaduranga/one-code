@@ -105,10 +105,11 @@ export function parsePs(output, tag) {
 
 /**
  * A cell where pi keeps running and nothing may be ended: `before` the old
- * session's processes of this spawner, `after` those still alive.
+ * session's processes of this spawner, `after` those still alive. A spawner
+ * seen earlier but with nothing alive at the signal was not exercised.
  */
 export function keptOutcome({ seen, before, after }) {
-	if (!seen) return { status: "NOT STARTED", fails: true };
+	if (!seen || before.length === 0) return { status: "NOT STARTED", fails: true };
 	const ended = before.filter((p) => !after.some((q) => q.pid === p.pid));
 	return ended.length > 0 ? { status: "ENDED (pi lives)", fails: true, ended } : { status: "kept", fails: false };
 }

@@ -74,4 +74,8 @@ describe("a cell's outcome", () => {
 		expect(keptOutcome({ seen: true, before, after: [survivor] })).toMatchObject({ status: "ENDED (pi lives)", fails: true });
 		expect(keptOutcome({ seen: true, before, after: before })).toMatchObject({ status: "kept", fails: false });
 	});
+
+	it("fails a kept cell whose fixture had nothing alive when the signal came", () => {
+		expect(keptOutcome({ seen: true, before: [], after: [] })).toMatchObject({ status: "NOT STARTED", fails: true });
+	});
 });
