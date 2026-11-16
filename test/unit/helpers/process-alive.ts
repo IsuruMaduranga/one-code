@@ -1,4 +1,4 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { type ChildProcessWithoutNullStreams, execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -11,6 +11,12 @@ export const alive = (pid: number): boolean => {
 	} catch {
 		return false;
 	}
+};
+
+/** A process's parent pid and process group, read from `ps` (POSIX only). */
+export const parentAndGroup = (pid: number): { ppid: number; pgid: number } => {
+	const [ppid, pgid] = execFileSync("ps", ["-o", "ppid=,pgid=", "-p", String(pid)], { encoding: "utf8" }).trim().split(/\s+/).map(Number);
+	return { ppid, pgid };
 };
 
 /** Poll every 50 ms, at most `tries` times (3 s by default); the condition's last value. */

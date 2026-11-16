@@ -7,14 +7,13 @@
  * process exits without stopping it (a crash, where pi calls `process.exit`
  * without a `session_shutdown`).
  */
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient } from "../../extensions/tools/lsp/client.ts";
-import { alive, startOwner, until } from "./helpers/process-alive.ts";
+import { alive, parentAndGroup, startOwner, until } from "./helpers/process-alive.ts";
 import { RECORDING_SERVER } from "./helpers/recording-lsp-server.ts";
 
 /** `; :` keeps the shell from replacing itself with node: the server is the script's child. */
@@ -63,7 +62,7 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		const client = new LspClient(config, dir, { env });
 		await client.start();
 		const pid = await readServerPid();
-		const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+		const launcherPid = parentAndGroup(pid).ppid;
 
 		process.kill(launcherPid, "SIGKILL");
 		expect(await until(() => !alive(pid))).toBe(true);
@@ -83,7 +82,7 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		await client.start();
 		const pid = await readServerPid();
 		if (launcherDies) {
-			const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+			const launcherPid = parentAndGroup(pid).ppid;
 			process.kill(launcherPid, "SIGKILL");
 			expect(await until(() => !client.isRunning)).toBe(true);
 		}

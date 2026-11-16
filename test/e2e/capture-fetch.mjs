@@ -66,12 +66,14 @@ function readBody(input, init) {
 
 function target(input) {
 	const href = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+	// A relative URL (the call itself then fails) parses against a placeholder base, so its query,
+	// fragment and userinfo drop out the same way; whatever still does not parse is never written raw.
+	const RELATIVE = "http://relative.invalid";
 	try {
-		const url = new URL(href);
-		return { host: url.host, path: url.pathname };
+		const url = new URL(href, RELATIVE);
+		return { host: url.origin === RELATIVE ? "" : url.host, path: url.pathname };
 	} catch {
-		// A relative or malformed URL (the call itself then fails): its query can carry a key too.
-		return { host: "", path: String(href).replace(/[?#].*$/s, "") };
+		return { host: "", path: "(unparseable)" };
 	}
 }
 

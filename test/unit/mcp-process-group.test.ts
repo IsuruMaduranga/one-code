@@ -6,7 +6,6 @@
  * closing it (a crash, where pi exits without `session_shutdown`). The SDK's
  * own transport failed all three (test/e2e/exit-probe.mjs).
  */
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -14,7 +13,7 @@ import { join, resolve } from "node:path";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProcessGroupStdioTransport } from "../../extensions/tools/mcp/stdio-transport.ts";
-import { alive, startOwner, until } from "./helpers/process-alive.ts";
+import { alive, parentAndGroup, startOwner, until } from "./helpers/process-alive.ts";
 
 /** Answers every request with an empty result; with EXIT_PROBE_STUBBORN it outlives a closed stdin (test/e2e/stubborn.mjs). */
 const SERVER = `
@@ -115,7 +114,7 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		await transport.start();
 		const pid = await readServerPid();
-		const [launcherPid, group] = execFileSync("ps", ["-o", "ppid=,pgid=", "-p", String(pid)], { encoding: "utf8" }).trim().split(/\s+/).map(Number);
+		const { ppid: launcherPid, pgid: group } = parentAndGroup(pid);
 		// The server's parent is the launcher, which leads the server's own group.
 		expect(group).toBe(launcherPid);
 
