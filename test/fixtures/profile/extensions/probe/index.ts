@@ -5,8 +5,8 @@
  * deferred tool of its own, a secret value, a report of a file it wrote to
  * the profile's language server, a page in the product's state folder opened
  * in the browser, a notice when the session model sits below a tier, which
- * a setting the profile declares switches off) the way a product's extension
- * would. The base
+ * a setting the profile declares switches off, a block of project facts in
+ * the first message's context) the way a product's extension would. The base
  * suite copies this profile into place, so the manifest's product entry loads
  * it there (`product-extension.test.ts`).
  */
@@ -24,6 +24,7 @@ import {
 	notifyOrPrint,
 	openInBrowser,
 	productSetting,
+	publishContextBlock,
 	productStateDir,
 	queueNotice,
 	REMINDER_CHANNEL,
@@ -58,6 +59,9 @@ export const PROBE_TIER_NOTICE = "[fixture:below-tier-floor]";
 export const PROBE_UNKNOWN_MODEL_NOTICE = "[fixture:unknown-model]";
 /** The setting the profile declares for the notice (`settings` in ../../index.ts): false keeps it quiet. */
 export const PROBE_TIER_SETTING = "fixtureTierNotice";
+/** The probe's own context block: project facts the model starts every epoch with. */
+export const PROBE_CONTEXT_KEY = "fixture-layout";
+export const PROBE_CONTEXT = "[fixture:project-layout]";
 /** A command that writes a page into the product's state folder and opens it. */
 export const PROBE_COMMAND = "fixture-page";
 
@@ -77,7 +81,11 @@ export default function probe(pi: ExtensionAPI) {
 		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", text);
 		else notifyOrPrint(ctx, text, "warning");
 	};
-	pi.on("session_start", (_event, ctx) => tierNotice(ctx));
+	pi.on("session_start", (_event, ctx) => {
+		// Published at the session's start; a product republishes only on a real change.
+		publishContextBlock(pi, ctx, PROBE_CONTEXT_KEY, PROBE_CONTEXT);
+		tierNotice(ctx);
+	});
 	pi.on("model_select", (event, ctx) => tierNotice(ctx, event.model));
 	pi.registerTool({
 		name: PROBE_TOOL,

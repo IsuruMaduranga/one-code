@@ -113,6 +113,8 @@ export const CONTEXT_ORDER = {
 	productMd: 52,
 	/** The user's email and the git snapshot. */
 	context: 54,
+	/** A product's own context blocks (context-block.ts `publishContextBlock`); not Claude Code's. */
+	productContext: 55,
 	date: 56,
 } as const;
 
