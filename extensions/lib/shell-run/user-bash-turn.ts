@@ -15,10 +15,23 @@
  * The bash handler is the only `user_bash` handler that returns operations:
  * pi takes the first handler's result, so a second one would never run, or
  * would skip the bundled app's environment restore.
+ *
+ * Only in the bundled app's terminal (`turnAfterBashAllowed`). The app already
+ * owns `user_bash`, so wrapping its operations takes nothing from anyone.
+ * Under a plain pi install, returning operations would shadow every later
+ * extension's `user_bash` handler (a remote or sandboxed shell), so the
+ * handler returns nothing there and the record rides the next prompt, as pi
+ * does. An RPC client's `bash` command and a print or JSON run start no turn
+ * either: the client did not ask for one.
  */
 
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { brandedId } from "../profile/brand.mjs";
+
+/** Whether a `!` run may start a turn: under the bundled app (`LAUNCHER_ENV_VAR` set), typed in its terminal (pi's `ctx.mode` is "tui"). */
+export function turnAfterBashAllowed(run: { app: boolean; mode: string }): boolean {
+	return run.app && run.mode === "tui";
+}
 
 /** The bash handler emits a `UserBashTurnRequest` here for every `!` run, at `user_bash` time. */
 export const USER_BASH_CHANNEL = brandedId("user-bash");

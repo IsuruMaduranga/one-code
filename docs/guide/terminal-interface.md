@@ -191,14 +191,18 @@ or RPC run.
 ## Shell commands you type
 
 Start a line with `!` to run a shell command yourself, such as `!git status`.
-When the model is idle, One Code starts a turn as soon as the command
-finishes, so the model reacts to the output without you typing anything.
+In the `onecode` app's terminal, when the model is idle, One Code starts a
+turn as soon as the command finishes, so the model reacts to the output
+without you typing anything. When you run One Code as a pi package, the
+command runs the way pi runs it and the output goes out with your next
+message.
+
 Start the line with `!!` instead to run the command without putting its
 output in the model's context. A `!!` command never starts a turn.
 
 No turn starts when you cancel the command (press **Esc** while it runs), or
 when you typed it while the model was working. In that case the output
-travels with your next message.
+travels with your next message too.
 
 ## Keyboard shortcuts
 

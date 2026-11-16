@@ -3,9 +3,10 @@
  * recorded it, so the model reacts to the output with nothing typed, as in
  * Claude Code (lib/shell-run/user-bash-turn.ts has the route).
  *
- * For each `!` run the bash feature's `user_bash` handler emits a request on
- * USER_BASH_CHANNEL; this extension sets its `onSettled` when the run should
- * start a turn: not for a `!!` run (kept out of the context) and not while the
+ * For each `!` run typed in the bundled app's terminal (not under a plain pi
+ * install, not from an RPC client's `bash` command) the bash feature's
+ * `user_bash` handler emits a request on USER_BASH_CHANNEL; this extension
+ * sets its `onSettled` when the run should start a turn: not for a `!!` run (kept out of the context) and not while the
  * model is working (pi queues that record until the turn ends, and the next
  * prompt carries it). When the run settles it checks again: no turn after a
  * cancel or a failed run, while the session is busy, or once the session that
