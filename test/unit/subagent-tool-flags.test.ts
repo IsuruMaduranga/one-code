@@ -20,10 +20,11 @@ import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { CHILD_REPORT_CHANNELS, discoverAgents } from "../../extensions/lib/agents/agent-catalog.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 import { childLive } from "../../extensions/lib/agents/child-extensions.ts";
-import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { profile as shipped } from "../../profile/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
 
 let agentDir: string;
 let cwd: string;
@@ -198,5 +199,15 @@ describe("the agent catalog under pi's tool flags", () => {
 		expect(tools).not.toContain("bash");
 		// No tool of its own left: still a start, with the note.
 		expect(output).toContain(subagentResultText().toolsLeftOut({ name: "flags-shell", tools: ["bash"] }));
+	});
+});
+
+describe("text under pi's --exclude-tools SendMessage", () => {
+	it("leaves SendMessage out of a subagent and out of the resident-ended note", async () => {
+		const note = () => backgroundWords(requireText("background")).tasks.residentEnded({ id: "t1", description: "review" });
+		expect(note()).toContain("SendMessage");
+		launch(["--exclude-tools", "SendMessage"]);
+		expect(note()).toBe("Terminated the resident agent behind t1 (review).");
+		expect((await subagent({ agent: "flags-reader" })).tools).not.toContain("SendMessage");
 	});
 });

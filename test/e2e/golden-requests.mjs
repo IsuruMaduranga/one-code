@@ -587,6 +587,8 @@ async function sweep() {
 	// pi's own flag leaves Agent out of the registry; the text built for the live tool set follows it (lib/profile/pi-tool-flags.ts).
 	// Workhorse: its register has the system prompt's Agent passages, which frontier's lacks.
 	runs.push({ label: "pi --exclude-tools Agent", toolsOff: ["Agent"], config: { name: "sweep-exclude-agent", model: ANTHROPIC, tier: "workhorse", mode: "print", args: ["--exclude-tools", "Agent"] } });
+	// SendMessage: only pi's flag takes it out alone; the Agent tool's words and the catalog must stop naming it.
+	runs.push({ label: "pi --exclude-tools SendMessage", toolsOff: ["SendMessage"], config: { name: "sweep-exclude-send-message", model: ANTHROPIC, tier: "workhorse", mode: "print", args: ["--exclude-tools", "SendMessage"] } });
 	// The flags restrict a subagent too (lib/agents/agent-catalog.ts agentToolOptions): the tools turn, which runs one, must send web_fetch in no request, the child's included.
 	runs.push({ label: "pi --exclude-tools web_fetch, with a subagent", toolsOff: ["web_fetch"], children: true, config: { name: "sweep-exclude-web-fetch", model: ANTHROPIC, tier: "frontier", mode: "tools", args: ["--exclude-tools", "web_fetch"] } });
 	// The all-on baseline runs in the same pool; the tools a run loses against

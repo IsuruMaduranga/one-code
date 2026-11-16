@@ -24,6 +24,7 @@ import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
 import { findConfigured, modelSpec } from "../../lib/models/model-policy.ts";
 import { isModelUnavailableError } from "../../lib/models/classifier-model.ts";
+import { toolLive } from "../../lib/profile/profile.ts";
 import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFlags, unusableAllowlistError } from "../../lib/agents/agent-catalog.ts";
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
@@ -291,8 +292,9 @@ export class SubagentRuntime {
 				// The tools injected below (the spawn and cron tools, the shared MCP
 				// tools) are deferred as the parent defers them: their owners run there.
 				deferLikeParentExtension(this.getParentDeferred(), injectedByParent(spec.extraTools ?? [])),
-				// Every subagent also gets SendMessage to its caller (sendToMainTool below).
-				subagentHandbackExtension(handback, { deferred: fork, sendMessage: true }),
+				// Every subagent also gets SendMessage to its caller (sendToMainTool below),
+				// unless pi's tool flags removed it (lib/agents/agent-catalog.ts agentToolOptions).
+				subagentHandbackExtension(handback, { deferred: fork, sendMessage: toolLive("SendMessage") }),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],

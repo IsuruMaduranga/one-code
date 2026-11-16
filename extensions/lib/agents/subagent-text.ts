@@ -291,6 +291,9 @@ const STATUS: Record<RunStatus, string> = {
 	finished: "finished (resume with SendMessage)",
 };
 
+/** A run row's status that names SendMessage, which pi's --exclude-tools takes out alone. */
+const ROW_PASSAGES: ToolPassages = { SendMessage: [" (resume with SendMessage)"] };
+
 /** The runs by name and task id, comma-separated. */
 const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
 
@@ -299,6 +302,8 @@ const RESULT_PASSAGES: ToolPassages = {
 	read: [["Do NOT read or tail the output file", "Do NOT tail the output file"]],
 	task_output: [[", and task_output does not know this id.", "."]],
 	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], " Use task_stop to end one."],
+	// pi's --exclude-tools takes SendMessage out alone; after task_stop's cut the sentence starts with it.
+	SendMessage: [["; SendMessage reaches the agent even while it runs (the message is steered into its current turn).", "."], " SendMessage reaches the agent even while it runs (the message is steered into its current turn)."],
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
@@ -357,7 +362,7 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			`[${name}'s working directory ${cwd} no longer exists${worktreeRemoved ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ranIn}.]`,
 		noAgents: "No agents have been spawned in this session yet. Start one with the Agent tool.",
 		agentList: ({ rows }) => `Agents spawned this session:\n${rows.join("\n")}`,
-		agentRow: ({ name, agent, status, taskId }) => `- ${name} [${agent}] — ${STATUS[status]} (task ${taskId})`,
+		agentRow: ({ name, agent, status, taskId }) => withoutOff(`- ${name} [${agent}] — ${STATUS[status]} (task ${taskId})`, live, ROW_PASSAGES),
 		fromSubagent: ({ name, summary, body }) => `Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`,
 		parentMode: ({ mode }) =>
 			`The main session's permission mode is now "${mode}", and your tool calls are checked against it from here on.${mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : ""}`,

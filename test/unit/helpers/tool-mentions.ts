@@ -32,8 +32,8 @@ export function mentions(text: string, tool: string, english: EnglishPhrases): s
 	return found;
 }
 
-/** Tools pi's `--exclude-tools` takes out alone while their feature's other tools stay: Agent, which leaves SendMessage and list_agents behind. */
-const FLAG_ALONE: ReadonlySet<string> = new Set(["Agent"]);
+/** Tools pi's `--exclude-tools` takes out alone while their feature's other tools stay: Agent and SendMessage, each leaving the other and list_agents behind. */
+const FLAG_ALONE: ReadonlySet<string> = new Set(["Agent", "SendMessage"]);
 
 /**
  * Every text of `texts(live)` that names a tool the session lacks, with each
