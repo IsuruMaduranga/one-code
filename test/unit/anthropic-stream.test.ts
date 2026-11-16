@@ -103,7 +103,6 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		expect(before.session).toMatchObject({ auth: null, key: "sk-ant-api-KEY" });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
-		expect(after.session.thread).toBe(false);
 	});
 
 	it("a login (bearer) only: Authorization alone, as pi sends it", async () => {
@@ -140,6 +139,21 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		expect(before.session).toMatchObject({ auth: null, key: "gateway-own-key" });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
+	});
+
+	it("the wrapper keeps a session request's message threads off, which pi turns on with a session id", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		// pi-ai asks for a thread only with a session id: without one, `thread: false` would hold whatever the wrapper did.
+		const sessionThread = async (wrap: boolean) => {
+			const rt = await runtime();
+			if (wrap) rt.registerProvider("anthropic", threadlessAnthropicRegistration()!);
+			const { sent, fetch } = recorder();
+			await rt.streamSimple(anthropicModel(rt), context, { fetch, maxRetries: 0, sessionId: "session-thread" } as never).result();
+			expect(sent).toHaveLength(1);
+			return sent[0].thread;
+		};
+		expect(await sessionThread(false)).toBe(true);
+		expect(await sessionThread(true)).toBe(false);
 	});
 
 	it("a side call keeps message threads off on a provider that does not go through the wrapper", async () => {
