@@ -11,8 +11,12 @@
  * Load order: after the ledger's payload hook (extensions/request/ledger/wire.ts), the
  * last extension that edits the messages. First-party Anthropic only: the
  * Messages API is where the look-back was measured, and its four-breakpoint
- * limit is checked here. `*_CACHE_MARKS=0` turns it off, to compare a run with
- * and without the mark.
+ * limit is checked here.
+ *
+ * It also registers the `openrouter` provider's Chat Completions stream with
+ * pi's own breakpoints turned on for the open-weight models, some of whose
+ * hosts cache nothing without them (lib/request/openrouter-cache-marks.ts).
+ * `*_CACHE_MARKS=0` turns both off, to compare a run with and without marks.
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
@@ -20,11 +24,14 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../../lib/request/anthropic-server-tools.ts";
+import { openRouterCacheMarksRegistration } from "../../lib/request/anthropic-stream.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
 	if (knobValue("CACHE_MARKS") === "0") return;
+	const openRouter = openRouterCacheMarksRegistration();
+	if (openRouter) pi.registerProvider("openrouter", openRouter);
 	/** The plan of the request being sent; a warm reuses it. */
 	let plan: RequestPlan | undefined;
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {

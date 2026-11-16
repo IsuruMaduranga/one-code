@@ -15,9 +15,14 @@
  *   built-in APIs and filled an empty key from the environment, which pi's
  *   provider never does.
  *
- * `anthropicMessagesApi` exists on every pi-ai in the peer range (1.0.0 to
- * 1.5.2, through `/compat`); when the running pi-ai lacks it, it reads as
- * undefined and pi's own provider stays in charge.
+ * - OpenRouter's open-weight models: `openRouterCacheMarksRegistration` wraps
+ *   pi-ai's `openAICompletionsApi()` so their requests carry cache breakpoints
+ *   (lib/request/openrouter-cache-marks.ts), registered for the `openrouter`
+ *   provider by request/cache-marks. Side calls reach it through the registry.
+ *
+ * `anthropicMessagesApi` and `openAICompletionsApi` exist on every pi-ai in the
+ * peer range (1.0.0 to 1.5.2, through `/compat`); when the running pi-ai lacks
+ * one, it reads as undefined and pi's own provider stays in charge.
  */
 
 import * as compat from "@earendil-works/pi-ai/compat";
@@ -25,11 +30,12 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { credentialCause, credentialRefusalMessage, isCredentialRefusal } from "./credential-refusal.ts";
 import { type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMessageThreads } from "./message-threads.ts";
+import { type OpenRouterCacheMarksConfig, openRouterCacheMarksProvider } from "./openrouter-cache-marks.ts";
 
 type Stream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 
-/** pi-ai's `anthropicMessagesApi`, read as optional: undefined when the running pi-ai lacks it. */
-const piAi = compat as { anthropicMessagesApi?: () => { streamSimple: Stream } };
+/** pi-ai's API implementations, read as optional: undefined when the running pi-ai lacks one. */
+const piAi = compat as { anthropicMessagesApi?: () => { streamSimple: Stream }; openAICompletionsApi?: () => { streamSimple: Stream } };
 
 /**
  * The `pi.registerProvider("anthropic", …)` config that keeps message threads
@@ -40,6 +46,18 @@ const piAi = compat as { anthropicMessagesApi?: () => { streamSimple: Stream } }
 export function threadlessAnthropicRegistration(): ThreadlessProviderConfig<Model<Api>, TranscriptContext, SimpleStreamOptions, AssistantMessageEventStream> | undefined {
 	if (typeof piAi.anthropicMessagesApi !== "function") return undefined;
 	return threadlessAnthropicProvider(piAi.anthropicMessagesApi().streamSimple);
+}
+
+/**
+ * The `pi.registerProvider("openrouter", …)` config that puts cache breakpoints
+ * on the open-weight models: pi-ai's Chat Completions implementation (the one
+ * pi's `openrouter` provider dispatches to) with the model's
+ * `cacheControlFormat` set, handed pi's resolved options untouched. Undefined
+ * when the running pi-ai has no `openAICompletionsApi`.
+ */
+export function openRouterCacheMarksRegistration(): OpenRouterCacheMarksConfig<Model<Api>, TranscriptContext, SimpleStreamOptions, AssistantMessageEventStream> | undefined {
+	if (typeof piAi.openAICompletionsApi !== "function") return undefined;
+	return openRouterCacheMarksProvider(piAi.openAICompletionsApi().streamSimple);
 }
 
 /** The slice of pi's model registry a side call sends through, and asks why a credential did not resolve. */
