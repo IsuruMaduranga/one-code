@@ -434,13 +434,22 @@ export const endTreeMaxMs = (graceMs: number, leaderMs = 0): number => leaderMs 
 async function endProcessTree(child: ChildProcess, graceMs: number, leaderMs = 0): Promise<void> {
 	if (leaderMs > 0 && !leaderExited(child)) {
 		await new Promise<void>((resolve) => {
-			child.once("exit", () => resolve());
-			setTimeout(resolve, leaderMs).unref();
+			const settle = () => {
+				clearTimeout(timer);
+				child.off("exit", settle);
+				resolve();
+			};
+			const timer = setTimeout(settle, leaderMs);
+			timer.unref();
+			child.once("exit", settle);
 		});
 	}
 	if (!rememberedGroupAlive(child)) return;
 	stopProcessTree(child, graceMs);
-	for (let waited = 0; rememberedGroupAlive(child) && waited < graceMs + KILL_SETTLE_MS; waited += GROUP_POLL_MS) {
+	// A deadline, not a count of polls: a loaded machine fires each poll late, and the
+	// MCP client's close timeout is built from this bound (endTreeMaxMs).
+	const deadline = Date.now() + graceMs + KILL_SETTLE_MS;
+	while (rememberedGroupAlive(child) && Date.now() < deadline) {
 		await new Promise<void>((resolve) => setTimeout(resolve, GROUP_POLL_MS).unref());
 	}
 }
