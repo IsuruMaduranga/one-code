@@ -49,7 +49,7 @@ import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-
 import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
-import { credentialFailure, releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { credentialFailure, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
@@ -129,11 +129,10 @@ function btwExtension(pi: ExtensionAPI) {
 		inFlight?.abort();
 		inFlight = undefined;
 	});
-	pi.on("session_shutdown", (_event, ctx) => {
+	pi.on("session_shutdown", () => {
 		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
-		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 	// A /tree keeps the side exchanges asked from a point the selected branch
 	// holds; the others were answered from the abandoned branch's conversation.

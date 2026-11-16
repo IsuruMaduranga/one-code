@@ -1156,7 +1156,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Children screen through this session's key too (evaluateChildToolCall
 		// uses lastReviewCtx), so one release covers their calls.
 		releaseClassifierResources(ctx.sessionManager.getSessionId());
-		// The setup draft's key (any side-call kind's, harmlessly).
+		// Every side-call kind's key, whichever extension sent on it: this extension
+		// is required (lib/profile/features.ts), so it always runs to release them.
 		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 

@@ -22,7 +22,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
-import { releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { Type } from "typebox";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
@@ -151,8 +151,6 @@ function webFetchExtension(pi: ExtensionAPI) {
 	const learnedReasoning = new Map<string, ThinkingLevel>();
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
-	// A child is disposed without this event; disposeChildSession releases its keys.
-	pi.on("session_shutdown", (_event, ctx) => releaseSideCalls(ctx.sessionManager.getSessionId()));
 
 	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
 		signal?.throwIfAborted();

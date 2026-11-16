@@ -63,8 +63,10 @@ export function sideCallKey(sessionId: string, kind: SideCallKind): string {
  * (a key never used costs nothing). On openai-codex it keeps one WebSocket per
  * `sessionId` with a 5-minute idle timer holding the process, and pi's own
  * dispose closes only the session's id, so a `pi -p` run waited out the timer
- * after its answer (findings §59). Every extension that runs a side call calls
- * it as the session ends, so a new kind is released with no further change.
+ * after its answer (findings §59). One owner calls it as a session ends: the
+ * permissions extension, which is required and so always loaded, on
+ * `session_shutdown`, and `disposeChildSession` for a child, which never gets
+ * that event. A new kind is released with no further change.
  */
 export function releaseSideCalls(sessionId: string): void {
 	for (const kind of SIDE_CALL_KINDS) cleanupSessionResources(sideCallKey(sessionId, kind));
