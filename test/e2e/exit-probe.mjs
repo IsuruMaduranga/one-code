@@ -433,10 +433,14 @@ async function runEnding(ending) {
 				pi.child.stdin.end();
 				await finish(result, pi, { ...ending, id: "rpc-stdin", via: `${ending.id}, then stdin closed` }, tag, seen);
 			} else if (ending.alive) {
-				const before = new Set(scan(tag).filter((p) => p.pid !== pi.child.pid).map((p) => p.pid));
+				const old = scan(tag).filter((p) => p.pid !== pi.child.pid);
+				const before = new Set(old.map((p) => p.pid));
+				// Only a spawner the old session still had running is exercised by the switch: one already
+				// gone before it would pass as "gone" untested, so it counts as not started.
+				const running = new Set(old.map((p) => spawnerOf(p.command, tag)));
 				const switched = ending.id === "new" ? await rpc.send({ type: "new_session" }) : await rpc.send({ type: "switch_session", sessionPath: resumeTo });
 				if (!switched.success || switched.data?.cancelled) result.problems.push(`${ending.id}: the switch did not happen (${JSON.stringify(switched)})`);
-				const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: pi.child.pid, only: before }, SWITCH_GRACE_MS);
+				const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen: running, piPid: pi.child.pid, only: before }, SWITCH_GRACE_MS);
 				// An exit would end the old session's processes too: they are judged gone only if pi lives.
 				if (!pi.running()) result.problems.push(`${ending.id}: pi exited during the session switch`);
 				result.cells.push(...cells);
