@@ -16,6 +16,7 @@ import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.t
 import { MODE_CHANNEL } from "../../extensions/lib/rules/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { powershellInjectionSyntax } from "../../extensions/lib/shell/powershell-rules.ts";
+import { wildcardMatcher } from "../../extensions/lib/shell/powershell-paths.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
@@ -241,13 +242,39 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 	});
 
 	it.skipIf(!HAVE_POWERSHELL)("matches a wildcard leaf without backtracking (PR #15 review)", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
-		// A regex for this pattern backtracks polynomially against every entry.
-		const started = performance.now();
+		// The matcher's time is measured on its own, by how it scales (below); here, the gate's verdict.
 		expect((await psReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home })).readOnly).toBe(true);
-		expect(performance.now() - started).toBeLessThan(500);
 		expect((await psReadOnly("Get-Content A.T?T", { cwd, home })).readOnly).toBe(true);
 		// `?` is judged as matching none too, so a credential it could reach is found.
 		writeFileSync(join(cwd, "auth.json"), "{}");
 		expect((await psReadOnly("Get-Content ?auth.json", { cwd, home })).readOnly).toBe(false);
+	});
+
+	it("matches a wildcard leaf in time that grows with the name, not polynomially (PR #15 review)", () => {
+		// `*a*a*az` against a run of `a`s: a backtracking matcher (a regex) tries
+		// every way to split the run, about n³ steps; a greedy one reads it once.
+		// Measured as a ratio, so a loaded machine slows both sides alike: the
+		// name grows 8×, so linear time grows about 8× and cubic time about 512×.
+		const matches = wildcardMatcher("*a*a*az");
+		if (!matches) throw new Error("the pattern did not compile");
+		const perCall = (name: string): number => {
+			let best = Infinity;
+			let hits = 0;
+			for (let sample = 0; sample < 5; sample++) {
+				let calls = 0;
+				const started = performance.now();
+				let elapsed = 0;
+				for (let batch = 1; elapsed < 20; batch *= 2) {
+					for (let i = 0; i < batch; i++) hits += matches(name) ? 1 : 0;
+					calls += batch;
+					elapsed = performance.now() - started;
+				}
+				best = Math.min(best, elapsed / calls);
+			}
+			expect(hits).toBe(0);
+			return best;
+		};
+		const ratio = perCall("a".repeat(800)) / perCall("a".repeat(100));
+		expect(ratio).toBeLessThan(64);
 	});
 });
