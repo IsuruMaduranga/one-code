@@ -5,17 +5,21 @@
  * short, so this proves repeated reads of one page only. It does not claim
  * that different pages share a useful cached prefix.
  *
+ * On OpenRouter the second call's serving host is looked up from the row's
+ * `responseId` and printed on its lines; a host measured to read in larger
+ * blocks may fall one of its blocks short (cache-hosts.mjs).
+ *
  * Usage: node test/e2e/cache-probe-reader.mjs <side-calls.jsonl> <events.jsonl> [--short]
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
+import { allowance, hostNote, lookupHosts } from "./cache-hosts.mjs";
 
 export const READER_PROBE_LONG_URL = "https://handbook.example.com/editorial-guide";
 export const READER_PROBE_SHORT_URL = "https://handbook.example.com/editorial-guide-short";
 export const READER_PROBE_QUESTION = "What does section 12 require before publication?";
 
-const IMPLICIT_BLOCK = 256;
 const DEFAULT_CACHE_MINIMUM = 1024;
 const HAIKU_CACHE_MINIMUM = 4096;
 const IMPLICIT_APIS = new Set(["openai-responses", "openai-codex-responses", "openai-completions"]);
@@ -122,7 +126,7 @@ function readerFailures(readers) {
  * as a completed attempt too, so any error row deliberately fails this probe
  * rather than being hidden as a successful two-call result.
  */
-export function checkReaderProbe(rows, events, { short = false } = {}) {
+export function checkReaderProbe(rows, events, { short = false, hosts = new Map() } = {}) {
 	const readers = Array.isArray(rows) ? rows.filter((row) => row?.kind === "reader") : [];
 	const failures = [...toolFailures(events, short), ...readerFailures(readers)];
 	const lines = [];
@@ -157,16 +161,18 @@ export function checkReaderProbe(rows, events, { short = false } = {}) {
 
 	const explicit = api === "anthropic-messages";
 	const warnings = [];
-	const expected = explicit ? firstUsage.cacheRead + firstUsage.cacheWrite : Math.max(minimum, firstTotal - IMPLICIT_BLOCK);
-	lines.push(`   2  ${String(secondTotal).padStart(6)}  ${String(secondUsage.cacheRead).padStart(9)}  ${String(secondUsage.cacheWrite).padStart(10)}  ${String(expected).padStart(10)}`);
+	const host = hosts.get(second.responseId);
+	const note = hostNote(host);
+	const expected = explicit ? firstUsage.cacheRead + firstUsage.cacheWrite : Math.max(minimum, firstTotal - allowance(host, secondUsage.cacheRead));
+	lines.push(`   2  ${String(secondTotal).padStart(6)}  ${String(secondUsage.cacheRead).padStart(9)}  ${String(secondUsage.cacheWrite).padStart(10)}  ${String(expected).padStart(10)}${note}`);
 	if (expected <= 0) failures.push("the first Anthropic reader call reported no cache read or write evidence");
 	if (secondUsage.cacheRead < expected) {
 		// An implicit cache (OpenAI, Codex, OpenRouter) may reuse only part of an
 		// identical prompt, or route it elsewhere: a warning, as in the classifier phase.
-		(explicit ? failures : warnings).push(`reader call 2 read ${secondUsage.cacheRead} cached tokens; it should have read at least ${expected} from call 1 (miss of ${expected - secondUsage.cacheRead} tokens)`);
+		(explicit ? failures : warnings).push(`reader call 2 read ${secondUsage.cacheRead} cached tokens; it should have read at least ${expected} from call 1 (miss of ${expected - secondUsage.cacheRead} tokens)${note}`);
 	}
 	for (const warning of warnings) lines.push(`WARN  ${warning}`);
-	return { status: failures.length ? "fail" : "pass", failures, lines };
+	return { status: failures.length ? "fail" : "pass", failures, lines, note };
 }
 
 function readJsonl(path) {
@@ -182,14 +188,16 @@ function readJsonl(path) {
 		});
 }
 
-export function runReaderProbe(argv = process.argv.slice(2)) {
+export async function runReaderProbe(argv = process.argv.slice(2)) {
 	const short = argv.includes("--short");
 	const positional = argv.filter((argument) => !argument.startsWith("--"));
 	if (positional.length !== 2) {
 		return { status: "fail", failures: ["usage: cache-probe-reader.mjs <side-calls.jsonl> <events.jsonl> [--short]"], lines: [], usage: true };
 	}
 	try {
-		return checkReaderProbe(readJsonl(positional[0]), readJsonl(positional[1]), { short });
+		const rows = readJsonl(positional[0]);
+		const hosts = await lookupHosts(rows.filter((row) => row?.kind === "reader").map((row) => row.responseId));
+		return checkReaderProbe(rows, readJsonl(positional[1]), { short, hosts });
 	} catch (error) {
 		return { status: "fail", failures: [(error instanceof Error ? error.message : String(error))], lines: [] };
 	}
@@ -197,12 +205,13 @@ export function runReaderProbe(argv = process.argv.slice(2)) {
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
-	const result = runReaderProbe();
+	const result = await runReaderProbe();
 	for (const line of result.lines) console.log(line);
-	for (const failure of result.failures) console.log(`FAIL  ${failure}`);
+	for (const failure of result.failures) console.log(`FAIL  ${failure}${result.note && !failure.includes(" [host ") ? result.note : ""}`);
 	// A miss on an implicit cache is a warning, not a failure: say so, never "warm" over a read that did not happen.
 	const unconfirmed = result.lines.some((line) => line.startsWith("WARN  "));
-	if (result.status === "pass") console.log(unconfirmed ? "PASS  with a warning: the reader's cache read was not confirmed" : "PASS  reader cache warm for the repeated identical page");
+	const note = result.note ?? "";
+	if (result.status === "pass") console.log(unconfirmed ? `PASS  with a warning: the reader's cache read was not confirmed${note}` : `PASS  reader cache warm for the repeated identical page${note}`);
 	if (result.status === "skip") console.log("SKIP  reader cache was not measured");
 	if (result.status === "fail") console.log(`FAILED  ${result.failures.length} check(s)`);
 	process.exitCode = result.status === "fail" ? (result.usage ? 2 : 1) : 0;

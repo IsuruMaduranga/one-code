@@ -29,8 +29,11 @@
  *      probe numbers in the review were exact). A provider that caches
  *      implicitly reports no writes (DeepSeek through OpenRouter); when no
  *      request of the run reports one, the floor is everything request N sent,
- *      input + cacheRead, less one cache block (IMPLICIT_BLOCK) for the
- *      provider's rounding.
+ *      input + cacheRead, less one cache block (cache-hosts.mjs DEFAULT_BLOCK, 256) for the
+ *      provider's rounding. On OpenRouter the serving host of each reply is
+ *      looked up from its generation id (cache-hosts.mjs) and printed beside
+ *      each line; a host measured to read in larger blocks may fall one of its
+ *      blocks short when the read is a whole number of them.
  *
  *   5. Tool declarations, wherever the request keeps them: top-level `tools`,
  *      Responses `additional_tools` items (pi 1.4.0 puts the starting tools in
@@ -57,6 +60,7 @@
  */
 import { readFileSync } from "node:fs";
 import { addendumLines, addendumToolName, textOf } from "./deferred-addendum.mjs";
+import { allowance, hostNote, hostsNote, lookupHosts } from "./cache-hosts.mjs";
 
 const USAGE =
 	"usage: cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok] [--late-tool NAME [--late-tool-form tool_addition|addendum] [--late-tool-hint TEXT]]";
@@ -115,17 +119,21 @@ const usages = responses.map((m) => m.usage);
 /** Whether request i's response errored; only knowable when every request has a response. */
 const isErrored = (i) => responses.length === requests.length && responses[i].stopReason === "error";
 
-/** Implicit caches store whole blocks (OpenAI 128 tokens, DeepSeek 64); allow one partial block of 256. */
-const IMPLICIT_BLOCK = 256;
 /**
  * A provider caches implicitly when no request of the run reports a write.
  * Decided for the whole run: one explicit-cache request that happens to write
  * nothing must not switch to the implicit floor.
  */
 const implicitCache = usages.every((u) => (u.cacheWrite ?? 0) === 0);
-/** The cached tokens request `i` must read, from what request `i - 1` sent. */
-const readFloor = (prev) =>
-	implicitCache ? (prev.input ?? 0) + (prev.cacheRead ?? 0) - IMPLICIT_BLOCK - slack : (prev.cacheRead ?? 0) + (prev.cacheWrite ?? 0) - slack;
+/** The serving host of each reply on OpenRouter (cache-hosts.mjs); undefined elsewhere. */
+const hosts = await lookupHosts(responses.map((m) => m.responseId));
+const hostOf = (i) => hosts.get(responses[i]?.responseId);
+/** The cached tokens request `i` must read, from what request `i - 1` sent, allowing the block of the host that served request `i`. */
+const readFloor = (i) => {
+	const prev = usages[i - 1];
+	const block = allowance(hostOf(i), usages[i].cacheRead ?? 0);
+	return implicitCache ? (prev.input ?? 0) + (prev.cacheRead ?? 0) - block - slack : (prev.cacheRead ?? 0) + (prev.cacheWrite ?? 0) - slack;
+};
 
 const failures = [];
 const warnings = [];
@@ -265,14 +273,14 @@ if (usages.length !== requests.length) {
 console.log("request  input  cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < usages.length; i++) {
 	const u = usages[i];
-	const expected = i === 0 ? "-" : String(readFloor(usages[i - 1]));
+	const expected = i === 0 ? "-" : String(readFloor(i));
 	console.log(
-		`${String(i + 1).padStart(7)}  ${String(u.input ?? 0).padStart(5)}  ${String(u.cacheRead ?? 0).padStart(9)}  ${String(u.cacheWrite ?? 0).padStart(10)}  ${expected.padStart(10)}`,
+		`${String(i + 1).padStart(7)}  ${String(u.input ?? 0).padStart(5)}  ${String(u.cacheRead ?? 0).padStart(9)}  ${String(u.cacheWrite ?? 0).padStart(10)}  ${expected.padStart(10)}${hostNote(hostOf(i))}`,
 	);
 	if (i > 0) {
-		const need = readFloor(usages[i - 1]);
+		const need = readFloor(i);
 		if ((u.cacheRead ?? 0) < need) {
-			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${i} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)`);
+			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${i} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)${hostNote(hostOf(i))}`);
 		}
 	}
 }
@@ -312,7 +320,8 @@ if (lateTool !== undefined) {
 	if (!called) warnings.push(`the model never called ${lateTool}`);
 }
 
-for (const w of warnings) console.log(`WARN  ${w}`);
-for (const f of failures) console.log(`FAIL  ${f}`);
-console.log(failures.length === 0 ? `PASS  prefix stable across ${requests.length} requests` : `FAILED  ${failures.length} check(s)`);
+const phaseHosts = hostsNote(responses.map((_, i) => hostOf(i)));
+for (const w of warnings) console.log(`WARN  ${w}${phaseHosts}`);
+for (const f of failures) console.log(`FAIL  ${f}${f.includes(" [host ") ? "" : phaseHosts}`);
+console.log(failures.length === 0 ? `PASS  prefix stable across ${requests.length} requests${phaseHosts}` : `FAILED  ${failures.length} check(s)${phaseHosts}`);
 process.exit(failures.length === 0 ? 0 : 1);

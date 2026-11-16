@@ -482,6 +482,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 								user: userText,
 								usage: reply.usage,
 								stopReason: reply.stopReason,
+								// The provider's id for the reply; on OpenRouter the probe looks the serving host up by it.
+								responseId: reply.responseId,
 							})}\n`,
 						);
 					} catch {

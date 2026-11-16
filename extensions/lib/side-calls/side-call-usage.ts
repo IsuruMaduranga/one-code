@@ -19,8 +19,8 @@ export interface SideCallLogContext {
  * explicitly opt-in and never read back. Log every completed provider attempt,
  * including reasoning retries; a probe must not mistake an error for a hit.
  */
-export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unknown; stopReason: string }): void {
-	appendSideCallLog(call, { system: call.system, messages: call.messages, usage: reply.usage, stopReason: reply.stopReason });
+export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unknown; stopReason: string; responseId?: string }): void {
+	appendSideCallLog(call, { system: call.system, messages: call.messages, usage: reply.usage, stopReason: reply.stopReason, responseId: reply.responseId });
 }
 
 /**

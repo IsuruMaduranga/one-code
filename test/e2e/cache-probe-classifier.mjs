@@ -30,7 +30,10 @@
  *      Implicit caches (Codex, OpenRouter): at least the share of request N's
  *      prompt that request N+1 repeats, less one cache block; a miss there is a
  *      WARN, since OpenRouter can route consecutive calls to different upstream
- *      providers.
+ *      providers. On OpenRouter each line names the call's serving host, looked
+ *      up from the row's `responseId` (cache-hosts.mjs), and a host measured to
+ *      read in larger blocks may fall one of its blocks short when the read is
+ *      a whole number of them.
  *
  * With `--review` (cache-probe.sh's review phase) the log must also hold a
  * subagent's hand-back review (a row whose tool is `subagent-review`) after at
@@ -45,6 +48,7 @@
  * Exit 1 on a failed check.
  */
 import { readFileSync } from "node:fs";
+import { allowance, hostNote, hostsNote, lookupHosts } from "./cache-hosts.mjs";
 
 const args = process.argv.slice(2);
 const file = args.find((a) => !a.startsWith("--"));
@@ -54,7 +58,6 @@ if (!file) {
 }
 const slackIndex = args.indexOf("--slack");
 const slack = slackIndex === -1 ? 0 : Number(args[slackIndex + 1] ?? 0);
-const IMPLICIT_BLOCK = 256;
 
 const rows = readFileSync(file, "utf8")
 	.split("\n")
@@ -95,8 +98,11 @@ const calls = rows.map((r) => {
 		read,
 		write: u.cacheWrite ?? 0,
 		total: (u.input ?? 0) + read + (u.cacheWrite ?? 0),
+		responseId: r.responseId,
 	};
 });
+const hosts = await lookupHosts(calls.map((c) => c.responseId));
+const hostOf = (c) => hosts.get(c?.responseId);
 const explicit = calls.some((c) => c.explicit);
 const historyMarks = !explicit && calls.some((c) => c.historyMarks);
 
@@ -122,16 +128,18 @@ for (let i = 0; i < calls.length; i++) {
 		if (historyMarks && cur.skipped) warnings.push(`classifier call ${i + 1} had the cache hook but it left this request unmarked (a blank part or an unexpected shape); it is checked as an implicit cache`);
 		need = explicit
 			? prev.read + prev.write - slack
-			: Math.floor((prev.total * (marked ? prev.history : firstDiff(prev.text, cur.text))) / prev.text.length) - IMPLICIT_BLOCK - slack;
+			: Math.floor((prev.total * (marked ? prev.history : firstDiff(prev.text, cur.text))) / prev.text.length) - allowance(hostOf(cur), cur.read) - slack;
 		if (cur.read < need) {
-			const msg = `classifier call ${i + 1} read ${cur.read} cached tokens; it should have read at least ${need} of what call ${i} sent (miss of ${need - cur.read})`;
+			const msg = `classifier call ${i + 1} read ${cur.read} cached tokens; it should have read at least ${need} of what call ${i} sent (miss of ${need - cur.read})${hostNote(hostOf(cur))}`;
 			(explicit || marked ? failures : warnings).push(msg);
 		}
 	}
-	console.log(`${String(i + 1).padStart(4)}  ${String(cur.total).padStart(6)}  ${String(cur.read).padStart(9)}  ${String(cur.write).padStart(10)}  ${String(need ?? "-").padStart(10)}`);
+	console.log(`${String(i + 1).padStart(4)}  ${String(cur.total).padStart(6)}  ${String(cur.read).padStart(9)}  ${String(cur.write).padStart(10)}  ${String(need ?? "-").padStart(10)}${hostNote(hostOf(cur))}`);
 }
 
-for (const w of warnings) console.log(`WARN  ${w}`);
-for (const f of failures) console.log(`FAIL  ${f}`);
-console.log(failures.length === 0 ? `PASS  classifier transcript cached across ${calls.length} requests` : `FAILED  ${failures.length} classifier check(s)`);
+const phaseHosts = hostsNote(calls.map(hostOf));
+const withHosts = (line) => (line.includes(" [host ") ? line : `${line}${phaseHosts}`);
+for (const w of warnings) console.log(`WARN  ${withHosts(w)}`);
+for (const f of failures) console.log(`FAIL  ${withHosts(f)}`);
+console.log(failures.length === 0 ? `PASS  classifier transcript cached across ${calls.length} requests${phaseHosts}` : `FAILED  ${failures.length} classifier check(s)${phaseHosts}`);
 process.exit(failures.length === 0 ? 0 : 1);
