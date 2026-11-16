@@ -169,7 +169,8 @@ function btwExtension(pi: ExtensionAPI) {
 
 		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		if (!auth.ok) throw new Error("No API key is available for the current model.");
+		// pi's own reason (an OAuth refresh that failed, a missing key) is the cause the user can act on.
+		if (!auth.ok) throw new Error(`No usable credentials for ${model.provider}/${model.id}: ${auth.error}. Log in with /login or set the provider's API key.`);
 		const tools = toolStubs(pi.getActiveTools(), btwResultText.stubReason);
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
@@ -185,7 +186,7 @@ function btwExtension(pi: ExtensionAPI) {
 		const result = await runSideCall({
 			kind: "btw",
 			model,
-			auth,
+			registry: ctx.modelRegistry,
 			sessionId: ctx.sessionManager.getSessionId(),
 			context: { systemPrompt: "", messages, tools },
 			signal,
@@ -194,7 +195,7 @@ function btwExtension(pi: ExtensionAPI) {
 			cache: CONVERSATION_CACHE_PLACEMENT,
 			onUsage: (usage) => recordUsage(pi, "btw", usage),
 		});
-		// completeSimple reports a failure (a network error, a timeout) in the
+		// A side call reports a failure (a network error, a timeout) in the
 		// reply instead of throwing; its empty text is not an answer.
 		if (signal.aborted) return "";
 		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);

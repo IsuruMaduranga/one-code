@@ -1,7 +1,33 @@
-/** A best-effort attribution lookup, bounded across auth, retries, and response-body reads. */
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+/** What the lookup needs of a model's credential: the key and the base URL requests for it go to. */
+export interface GenerationAuth {
+	apiKey?: string;
+	baseUrl?: string;
+}
+
+/**
+ * The generation endpoint under a model's resolved base URL, or undefined when
+ * that URL is not OpenRouter's own. A provider named `openrouter` can point at
+ * a proxy, and the key must not leave for a host it was not issued for.
+ */
+export function generationEndpoint(baseUrl: string | undefined, generationId: string): string | undefined {
+	try {
+		const url = new URL(baseUrl || OPENROUTER_BASE_URL);
+		if (url.protocol !== "https:" || url.hostname !== "openrouter.ai") return;
+		return `${url.origin}${url.pathname.replace(/\/+$/, "")}/generation?id=${encodeURIComponent(generationId)}`;
+	} catch {
+		// A malformed base URL is not OpenRouter's.
+	}
+}
+
+/**
+ * A best-effort attribution lookup, bounded across auth, retries, and response-body reads.
+ * Skipped silently when the credential's base URL is not openrouter.ai.
+ */
 export async function openRouterProviderName(
 	generationId: string | undefined,
-	getApiKey: () => Promise<string | undefined>,
+	getAuth: () => Promise<GenerationAuth | undefined>,
 	signal: AbortSignal,
 ): Promise<string | undefined> {
 	if (!generationId || signal.aborted) return;
@@ -19,16 +45,18 @@ export async function openRouterProviderName(
 		}, { once: true });
 	});
 	const lookup = async (): Promise<string | undefined> => {
-		let apiKey: string | undefined;
+		let auth: GenerationAuth | undefined;
 		try {
-			apiKey = await getApiKey();
+			auth = await getAuth();
 		} catch {
 			return;
 		}
-		if (!apiKey || controller.signal.aborted) return;
+		const apiKey = auth?.apiKey;
+		const endpoint = generationEndpoint(auth?.baseUrl, generationId);
+		if (!apiKey || !endpoint || controller.signal.aborted) return;
 		while (!controller.signal.aborted) {
 			try {
-				const response = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(generationId)}`, {
+				const response = await fetch(endpoint, {
 					headers: { Authorization: `Bearer ${apiKey}` },
 					signal: controller.signal,
 				});

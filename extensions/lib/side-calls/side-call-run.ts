@@ -1,11 +1,11 @@
 /**
- * One standalone side call: a single `completeSimple` request outside the main
- * agent loop, shared by `/btw`, the recap and the web_fetch reader. The
- * auto-mode classifier has its own transport and stays out of this.
+ * One standalone side call: a single request through pi's model runtime
+ * (`completeThreadless`) outside the main agent loop, shared by `/btw`, the
+ * recap and the web_fetch reader. The auto-mode classifier has its own
+ * transport and stays out of this.
  *
- * Every side call takes the same steps: splice the provider's base URL from the
- * resolved auth into the model, combine the caller's abort signal with a
- * per-attempt timeout, key the request to the session (`<session id>:<kind>`,
+ * Every side call takes the same steps: let pi resolve the model's credential
+ * and base URL, combine the caller's abort signal with a per-attempt timeout, key the request to the session (`<session id>:<kind>`,
  * stable across calls, so the provider's prompt cache is reused), apply the
  * caller's cache placement on the APIs it covers, log the attempt
  * (`*_SIDE_CALL_LOG`), retry with thinking on when the model cannot disable
@@ -16,8 +16,8 @@
  * the pure prompt modules that use it.
  */
 
-import { type Api, type AssistantMessage, type Context, cleanupSessionResources, type Model, type SimpleStreamOptions, type ThinkingLevel } from "@earendil-works/pi-ai";
-import { completeThreadless } from "../request/anthropic-stream.ts";
+import { type Api, type AssistantMessage, type Context, cleanupSessionResources, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
+import { completeThreadless, type SideCallRegistry } from "../request/anthropic-stream.ts";
 import { withReasoningFallback } from "../models/model-policy.ts";
 import { SIDE_CALL_KINDS, type SideCallLogContext, logSideCallUsage } from "./side-call-usage.ts";
 
@@ -31,8 +31,8 @@ export interface SideCallRun {
 	/** Names the call in the cache key and the side-call log. */
 	kind: SideCallLogContext["kind"];
 	model: Model<Api>;
-	/** The model registry's resolved auth for `model` (the caller handles a failed lookup). */
-	auth: { apiKey?: string; headers?: SimpleStreamOptions["headers"]; env?: Record<string, string>; baseUrl?: string };
+	/** pi's model registry, which resolves `model`'s credential (the caller checks it can, and handles a failed lookup). */
+	registry: SideCallRegistry;
 	/** The session's id; the call's cache key is `<sessionId>:<kind>`. */
 	sessionId: string;
 	context: Context;
@@ -50,8 +50,8 @@ export interface SideCallRun {
 
 type SideCallKind = SideCallLogContext["kind"];
 
-/** A side call's cache key, which pi-ai also takes as its `sessionId`. */
-function sideCallKey(sessionId: string, kind: SideCallKind): string {
+/** A side call's cache key, `<session id>:<kind>`, which pi-ai also takes as its `sessionId`. */
+export function sideCallKey(sessionId: string, kind: SideCallKind): string {
 	return `${sessionId}:${kind}`;
 }
 
@@ -67,20 +67,16 @@ export function releaseSideCalls(sessionId: string): void {
 	for (const kind of SIDE_CALL_KINDS) cleanupSessionResources(sideCallKey(sessionId, kind));
 }
 
-/** Run the side call and return the final reply; a provider failure is in its `stopReason`, as with `completeSimple`. */
+/** Run the side call and return the final reply; a provider or credential failure is in its `stopReason`. */
 export async function runSideCall(run: SideCallRun): Promise<AssistantMessage> {
-	const { kind, model, auth, context } = run;
+	const { kind, model, context } = run;
 	const sessionId = sideCallKey(run.sessionId, kind);
-	const target = auth.baseUrl ? ({ ...model, baseUrl: auth.baseUrl } as Model<Api>) : model;
 	const onPayload = run.cache?.apis.has(model.api) ? run.cache.place : undefined;
 	return withReasoningFallback(
 		model,
 		async (reasoning) => {
 			const timeout = AbortSignal.timeout(run.timeoutMs);
-			const reply = await completeThreadless(target, context, {
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				env: auth.env,
+			const reply = await completeThreadless(run.registry, model, context, {
 				signal: run.signal ? AbortSignal.any([run.signal, timeout]) : timeout,
 				maxTokens: run.maxTokens,
 				sessionId,

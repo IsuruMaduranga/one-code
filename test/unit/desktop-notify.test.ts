@@ -123,6 +123,37 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		expect(h.sent).toEqual([{ message: "Prod is waiting for your input", notificationType: "idle_prompt" }]);
 	});
 
+	it("a withdrawn description whose prompt never opened does not make a panel the user opens while idle notify", () => {
+		const h = harness();
+		const id = {};
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", id);
+		h.notifier.withdrawPrompt(id);
+		h.notifier.promptOpened();
+		h.advance(60_000);
+		expect(h.sent).toEqual([]);
+	});
+
+	it("a withdrawal leaves a later prompt's description in place", () => {
+		const h = harness();
+		const earlier = {};
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", earlier);
+		h.notifier.describeNextPrompt("Prod needs your approval for the plan", {});
+		h.notifier.withdrawPrompt(earlier);
+		h.notifier.promptOpened();
+		h.advance(INTERACTION_THRESHOLD_MS);
+		expect(h.sent).toEqual([{ message: "Prod needs your approval for the plan", notificationType: "permission_prompt" }]);
+	});
+
+	it("a withdrawal after the prompt opened changes nothing: the open prompt still notifies by its description", () => {
+		const h = harness();
+		const id = {};
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", id);
+		h.notifier.promptOpened();
+		h.notifier.withdrawPrompt(id);
+		h.advance(INTERACTION_THRESHOLD_MS);
+		expect(h.sent).toEqual([{ message: "Prod needs your permission to use Bash", notificationType: "permission_prompt" }]);
+	});
+
 	it("counts a prompt's 6 s from its opening, not from an older keypress", () => {
 		const h = harness();
 		h.notifier.turnStarted();

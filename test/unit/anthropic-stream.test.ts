@@ -3,10 +3,13 @@
  * provider sends. A real pi ModelRuntime resolves each credential, a stub
  * `fetch` records the request headers, and each case compares a request with
  * the `anthropic` wrapper registered (and a side call through
- * `completeThreadless`) against the same request with no wrapper.
+ * `completeThreadless`, which sends through the runtime) against the same
+ * request with no wrapper. The last cases cover what only the runtime knows:
+ * a missing credential, an extension provider's own stream, a virtual model.
  */
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { completeThreadless, threadlessAnthropicRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
 
@@ -58,18 +61,11 @@ async function runtime(credential?: Credential): Promise<ModelRuntime> {
 
 const context = { systemPrompt: "Be brief.", messages: [{ role: "user" as const, content: "hi", timestamp: 1 }] };
 
-/** One session request through pi's runtime, and one side call the way the side calls resolve auth (modelRegistry.getApiKeyAndHeaders). */
+/** One session request through pi's runtime, and one side call through the same runtime (the side calls pass `ctx.modelRegistry`). */
 async function send(rt: ModelRuntime, model: Model<Api>): Promise<{ session: Sent; side: Sent }> {
 	const { sent, fetch } = recorder();
 	await rt.streamSimple(model, context, { fetch, maxRetries: 0 } as never).result();
-	const resolution = await rt.getAuth(model);
-	await completeThreadless(model, context, {
-		apiKey: resolution?.auth.apiKey,
-		headers: resolution?.auth.headers,
-		env: resolution?.env,
-		fetch,
-		maxRetries: 0,
-	} as never);
+	await completeThreadless(rt, model, context, { fetch, maxRetries: 0 } as never);
 	expect(sent).toHaveLength(2);
 	return { session: sent[0], side: sent[1] };
 }
@@ -102,7 +98,8 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 	it("an API key only: x-api-key alone, as pi sends it", async () => {
 		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
 		const { before, after, calls } = await compare(undefined, anthropicModel);
-		expect(calls).toBe(1);
+		// The session request and the side call both reach the registered wrapper.
+		expect(calls).toBe(2);
 		expect(before.session).toMatchObject({ auth: null, key: "sk-ant-api-KEY" });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
@@ -112,7 +109,7 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 	it("a login (bearer) only: Authorization alone, as pi sends it", async () => {
 		const login: Credential = { type: "oauth", access: "sk-ant-oat01-LOGIN", refresh: "sk-ant-ort01-R", expires: Date.now() + 3_600_000 };
 		const { before, after, calls } = await compare(login, anthropicModel);
-		expect(calls).toBe(1);
+		expect(calls).toBe(2);
 		expect(before.session).toMatchObject({ auth: "Bearer sk-ant-oat01-LOGIN", key: null });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
@@ -122,7 +119,7 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		process.env.ANTHROPIC_AUTH_TOKEN = "gateway-token";
 		process.env.ANTHROPIC_API_KEY = "sk-ant-api-SECRET";
 		const { before, after, calls } = await compare(undefined, anthropicModel);
-		expect(calls).toBe(1);
+		expect(calls).toBe(2);
 		expect(before.session).toMatchObject({ auth: "Bearer gateway-token", key: null });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
@@ -144,4 +141,75 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
 	});
+
+	it("a side call keeps message threads off on a provider that does not go through the wrapper", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		const rt = await runtime();
+		const { sent, fetch } = recorder();
+		await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].thread).toBe(false);
+	});
 });
+
+describe("side calls go through pi's model runtime", () => {
+	it("no credential pi would use: an error reply naming the provider, nothing sent", async () => {
+		const rt = await runtime();
+		const { sent, fetch } = recorder();
+		const reply = await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		expect(sent).toHaveLength(0);
+		expect(reply.stopReason).toBe("error");
+		expect(reply.errorMessage).toMatch(/anthropic/);
+	});
+
+	it("an extension provider with its own api and stream is reached (compat had no API for it)", async () => {
+		const rt = await runtime();
+		const seen: { model: string; apiKey?: string }[] = [];
+		rt.registerProvider("my-ext", {
+			baseUrl: "https://ext.example/v1",
+			apiKey: "ext-own-key",
+			api: "my-ext-api",
+			models: [{ id: "ext-1", name: "Ext", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100_000, maxTokens: 4_000 }],
+			streamSimple: (model: Model<Api>, _ctx: unknown, options?: { apiKey?: string }) => {
+				seen.push({ model: model.id, apiKey: options?.apiKey });
+				return replyStream(model, "from the extension");
+			},
+		} as never);
+		const reply = await completeThreadless(rt, rt.getModel("my-ext", "ext-1")!, context, { maxRetries: 0 } as never);
+		expect(reply.stopReason).toBe("stop");
+		expect(seen).toEqual([{ model: "ext-1", apiKey: "ext-own-key" }]);
+	});
+
+	it("a virtual model is routed to its physical model, which resolves its own credential", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		const rt = await runtime();
+		const physical = anthropicModel(rt);
+		await rt.refresh({ allowNetwork: false });
+		rt.registerVirtualModel({ provider: "router", id: "auto", name: "Auto", route: () => ({ model: physical, thinkingLevel: "off" }) });
+		const { sent, fetch } = recorder();
+		const reply = await completeThreadless(rt, rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
+		expect(reply.errorMessage ?? "").toMatch(/stub/);
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY", thread: false });
+	});
+});
+
+/** A finished one-text-block reply as a pi-ai event stream. */
+function replyStream(model: Model<Api>, text: string) {
+	const stream = new AssistantMessageEventStream();
+	const message = {
+		role: "assistant" as const,
+		content: [{ type: "text" as const, text }],
+		api: model.api,
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop" as const,
+		timestamp: 1,
+	};
+	queueMicrotask(() => {
+		stream.push({ type: "done", reason: "stop", message });
+		stream.end(message);
+	});
+	return stream;
+}

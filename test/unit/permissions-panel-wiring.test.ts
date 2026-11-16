@@ -11,9 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { productProjectSettingsPath, productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
@@ -24,6 +23,9 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { indexFor } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
+
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
 
 const completeMock = vi.mocked(completeSimple);
 const granted = (display: string) => autoModeResultText.permissionGranted({ displays: [display] });
@@ -78,7 +80,7 @@ describe("/permissions wiring", () => {
 			hasUI: true,
 			mode: "interactive",
 			model,
-			modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k" }) },
+			modelRegistry: { getAvailable: () => [model], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k" }) },
 			sessionManager: { getSessionId: () => "s1", getSessionDir: () => join(home, "session"), getBranch: () => [] },
 			ui: {
 				editor: vi.fn(async (_title: string, prefill: string) => editorReply(prefill)),

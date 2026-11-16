@@ -21,8 +21,13 @@
  * The extension that owns a prompt can say what it waits for on
  * `PROMPT_ATTENTION_CHANNEL` just before it opens (the permissions gate names
  * the tool); a prompt nobody described reads "needs your attention". Only the
- * harness describes its prompts (the permissions gate, the plan approval), so
- * a described prompt waits for the user whether or not a turn is running.
+ * harness describes its prompts (the permissions gate, the plan approval,
+ * through `lib/consent/gate-prompt.ts`), so a described prompt waits for the
+ * user whether or not a turn is running. The owner withdraws the description
+ * once its prompt settles (`PROMPT_ATTENTION_WITHDRAWN_CHANNEL`): one whose
+ * prompt never opened (the opener threw, or pi was already tracking an outer
+ * prompt) would otherwise describe the next prompt to open, and a panel the
+ * user opens while idle would notify as a permission question.
  *
  * Every notification is announced on `DESKTOP_NOTIFICATION_CHANNEL` (the hooks
  * extension runs the `Notification` hooks from it) and then written to the
@@ -48,11 +53,26 @@ export const PROMPT_ATTENTION_CHANNEL = brandedId("prompt-attention");
 
 export interface PromptAttention {
 	message: string;
+	/** Identifies this description to its withdrawal (`PromptAttentionWithdrawn`). */
+	id?: object;
 }
 
-/** Say what the next prompt waits for, on `PROMPT_ATTENTION_CHANNEL`, just before opening it. */
-export function announcePrompt(events: { emit(channel: string, data: unknown): void }, message: string): void {
-	events.emit(PROMPT_ATTENTION_CHANNEL, { message } satisfies PromptAttention);
+/** A description whose prompt settled, sent by its owner (`PromptAttentionWithdrawn`). */
+export const PROMPT_ATTENTION_WITHDRAWN_CHANNEL = brandedId("prompt-attention-withdrawn");
+
+export interface PromptAttentionWithdrawn {
+	id: object;
+}
+
+/**
+ * Say what the next prompt waits for, on `PROMPT_ATTENTION_CHANNEL`, just
+ * before opening it. Call the returned function once the prompt settles: it
+ * withdraws the description if no prompt took it.
+ */
+export function announcePrompt(events: { emit(channel: string, data: unknown): void }, message: string): () => void {
+	const id = {};
+	events.emit(PROMPT_ATTENTION_CHANNEL, { message, id } satisfies PromptAttention);
+	return () => events.emit(PROMPT_ATTENTION_WITHDRAWN_CHANNEL, { id } satisfies PromptAttentionWithdrawn);
 }
 
 /** The words, from the product's name. */
@@ -88,7 +108,8 @@ export class AttentionNotifier {
 	private working = false;
 	private submitted = false;
 	private prompts = 0;
-	private attention: string | undefined;
+	/** The next prompt's description and the id its withdrawal names. */
+	private attention: { message: string; id?: object } | undefined;
 	private cancelPrompt: (() => void) | undefined;
 	private cancelIdle: (() => void) | undefined;
 	private stopped = false;
@@ -112,8 +133,13 @@ export class AttentionNotifier {
 	}
 
 	/** The owner of the next prompt says what it waits for. */
-	describeNextPrompt(message: string): void {
-		this.attention = message;
+	describeNextPrompt(message: string, id?: object): void {
+		this.attention = { message, id };
+	}
+
+	/** The owner's prompt settled: drop its description if no prompt took it, never a later one. */
+	withdrawPrompt(id: object): void {
+		if (this.attention?.id === id) this.attention = undefined;
 	}
 
 	turnStarted(): void {
@@ -138,7 +164,7 @@ export class AttentionNotifier {
 	promptOpened(): void {
 		this.prompts++;
 		const described = this.attention !== undefined;
-		const message = this.attention ?? desktopNotificationText.attention(this.product);
+		const message = this.attention?.message ?? desktopNotificationText.attention(this.product);
 		this.attention = undefined;
 		// While idle, only a described prompt counts: an undescribed one is a panel the user opened.
 		if (this.stopped || (!this.working && !described) || this.prompts > 1) return;

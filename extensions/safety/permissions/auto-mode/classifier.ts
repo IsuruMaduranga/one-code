@@ -53,7 +53,6 @@ import {
 	describeCandidate,
 	isModelUnavailableError,
 	replyText,
-	withAuthBaseUrl,
 } from "../../../lib/models/classifier-model.ts";
 import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 import type { ClassifierBlock, UnusableClassifier } from "./text.ts";
@@ -420,7 +419,6 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			lastError = auth.error;
 			continue;
 		}
-		const resolvedModel = withAuthBaseUrl(model, auth);
 
 		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
 		// turns thinking off entirely when `reasoning` is absent (what a classifier
@@ -442,12 +440,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			}
 			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
 			return completeThreadless(
-				resolvedModel,
+				deps.registry,
+				model,
 				{ systemPrompt: system, messages: [{ role: "user", content: userText, timestamp: Date.now() }] },
 				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
 					maxRetries: CLASSIFIER_MAX_RETRIES,

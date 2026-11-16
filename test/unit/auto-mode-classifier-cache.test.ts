@@ -6,14 +6,17 @@ import { envName } from "../../extensions/lib/profile/brand.mjs";
 import type { AssistantMessage, Model, Api } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { classify, createClassifierState } from "../../extensions/safety/permissions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/lib/rules/auto-mode-config.ts";
 import { buildPayload, type ClassifyRequest, stage1User, stage2User } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { cacheClassifierHistory, MAX_RESPONSES_HISTORY_MARKS } from "../../extensions/safety/permissions/auto-mode/cache.ts";
 import { classifierText, instructionsFraming } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { transcriptBlocks, type TranscriptEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
+
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
 
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 const request: ClassifyRequest = {
@@ -37,6 +40,7 @@ function deps(selected = model) {
 	return {
 		registry: {
 			getAvailable: () => [selected],
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }),
 		} as unknown as ModelRegistry,
 		sessionModel: selected,

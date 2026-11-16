@@ -107,11 +107,13 @@ echo "PASS: onecode doctor ran under the bundled app."
 mkdir -p "$S/proj"
 (cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git -c user.name=smoke -c user.email=smoke@example.invalid commit -qm init)
 
+# stdin is /dev/null so the run never waits on input inherited from the caller's
+# shell (an agent shell keeps stdin open, and this step hung on it).
 echo "smoke: launching onecode -p (no credentials expected)"
 OUT="$S/out.txt"
 set +e
 env -i HOME="$S/home" PATH="$PATH" TERM=xterm-256color \
-  "$BIN" -p "Reply with the single word ok" >"$OUT" 2>&1
+  "$BIN" -p "Reply with the single word ok" </dev/null >"$OUT" 2>&1
 STATUS=$?
 set -e
 

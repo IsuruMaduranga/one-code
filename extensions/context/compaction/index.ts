@@ -24,7 +24,7 @@
  *     proven to accept the level, and pi clamps an unsupported level down.
  *   - On Anthropic, the context-management beta + `clear_thinking` body edit that
  *     the session's requests carry (added by the context-management extension via
- *     hooks completeSimple bypasses). Without them the session caches its message
+ *     hooks a side call bypasses). Without them the session caches its message
  *     prefix thinking-cleared while this call sends full thinking blocks, and the
  *     mismatch invalidates the message-block cache (system+tools still read).
  *
@@ -32,7 +32,9 @@
  * standalone shape (the doomed span alone, trimmed to the window) is used.
  *
  * Any failure returns nothing, so pi's own compaction serves — a different
- * summary style, never a broken compaction. Turning the `compaction` feature off opts out.
+ * summary style, never a broken compaction. Each fallback is written to the
+ * side-call log, and a credential, provider or code failure is shown to the
+ * user once per session (fallback.ts). Turning the `compaction` feature off opts out.
  */
 
 import { sessionView } from "../../lib/agents/child-extensions.ts";
@@ -68,6 +70,8 @@ import { withoutThinking } from "../../lib/request/kept-thinking.ts";
 import { COMPACTION_MAX_TOKENS, extractSummary } from "./prompt.ts";
 import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { compactionResultText } from "./text.ts";
+import { type CompactionFallback, fallbackNotice, fallbackReason, replyFallback, thrownFallback } from "./fallback.ts";
+import { logSideCallFailure } from "../../lib/side-calls/side-call-usage.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -134,9 +138,12 @@ function compactionExtension(pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });
 	});
+	/** Whether this session's user has been told a compaction fell back (once per session). */
+	let fallbackNoticed = false;
 	pi.on("session_start", () => {
 		captured = undefined;
 		publish(undefined);
+		fallbackNoticed = false;
 	});
 
 	// After a compaction the capture describes the pre-compaction request. A
@@ -175,10 +182,20 @@ function compactionExtension(pi: ExtensionAPI) {
 		// exactly what lies before it (cut.ts).
 		const { preparation, firstKeptEntryId } = claudeCodeCut(event.branchEntries as (SessionEntry & CutEntry)[], event.preparation, sessionEntryToContextMessages);
 
+		/** pi's compaction serves instead: log why, and tell the user once per session when they can act on it. */
+		const fallBack = (fallback: CompactionFallback): undefined => {
+			logSideCallFailure({ kind: "compaction", model, sessionId: ctx.sessionManager.getSessionId() }, fallbackReason(fallback));
+			const notice = fallbackNotice(fallback, `${model.provider}/${model.id}`);
+			if (notice && !fallbackNoticed) {
+				fallbackNoticed = true;
+				ctx.ui.notify(notice, "warning");
+			}
+			return undefined;
+		};
+
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) return undefined;
-			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+			if (!auth.ok) return fallBack({ kind: "credentials", detail: auth.error });
 
 			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
 
@@ -210,7 +227,7 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			// When context-management (clear_thinking) is active for this session,
 			// the agent loop's cached message prefix has old thinking blocks cleared
-			// and every request carries the context-management beta. completeSimple
+			// and every request carries the context-management beta. A side call
 			// bypasses our before_provider_headers/before_provider_request handlers,
 			// so the compaction request would omit both — and on Anthropic that
 			// mismatch invalidates the *message* cache (system+tools still read, but
@@ -223,7 +240,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
 			const clearThinking = clearThinkingEnabled(knobValue("CLEAR_THINKING"), cmModel);
-			const headers = sessionRequestHeaders(cmModel, auth.headers);
+			const headers = sessionRequestHeaders(cmModel, undefined);
 
 			// A replay sends the captured body (which already carries the
 			// clear_thinking edit) with the tail pi-ai just built appended.
@@ -243,10 +260,8 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			const timeout = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
 			const callContext: Context = plan ? { systemPrompt: "", messages: plan.tail, tools: [] } : request;
-			const result = await completeThreadless(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, callContext, {
-				apiKey: auth.apiKey,
+			const result = await completeThreadless(ctx.modelRegistry, model, callContext, {
 				headers,
-				env: auth.env,
 				signal: AbortSignal.any([event.signal, timeout]),
 				maxTokens: plan?.maxTokens ?? maxTokens,
 				// The session id is the prompt-cache key / routing affinity on the
@@ -273,14 +288,17 @@ function compactionExtension(pi: ExtensionAPI) {
 
 			// A failed or capped stream can carry partial text. Never replace the
 			// conversation with that incomplete checkpoint; let pi retry its summary.
-			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") return undefined;
+			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
+				const fallback = replyFallback(result, event.signal.aborted, COMPACTION_TIMEOUT_MS);
+				return fallback ? fallBack(fallback) : undefined;
+			}
 
 			const text = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")
 				.map((block) => block.text)
 				.join("\n");
 			const summary = extractSummary(text);
-			if (!summary) return undefined;
+			if (!summary) return fallBack({ kind: "noSummary" });
 
 			return {
 				compaction: {
@@ -291,9 +309,10 @@ function compactionExtension(pi: ExtensionAPI) {
 					usage: result.usage,
 				},
 			};
-		} catch {
+		} catch (error) {
 			// pi's default compaction runs instead: degraded style, never broken.
-			return undefined;
+			if (event.signal.aborted) return undefined;
+			return fallBack(thrownFallback(error));
 		}
 	});
 }

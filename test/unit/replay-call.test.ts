@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { registryStream } from "./helpers/side-call-registry.ts";
+
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
 const completeSimple = vi.fn();
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: (...args: unknown[]) => completeSimple(...args) }));
 
 const { replaySideCall } = await import("../../extensions/lib/side-calls/replay-call.ts");
 const { captureRequest, LastExchange } = await import("../../extensions/lib/side-calls/request-replay.ts");
 
 const model = { api: "anthropic-messages", provider: "my-proxy", id: "claude-sonnet-5", baseUrl: "https://proxy.example" } as never;
 const ctx = {
-	modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k", headers: {} }) },
+	modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k", headers: {} }), streamSimple: registryStream(completeSimple, { apiKey: "k" }) },
 	sessionManager: { getSessionId: () => "s1" },
 } as never;
 

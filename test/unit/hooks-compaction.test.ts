@@ -1,11 +1,14 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import compactionExtension from "../../extensions/context/compaction/index.ts";
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import { runHookCommand } from "../../extensions/safety/hooks/executor.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 vi.mock("../../extensions/safety/hooks/executor.ts", () => ({ runHookCommand: vi.fn() }));
 vi.mock("../../extensions/safety/hooks/settings.ts", () => ({
 	loadHookSettings: () => ({
@@ -48,7 +51,7 @@ describe("PreCompact hook instructions reach the summarizer", () => {
 			model,
 			thinkingLevel: "off",
 			getSystemPrompt: () => "Session system prompt",
-			modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
+			modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
 		});
 		if (replay) await fake.fire("context", { messages: [user, reply] }, ctx);
 		const event = {

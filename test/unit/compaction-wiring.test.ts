@@ -1,9 +1,16 @@
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import compactionExtension from "../../extensions/context/compaction/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 const complete = vi.mocked(completeSimple);
 const model = { api: "openai-completions", provider: "openrouter", id: "test-model", contextWindow: 200_000, maxTokens: 16_384 };
 const user = (text: string, timestamp = 1) => ({ role: "user", content: text, timestamp });
@@ -21,7 +28,7 @@ function setup() {
 		model,
 		thinkingLevel: "off",
 		getSystemPrompt: () => "Session system prompt",
-		modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
+		modelRegistry: { streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key" }) },
 	});
 	const messages = [user("Current session task"), reply("Current session reply")];
 	const branchEntries = messages.map((message, index) => ({ type: "message", id: `entry-${index}`, message }));
@@ -79,5 +86,61 @@ describe("compaction capture lifecycle", () => {
 		await fake.fireOne("session_before_compact", event, ctx);
 		expect(JSON.stringify(complete.mock.calls[0][1])).toContain("Current session task");
 		expect(JSON.stringify(complete.mock.calls[0][1])).not.toContain("Abandoned request");
+	});
+});
+
+describe("compaction fallback reporting", () => {
+	function logged(path: string): Record<string, unknown>[] {
+		return readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>);
+	}
+
+	it("tells the user once per session why the cache-reading compaction gave way, and logs every fallback", async () => {
+		const log = join(mkdtempSync(join(tmpdir(), "compaction-fallback-")), "side-calls.jsonl");
+		vi.stubEnv(envName("SIDE_CALL_LOG"), log);
+		const { fake, ctx, event } = setup();
+		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
+		const registry = ctx.modelRegistry as { getApiKeyAndHeaders: unknown };
+		registry.getApiKeyAndHeaders = async () => ({ ok: false, error: "OAuth refresh failed for openrouter" });
+		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
+		expect(complete).not.toHaveBeenCalled();
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toContain("OAuth refresh failed for openrouter");
+		expect(notify.mock.calls[0][0]).toContain("/login");
+		expect(notify.mock.calls[0][1]).toBe("warning");
+
+		// A second failure in the same session is logged, not shown again.
+		registry.getApiKeyAndHeaders = async () => ({ ok: true });
+		complete.mockResolvedValue({ ...response("error"), errorMessage: "Provider is not configured: openrouter" } as never);
+		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(logged(log)).toEqual([
+			{ kind: "compaction", model: "openrouter/test-model", api: "openai-completions", sessionId: expect.any(String), failed: "credentials: OAuth refresh failed for openrouter" },
+			{ kind: "compaction", model: "openrouter/test-model", api: "openai-completions", sessionId: expect.any(String), failed: "provider error: Provider is not configured: openrouter" },
+		]);
+
+		// A new session may be told again.
+		await fake.fire("session_start", { reason: "new" }, ctx);
+		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
+		expect(notify).toHaveBeenCalledTimes(2);
+		expect(notify.mock.calls[1][0]).toContain("Provider is not configured: openrouter");
+	});
+
+	it("names a thrown error, and stays quiet about a capped or blockless summary and a cancelled compaction", async () => {
+		const { fake, ctx, event } = setup();
+		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
+		complete.mockResolvedValueOnce(response("length") as never);
+		await fake.fireOne("session_before_compact", event, ctx);
+		complete.mockResolvedValueOnce(response("stop", "no block here") as never);
+		await fake.fireOne("session_before_compact", event, ctx);
+		const cancelled = new AbortController();
+		cancelled.abort();
+		complete.mockResolvedValueOnce(response("aborted") as never);
+		await fake.fireOne("session_before_compact", { ...event, signal: cancelled.signal }, ctx);
+		expect(notify).not.toHaveBeenCalled();
+
+		complete.mockRejectedValueOnce(new Error("Connection closed"));
+		await fake.fireOne("session_before_compact", event, ctx);
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toContain("Connection closed");
 	});
 });

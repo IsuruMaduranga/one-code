@@ -217,7 +217,14 @@ describe("subagent shutdown during launch", () => {
 		expect(worktrees.createWorktree).toHaveBeenCalledOnce();
 		await h.fake.fire("session_shutdown", {}, h.ctx);
 		release();
-		await launching;
+		const result = (await launching) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toBe(subagentResultText().refused({
+			kind: "noneLaunched",
+			lines: [subagentResultText().launchLine({ kind: "sessionEnded", name: "general-purpose-1" })],
+			sessionEnded: true,
+		}));
+		expect(result.content[0].text).toContain("Do not call Agent again");
 		expect(build).not.toHaveBeenCalled();
 		expect(cleanup).toHaveBeenCalledWith(dir, created);
 		expect(h.tasks.size).toBe(0);
@@ -239,7 +246,8 @@ describe("subagent shutdown during launch", () => {
 		expect(runtime.runner.runResident).toHaveBeenCalledOnce();
 		await h.fake.fire("session_shutdown", {}, h.ctx);
 		release();
-		await launching;
+		const result = (await launching) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("the session is ending. Do not call Agent again");
 		expect(runtime.handle.send).not.toHaveBeenCalled();
 		expect(runtime.handle.kill).toHaveBeenCalledOnce();
 		expect(h.tasks.size).toBe(0);
@@ -457,6 +465,7 @@ describe("subagent runtime build failure", () => {
 		const line = subagentResultText().launchLine({ kind: "startFailed", name: "general-purpose-1", osMessage: "boom" });
 		expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "noneLaunched", lines: [line] }));
 		expect(result.content[0].text).not.toContain("working in the background");
+		expect(result.content[0].text).toContain("call Agent again");
 		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
 	});
 

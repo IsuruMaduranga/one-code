@@ -1,6 +1,6 @@
 /** Classifier cache breakpoints on the wire. Never changes classifier text or verdict behavior. */
 
-import { MAX_SIDE_CALL_CACHE_MARKERS } from "../../../lib/side-calls/side-call-cache.ts";
+import { isCacheMarker, MAX_SIDE_CALL_CACHE_MARKERS } from "../../../lib/side-calls/side-call-cache.ts";
 import { isPlainObject } from "../../../lib/core/plain-object.ts";
 
 type WireRecord = Record<string, unknown>;
@@ -152,7 +152,7 @@ function bedrockCachePoint(content: WireRecord[], text: string, parts: readonly 
 
 /** Breakpoints elsewhere in the request: the tools, the system prompt and any instruction message. */
 function markersOutside(payload: WireRecord, message: WireRecord): number {
-	const count = (value: unknown) => (Array.isArray(value) ? value.filter((block) => isPlainObject(block) && (block.cache_control !== undefined || block.cachePoint !== undefined)).length : 0);
+	const count = (value: unknown) => (Array.isArray(value) ? value.filter(isCacheMarker).length : 0);
 	const toolConfig = isPlainObject(payload.toolConfig) ? payload.toolConfig.tools : undefined;
 	const others = (payload.messages as unknown[]).filter((entry) => entry !== message);
 	return count(payload.tools) + count(toolConfig) + count(payload.system) + others.reduce<number>((sum, entry) => sum + (isPlainObject(entry) ? count(entry.content) : 0), 0);

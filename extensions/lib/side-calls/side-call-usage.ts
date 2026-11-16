@@ -3,7 +3,7 @@ import { knobValue } from "../profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 
 /** Every side-call kind; releaseSideCalls closes each one's pi-ai key. */
-export const SIDE_CALL_KINDS = ["reader", "btw", "recap"] as const;
+export const SIDE_CALL_KINDS = ["reader", "btw", "recap", "title", "setup"] as const;
 
 export interface SideCallLogContext {
 	kind: (typeof SIDE_CALL_KINDS)[number];
@@ -33,6 +33,21 @@ export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unkn
 			usage: reply.usage,
 			stopReason: reply.stopReason,
 		})}\n`);
+	} catch {
+		// A diagnostic log that cannot be written must not fail a side call.
+	}
+}
+
+/**
+ * A side call that gave up before an answer it could use, with the reason, in
+ * the same opt-in log. `kind` names the caller (`compaction` logs only these);
+ * the row carries `failed` and no `usage`, so a usage reader can tell it apart.
+ */
+export function logSideCallFailure(call: { kind: string; model: { provider: string; id: string; api: string }; sessionId: string }, reason: string): void {
+	const path = knobValue("SIDE_CALL_LOG");
+	if (!path) return;
+	try {
+		appendFileSync(path, `${JSON.stringify({ kind: call.kind, model: `${call.model.provider}/${call.model.id}`, api: call.model.api, sessionId: call.sessionId, failed: reason })}\n`);
 	} catch {
 		// A diagnostic log that cannot be written must not fail a side call.
 	}

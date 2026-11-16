@@ -1,15 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import { readerMessages } from "../../extensions/tools/web-fetch/summarize.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { logSideCallUsage } from "../../extensions/lib/side-calls/side-call-usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 const webFetch = requireText("webFetch");
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
@@ -28,6 +31,7 @@ function setup(api = "openai-codex-responses") {
 		sessionManager: { getSessionId: () => sessionId },
 		modelRegistry: {
 			getAvailable: () => [model],
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test-key", headers: { "x-test": "yes" }, env: { PI_CACHE_RETENTION: "short" } }),
 		},
 	});

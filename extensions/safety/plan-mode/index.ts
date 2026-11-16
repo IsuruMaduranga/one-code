@@ -21,7 +21,8 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import { brand } from "../../lib/profile/brand.mjs";
-import { announcePrompt, desktopNotificationText } from "../../lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../lib/notify/desktop.ts";
+import { openGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -385,10 +386,10 @@ function planModeExtension(pi: ExtensionAPI) {
 			const maxVisible = 12;
 			let offset = 0;
 			let selected: PlanChoice = initialPlanChoice(options);
-			const showDialog = (): Promise<PlanChoice | null> => {
-				announcePrompt(pi.events, desktopNotificationText.planApproval(brand.name));
-				return openDialog();
-			};
+			// Through the gate-prompt helper: an aborted turn skips the dialog (a
+			// rejection), and the approval is described just before it opens.
+			const showDialog = async (): Promise<PlanChoice | null> =>
+				(await openGatePrompt({ events: pi.events, attention: desktopNotificationText.planApproval(brand.name), signal, hasUI: () => ctx.hasUI, open: openDialog })) ?? null;
 			const openDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
 				// An aborted turn closes the dialog as a cancel; a choice or a cancel
 				// drops the abort listener. Either way the dialog settles once.
@@ -450,7 +451,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			const decision = await runPlanApproval(
 				options,
 				showDialog,
-				() => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal }),
+				() => openGatePrompt({ events: pi.events, attention: undefined, signal, hasUI: () => ctx.hasUI, open: () => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal }) }),
 				signal,
 			);
 

@@ -206,6 +206,9 @@ function lspExtension(pi: ExtensionAPI) {
 				return undefined;
 			}
 			clients.delete(key);
+			// A server whose input failed can still be running, or have left a
+			// child that is: the new one must not start beside it.
+			await existing.stop();
 			await new Promise((resolve) => setTimeout(resolve, 500 * count));
 		}
 

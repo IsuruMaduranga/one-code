@@ -18,7 +18,13 @@ let auth;
 let model;
 for (let i = 0; i < args.length; i++) {
 	if (args[i] === "--auth") auth = args[++i];
-	else if (args[i] === "--model") model = args[++i];
+	else if (args[i] === "--model") {
+		if (i + 1 >= args.length) {
+			console.error("--model needs a value: a model id");
+			process.exit(2);
+		}
+		model = args[++i];
+	}
 	else files.push(args[i]);
 }
 if (!["login", "key"].includes(auth) || files.length === 0) {

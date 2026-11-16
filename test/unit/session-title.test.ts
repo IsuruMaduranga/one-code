@@ -9,6 +9,7 @@ import {
 } from "../../extensions/agents/session-title/title.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { registryStream } from "./helpers/side-call-registry.ts";
 
 /** The naming request's user message in the active profile's words. */
 const sessionTitleInput = (text: string) => titleInput(requireText("sessionTitle"), text);
@@ -77,5 +78,25 @@ describe("session-title wiring on a run an extension opened", () => {
 		// The user's prompt still gets examined (a slash command is not nameable, so no request).
 		await fake.fire("before_agent_start", { messageType: "user", prompt: "/help" }, ctx);
 		expect(getEntries).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("session-title request", () => {
+	it("goes through the model registry keyed `<session>:title`", async () => {
+		const model = { provider: "openai", id: "gpt-test", api: "openai-responses", contextWindow: 400_000, maxTokens: 32_000, cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } };
+		const complete = vi.fn(async () => ({ role: "assistant", content: [{ type: "text", text: '{"title": "Fix the login button"}' }], stopReason: "stop", usage: {} }));
+		const fake = createFakePi();
+		sessionTitleExtension(fake.pi as never);
+		const ctx = createFakeCtx({
+			mode: "tui",
+			model,
+			sessionManager: { getEntries: () => [], getSessionId: () => "session-7" },
+			modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => ({ ok: true }), streamSimple: registryStream(complete) },
+		});
+		await fake.fire("before_agent_start", { messageType: "user", prompt: "Fix the login button" }, ctx);
+		await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+		const options = (complete.mock.calls[0] as unknown[])[2] as { sessionId?: string };
+		expect(options.sessionId).toBe("session-7:title");
+		await vi.waitFor(() => expect(fake.pi.setSessionName).toHaveBeenCalledWith("Fix the login button"));
 	});
 });

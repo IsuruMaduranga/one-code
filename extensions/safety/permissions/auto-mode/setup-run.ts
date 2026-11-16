@@ -22,7 +22,7 @@ import { withReasoningFallback } from "../../../lib/models/model-policy.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles } from "../../../lib/rules/auto-mode-config.ts";
 import { isBorrowedUserFile } from "../../../lib/profile/settings-files.ts";
-import { classifierCandidates, replyText, withAuthBaseUrl } from "../../../lib/models/classifier-model.ts";
+import { classifierCandidates, replyText } from "../../../lib/models/classifier-model.ts";
 import { autoModeSetupText, buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
 import { HARNESS_GIT_CONFIG } from "../../../lib/context/git.ts";
 import { instructionTargets } from "../../../lib/context/instructions.ts";
@@ -178,6 +178,8 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 export interface DraftDeps {
 	registry: ModelRegistry;
 	sessionModel: Model<Api> | undefined;
+	/** The session's side-call key for drafting (`<session>:setup`), sent as pi-ai's `sessionId`. */
+	cacheKey?: string;
 	config: AutoModeConfig;
 	defaultEnvironment: string[];
 	signal?: AbortSignal;
@@ -215,21 +217,19 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 			lastError = auth.error;
 			continue;
 		}
-		const resolved = withAuthBaseUrl(model, auth);
 		// Thinking stays off unless the model cannot disable it (withReasoningFallback
 		// sends a level up front for catalog-marked models and retries on the 400 for
 		// the rest). A rare one-off, so no cross-run memo.
 		const reply = await withReasoningFallback(model, (reasoning) => {
 			const timeout = AbortSignal.timeout(DRAFT_TIMEOUT_MS);
 			return completeThreadless(
-				resolved,
+				deps.registry,
+				model,
 				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
 				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens: DRAFT_MAX_TOKENS,
+					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
 					...(reasoning ? { reasoning } : {}),
 				},
 			);

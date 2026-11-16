@@ -3,13 +3,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { completeSimple as CompleteSimple } from "@earendil-works/pi-ai/compat";
+import { registryStream } from "./helpers/side-call-registry.ts";
 import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import type { FetchAnswer } from "../../extensions/tools/web-fetch/text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { webFetchResultText } from "../../extensions/tools/web-fetch/text.ts";
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
+/** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
+const completeSimple = vi.fn<typeof CompleteSimple>();
+
 vi.mock("../../extensions/lib/side-calls/side-call-usage.ts", () => ({ logSideCallUsage: vi.fn(), SIDE_CALL_KINDS: ["reader", "btw", "recap"] }));
 
 const complete = vi.mocked(completeSimple);
@@ -33,6 +36,7 @@ function harness(getAuth = async () => ({ ok: true, apiKey: "test-key" })) {
 		sessionManager: { getSessionId: () => "fetch-runtime", getSessionDir: () => work },
 		modelRegistry: {
 			getAvailable: () => [model],
+			streamSimple: registryStream(completeSimple),
 			getApiKeyAndHeaders: getAuth,
 		},
 	});

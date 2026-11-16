@@ -18,7 +18,8 @@
  */
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
-import { announcePrompt, desktopNotificationText } from "../../lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../lib/notify/desktop.ts";
+import { openGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
@@ -55,6 +56,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../../lib/rules/settings-cha
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
+import { releaseSideCalls, sideCallKey } from "../../lib/side-calls/side-call-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
 import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
@@ -1154,6 +1156,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Children screen through this session's key too (evaluateChildToolCall
 		// uses lastReviewCtx), so one release covers their calls.
 		releaseClassifierResources(ctx.sessionManager.getSessionId());
+		// The setup draft's key (any side-call kind's, harmlessly).
+		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 
 	pi.on("model_select", (event, ctx) => {
@@ -1271,7 +1275,23 @@ function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/** The permission question's description: the tool it asks for. */
-	const describePrompt = (toolName: string) => announcePrompt(pi.events, desktopNotificationText.permission(brand.name, ccToolName(toolName)));
+	const permissionAttention = (toolName: string) => desktopNotificationText.permission(brand.name, ccToolName(toolName));
+
+	/**
+	 * Open one gate prompt now (`lib/consent/gate-prompt.ts`): skipped when
+	 * `signal` has aborted or `ctx` has no UI, its description (`attention`)
+	 * announced right before it opens. Call it from inside the prompt queue.
+	 */
+	const openPrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
+		openGatePrompt({ events: pi.events, attention, signal, hasUI: () => ctx.hasUI, open });
+
+	/**
+	 * A gate prompt in its turn in the prompt queue: one whose signal aborts
+	 * while it waits (a cancelled turn, a stopped child) is skipped when its turn
+	 * comes, so a dead caller's dialog never holds the queue.
+	 */
+	const gatePrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
+		serializePrompt(() => openPrompt(ctx, attention, signal, open), signal);
 
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
@@ -1286,18 +1306,16 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const reason = "Auto mode classifier transcript exceeded context window — falling back to manual approval";
 		ctx.ui.notify(reason, "warning");
 		logDecision(ctx, { tool: toolName, subject, outcome: "prompt", source: "user", transcriptTooLong: true, reason });
-		const choice = await serializePrompt(() => {
-			if (signal?.aborted) return Promise.resolve(undefined);
-			announcePrompt(pi.events, desktopNotificationText.reviewFallback(brand.name, ccToolName(toolName)));
-			return ctx.ui.select(`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`, askOptions(undefined), { signal });
-		}, signal);
+		const choice = await gatePrompt(ctx, desktopNotificationText.reviewFallback(brand.name, ccToolName(toolName)), signal, () =>
+			ctx.ui.select(`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`, askOptions(undefined), { signal }),
+		);
 		const allowed = !signal?.aborted && choice === YES;
 		logDecision(ctx, { tool: toolName, subject, outcome: allowed ? "allow" : "block", source: "user", transcriptTooLong: true, reason });
 		if (allowed) return undefined;
 		if (!signal?.aborted && choice === NO) {
-			const feedback = await serializePrompt(() => signal?.aborted ? Promise.resolve(undefined) : ctx.ui.input(
-				"What should the agent do instead?", "Optional — press Esc to skip", { signal },
-			), signal);
+			const feedback = await gatePrompt(ctx, undefined, signal, () =>
+				ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal }),
+			);
 			return { block: true, reason: userDenialText(feedback) };
 		}
 		return { block: true, reason: refusalText({ kind: "manualApprovalWithheld" }) };
@@ -1346,8 +1364,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(productSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			announcePrompt(pi.events, desktopNotificationText.outsideRead(brand.name));
-			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal });
+			const choice = await openPrompt(ctx, desktopNotificationText.outsideRead(brand.name), signal, () =>
+				ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal }),
+			);
 			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
 			markOutsideReadPromptSeen(productSettingsPath(home));
@@ -1445,11 +1464,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
-			const approved = (await serializePrompt(() => {
-				if (ctx.signal?.aborted) return Promise.resolve(false);
-				announcePrompt(pi.events, desktopNotificationText.projectTrust(brand.name));
-				return ctx.ui.confirm(title, message, { signal: ctx.signal });
-			}, ctx.signal)) === true;
+			const approved = (await gatePrompt(ctx, desktopNotificationText.projectTrust(brand.name), ctx.signal, () =>
+				ctx.ui.confirm(title, message, { signal: ctx.signal }),
+			)) === true;
 			if (ctx.signal?.aborted) return;
 			if (approved) {
 				projectAllowTrusted = true;
@@ -1625,10 +1642,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 			cause: result.cause,
 			home: os.homedir(),
 		});
-		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) => {
-			describePrompt(event.toolName);
-			return ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout });
-		});
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
+			openPrompt(ctx, permissionAttention(event.toolName), ctx.signal, () => ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout })),
+		);
 		if (ctx.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
@@ -1666,7 +1682,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const feedback =
 			choice === undefined
 				? undefined
-				: await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }), ctx.signal);
+				: await gatePrompt(ctx, undefined, ctx.signal, () => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
 		// Claude Code's cancelAndAbort: a rejection without the user's words stops
 		// the turn and waits for them; with words, the model acts on them. pi reads
 		// an abort before the block (the result would say "Operation aborted"), so
@@ -1809,15 +1825,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const title = askTitle(`${who} ${toolName}`, preview, result.cause, pausedResume);
 		// The child's turn signal dismisses the dialog (as a denial) when the child
 		// is stopped mid-prompt; a prompt whose child is already gone by the time
-		// its turn in the chain comes is skipped outright. Otherwise a dead agent's
-		// dialog stays on screen and every later prompt waits behind it (M5).
-		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
-			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()), call.signal);
+		// its turn in the chain comes is skipped outright (openPrompt). Otherwise a
+		// dead agent's dialog stays on screen and every later prompt waits behind
+		// it (M5).
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
-		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) => {
-			describePrompt(toolName);
-			return ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout });
-		});
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, call.signal), (text, timeout) =>
+			openPrompt(ctx, permissionAttention(toolName), call.signal, () => ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout })),
+		);
 		if (call.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
 			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
@@ -1844,7 +1858,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			sessionAllows.push(grant.rule);
 			return undefined;
 		}
-		const feedback = await childPrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));
+		const feedback = await gatePrompt(ctx, undefined, call.signal, () => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));
 		return {
 			block: true,
 			reason: userDenialText(feedback),
@@ -2405,6 +2419,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			draft = await draftSetup(facts, {
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
+				cacheKey: sideCallKey(ctx.sessionManager.getSessionId(), "setup"),
 				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
 				defaultEnvironment: defaultEnvironment(),
 				signal: ctx.signal,
