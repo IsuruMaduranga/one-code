@@ -20,22 +20,7 @@ export interface SideCallLogContext {
  * including reasoning retries; a probe must not mistake an error for a hit.
  */
 export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unknown; stopReason: string }): void {
-	const path = knobValue("SIDE_CALL_LOG");
-	if (!path) return;
-	try {
-		appendFileSync(path, `${JSON.stringify({
-			kind: call.kind,
-			model: `${call.model.provider}/${call.model.id}`,
-			api: call.model.api,
-			sessionId: call.sessionId,
-			system: call.system,
-			messages: call.messages,
-			usage: reply.usage,
-			stopReason: reply.stopReason,
-		})}\n`);
-	} catch {
-		// A diagnostic log that cannot be written must not fail a side call.
-	}
+	appendSideCallLog(call, { system: call.system, messages: call.messages, usage: reply.usage, stopReason: reply.stopReason });
 }
 
 /**
@@ -43,11 +28,23 @@ export function logSideCallUsage(call: SideCallLogContext, reply: { usage?: unkn
  * the same opt-in log. `kind` names the caller (`compaction` logs only these);
  * the row carries `failed` and no `usage`, so a usage reader can tell it apart.
  */
-export function logSideCallFailure(call: { kind: string; model: { provider: string; id: string; api: string }; sessionId: string }, reason: string): void {
+export function logSideCallFailure(call: SideCallIdentity, reason: string): void {
+	appendSideCallLog(call, { failed: reason });
+}
+
+/** What every row names first: the caller, the model and the call's session key. */
+interface SideCallIdentity {
+	kind: string;
+	model: { provider: string; id: string; api: string };
+	sessionId: string;
+}
+
+/** Append one row to the opt-in log, when it is on. */
+function appendSideCallLog(call: SideCallIdentity, fields: Record<string, unknown>): void {
 	const path = knobValue("SIDE_CALL_LOG");
 	if (!path) return;
 	try {
-		appendFileSync(path, `${JSON.stringify({ kind: call.kind, model: `${call.model.provider}/${call.model.id}`, api: call.model.api, sessionId: call.sessionId, failed: reason })}\n`);
+		appendFileSync(path, `${JSON.stringify({ kind: call.kind, model: `${call.model.provider}/${call.model.id}`, api: call.model.api, sessionId: call.sessionId, ...fields })}\n`);
 	} catch {
 		// A diagnostic log that cannot be written must not fail a side call.
 	}
