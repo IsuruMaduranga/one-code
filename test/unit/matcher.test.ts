@@ -234,6 +234,52 @@ describe("read-only commands need no rule of their own", () => {
 			expect(findBashAllowRule(rules(["Bash(ln -sf:*)"]), "cat k & ln -sf ~/.ssh/id_rsa k", "bash", { readOnly: () => true })).toBeUndefined();
 		});
 
+		describe("a substitution the proof clears, counted from the command around it", () => {
+			const lnCommit = ["Bash(ln -sf:*)", "Bash(git commit:*)"];
+
+			it("never covers a substitution that reads through a link an earlier ruled command made", () => {
+				for (const mode of ["default", "auto"] as const) {
+					const d = decide({ ...shell, mode, subject: 'ln -sf ~/.ssh/id_rsa k && git commit -m "$(cat k)"', allow: rules(lnCommit) });
+					// Not allowed by a rule: default asks the user, auto hands the line to the classifier.
+					expect(d, mode).toMatchObject({ decision: mode === "default" ? "ask" : "classify" });
+					expect(d.cause, mode).not.toBe("rule");
+				}
+			});
+
+			it("never covers it after a `;`, an earlier pipeline stage, a later one running alongside, or a rule-cleared substitution in the same command", () => {
+				for (const mode of ["default", "auto"] as const) {
+					for (const subject of [
+						'ln -sf ~/.ssh/id_rsa k; git commit -m "$(cat k)"',
+						'ln -sf x k | git commit -m "$(cat k)"',
+						'git commit -m "$(cat k)" | ln -sf ~/.ssh/id_rsa k',
+						'git commit -m "$(ln -sf ~/.ssh/id_rsa k)" -F "$(cat k)"',
+						'ln -sf ~/.ssh/id_rsa k && git commit -m "$(echo "$(cat k)")"',
+						"ln -sf ~/.ssh/id_rsa k && git commit -m \"`cat k`\"",
+						"ln -sf ~/.ssh/id_rsa k && git commit -F <(cat k)",
+					]) {
+						expect(covered(mode, subject, lnCommit), `${mode}: ${subject}`).toBe(false);
+					}
+				}
+				// The same lines with a proof that clears everything: only the order refuses them.
+				for (const subject of ['ln -sf x k && git commit -m "$(cat k)"', 'ln -sf x k | git commit -m "$(cat k)"', 'git commit -m "$(cat k)" | ln -sf x k']) {
+					expect(findBashAllowRule(rules(lnCommit), subject, "bash", { readOnly: (c) => !c.startsWith("ln") }), subject).toBeUndefined();
+				}
+			});
+
+			it("still covers a substitution with nothing before it, or only read-only commands", () => {
+				for (const mode of ["default", "auto"] as const) {
+					expect(covered(mode, 'git commit -m "$(cat README.md)"', ["Bash(git commit:*)"]), mode).toBe(true);
+					expect(covered(mode, 'cat README.md && git commit -m "$(cat README.md)"', ["Bash(git commit:*)"]), mode).toBe(true);
+					expect(covered(mode, 'git commit -m "$(cat README.md)" && ln -sf x k', lnCommit), mode).toBe(true);
+				}
+			});
+
+			it("leaves plan mode as it was", () => {
+				expect(decide({ ...shell, mode: "plan", subject: 'ln -sf ~/.ssh/id_rsa k && git commit -m "$(cat k)"', allow: rules(lnCommit) })).toEqual({ decision: "deny", cause: "plan-mode" });
+				expect(decide({ ...shell, mode: "plan", subject: 'git commit -m "$(cat README.md)"', allow: rules(["Bash(git commit:*)"]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			});
+		});
+
 		it("covers a read-only command that runs before every command the proof could not clear", () => {
 			for (const mode of ["default", "auto"] as const) {
 				expect(covered(mode, "cat README.md && gh pr view 1", ["Bash(gh pr view:*)"]), mode).toBe(true);

