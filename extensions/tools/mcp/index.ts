@@ -261,6 +261,11 @@ function mcpExtension(pi: ExtensionAPI) {
 	const adoptConnection = (server: McpServer, connection: Connection): void => {
 		failures = failures.filter((f) => f.server.name !== server.name);
 		oauthNeeded.delete(server.name);
+		// Two connects for one server can overlap (a Reconnect or an Authenticate
+		// while the startup connect is still answering): the one replaced here is
+		// closed, or its server would run until the process exits.
+		const replaced = connections.get(server.name);
+		if (replaced && replaced !== connection) void close(replaced);
 		connections.set(server.name, connection);
 		// A server that dies (or drops the HTTP session) mid-session must not keep
 		// reading "connected" with a stale tool count; its tools stay registered
