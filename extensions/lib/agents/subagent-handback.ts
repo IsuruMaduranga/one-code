@@ -25,7 +25,7 @@
 
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../request/deferred.ts";
+import { deferBaseTool } from "../request/deferred.ts";
 import type { HandbackText } from "./handback-text.ts";
 import { requireText } from "../profile/profile.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../request/reminders.ts";
@@ -87,7 +87,7 @@ export function subagentHandbackTool(slot: HandbackSlot, sendMessage = false): T
 export function subagentHandbackExtension(slot: HandbackSlot, options: { deferred?: boolean; sendMessage?: boolean } = {}) {
 	return (pi: ExtensionAPI) => {
 		pi.registerTool(subagentHandbackTool(slot, options.sendMessage));
-		if (options.deferred) pi.events.emit(DEFER_CHANNEL, { name: SUBAGENT_HANDBACK, keywords: ["handback", "report", "result", "final", "caller"] });
+		if (options.deferred) deferBaseTool(pi.events, SUBAGENT_HANDBACK, ["handback", "report", "result", "final", "caller"]);
 		pi.on("session_start", () => {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: options.deferred ? `${handbackResultText.loadFirst}\n${handbackResultText.reminder}` : handbackResultText.reminder,

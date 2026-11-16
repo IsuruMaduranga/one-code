@@ -34,7 +34,7 @@ import { extname, relative } from "node:path";
 import { StringEnum } from "../../lib/core/string-enum.ts";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { absoluteFrom } from "../../lib/profile/paths.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../../lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
@@ -546,10 +546,7 @@ function lspExtension(pi: ExtensionAPI) {
 		clients.clear();
 	});
 
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "lsp_diagnostics",
-		keywords: ["diagnostics", "errors", "type error", "typecheck", "compile", "lint", "lsp"],
-	});
+	deferBaseTool(pi.events, "lsp_diagnostics", ["diagnostics", "errors", "type error", "typecheck", "compile", "lint", "lsp"]);
 }
 
 export default feature("lsp", lspExtension);

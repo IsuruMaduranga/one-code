@@ -28,7 +28,7 @@ import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
@@ -492,14 +492,8 @@ function planModeExtension(pi: ExtensionAPI) {
 	// to instruction-eager third-party models, which then entered plan mode for
 	// trivial tasks. User-initiated plan mode (mode cycling, defaultMode) is
 	// unaffected — that flows over MODE_CHANNEL, not through these tools.
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "enter_plan_mode",
-		keywords: ["plan", "planning", "design", "approach", "architecture", "investigate", "read-only"],
-	});
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "exit_plan_mode",
-		keywords: ["plan", "approve", "approval", "present", "finish planning"],
-	});
+	deferBaseTool(pi.events, "enter_plan_mode", ["plan", "planning", "design", "approach", "architecture", "investigate", "read-only"]);
+	deferBaseTool(pi.events, "exit_plan_mode", ["plan", "approve", "approval", "present", "finish planning"]);
 }
 
 export default feature("plan-mode", planModeExtension);

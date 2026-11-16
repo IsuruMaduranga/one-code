@@ -25,7 +25,7 @@ import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { DeadlineError, runWithDeadline } from "../../lib/side-calls/operation-deadline.ts";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
@@ -357,7 +357,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 	});
 	registerFormTool(pi, tool, text.description);
 
-	pi.events.emit(DEFER_CHANNEL, { name: "web_fetch", keywords: text.searchKeywords });
+	deferBaseTool(pi.events, "web_fetch", text.searchKeywords);
 }
 
 export default feature("web-fetch", webFetchExtension);

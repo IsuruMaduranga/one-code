@@ -22,8 +22,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { whenAborted } from "../../lib/core/abort.ts";
-import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { KILL_GRACE_MS, spawnOwnedTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
@@ -878,17 +877,12 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	// schedule_wakeup stays eager, as Claude Code's ScheduleWakeup is.
-	const deferredKeywords = {
-		monitor: ["monitor", "watch", "background", "tail", "events", "stream", "websocket"],
-		task_output: ["task", "background", "output", "status", "wait"],
-		task_stop: ["task", "background", "stop", "kill", "cancel"],
-		cron_create: ["cron", "schedule", "recurring", "remind", "timer", "every", "later"],
-		cron_list: ["cron", "schedule", "list", "jobs", "scheduled"],
-		cron_delete: ["cron", "schedule", "cancel", "delete", "stop"],
-	} satisfies Partial<Record<DeferrableTool, string[]>>;
-	for (const [name, keywords] of Object.entries(deferredKeywords)) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords });
-	}
+	deferBaseTool(pi.events, "monitor", ["monitor", "watch", "background", "tail", "events", "stream", "websocket"]);
+	deferBaseTool(pi.events, "task_output", ["task", "background", "output", "status", "wait"]);
+	deferBaseTool(pi.events, "task_stop", ["task", "background", "stop", "kill", "cancel"]);
+	deferBaseTool(pi.events, "cron_create", ["cron", "schedule", "recurring", "remind", "timer", "every", "later"]);
+	deferBaseTool(pi.events, "cron_list", ["cron", "schedule", "list", "jobs", "scheduled"]);
+	deferBaseTool(pi.events, "cron_delete", ["cron", "schedule", "cancel", "delete", "stop"]);
 
 	registerLocalCommand(pi, "background", {
 		description: "List background tasks (monitors, background subagents)",

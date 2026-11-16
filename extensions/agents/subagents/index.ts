@@ -61,7 +61,7 @@ import { scanSkills } from "../../lib/plugins/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../../lib/plugins/mcp-status.ts";
 
-import { DEFER_CHANNEL, queryDeferred } from "../../lib/request/deferred.ts";
+import { deferBaseTool, queryDeferred } from "../../lib/request/deferred.ts";
 import { requestSystemPrompt } from "../../lib/ui/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../../lib/side-calls/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../../lib/side-calls/btw-fork.ts";
@@ -2921,7 +2921,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		description: "List background tasks: shells, running agents, and the agents you viewed",
 		handler: async (_args, ctx) => openTasksDialog(ctx as ExtensionContext),
 	});
-	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
+	deferBaseTool(pi.events, "SendMessage", ["message", "agent", "resume", "continue", "teammate"]);
 
 	// Same precedence as SendMessage's own dispatch (a live resident is reachable
 	// even while a blocking run of the same name is in flight): resident-live
