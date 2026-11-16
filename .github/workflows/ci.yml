@@ -11,6 +11,11 @@ on:
     branches: [master]
   pull_request:
 
+# Every job runs code it did not write (npm's install scripts) and none
+# writes to the repository, so the token carries read access only.
+permissions:
+  contents: read
+
 jobs:
   test:
     name: ${{ matrix.os }}
