@@ -2,9 +2,11 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-const preload = join(import.meta.dirname, "../e2e/capture-fetch.mjs");
+/** `--import` takes a URL: a bare Windows path reads as a `d:` scheme. */
+const preload = pathToFileURL(join(import.meta.dirname, "../e2e/capture-fetch.mjs")).href;
 const summary = join(import.meta.dirname, "../e2e/capture-fetch-summary.mjs");
 
 // The scenario runs in a child Node with the preload, against a local server:
