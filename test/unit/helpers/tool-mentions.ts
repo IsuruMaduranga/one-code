@@ -88,15 +88,21 @@ const EAGER_TOOLS: readonly string[] = [...new Set(["read", "bash", "edit", "wri
  * starting tools, then with each deferrable tool added (and all of them at
  * once), the bytes must be the same. A loaded tool joins pi's active list
  * (`tools`), and a prompt that follows it misses the cache from the top;
- * passages keyed on `live` never move. Empty when the section is stable.
+ * passages keyed on `live` never move. `deferred` names the tools the caller
+ * defers itself (a product's own tool over DEFER_CHANNEL), loaded like the
+ * base's. Empty when the section is stable.
  */
-export function deferralChanges(render: (session: SectionSession) => string | undefined, live: LiveTools = { has: () => true }): string[] {
+export function deferralChanges(
+	render: (session: SectionSession) => string | undefined,
+	{ live = { has: () => true }, deferred = [] }: { live?: LiveTools; deferred?: readonly string[] } = {},
+): string[] {
 	const changes: string[] = [];
+	const deferrable = [...new Set([...DEFERRABLE_TOOLS, ...deferred])];
 	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
 			const at = (tools: readonly string[]) => render({ tier, taskTools, tools, live });
 			const start = at(EAGER_TOOLS);
-			for (const loaded of [...DEFERRABLE_TOOLS.map((tool) => [tool]), [...DEFERRABLE_TOOLS]]) {
+			for (const loaded of [...deferrable.map((tool) => [tool]), deferrable]) {
 				if (at([...EAGER_TOOLS, ...loaded]) !== start) changes.push(`${tier}${taskTools ? "" : " without task tools"}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
 			}
 		}

@@ -93,6 +93,12 @@ describe("system prompt from the profile", () => {
 		expect(deferralChanges(({ live }) => (live.has("SendMessage") ? "Continue an agent with SendMessage." : ""))).toEqual([]);
 	});
 
+	it("finds a section that names the caller's own deferred tool from the active list", () => {
+		const keyedOnActive = ({ tools }: SectionSession) => (tools?.includes("product_tool") ? "Call product_tool." : "");
+		expect(deferralChanges(keyedOnActive)).toEqual([]);
+		expect(deferralChanges(keyedOnActive, { deferred: ["product_tool"] })).toHaveLength(PROMPT_TIERS.length * 4);
+	});
+
 	it("the shipped profile renders the same prompt twice (byte-stable), opening with its lead", () => {
 		const a = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		const b = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");

@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CHILD_EXTENSIONS, LAST_CHILD_EXTENSION } from "../../extensions/lib/agents/child-extensions.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
@@ -30,6 +30,9 @@ const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).fi
 const probe = join(root, "probe", "index.ts");
 
 describe("a product's own extensions", () => {
+	// A stubbed tier or state folder never outlives its test, a failing one included.
+	afterEach(() => vi.unstubAllEnvs());
+
 	it("sit where the manifest's product entry looks", () => {
 		expect(PRODUCT_EXTENSIONS_ENTRY).toBe("profile/extensions/*/index.ts");
 		// pi's glob skips dot folders; any other folder without an index.ts
@@ -62,12 +65,11 @@ describe("a product's own extensions", () => {
 		const rendered = (has: boolean) => seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: [], live: { has: () => has } })]);
 		expect(rendered(true)).toEqual([["tail", `${module.PROBE_SECTION}${module.PROBE_SECTION_TOOL}`]]);
 		expect(rendered(false)).toEqual([["tail", module.PROBE_SECTION]]);
-		expect(deferralChanges((session) => seen.sections[0].render(session))).toEqual([]);
+		expect(deferralChanges((session) => seen.sections[0].render(session), { deferred: [module.PROBE_TOOL] })).toEqual([]);
 		expect(redactSecretValues(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});
-		vi.unstubAllEnvs();
 		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
 	});
 
