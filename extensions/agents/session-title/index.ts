@@ -22,7 +22,7 @@
  */
 
 import { feature } from "../../lib/profile/feature.ts";
-import { runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
@@ -49,7 +49,11 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 	// A new session (startup, /clear, a resume, a /tree switch) is a new
 	// naming opportunity; an in-flight request belonged to the old one.
 	pi.on("session_start", reset);
-	pi.on("session_shutdown", reset);
+	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).
+	pi.on("session_shutdown", (_event, ctx) => {
+		reset();
+		releaseSideCall(ctx.sessionManager.getSessionId(), "title");
+	});
 
 	pi.on("before_agent_start", (event, ctx) => {
 		if (attempted) return;

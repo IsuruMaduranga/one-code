@@ -1158,6 +1158,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		releaseClassifierResources(ctx.sessionManager.getSessionId());
 		// Every side-call kind's key, whichever extension sent on it: this extension
 		// is required (lib/profile/features.ts), so it always runs to release them.
+		// It may run before an owner aborts its call, so btw, recap and the title
+		// release their own kind again after aborting (releaseSideCalls).
 		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 

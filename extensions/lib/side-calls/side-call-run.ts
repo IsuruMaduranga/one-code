@@ -63,13 +63,22 @@ export function sideCallKey(sessionId: string, kind: SideCallKind): string {
  * (a key never used costs nothing). On openai-codex it keeps one WebSocket per
  * `sessionId` with a 5-minute idle timer holding the process, and pi's own
  * dispose closes only the session's id, so a `pi -p` run waited out the timer
- * after its answer (findings §59). One owner calls it as a session ends: the
- * permissions extension, which is required and so always loaded, on
- * `session_shutdown`, and `disposeChildSession` for a child, which never gets
- * that event. A new kind is released with no further change.
+ * after its answer (findings §59). The permissions extension, which is
+ * required and so always loaded, calls it on `session_shutdown`, and
+ * `disposeChildSession` for a child, which never gets that event; a new kind
+ * is released with no further change. pi runs the shutdown handlers in load
+ * order, so an owner whose call can still be out at shutdown (btw, recap, the
+ * session title) also releases its own kind after aborting that call: a call
+ * that finished between the two keeps its socket, and only the owner's
+ * release is sure to come after it, wherever the owner loads.
  */
 export function releaseSideCalls(sessionId: string): void {
-	for (const kind of SIDE_CALL_KINDS) cleanupSessionResources(sideCallKey(sessionId, kind));
+	for (const kind of SIDE_CALL_KINDS) releaseSideCall(sessionId, kind);
+}
+
+/** Close what pi-ai holds open under one side-call kind's key; call it after aborting the kind's in-flight call. */
+export function releaseSideCall(sessionId: string, kind: SideCallKind): void {
+	cleanupSessionResources(sideCallKey(sessionId, kind));
 }
 
 /** Run the side call and return the final reply; a provider or credential failure is in its `stopReason`. */

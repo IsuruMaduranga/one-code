@@ -37,7 +37,7 @@ import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
-import { runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { unrefTimers } from "../../lib/core/timer-ops.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
@@ -197,9 +197,11 @@ function recapExtension(pi: ExtensionAPI) {
 		scheduler.turnEnded();
 	});
 
-	pi.on("session_shutdown", () => {
+	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).
+	pi.on("session_shutdown", (_event, ctx) => {
 		scheduler.reset();
 		abortInFlight();
+		releaseSideCall(ctx.sessionManager.getSessionId(), "recap");
 	});
 }
 
