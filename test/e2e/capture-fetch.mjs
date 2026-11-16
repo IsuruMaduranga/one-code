@@ -65,11 +65,13 @@ function readBody(input, init) {
 }
 
 function target(input) {
+	const href = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
 	try {
-		const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+		const url = new URL(href);
 		return { host: url.host, path: url.pathname };
 	} catch {
-		return { host: "", path: String(input) };
+		// A relative or malformed URL (the call itself then fails): its query can carry a key too.
+		return { host: "", path: String(href).replace(/[?#].*$/s, "") };
 	}
 }
 

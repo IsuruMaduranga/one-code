@@ -86,6 +86,13 @@ describe("capture-fetch preload and summary", () => {
 		expect(text).not.toMatch(/authorization|x-api-key/i);
 	});
 
+	it("keeps the query out of a target it cannot parse", () => {
+		writeFileSync(join(dir, "relative.mjs"), "await fetch('/v1/messages?key=SECRET-KEY-VALUE#frag').catch(() => {});");
+		execFileSync(process.execPath, ["--import", preload, join(dir, "relative.mjs")], { env: { ...process.env, FETCH_CAPTURE: out }, stdio: "pipe" });
+		const rows = readFileSync(out, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		expect(rows.map((r) => [r.host, r.path, r.status])).toEqual([["", "/v1/messages", "error"]]);
+	});
+
 	it("does nothing without FETCH_CAPTURE", () => {
 		writeFileSync(join(dir, "plain.mjs"), "const original = globalThis.fetch; await original('http://127.0.0.1:1/').catch(() => {}); console.log(typeof Object.getOwnPropertyDescriptor(globalThis, 'fetch').get);");
 		const printed = execFileSync(process.execPath, ["--import", preload, join(dir, "plain.mjs")], { env: { ...process.env, FETCH_CAPTURE: "" }, stdio: "pipe" }).toString().trim();
