@@ -101,7 +101,7 @@ async function answerFromPage(
 
 	try {
 		// pi resolves the reader's credential inside the call, raced against the
-		// attempt's timeout, and reports one it cannot resolve as the error below.
+		// attempt's timeout, and reports one it cannot resolve, with its cause, as the error below.
 		const messages = readerMessages(words, { prompt, markdown: entry.markdown, url, title: entry.title });
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
 		// a level up front for catalog-marked models and retries on the 400 for the

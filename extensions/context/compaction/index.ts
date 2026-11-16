@@ -72,7 +72,6 @@ import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { compactionResultText } from "./text.ts";
 import { type CompactionFallback, fallbackNotice, fallbackReason, replyFallback, thrownFallback } from "./fallback.ts";
 import { logSideCallFailure } from "../../lib/side-calls/side-call-usage.ts";
-import { credentialFailure } from "../../lib/side-calls/side-call-run.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -288,9 +287,8 @@ function compactionExtension(pi: ExtensionAPI) {
 			// conversation with that incomplete checkpoint; let pi retry its summary.
 			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
 				if (event.signal.aborted) return undefined;
-				// pi refuses a credential it cannot resolve with a generic error; name the cause.
-				const credentials = result.stopReason === "error" ? await credentialFailure(ctx.modelRegistry, model) : undefined;
-				return fallBack(credentials ? { kind: "credentials", detail: credentials } : replyFallback(result, COMPACTION_TIMEOUT_MS));
+				// A credential refusal carries its cause (completeThreadless).
+				return fallBack(result.credentialError ? { kind: "credentials", detail: result.credentialError } : replyFallback(result, COMPACTION_TIMEOUT_MS));
 			}
 
 			const text = result.content

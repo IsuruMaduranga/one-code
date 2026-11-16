@@ -16,7 +16,7 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { credentialFailure, runSideCall } from "../../../lib/side-calls/side-call-run.ts";
+import { runSideCall } from "../../../lib/side-calls/side-call-run.ts";
 import { readSettingsFile } from "../../../lib/profile/settings-files.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles } from "../../../lib/rules/auto-mode-config.ts";
@@ -227,9 +227,8 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 		});
 		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 			if (deps.signal?.aborted) throw new Error("setup drafting was cancelled");
-			// A credential pi could not resolve is named by its own cause, not pi's generic refusal.
-			const credentials = reply.stopReason === "error" ? await credentialFailure(deps.registry, model) : undefined;
-			lastError = credentials ?? reply.errorMessage ?? reply.stopReason;
+			// A credential refusal's message names its cause (completeThreadless).
+			lastError = reply.errorMessage ?? reply.stopReason;
 			continue; // a dead model steps to the next candidate; a bad draft does not
 		}
 		if (reply.stopReason === "length") {

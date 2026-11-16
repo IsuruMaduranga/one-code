@@ -132,11 +132,24 @@ describe("/btw in RPC", () => {
 		);
 	});
 
-	it("reports the error pi's runtime returns for a call it cannot send", async () => {
+	it("names the model and the fix for a refusal the registry cannot explain", async () => {
 		const t = setup();
 		complete.mockResolvedValue({ content: [], stopReason: "error", errorMessage: "Provider is not configured: anthropic", usage: {} } as never);
 		await t.ask("A question?");
-		expect(t.ui.notify).toHaveBeenCalledWith("Side question failed: Provider is not configured: anthropic", "error");
+		expect(t.ui.notify).toHaveBeenCalledWith(
+			"Side question failed: No usable credentials for anthropic/test: Provider is not configured: anthropic. Log in with /login or set the provider's API key.",
+			"error",
+		);
+	});
+
+	it("reports any other provider error as pi gave it, with no credential lookup", async () => {
+		const t = setup();
+		const getAuth = vi.fn(async () => ({ ok: true }));
+		(t.ctx.modelRegistry as { getApiKeyAndHeaders: unknown }).getApiKeyAndHeaders = getAuth;
+		complete.mockResolvedValue({ content: [], stopReason: "error", errorMessage: "529 Overloaded", usage: {} } as never);
+		await t.ask("A question?");
+		expect(t.ui.notify).toHaveBeenCalledWith("Side question failed: 529 Overloaded", "error");
+		expect(getAuth).not.toHaveBeenCalled();
 	});
 
 	it("aborts on shutdown and does not publish a late answer", async () => {

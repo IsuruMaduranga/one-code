@@ -7,7 +7,7 @@
  * request with no wrapper. The last cases cover what only the runtime knows:
  * a missing credential, an extension provider's own stream, a virtual model.
  */
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -65,7 +65,7 @@ const context = { systemPrompt: "Be brief.", messages: [{ role: "user" as const,
 async function send(rt: ModelRuntime, model: Model<Api>): Promise<{ session: Sent; side: Sent }> {
 	const { sent, fetch } = recorder();
 	await rt.streamSimple(model, context, { fetch, maxRetries: 0 } as never).result();
-	await completeThreadless(rt, model, context, { fetch, maxRetries: 0 } as never);
+	await completeThreadless(new ModelRegistry(rt), model, context, { fetch, maxRetries: 0 } as never);
 	expect(sent).toHaveLength(2);
 	return { session: sent[0], side: sent[1] };
 }
@@ -146,7 +146,7 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
 		const rt = await runtime();
 		const { sent, fetch } = recorder();
-		await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
 		expect(sent).toHaveLength(1);
 		expect(sent[0].thread).toBe(false);
 	});
@@ -156,10 +156,13 @@ describe("side calls go through pi's model runtime", () => {
 	it("no credential pi would use: an error reply naming the provider, nothing sent", async () => {
 		const rt = await runtime();
 		const { sent, fetch } = recorder();
-		const reply = await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
 		expect(sent).toHaveLength(0);
 		expect(reply.stopReason).toBe("error");
 		expect(reply.errorMessage).toMatch(/anthropic/);
+		// The refusal names the model, the cause and the fix, not pi's bare "Provider is not configured".
+		expect(reply.credentialError).toBe("Provider is not configured: anthropic");
+		expect(reply.errorMessage).toBe(`No usable credentials for anthropic/${anthropicModel(rt).id}: Provider is not configured: anthropic. Log in with /login or set the provider's API key.`);
 	});
 
 	it("an extension provider with its own api and stream is reached (compat had no API for it)", async () => {
@@ -175,7 +178,7 @@ describe("side calls go through pi's model runtime", () => {
 				return replyStream(model, "from the extension");
 			},
 		} as never);
-		const reply = await completeThreadless(rt, rt.getModel("my-ext", "ext-1")!, context, { maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), rt.getModel("my-ext", "ext-1")!, context, { maxRetries: 0 } as never);
 		expect(reply.stopReason).toBe("stop");
 		expect(seen).toEqual([{ model: "ext-1", apiKey: "ext-own-key" }]);
 	});
@@ -187,7 +190,7 @@ describe("side calls go through pi's model runtime", () => {
 		await rt.refresh({ allowNetwork: false });
 		rt.registerVirtualModel({ provider: "router", id: "auto", name: "Auto", route: () => ({ model: physical, thinkingLevel: "off" }) });
 		const { sent, fetch } = recorder();
-		const reply = await completeThreadless(rt, rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
 		expect(reply.errorMessage ?? "").toMatch(/stub/);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY", thread: false });

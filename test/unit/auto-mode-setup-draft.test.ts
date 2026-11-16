@@ -13,7 +13,7 @@ const model = { provider: "openai", id: "gpt-test", api: "openai-responses", con
 const facts = { cwd: "/project", username: "tester", usage: "A web app.", remotes: [], permissionsAllow: [], gatherNotes: [] };
 
 describe("draftSetup", () => {
-	it("keys the call to the session and fails with pi's error when the runtime cannot send", async () => {
+	it("keys the call to the session and fails naming the refused credential when the runtime cannot send", async () => {
 		const complete = vi.fn(async () => ({ role: "assistant", content: [], stopReason: "error", errorMessage: "Provider is not configured: openai", usage: {} }));
 		const registry = {
 			getAvailable: () => [model],
@@ -28,7 +28,7 @@ describe("draftSetup", () => {
 				config: loadAutoModeConfig("/nonexistent-home-for-tests"),
 				defaultEnvironment: [],
 			}),
-		).rejects.toThrow("no model could draft the setup (last error: Provider is not configured: openai)");
+		).rejects.toThrow("no model could draft the setup (last error: No usable credentials for openai/gpt-test: Provider is not configured: openai. Log in with /login or set the provider's API key.)");
 		expect(complete).toHaveBeenCalled();
 		const options = (complete.mock.calls[0] as unknown[])[2] as { sessionId?: string; apiKey?: string };
 		expect(options.sessionId).toBe("session-1:setup");

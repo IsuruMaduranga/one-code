@@ -49,7 +49,7 @@ import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-
 import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
-import { credentialFailure, releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
@@ -197,12 +197,8 @@ function btwExtension(pi: ExtensionAPI) {
 		// reply instead of throwing; its empty text is not an answer.
 		if (signal.aborted) return "";
 		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);
-		if (result.stopReason === "error") {
-			// pi's own reason (an OAuth refresh that failed, a missing key) is the cause the user can act on.
-			const credentials = await credentialFailure(ctx.modelRegistry, model);
-			if (credentials) throw new Error(`No usable credentials for ${model.provider}/${model.id}: ${credentials}. Log in with /login or set the provider's API key.`);
-			throw new Error(result.errorMessage || "The model returned an error.");
-		}
+		// A credential refusal's message names the model, the cause and the fix (completeThreadless).
+		if (result.stopReason === "error") throw new Error(result.errorMessage || "The model returned an error.");
 		return answerText(result.content);
 	}
 

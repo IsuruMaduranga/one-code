@@ -273,6 +273,17 @@ describe("classify: pinning and fallback", () => {
 		// Only the failed call asked the registry why; the working model's calls did not.
 		expect(getAuth).toHaveBeenCalledTimes(1);
 	});
+
+	it("asks the registry nothing after a failure that is not a credential refusal", async () => {
+		const getAuth = vi.fn(async () => ({ ok: true as const, apiKey: "key" }));
+		const { deps } = makeDeps({
+			registry: { getAvailable: () => [sessionModel, miniModel, tinyModel], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: getAuth } as any,
+		});
+		completeMock.mockResolvedValue(errorReply("529 Overloaded"));
+		await classify(request, deps);
+		expect(completeMock).toHaveBeenCalled();
+		expect(getAuth).not.toHaveBeenCalled();
+	});
 });
 
 describe("classify: reasoning-mandatory fallback", () => {

@@ -110,20 +110,19 @@ describe("compaction fallback reporting", () => {
 		expect(notify.mock.calls[0][1]).toBe("warning");
 
 		// A second failure in the same session is logged, not shown again.
-		registry.getApiKeyAndHeaders = async () => ({ ok: true });
-		complete.mockResolvedValue({ ...response("error"), errorMessage: "Provider is not configured: openrouter" } as never);
+		complete.mockResolvedValue({ ...response("error"), errorMessage: "529 Overloaded" } as never);
 		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(logged(log)).toEqual([
 			{ kind: "compaction", model: "openrouter/test-model", api: "openai-completions", sessionId: expect.any(String), failed: "credentials: OAuth refresh failed for openrouter" },
-			{ kind: "compaction", model: "openrouter/test-model", api: "openai-completions", sessionId: expect.any(String), failed: "provider error: Provider is not configured: openrouter" },
+			{ kind: "compaction", model: "openrouter/test-model", api: "openai-completions", sessionId: expect.any(String), failed: "provider error: 529 Overloaded" },
 		]);
 
 		// A new session may be told again.
 		await fake.fire("session_start", { reason: "new" }, ctx);
 		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
 		expect(notify).toHaveBeenCalledTimes(2);
-		expect(notify.mock.calls[1][0]).toContain("Provider is not configured: openrouter");
+		expect(notify.mock.calls[1][0]).toContain("529 Overloaded");
 	});
 
 	it("names a thrown error, and stays quiet about a capped or blockless summary and a cancelled compaction", async () => {

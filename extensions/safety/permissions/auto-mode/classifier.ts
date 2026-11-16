@@ -24,8 +24,7 @@
 import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
-import { completeThreadless } from "../../../lib/request/anthropic-stream.ts";
-import { credentialFailure } from "../../../lib/side-calls/side-call-run.ts";
+import { completeThreadless, type SideCallReply } from "../../../lib/request/anthropic-stream.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
@@ -253,7 +252,7 @@ export interface ClassifierDeps {
 }
 
 /** How a single candidate's attempt failed, so the outer loop can react. */
-type StepKind = "timeout" | "cancelled" | "unavailable" | "refused" | "error" | "truncated" | "transcript-too-long";
+type StepKind = "timeout" | "cancelled" | "unavailable" | "credentials" | "refused" | "error" | "truncated" | "transcript-too-long";
 class StepError extends Error {
 	constructor(
 		readonly kind: StepKind,
@@ -460,7 +459,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
 			base += padding;
 			big += padding;
-			const inspect = (reply: AssistantMessage): string | "length" => {
+			const inspect = (reply: SideCallReply): string | "length" => {
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
 					try {
@@ -490,6 +489,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					}
 				}
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
+				if (reply.credentialError) throw new StepError("credentials", reply.credentialError);
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
 					if (isContextOverflow(reply)) throw new StepError("transcript-too-long", msg);
@@ -591,18 +591,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			if (kind === "cancelled") {
 				return noVerdict({ kind: "cancelled" });
 			}
-			// pi resolves the credential inside the call and refuses one it cannot
-			// resolve with a generic error, so a failed call asks why here. No working
-			// credentials for this model: a subagent on it would fail the same way, so
-			// it is published like a provider refusal.
-			if (kind !== "truncated" && kind !== "transcript-too-long") {
-				const credentials = await credentialFailure(deps.registry, model);
-				if (credentials) {
-					reject(key);
-					deps.onModelUnusable?.(key, credentials);
-					lastError = credentials;
-					continue;
-				}
+			// pi refused this model's credential (the cause is in the reply,
+			// completeThreadless): a subagent on it would fail the same way, so it is
+			// published like a provider refusal.
+			if (kind === "credentials") {
+				reject(key);
+				deps.onModelUnusable?.(key, lastError);
+				continue;
 			}
 			// The provider is authoritative about its token window. Do not clip the
 			// history or retry another model: the gate must offer manual approval
