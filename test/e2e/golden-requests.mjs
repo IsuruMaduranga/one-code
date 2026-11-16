@@ -42,13 +42,11 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
 import { FEATURE_IDS, FEATURES, isGuardFeature, TOOL_FEATURES } from "../../extensions/lib/profile/features.ts";
 import { projectSlug } from "../../extensions/lib/context/memory.ts";
-import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-builtins.mjs";
 import { STAGE2_MAX_TOKENS } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
+import { cleanEnv, repo, rpcClient, writeFreshHome } from "./lib/harness.mjs";
 
 const { values: opts } = parseArgs({
 	options: {
@@ -61,7 +59,6 @@ const { values: opts } = parseArgs({
 	},
 });
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const piCli = join(repo, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 const fixture = join(repo, "test/e2e/golden-fixture.ts");
 const goldenDir = resolve(opts.dir ?? join(repo, "captures/golden-requests"));
@@ -225,27 +222,12 @@ function writeLanguageServer(bin) {
 
 const SESSION_PROMPTS = ["GOLDEN_TOOLS GOLDEN_BIGFILE GOLDEN_DENY: read README.md and run echo golden.", "Reply with OK."];
 
-/** The parent's environment without anything that steers pi or One Code. */
-function cleanEnv() {
-	const env = {};
-	for (const [key, value] of Object.entries(process.env)) {
-		if (/^(PI_|CC_|ONECODE_|ONE_CODE_|CLAUDE_|ANTHROPIC_|OPENAI_|OPENROUTER_|OPEN_ROUTER_|BRAVE_|TAVILY_|EXA_)/.test(key)) continue;
-		env[key] = value;
-	}
-	return env;
-}
-
 /** Run one config in a fresh temp root; resolves with its normalized `{ dialogs, requests }` or throws. */
 async function runConfig(config) {
 	const root = realpathSync(mkdtempSync(join(os.tmpdir(), "golden-")));
 	try {
-		const home = join(root, "home");
+		const { home, agentDir, project, dump, env: baseEnv } = writeFreshHome(root, { model: config.model, tier: config.tier });
 		const bin = join(root, "bin");
-		const project = join(root, "project");
-		const agentDir = join(home, ".pi", "agent");
-		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(home, ".onecode"), { recursive: true });
-		mkdirSync(project, { recursive: true });
 		writeFileSync(join(project, "README.md"), "# Golden project\n\nA fixed project for the golden request snapshot.\n");
 		if (config.mode === "tools") {
 			for (const [name, content] of Object.entries(NOTEBOOK_FILES)) writeFileSync(join(project, name), content);
@@ -257,24 +239,12 @@ async function runConfig(config) {
 		}
 		if (config.instructions) writeInstructionFiles(config.instructions, project, home, agentDir);
 		if (config.mode !== "print") writeHooks(home, config.mode);
-		const settings = withCompactionKeepBackfilled({
-			quietStartup: true,
-			packages: [repo],
-			extensions: withReplacedBuiltinsOff(undefined).extensions,
-		}).settings;
-		writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
-		writeFileSync(join(home, ".onecode", "settings.json"), `${JSON.stringify({ modelTiers: { [config.model]: config.tier } }, null, 2)}\n`);
 
-		const dump = join(root, "requests.jsonl");
 		const env = {
-			...cleanEnv(),
-			HOME: home,
-			GOLDEN_DUMP: dump,
+			...baseEnv,
 			ANTHROPIC_API_KEY: "sk-ant-golden",
 			OPENROUTER_API_KEY: "sk-or-golden",
-			ONECODE_NO_UPDATE_CHECK: "1",
 			SHELL: "/bin/zsh",
-			TZ: "UTC",
 			// Keys for the canned Brave and Tavily replies (golden-fixture.ts SEARCH_ROUNDS),
 			// and the stub language server first on PATH (LSP_ROUNDS).
 			// SSH_CONNECTION keeps the artifact tool from opening a real browser (ARTIFACT_ROUNDS).
@@ -360,7 +330,6 @@ function runSession(config, { cwd, env }) {
 		let step = -1;
 		const dialogs = [];
 		let stderr = "";
-		let buffer = "";
 		let settled = false;
 		const finish = (problem) => {
 			if (settled) return;
@@ -378,44 +347,33 @@ function runSession(config, { cwd, env }) {
 			started = false;
 			if (step >= steps.length) return finish();
 			const { until: _until, ...command } = steps[step];
-			child.stdin.write(`${JSON.stringify({ id: `step-${step}`, ...command })}\n`);
+			rpc.write({ id: `step-${step}`, ...command });
 		};
+		// The fixture's ask_user_question dialogs and the plan approval are answered; every other one is cancelled.
+		const rpc = rpcClient(child, (event) => {
+			const title = event.title ?? event.message ?? "";
+			const answer = dialogAnswer(event.method, title, event.options);
+			dialogs.push({ method: event.method, title, answer: answer ?? "(cancelled)" });
+			return answer === undefined ? undefined : { value: answer };
+		});
 		child.stderr.on("data", (chunk) => {
 			stderr += chunk;
 		});
 		child.on("exit", (code) => finish(`pi exited ${code} at step ${step}\n${stderr.slice(-3000)}`));
-		child.stdout.on("data", (chunk) => {
-			buffer += chunk;
-			let at;
-			while ((at = buffer.indexOf("\n")) !== -1) {
-				const line = buffer.slice(0, at);
-				buffer = buffer.slice(at + 1);
-				let event;
-				try {
-					event = JSON.parse(line);
-				} catch {
-					continue;
-				}
-				if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) {
-					const title = event.title ?? event.message ?? "";
-					const answer = dialogAnswer(event.method, title, event.options);
-					dialogs.push({ method: event.method, title, answer: answer ?? "(cancelled)" });
-					const response = answer === undefined ? { cancelled: true } : { value: answer };
-					child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: event.id, ...response })}\n`);
-				} else if (event.type === "extension_ui_request" && event.method === "notify" && steps[step]?.until === "notify") {
-					dialogs.push({ method: "notify", title: event.message ?? "" });
-					next();
-				} else if (event.type === "response" && event.success === false) {
-					finish(`command ${event.command} failed: ${event.error ?? JSON.stringify(event)}`);
-				} else if (event.type === "response" && event.command === "compact") {
-					next();
-				} else if (event.type === "agent_end" && steps[step]?.until !== "settled") {
-					next();
-				} else if (event.type === "agent_start") {
-					started = true;
-				} else if (event.type === "agent_settled" && steps[step]?.until === "settled" && started) {
-					next();
-				}
+		rpc.onEvent((event) => {
+			if (event.type === "extension_ui_request" && event.method === "notify" && steps[step]?.until === "notify") {
+				dialogs.push({ method: "notify", title: event.message ?? "" });
+				next();
+			} else if (event.type === "response" && event.success === false) {
+				finish(`command ${event.command} failed: ${event.error ?? JSON.stringify(event)}`);
+			} else if (event.type === "response" && event.command === "compact") {
+				next();
+			} else if (event.type === "agent_end" && steps[step]?.until !== "settled") {
+				next();
+			} else if (event.type === "agent_start") {
+				started = true;
+			} else if (event.type === "agent_settled" && steps[step]?.until === "settled" && started) {
+				next();
 			}
 		});
 		next();

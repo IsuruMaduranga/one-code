@@ -27,6 +27,7 @@ on:
       - "profile/text/auto-mode/**"
       - "profile/text/permissions/**"
       - "test/e2e/live-smoke.mjs"
+      - "test/e2e/lib/harness.mjs"
       - ".github/workflows/live-smoke.yml"
 
 jobs:
