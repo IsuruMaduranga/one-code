@@ -15,7 +15,7 @@ import { execFile, spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, KILL_GRACE_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { alive, until } from "./helpers/process-alive.ts";
 
@@ -225,7 +225,7 @@ describe("an owned tree's stop", () => {
 		}
 	});
 
-	it.skipIf(win32)("force-kills a stopped tree at process exit, before its grace timer could fire (A3-M1, the quit path)", async () => {
+	it.skipIf(win32)("ends a stopped tree after the exit watchdog's grace when the process exits before its grace timer could fire (A3-M1, the quit path)", async () => {
 		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
 		// later, as pi's quit does (dispose, then process.exit).
 		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
@@ -243,9 +243,9 @@ describe("an owned tree's stop", () => {
 		const pgid = Number(stdout.trim());
 		expect(pgid).toBeGreaterThan(0);
 		try {
-			// Well inside the 2 s grace (the stop's, and the exit watchdog's for the
-			// remembered group): only the pending stop's exit hook can have killed it.
-			expect(await waitUntilGone(pgid, 1000)).toBe(true);
+			// The stop's timer died with the process; the exit watchdog SIGKILLs the
+			// member that outlasts the grace (process-group-exit.test.ts checks the grace).
+			expect(await waitUntilGone(pgid, KILL_GRACE_MS + 2000)).toBe(true);
 		} finally {
 			try {
 				process.kill(-pgid, "SIGKILL");

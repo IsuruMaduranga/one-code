@@ -7,10 +7,11 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { KILL_GRACE_MS } from "../../extensions/lib/shell-run/process-tree.ts";
-import { alive, startShellOwner, until } from "./helpers/process-alive.ts";
+import { alive, startOwner, startShellOwner, until } from "./helpers/process-alive.ts";
 
 /** A worker that ignores SIGTERM (and SIGHUP, SIGINT), left by a shell that has finished. */
 const STUBBORN_WORKER = `(trap '' TERM HUP INT; exec sleep 60) & printf "%s %s\\n" "$$" "$!"`;
@@ -89,6 +90,50 @@ describe.skipIf(process.platform === "win32")("the exit watchdog", () => {
 			expect(await goneAfterGrace(run.worker)).toBe(true);
 		} finally {
 			run.cleanup();
+		}
+	}, 15_000);
+});
+
+describe.skipIf(process.platform === "win32")("a tree stopped just before its owner exits", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "stopped-at-exit-"));
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+	// An MCP server closed in a one-shot run's session_shutdown: its stop's grace
+	// is still running when the process exits. It gets the exit watchdog's grace
+	// and no second SIGTERM, like a tree never stopped.
+	it("keeps its grace and gets one SIGTERM", async () => {
+		const log = join(dir, "terms.log");
+		const moduleUrl = pathToFileURL(resolve("extensions/lib/shell-run/process-tree.ts")).href;
+		const server = `trap 'echo TERM >> ${log}' TERM HUP INT; while :; do sleep 0.05; done`;
+		const run = await startOwner(
+			[
+				`import { spawn } from "node:child_process";`,
+				`import { spawnOwnedTree, KILL_GRACE_MS } from ${JSON.stringify(moduleUrl)};`,
+				`const tree = spawnOwnedTree((detached) => spawn("sh", ["-c", ${JSON.stringify(server)}], { ...detached, stdio: "ignore" }));`,
+				`setInterval(() => {}, 1000);`,
+				`setTimeout(() => process.stdout.write(String(tree.child.pid) + "\\n"), 300);`,
+				`process.stdin.once("data", () => { tree.stop(KILL_GRACE_MS); process.exit(0); });`,
+			].join("\n"),
+		);
+		const leader = Number(run.ready.trim());
+		try {
+			run.owner.stdin.write("go\n");
+			await run.exited;
+			// Not SIGKILLed with the owner: the grace still runs.
+			await new Promise((resolveWait) => setTimeout(resolveWait, 300));
+			expect(alive(leader)).toBe(true);
+			expect(await goneAfterGrace(leader)).toBe(true);
+			expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["TERM"]);
+		} finally {
+			run.kill();
+			try {
+				process.kill(-leader, "SIGKILL");
+			} catch {
+				// Gone.
+			}
 		}
 	}, 15_000);
 });

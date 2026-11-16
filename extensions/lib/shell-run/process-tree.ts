@@ -321,13 +321,16 @@ function killAfterExit(children: ChildProcess[]): void {
 /**
  * SIGTERM every remembered group still running, at exit or on a terminating
  * signal, and leave a watchdog to SIGKILL what outlasts the grace (an exit
- * handler cannot await it). Explicit stops keep their own TERM/KILL
- * escalation below.
+ * handler cannot await it). A tree stopped earlier whose grace is still
+ * running (`pendingKills`: an MCP server closed just before a one-shot run
+ * exits) already has its SIGTERM: it joins the watchdog without a second
+ * one, so it gets the same grace as a tree never stopped.
  */
 function terminateRememberedGroups(): void {
-	const live = [...rememberedGroups].filter(rememberedGroupAlive);
-	for (const child of live) killProcessTree(child, "SIGTERM");
+	const live = [...new Set([...rememberedGroups, ...pendingKills])].filter(rememberedGroupAlive);
+	for (const child of live) if (!pendingKills.has(child)) killProcessTree(child, "SIGTERM");
 	rememberedGroups.clear();
+	pendingKills.clear();
 	releaseGroupListeners();
 	killAfterExit(live);
 }
@@ -379,24 +382,17 @@ function rememberProcessGroup(child: ChildProcess): void {
  * Trees sent SIGTERM whose SIGKILL has not run yet. Keyed by the child, not
  * its pid, so a pid the OS hands to a new child during the grace does not
  * make that child look already scheduled. Per module instance on purpose
- * (each extension force-kills its own children); one `exit` listener per
- * instance, installed on first use.
+ * (each extension force-kills its own children). Every one is an owned tree,
+ * so the remembered groups' exit hook covers it (`terminateRememberedGroups`).
  */
 const pendingKills = new Set<ChildProcess>();
-let exitHookInstalled = false;
-
-/** The process is exiting: the grace timers will never fire, so force-kill every tree still pending. */
-function killPendingAtExit(): void {
-	for (const child of pendingKills) killProcessTree(child, "SIGKILL");
-	pendingKills.clear();
-}
 
 /**
  * SIGTERM the tree, then SIGKILL the whole group after `graceMs`, whatever
  * the leader's state: a group already gone makes that an ESRCH, and a live
  * group keeps its id reserved, so the id cannot name anyone else. The timer
  * is unref'd (it must never be what keeps a one-shot process alive); a
- * process exit before it fires runs the SIGKILL from the `exit` hook.
+ * process exit before it fires hands the group to the exit watchdog.
  */
 function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	killProcessTree(child, "SIGTERM");
@@ -404,10 +400,6 @@ function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	if (process.platform === "win32") return;
 	if (child.pid == null || pendingKills.has(child)) return;
 	pendingKills.add(child);
-	if (!exitHookInstalled) {
-		exitHookInstalled = true;
-		process.on("exit", killPendingAtExit);
-	}
 	const timer = setTimeout(() => {
 		if (!pendingKills.delete(child)) return;
 		killProcessTree(child, "SIGKILL");

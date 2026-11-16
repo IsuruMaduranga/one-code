@@ -34,7 +34,6 @@ const ALLOWED: Record<string, string> = {
 	"extensions/lib/models/model-tier.ts overridesPinned": "test pin of the tier overrides",
 	"extensions/lib/profile/profile.ts active": "memo of the shipped profile resolved against the process environment, both constant for the process",
 	"extensions/lib/shell-run/process-tree.ts orphanReaper": "process resource: the poll for remembered groups whose leader exited",
-	"extensions/lib/shell-run/process-tree.ts exitHookInstalled": "process resource: one exit listener per module instance, each killing its own children",
 	"extensions/lib/shell-run/process-tree.ts rememberedGroups": "process resource: the groups the exit and signal listeners kill",
 	"extensions/lib/shell-run/process-tree.ts groupSignalHandlers": "process resource: one termination-signal listener per signal",
 	"extensions/lib/shell-run/process-tree.ts pendingKills": "process resource: trees sent SIGTERM whose SIGKILL is still due",
