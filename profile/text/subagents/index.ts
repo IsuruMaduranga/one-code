@@ -110,6 +110,8 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			"When the agent has answered, report its answer and move on — do not re-read the files it already covered, except one you are about to edit (an edit needs a read first).",
 		].join("\n"),
 		delegationWithdrawn: "The subagent delegation guidance previously shown for this conversation is no longer active.",
+		catalogWithdrawn: "The agent types listed earlier in this conversation can no longer be started, because the Agent tool is not available in this session.",
+		modelsWithdrawn: "The model list shown earlier in this conversation for subagents and workflow agents no longer applies.",
 		guideAgent,
 	};
 };

@@ -185,7 +185,7 @@ describe("subagent blocks", () => {
 			const gone = await mount({ unregistered: ["Agent"], workflow: true });
 			// The menu stays (workflow), the catalog and the steer are withdrawn.
 			expect(render(gone.fake, told(before.reminders))).toEqual([
-				{ text: subagentWords().delegationWithdrawn, facts: [toldFact("subagent-agents", "")] },
+				{ text: subagentWords().catalogWithdrawn, facts: [toldFact("subagent-agents", "")] },
 				{ text: subagentWords().delegationWithdrawn, facts: [toldFact("subagent-delegation", "")] },
 			]);
 			const back = await mount({ workflow: true });
@@ -194,6 +194,18 @@ describe("subagent blocks", () => {
 				{ text: catalog, facts: liveFacts(back.reminders, "subagent-agents") },
 				{ text: subagentWords().delegationSteer, facts: liveFacts(back.reminders, "subagent-delegation") },
 			]);
+		});
+
+		it("withdraw each block with its own sentence when a resumed session has neither Agent nor workflow", async () => {
+			const before = await mount({ workflow: true });
+			const gone = await mount({ unregistered: ["Agent"] });
+			const words = subagentWords();
+			expect(render(gone.fake, told(before.reminders))).toEqual([
+				{ text: words.modelsWithdrawn, facts: [toldFact("subagent-models", "")] },
+				{ text: words.catalogWithdrawn, facts: [toldFact("subagent-agents", "")] },
+				{ text: words.delegationWithdrawn, facts: [toldFact("subagent-delegation", "")] },
+			]);
+			expect(new Set([words.modelsWithdrawn, words.catalogWithdrawn, words.delegationWithdrawn]).size).toBe(3);
 		});
 	});
 

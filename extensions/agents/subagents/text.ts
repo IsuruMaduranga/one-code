@@ -45,8 +45,12 @@ export interface SubagentsText {
 	forkTask(p: { task: string; isolation?: { worktreePath: string; parentCwd: string } }): string;
 	/** The tiny tier's delegation block. */
 	delegationSteer: string;
-	/** A delegation block withdrawn (the model left the tiny tier). */
+	/** A delegation block withdrawn (the model left the tiny tier, or the Agent tool is gone). */
 	delegationWithdrawn: string;
+	/** The agent catalog withdrawn: the Agent tool is gone from the session (a resume under pi's --tools or --exclude-tools). */
+	catalogWithdrawn: string;
+	/** The subagent model menu withdrawn: neither the Agent tool nor workflow is in the session any more. */
+	modelsWithdrawn: string;
 	/**
 	 * A built-in agent that answers questions about the product, listed below
 	 * every agent file; absent, there is none. Its prompt gets the docs, the

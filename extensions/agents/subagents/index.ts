@@ -646,6 +646,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// /model or a /subagent change rides the request's tail, decided at render
 	// time from the text the epoch last told, never a rewrite of the menu that
 	// would re-cache the conversation and drop its earlier thinking (findings §46).
+	/** The words each block is withdrawn with on the tail. */
+	const WITHDRAWN = { "subagent-models": "modelsWithdrawn", "subagent-agents": "catalogWithdrawn", "subagent-delegation": "delegationWithdrawn" } as const satisfies Record<SubagentBlockKey, keyof SubagentsText>;
 	/** The live text of each block; null when the block is absent. */
 	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
 	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
@@ -668,7 +670,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const fact = toldBlockFact(key, text ?? "");
 			if (told === fact.hash || (text === null && told === undefined)) continue;
 			const facts = [fact];
-			if (text === null) request.blocks.push({ text: words.delegationWithdrawn, facts });
+			if (text === null) request.blocks.push({ text: words[WITHDRAWN[key]], facts });
 			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
 			else request.blocks.push({ text, facts });
 		}
