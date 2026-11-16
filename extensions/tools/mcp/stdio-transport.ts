@@ -47,6 +47,8 @@ export interface StdioFraming {
 const GROUP_POLL_MS = 50;
 /** How long `close()` waits past the TERM grace for the SIGKILLed group to empty. */
 const KILL_SETTLE_MS = 250;
+/** The longest `close()` takes: the stdin grace, then the TERM grace and the SIGKILL's settling. */
+export const STDIO_CLOSE_MAX_MS = 2 * KILL_GRACE_MS + KILL_SETTLE_MS;
 
 export class ProcessGroupStdioTransport implements Transport {
 	onclose?: () => void;

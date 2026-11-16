@@ -15,7 +15,7 @@ import type { McpServer } from "./config.ts";
 import { collectPages } from "./discovery.ts";
 import { failureOf, McpFailureError, shownStderr } from "./failure.ts";
 import { McpAuthenticationRequiredError } from "./oauth/provider.ts";
-import { ProcessGroupStdioTransport, type StdioFraming } from "./stdio-transport.ts";
+import { ProcessGroupStdioTransport, STDIO_CLOSE_MAX_MS, type StdioFraming } from "./stdio-transport.ts";
 import { type McpFailure, type McpStep, mcpResultText } from "./text.ts";
 
 /**
@@ -469,10 +469,18 @@ export async function readResourceDir(connection: Connection, uri: string, signa
 	) as Record<string, unknown>;
 }
 
+/**
+ * How long `close()` waits for the client to close: past the longest a stdio
+ * server's transport takes (its stdin grace, then its TERM grace), so a
+ * stubborn server's close finishes its escalation instead of being abandoned
+ * in the middle of it. Other transports close well inside it.
+ */
+export const CLOSE_TIMEOUT_MS = STDIO_CLOSE_MAX_MS + 500;
+
 export async function close(connection: Connection): Promise<void> {
 	connection.closing = true;
 	try {
-		await withTimeout(connection.client.close(), 3000, "close", connection.server.name);
+		await withTimeout(connection.client.close(), CLOSE_TIMEOUT_MS, "close", connection.server.name);
 	} catch {
 		// A server that won't close cleanly should not block shutdown.
 	}
