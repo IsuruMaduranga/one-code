@@ -185,6 +185,27 @@ describe("read-only commands need no rule of their own", () => {
 			expect(d.decision === "allow" && d.cause === "rule", subject).toBe(false);
 		}
 	});
+
+	it("never covers a read-only command whose output the rule's command reads, which may run it", () => {
+		const cases: [string, string][] = [
+			["echo '.shell rm -rf x' | sqlite3 app.db", "Bash(sqlite3 app.db)"],
+			["echo 'rm -rf ~' | sudo bash", "Bash(sudo bash)"],
+			["cat package.json | ssh host", "Bash(ssh host)"],
+			["(echo a; echo b) | parallel", "Bash(parallel)"],
+			["echo x | gh pr view 1 | sh", "Bash(gh pr view:*)"],
+		];
+		for (const [subject, raw] of cases) {
+			for (const mode of ["default", "auto"] as const) {
+				const d = decide({ ...shell, mode, subject, allow: rules([raw]) });
+				expect(d.decision === "allow" && d.cause === "rule", `${mode}: ${subject}`).toBe(false);
+			}
+			expect(findBashAllowRule(rules([raw]), subject, "bash", { readOnly: () => true }), subject).toBeUndefined();
+		}
+		// A read-only command fed only to other read-only commands runs nothing it is fed.
+		expect(findBashAllowRule(gh, "gh pr view 1 | grep x | head", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
+		expect(findBashAllowRule(gh, "echo x | head && gh pr view 1", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
+		expect(findBashAllowRule(gh, "echo x | grep x | gh pr view 1", "bash", { readOnly: () => true })).toBeUndefined();
+	});
 });
 
 describe("matchesBashPattern", () => {
