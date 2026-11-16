@@ -289,8 +289,8 @@ function compactionExtension(pi: ExtensionAPI) {
 			// A failed or capped stream can carry partial text. Never replace the
 			// conversation with that incomplete checkpoint; let pi retry its summary.
 			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
-				const fallback = replyFallback(result, event.signal.aborted, COMPACTION_TIMEOUT_MS);
-				return fallback ? fallBack(fallback) : undefined;
+				if (event.signal.aborted) return undefined;
+				return fallBack(replyFallback(result, COMPACTION_TIMEOUT_MS));
 			}
 
 			const text = result.content

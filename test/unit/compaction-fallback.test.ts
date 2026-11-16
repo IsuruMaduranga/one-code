@@ -3,16 +3,10 @@ import { fallbackNotice, fallbackReason, replyFallback, thrownFallback } from ".
 
 describe("replyFallback", () => {
 	it("names the provider's error, a timeout and a capped summary", () => {
-		expect(replyFallback({ stopReason: "error", errorMessage: "401 invalid x-api-key" }, false, 120_000)).toEqual({ kind: "provider", detail: "401 invalid x-api-key" });
-		expect(replyFallback({ stopReason: "error" }, false, 120_000)).toEqual({ kind: "provider", detail: "the provider returned an error" });
-		expect(replyFallback({ stopReason: "aborted" }, false, 120_000)).toEqual({ kind: "timeout", seconds: 120 });
-		expect(replyFallback({ stopReason: "length" }, false, 120_000)).toEqual({ kind: "length" });
-	});
-
-	it("is no fallback when the user cancelled or the reply stopped normally", () => {
-		expect(replyFallback({ stopReason: "aborted" }, true, 120_000)).toBeUndefined();
-		expect(replyFallback({ stopReason: "error", errorMessage: "aborted" }, true, 120_000)).toBeUndefined();
-		expect(replyFallback({ stopReason: "stop" }, false, 120_000)).toBeUndefined();
+		expect(replyFallback({ stopReason: "error", errorMessage: "401 invalid x-api-key" }, 120_000)).toEqual({ kind: "provider", detail: "401 invalid x-api-key" });
+		expect(replyFallback({ stopReason: "error" }, 120_000)).toEqual({ kind: "provider", detail: "the provider returned an error" });
+		expect(replyFallback({ stopReason: "aborted" }, 120_000)).toEqual({ kind: "timeout", seconds: 120 });
+		expect(replyFallback({ stopReason: "length" }, 120_000)).toEqual({ kind: "length" });
 	});
 });
 
