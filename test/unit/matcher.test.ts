@@ -91,8 +91,54 @@ describe("isBroadExecutionRule", () => {
 		}
 	});
 
+	it("suspends wrappers, more shells and interpreters, paths and versions", () => {
+		for (const raw of [
+			"Bash(doas:*)", "Bash(watch:*)", "Bash(busybox:*)", "Bash(parallel:*)", "Bash(sudo:*)", "Bash(ssh host:*)", "Bash(timeout 60 npm test:*)",
+			"Bash(dash:*)", "Bash(ksh:*)", "Bash(tsx:*)", "Bash(lua:*)", "Bash(awk:*)", "Bash(source:*)",
+			"Bash(/usr/bin/python3:*)", "Bash(python3.12:*)", "Bash(perl5.34 *)", "Bash(zsh-5.9:*)", "Bash(node22 *)",
+		]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+	});
+
+	it("suspends a leading wildcard and an interpreter rule whose rest is not a bare *", () => {
+		for (const raw of ["Bash(* *)", "Bash(*-*)", "Bash(*foo)", "Bash(python3 -*)", "Bash(python3 -c 'import os*)", "Bash(sh -c 'git*)", "Bash(python3 -m pytest:*)", "Bash(sh scripts/*)"]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+	});
+
+	it("suspends an exact rule that hands a shell or interpreter no operand, whose piped input is code", () => {
+		for (const raw of ["Bash(sh)", "Bash(bash -s)", "Bash(python3)", "Bash(python3 -)", "Bash(node)"]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+		for (const raw of ["Bash(python3 script.py)", "Bash(sh -c 'echo hi')", "Bash(env)", "Bash(xargs)"]) {
+			expect(broad(raw), raw).toBe(false);
+		}
+	});
+
+	it("keeps test runners, package managers, editors and build tools narrow in auto mode, as before", () => {
+		for (const raw of [
+			"Bash(git status:*)", "Bash(gh pr view:*)", "Bash(ls:*)", "Bash(npm test)", "Bash(npm test:*)", "Bash(pytest:*)", "Bash(sed:*)",
+			"Bash(less:*)", "Bash(man:*)", "Bash(brew install:*)", "Bash(make test)", "Bash(cargo test:*)", "Bash(go test:*)", "Bash(sqlite3 db:*)",
+		]) {
+			expect(broad(raw), raw).toBe(false);
+		}
+		// Their own code escapes stay broad, as before.
+		for (const raw of ["Bash(npm run *)", "Bash(npx *)", "Bash(make *)", "Bash(go run:*)", "Bash(docker run *)"]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+	});
+
+	it("keeps auto mode's verdict for narrow rules: the rule allows, a broad one goes to the classifier", () => {
+		const auto = { cwd: CWD, mode: "auto" as const, deny: [], ask: [], toolName: "bash" };
+		expect(decide({ ...auto, subject: "pytest -k x", allow: parseRules(["Bash(pytest:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...auto, subject: "npm test", allow: parseRules(["Bash(npm test:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...auto, subject: "doas rm -rf x", allow: parseRules(["Bash(doas:*)"]) }).decision).toBe("classify");
+		expect(decide({ ...auto, subject: "git push", allow: parseRules(["Bash(* *)"]) }).decision).toBe("classify");
+	});
+
 	it("leaves narrow rules that name a concrete script or subcommand", () => {
-		for (const raw of ["Bash(npm test:*)", "Bash(git status)", "Bash(python)"]) {
+		for (const raw of ["Bash(npm test:*)", "Bash(git status)", "Bash(python script.py)"]) {
 			expect(broad(raw), raw).toBe(false);
 		}
 	});

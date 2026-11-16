@@ -172,7 +172,7 @@ describe("isBroadExecutionRule", () => {
 		}
 	});
 	it("keeps narrow rules", () => {
-		for (const raw of ["PowerShell(git status:*)", "PowerShell(npm test:*)", "PowerShell(Get-ChildItem *)", "PowerShell(python)"]) {
+		for (const raw of ["PowerShell(git status:*)", "PowerShell(npm test:*)", "PowerShell(Get-ChildItem *)", "PowerShell(python script.py)"]) {
 			expect(isBroadExecutionRule(rule(raw)), raw).toBe(false);
 		}
 	});

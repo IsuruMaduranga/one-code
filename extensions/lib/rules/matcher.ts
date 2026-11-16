@@ -1001,22 +1001,94 @@ const DELEGATION_TOOLS = new Set(["Agent", "workflow", "SendMessage"]);
 const CLASSIFY_IN_AUTO_TOOLS = new Set(["cron_create", "schedule_wakeup"]);
 
 /**
- * Interpreters and runners whose arguments are code, so a wildcarded rule over
- * them (`Bash(python*)`, `Bash(npm run *)`) grants arbitrary execution just as
- * surely as `Bash(*)` does.
+ * How a program runs other code, which decides what an allow rule for it
+ * grants. The one list behind both auto mode's broad-rule filter
+ * (`isBroadExecutionRule`) and plan mode's runner check (`runsOtherCode`), so
+ * the two cannot drift:
+ *
+ * - `shell`, `interpreter`: its arguments, script files or stdin are code. Any
+ *   wildcarded rule for one is broad, and so is an exact rule that gives it no
+ *   operand to run (`Bash(sh)`, `Bash(bash -s)`), since piped input is code.
+ * - `wrapper`: runs another command it is handed (privilege changers, exec
+ *   and environment wrappers, remote and sandbox runners). Any wildcarded rule
+ *   for one is broad.
+ * - `toolchain`: a package manager or build tool whose own escape hatch runs
+ *   code (`npm run *`, `npx *`, `make *`). Broad only for those shapes, so
+ *   `Bash(npm test:*)` still skips the classifier in auto mode.
+ * - `plan`: runs code another way (a test or task runner, an editor or pager
+ *   with a shell escape, a database client, a scheduler, a builtin that
+ *   changes what a later word runs). Plan mode only: in auto mode a rule for
+ *   one keeps skipping the classifier, as it did before this list existed.
+ *
+ * Names are basenames, lowercased; `runnerKind` also tries the name without a
+ * trailing version (`python3.12`, `perl5.34`, `zsh-5.9`) and the part before
+ * its first `-` (`docker-compose`, `ssh-agent`). Missing a name here lets a
+ * user's rule for that program skip the check, so the list errs wide.
  */
-const INTERPRETERS_AND_RUNNERS =
-	/^(python[0-9.]*|python3|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|fish|pwsh|powershell|cmd|wsl|eval|exec|env|xargs|nohup|setsid|timeout|make|npx|pnpx|yarn|npm|pnpm|bunx|uv|uvx|pip[0-9]*|poetry|cargo|go|dotnet|java|mvn|gradle|docker|kubectl|ssh|invoke-expression|invoke-command|start-process|start-job)\b/;
+type RunnerKind = "shell" | "interpreter" | "wrapper" | "toolchain" | "plan";
+const RUNNER_GROUPS: Record<RunnerKind, readonly string[]> = {
+	shell: ["bash", "sh", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "ash", "pwsh", "powershell", "cmd", "wsl"],
+	interpreter: [
+		"python", "pypy", "node", "nodejs", "deno", "tsx", "ts-node", "ruby", "irb", "perl", "php", "lua", "luajit", "osascript", "tclsh",
+		"wish", "expect", "r", "rscript", "julia", "swift", "groovy", "scala", "kotlin", "elixir", "erl", "escript", "ghci", "runghc",
+		"jshell", "jjs", "awk", "gawk", "mawk", "nawk", "dc", "bc", "m", "gnuplot", "octave", "source", ".", "eval",
+	],
+	wrapper: [
+		"exec", "env", "xargs", "nohup", "setsid", "timeout", "time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin",
+		"sudo", "doas", "su", "runuser", "pkexec", "chroot", "nsenter", "unshare", "fakeroot", "firejail", "sandbox-exec", "watch",
+		"busybox", "parallel", "caffeinate", "taskset", "unbuffer", "chronic", "dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
+		"strace", "ltrace", "valgrind", "gdb", "lldb", "hyperfine", "direnv", "mise", "asdf", "nix-shell", "nix", "entr",
+		"invoke-expression", "invoke-command", "start-process", "start-job",
+	],
+	toolchain: [
+		"npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pip", "poetry", "cargo", "go", "dotnet", "java", "mvn", "gradle",
+		"make", "docker", "kubectl",
+	],
+	plan: [
+		"sed", "vim", "vi", "nvim", "view", "ex", "emacs", "ed", "nano", "less", "more", "most", "man", "rake", "just", "ninja", "cmake",
+		"bazel", "ant", "sbt", "lein", "mix", "composer", "bundle", "gem", "pipx", "conda", "mamba", "rustup", "podman", "nerdctl",
+		"vagrant", "terraform", "ansible", "ansible-playbook", "tmux", "screen", "at", "batch", "crontab", "systemd-run", "launchctl",
+		"open", "xdg-open", "nodemon", "swiftc", "sqlite", "psql", "mysql", "pdflatex", "latex", "xelatex", "lualatex", "luatex", "tex",
+		"pandoc", "fzf", "brew", "pytest", "tox", "pre-commit", "turbo", "nx", "ssh-agent", "hash", "alias", "unalias", "enable", "set",
+		"shopt", "trap", "export", "declare", "typeset", "readonly", "local",
+	],
+};
+const RUNNERS = new Map<string, RunnerKind>(
+	(Object.entries(RUNNER_GROUPS) as [RunnerKind, readonly string[]][]).flatMap(([kind, names]) => names.map((name) => [name, kind] as const)),
+);
+
+/** How the program `name` (a basename, lowercased) runs other code, if it does. */
+function runnerKind(name: string): RunnerKind | undefined {
+	const unversioned = name.replace(/-?[0-9][0-9.]*$/, "");
+	for (const candidate of [name, unversioned, name.split("-")[0], unversioned.split("-")[0]]) {
+		const kind = candidate ? RUNNERS.get(candidate) : undefined;
+		if (kind) return kind;
+	}
+	return undefined;
+}
+
+/** Whether the program `name` (a basename, lowercased) runs other programs or code it is given: plan mode's check. */
+function runsOtherCode(name: string): boolean {
+	return runnerKind(name) !== undefined;
+}
 
 /**
  * An allow rule broad enough to grant arbitrary code execution. Auto mode
- * suspends these — a blanket `Bash` or a wildcarded interpreter would otherwise
- * hand the model a standing way past the classifier, which is the one thing auto
- * mode exists to prevent. Narrow rules (`Bash(npm test:*)`) still resolve before
- * the classifier unless `classifyAllShell` is set.
+ * suspends these (the rule is ignored and the call takes the fast paths, then
+ * the classifier) — a blanket `Bash` or a wildcarded interpreter would
+ * otherwise hand the model a standing way past the classifier, which is the
+ * one thing auto mode exists to prevent; plan mode ignores them too. Narrow
+ * rules (`Bash(npm test:*)`) still resolve before the classifier unless
+ * `classifyAllShell` is set.
  *
- * Matches Claude Code's list: blanket `Bash(*)`/`PowerShell(*)`, wildcarded
- * interpreters, package-manager run commands, and `Agent`/`Task` rules.
+ * Broad: a blanket `Bash(*)`/`PowerShell(*)`, a pattern that starts with a
+ * wildcard (`Bash(* *)`, `Bash(*-*)`), any wildcarded rule whose command is a
+ * shell, an interpreter or a wrapper (`RUNNER_GROUPS`; spelled as a path or
+ * with a version too), an exact rule that hands a shell or interpreter no
+ * operand (`Bash(sh)`, `Bash(bash -s)`: piped input is code), a toolchain's
+ * code escape (`npm run *`, `npx *`, `make *`), and `Agent`/`Task` rules.
+ * Claude Code's own list (`DANGEROUS_BASH_PATTERNS`) is a subset in shapes and
+ * names.
  */
 export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
@@ -1026,77 +1098,34 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 
 	if (!rule.pattern) return true;
 	const pattern = rule.pattern.trim().toLowerCase();
-	// Without a wildcard the rule matches one exact command, which is narrow by
-	// construction however powerful that command is — `Bash(python)` only ever
-	// starts a bare REPL.
-	if (!hasUnescapedWildcard(pattern)) return false;
-	if (/^(\*|:\*|\*\*)$/.test(pattern)) return true;
+	const wildcard = hasUnescapedWildcard(pattern);
+	// A leading wildcard matches any command word: `*`, `:*`, `* *`, `*-*`.
+	if (wildcard && /^(\*|:\*)/.test(pattern)) return true;
 
 	const rawHead = pattern.split(/[\s*]/)[0] ?? "";
 	// A PowerShell alias is as broad as its cmdlet: `PowerShell(iex *)` is
 	// `Invoke-Expression *`, `PowerShell(saps *)` is `Start-Process *`.
-	const head = rule.tool === "powershell" ? canonicalCommandName(rawHead).toLowerCase() : rawHead;
-	if (!INTERPRETERS_AND_RUNNERS.test(head)) return false;
+	const head = rule.tool === "powershell" ? canonicalCommandName(rawHead.replace(/:$/, "")).toLowerCase() : rawHead.replace(/:$/, "");
+	const kind = runnerKind(commandBasename(head));
+	if (!wildcard) {
+		// An exact rule matches one command, which is narrow however powerful
+		// that command is, unless it is a shell or interpreter given no operand
+		// to run: then it runs whatever is piped into it.
+		return (kind === "shell" || kind === "interpreter") && pattern.split(/\s+/).slice(1).every((word) => word.startsWith("-"));
+	}
+	if (kind === "shell" || kind === "interpreter" || kind === "wrapper") return true;
+	if (kind !== "toolchain") return false;
 
 	const rest = pattern.slice(rawHead.length).trim();
-	// Nothing constrains the arguments: `python*`, `node *`, `npm *`.
+	// Nothing constrains the arguments: `npm *`, `make:*`.
 	if (/^[:\s]*\*+$/.test(rest)) return true;
 	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
 	if (/^(run|exec|x)[:\s]*\*+$/.test(rest)) return true;
-	// Interpreter inline-code flags take arbitrary code: `python -c *`, `node -e *`,
-	// `sh -c *`, `bash -c *`, `ruby -e *`. Quote-wrapped spellings count too —
-	// `python3 -c '*` / `-c ' *` (as real settings write them) hand over exactly
-	// the same arbitrary code slot. Without this, such a rule granted a standing
-	// bypass of the classifier (over-flagging a runner's `-c` here only costs a
-	// classifier call, which is the safe direction).
+	// An inline-code flag takes arbitrary code: `java -e *`-style, quote-wrapped
+	// spellings included (over-flagging only costs a classifier call).
 	if (/^-(c|e)[\s:='"]*\*+['"]*$/.test(rest)) return true;
 	// `npm test:*` names the script, so it stays narrow.
 	return false;
-}
-
-/**
- * Programs that run other programs or code from their arguments, stdin or
- * files, beyond `INTERPRETERS_AND_RUNNERS`: wrappers the pre-gate treats as
- * unknown commands (`sudo`, `watch`, `busybox`), the wrappers it peels (for
- * PowerShell, which does not peel them), more shells and interpreters,
- * editors and pagers with shell escapes, task runners and schedulers. Plan
- * mode never lets an allow rule cover a line that runs one. Missing a name
- * here lets a user's rule for that program run it unprompted in plan mode,
- * so the list errs wide.
- */
-const PLAN_CODE_RUNNERS = new Set([
-	// Wrappers and privilege changers.
-	"sudo", "doas", "su", "runuser", "pkexec", "watch", "busybox", "parallel", "exec", "caffeinate", "chroot", "nsenter", "unshare",
-	"time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin", "strace", "ltrace", "gdb", "lldb",
-	// Shells and interpreters.
-	"dash", "ksh", "mksh", "tcsh", "csh", "ash", "tsx", "ts-node", "lua", "luajit", "tclsh", "wish", "expect", "rscript", "julia", "swift",
-	"groovy", "scala", "kotlin", "elixir", "erl", "escript", "ghci", "runghc", "irb", "jshell", "awk", "gawk", "mawk", "nawk", "sed",
-	// Editors and pagers with shell escapes.
-	"vim", "vi", "nvim", "view", "ex", "emacs", "ed", "nano", "less", "more", "most", "man",
-	// Build and task runners, package managers, containers and schedulers.
-	"rake", "just", "ninja", "cmake", "bazel", "ant", "sbt", "lein", "mix", "composer", "bundle", "gem", "pipx", "conda", "mamba",
-	"rustup", "podman", "nerdctl", "vagrant", "terraform", "ansible", "ansible-playbook", "tmux", "screen", "at", "batch", "crontab",
-	"systemd-run", "launchctl", "open", "xdg-open", "entr", "nodemon",
-	// More interpreters, and programs with a code or shell escape.
-	"nodejs", "pypy", "swiftc", "sqlite", "dc", "bc", "m", "jjs", "psql", "mysql", "gnuplot", "r", "octave", "pdflatex", "latex",
-	"xelatex", "lualatex", "luatex", "tex", "pandoc", "fzf",
-	// More wrappers and runners.
-	"fakeroot", "firejail", "xvfb-run", "nix-shell", "nix", "direnv", "mise", "asdf", "valgrind", "hyperfine", "taskset", "unbuffer",
-	"chronic", "dbus-run-session", "xcrun", "arch", "sandbox-exec", "brew", "pytest", "tox", "pre-commit", "turbo", "nx", "ssh-agent",
-	// Shell builtins that change what a later command word runs.
-	"hash", "alias", "unalias", "enable", "set", "shopt", "source", ".", "trap", "export", "declare", "typeset", "readonly", "local",
-]);
-
-/**
- * Whether the program `name` (a basename, lowercased) runs other programs or
- * code it is given. A trailing version (`perl5.34`, `node22`, `zsh-5.9`) is
- * stripped first, so the versioned name of an interpreter counts as the
- * interpreter (the list names `m` for `m4` and `sqlite` for `sqlite3` that
- * way). Plan mode only: `isBroadExecutionRule` keeps its own reading.
- */
-function runsOtherCode(name: string): boolean {
-	const unversioned = name.replace(/-?[0-9][0-9.]*$/, "");
-	return [name, unversioned].some((candidate) => candidate !== "" && (INTERPRETERS_AND_RUNNERS.test(candidate) || PLAN_CODE_RUNNERS.has(candidate)));
 }
 
 /** A command word's program name: its basename, lowercased, without a Windows executable extension. */
