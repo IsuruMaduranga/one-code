@@ -208,10 +208,10 @@ export interface TaskToolsResultText {
 	stopRequested(p: { id: string; description: string }): string;
 }
 
-/** The base's words of the group. */
 /** The resident note's clause about SendMessage, which pi's --exclude-tools takes out alone (lib/profile/live-tools.ts). */
 const RESIDENT_ENDED_PASSAGES: ToolPassages = { SendMessage: [["; it can no longer be messaged live (SendMessage will resume it from its session file).", "."]] };
 
+/** The base's words of the group. */
 const taskToolsResultText: TaskToolsResultText = {
 	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.join(", ") || "(none)"}`,
 	taskLine: (task: ShownTask) =>
