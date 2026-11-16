@@ -47,7 +47,13 @@
  * A compaction summary counts as a user message for the stack (pi renders it
  * as one), and so does a `custom` harness message (task notification, wakeup,
  * hook context): pi sends it as a user message, and a turn it opens has no
- * other user turn.
+ * other user turn. So does the record of a user's `!` run (`bashExecution`,
+ * which pi sends as the user message `` Ran `cmd` ``; a `!!` run is never
+ * sent): a turn a `!` run starts (extensions/tools/bash-turn) ends in that
+ * record, and the empty message that started it sends nothing
+ * (`withoutSilentMessages`), so the record carries what the turn's opener
+ * would. Each record is rendered on one request's tail only, like every
+ * message, so it gains blocks once and keeps them in the ledger's record.
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -506,14 +512,63 @@ function isUserLike(m: AgentMessage): boolean {
 	return isStickyCarrier(m) || m.role === "compactionSummary";
 }
 
-/** User-role messages that carry sticky blocks: real turns and harness messages, not a compaction summary. */
+/** User-role messages that carry sticky blocks: real turns, harness messages and sent `!` records, not a compaction summary. */
 function isStickyCarrier(m: AgentMessage): boolean {
-	return m.role === "user" || m.role === "custom";
+	return m.role === "user" || m.role === "custom" || isSentBashRecord(m);
+}
+
+/** pi's record of a user's `!` run, as far as this module reads it (`BashExecutionMessage`). */
+interface BashRecord {
+	role: "bashExecution";
+	command: string;
+	output: string;
+	exitCode: number | undefined;
+	cancelled: boolean;
+	truncated: boolean;
+	fullOutputPath?: string;
+	timestamp: number;
+	excludeFromContext?: boolean;
+}
+
+/** A `!` run's record that pi sends to the model; a `!!` run's (`excludeFromContext`) never goes out. */
+function isSentBashRecord(m: AgentMessage): boolean {
+	return (m as { role: string }).role === "bashExecution" && !(m as unknown as BashRecord).excludeFromContext;
+}
+
+/**
+ * The user message pi's `convertToLlm` sends for a `!` run's record
+ * (`bashExecutionToText` in `core/messages.js`, which the package does not
+ * export by itself; copied here and locked by a unit test against
+ * `convertToLlm`).
+ */
+export function bashRecordText(record: BashRecord): string {
+	let text = `Ran \`${record.command}\`\n`;
+	text += record.output ? `\`\`\`\n${record.output}\n\`\`\`` : "(no output)";
+	if (record.cancelled) text += "\n\n(command cancelled)";
+	else if (record.exitCode !== null && record.exitCode !== undefined && record.exitCode !== 0) text += `\n\nCommand exited with code ${record.exitCode}`;
+	if (record.truncated && record.fullOutputPath) text += `\n\n[Output truncated. Full output: ${record.fullOutputPath}]`;
+	return text;
+}
+
+/**
+ * The messages without those that send nothing: a `custom` message with no
+ * content, which some providers drop and others pad with a placeholder. The
+ * turn a `!` run starts opens with one (extensions/tools/bash-turn), so the
+ * run's record is the last thing the model reads and carries the tail's
+ * blocks. Returns the input when nothing is left out.
+ */
+export function withoutSilentMessages<T extends AgentMessage>(messages: T[]): T[] {
+	const silent = (m: AgentMessage) => m.role === "custom" && (m.content === "" || (Array.isArray(m.content) && m.content.length === 0));
+	return messages.some(silent) ? messages.filter((m) => !silent(m)) : messages;
 }
 
 /** A copy of `message` with `before` blocks in front of its content and `after` blocks behind. */
 function withBlocks(message: AgentMessage, before: TextContent[], after: TextContent[]): AgentMessage {
 	if (before.length === 0 && after.length === 0) return message;
+	if (isSentBashRecord(message)) {
+		const record = message as unknown as BashRecord;
+		return { role: "user", content: [...before, { type: "text", text: bashRecordText(record) }, ...after], timestamp: record.timestamp } as AgentMessage;
+	}
 	if (message.role === "compactionSummary") {
 		const summary = message as unknown as { summary: string; timestamp: number };
 		return {

@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+	bashRecordText,
 	COMPACTION_SUMMARY_PREFIX,
 	COMPACTION_SUMMARY_SUFFIX,
 	LiveReminders,
@@ -12,6 +13,7 @@ import {
 	type StickyToPlace,
 	stickyFact,
 	toldBlockFact,
+	withoutSilentMessages,
 	wrapReminder,
 } from "../../extensions/lib/request/reminders.ts";
 
@@ -21,6 +23,11 @@ const assistant = (timestamp = 0) => ({ role: "assistant", content: [], timestam
 const toolResult = (text = "ok", timestamp = 0, toolCallId = "c1") =>
 	({ role: "toolResult", toolCallId, toolName: "bash", content: [{ type: "text", text }], timestamp }) as any;
 const custom = (text: string, timestamp = 0) => ({ role: "custom", customType: "task-notification", content: text, display: true, timestamp }) as any;
+/** pi's record of a user's `!` run (`BashExecutionMessage`); `excludeFromContext` is a `!!` run. */
+const record = (command: string, output: string, timestamp = 0, extra: Record<string, unknown> = {}) =>
+	({ role: "bashExecution", command, output, exitCode: 0, cancelled: false, truncated: false, timestamp, ...extra }) as any;
+/** The empty, hidden message that starts the turn after a `!` run (extensions/tools/bash-turn). */
+const trigger = (timestamp = 0) => ({ role: "custom", customType: "one-code:bash-turn", content: [], display: false, timestamp }) as any;
 const compaction = (summary = "what happened", timestamp = 0) => ({ role: "compactionSummary", summary, tokensBefore: 1, timestamp }) as any;
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
 
@@ -244,6 +251,72 @@ describe("renderReminders: one-shots", () => {
 	it("puts a one-shot on a harness notification that opened the turn", () => {
 		const result = render([user("earlier", 1), assistant(2), custom("agent done", 3)], { oneShots: [shot("steer")] });
 		expect(blockTexts(result.messages[2])).toEqual(["agent done", wrapReminder("steer")]);
+	});
+});
+
+describe("renderReminders: a `!` run's record", () => {
+	const budget = sticky("<total_tokens>1 tokens left</total_tokens>", 0, { raw: true, skipStackCarrier: true });
+
+	it("reproduces the user message pi sends for a record byte for byte", async () => {
+		const pi = await import(pathToFileURL(resolve("node_modules/@earendil-works/pi-coding-agent/dist/core/messages.js")).href);
+		const records = [
+			record("pwd", "/tmp\n"),
+			record("true", ""),
+			record("echo oops; exit 3", "oops\n", 0, { exitCode: 3 }),
+			record("sleep 9", "", 0, { cancelled: true, exitCode: undefined }),
+			record("yes", "y\n", 0, { truncated: true, fullOutputPath: "/tmp/pi-bash.log" }),
+		];
+		for (const r of records) expect(pi.convertToLlm([r])[0].content).toEqual([{ type: "text", text: bashRecordText(r) }]);
+	});
+
+	it("is what a turn a `!` run started ends in: it carries the tail's sticky states and one-shots, and nothing follows it", () => {
+		const messages = withoutSilentMessages([user("hi", 1), assistant(2), record("pwd", "/tmp", 3), trigger(4)]);
+		expect(messages).toHaveLength(3);
+		const result = render(messages, { sticky: [budget, sticky("plan", 3)], oneShots: [shot("steer", { id: "p1" }), shot("cmd", { placement: "user-prepend", raw: true, id: "c1" })] });
+		expect(result.messages).toHaveLength(3);
+		expect(result.messages[2]).toEqual({
+			role: "user",
+			content: [
+				{ type: "text", text: "cmd" },
+				{ type: "text", text: "Ran `pwd`\n```\n/tmp\n```" },
+				{ type: "text", text: budget.text },
+				{ type: "text", text: wrapReminder("plan") },
+				{ type: "text", text: wrapReminder("steer") },
+			],
+			timestamp: 3,
+		});
+		expect(result.placed.map((s) => s.id)).toEqual(["p1", "c1"]);
+	});
+
+	it("carries the stack when the `!` run is the session's first input", () => {
+		const result = render(withoutSilentMessages([record("pwd", "/tmp", 1), trigger(2)]), { epoch: true, stack: [stack("env", 1), stack("date", 56)], sticky: [budget] });
+		expect(result.messages).toHaveLength(1);
+		expect(blockTexts(result.messages[0])).toEqual([wrapReminder("env"), wrapReminder("date"), "Ran `pwd`\n```\n/tmp\n```"]);
+	});
+
+	it("before a typed prompt (a `!` run while the model worked, or one cancelled), shares the sticky states; the prompt takes the one-shots", () => {
+		const messages = [assistant(1), record("echo mid", "mid", 2), user("next", 5)];
+		const result = render(messages, { sticky: [budget, sticky("auto", 4)], oneShots: [shot("steer"), shot("cmd", { placement: "user-prepend", raw: true })] });
+		expect(blockTexts(result.messages[1])).toEqual(["Ran `echo mid`\n```\nmid\n```", budget.text]);
+		expect(blockTexts(result.messages[2])).toEqual(["cmd", "next", budget.text, wrapReminder("auto"), wrapReminder("steer")]);
+	});
+
+	it("is left as pi's record when nothing rides it", () => {
+		const r = record("pwd", "/tmp", 3);
+		expect(render([user("hi", 1), assistant(2), r], {}).messages[2]).toBe(r);
+	});
+
+	it("never carries anything for a `!!` run, which pi keeps out of the context", () => {
+		const hidden = record("cat .env", "SECRET=1", 3, { excludeFromContext: true });
+		const result = render([user("hi", 1), assistant(2), hidden], { sticky: [budget], oneShots: [shot("steer")] });
+		expect(result.messages[2]).toBe(hidden);
+		expect(blockTexts(result.messages[0])).toEqual(["hi", budget.text, wrapReminder("steer")]);
+	});
+
+	it("leaves out only a custom message that sends nothing", () => {
+		const kept = [user("hi", 1), custom("note", 2), { ...trigger(3), content: [{ type: "text", text: "x" }] }];
+		expect(withoutSilentMessages(kept)).toBe(kept);
+		expect(withoutSilentMessages([...kept, trigger(4), { ...trigger(5), content: "" }])).toEqual(kept);
 	});
 });
 

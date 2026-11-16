@@ -20,6 +20,7 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import { searchToolsEnabled } from "../../lib/models/model-tier.ts";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { BashSpawnContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -34,6 +35,8 @@ import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { shellResultText } from "../../lib/shell-run/shell-text.ts";
 import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
+import { expandTilde } from "../../lib/profile/paths.ts";
+import { USER_BASH_CHANNEL, type UserBashTurnRequest, withTurnAfterRun } from "../../lib/shell-run/user-bash-turn.ts";
 
 /** The tool's parameters, described in the profile's words. */
 const bashParams = (d: ShellParams) =>
@@ -111,13 +114,20 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		setDescription(describe());
 	});
 
-	// The user's own `!` commands, under the bundled app only: pi runs them with
-	// its full process environment, so they get the same restore. Outside the app
-	// pi's default path runs untouched. They run in the session's bash, the one
-	// the bash tool uses.
-	pi.on("user_bash", () => {
-		if (process.env[LAUNCHER_ENV_VAR] === undefined) return undefined;
-		return { operations: withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin"))) };
+	// The user's own `!` commands. Under the bundled app pi runs them with its
+	// full process environment, so they get the same restore, in the session's
+	// bash, the one the bash tool uses; outside the app they run as pi would run
+	// them. A listener on USER_BASH_CHANNEL (the bash-turn feature) may ask to
+	// hear when a run settled, to start a turn (lib/shell-run/user-bash-turn.ts).
+	pi.on("user_bash", (event) => {
+		const app = process.env[LAUNCHER_ENV_VAR] !== undefined;
+		const operations = app ? withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin"))) : undefined;
+		const request: UserBashTurnRequest = { command: event.command, excludeFromContext: event.excludeFromContext };
+		pi.events.emit(USER_BASH_CHANNEL, request);
+		if (!request.onSettled) return operations ? { operations } : undefined;
+		const configured = pi.getSettings().shellPath;
+		const local = operations ?? createLocalBashOperations({ shellPath: configured ? expandTilde(configured, homedir()) : undefined });
+		return { operations: withTurnAfterRun(local, request.onSettled) };
 	});
 }
 

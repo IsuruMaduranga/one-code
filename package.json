@@ -48,6 +48,7 @@
 			"extensions/tools/skill/index.ts",
 			"extensions/tools/background/index.ts",
 			"extensions/tools/bash/index.ts",
+			"extensions/tools/bash-turn/index.ts",
 			"extensions/tools/powershell/index.ts",
 			"extensions/agents/subagents/index.ts",
 			"extensions/agents/workflow/index.ts",
