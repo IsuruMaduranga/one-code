@@ -20,6 +20,7 @@ import {
 	DEFER_CHANNEL,
 	type DeferRequest,
 	lspFilesChanged,
+	modelCapability,
 	notifyOrPrint,
 	openInBrowser,
 	productSetting,
@@ -27,7 +28,6 @@ import {
 	queueNotice,
 	REMINDER_CHANNEL,
 	type ReminderPayload,
-	sessionModelTier,
 	setSecretValues,
 	SYSTEM_PROMPT_SECTION_CHANNEL,
 	type SystemPromptSection,
@@ -50,28 +50,33 @@ export const PROBE_REMINDER = "[fixture:product-reminder]";
 export const PROBE_SECRET = "fixture-secret-value";
 /** The file the probe's tool writes in the session's directory, a file the fixture's language server serves. */
 export const PROBE_FILE = "probe.fixturelang";
-/** The tier the probe asks for: a session model below it gets `PROBE_TIER_NOTICE`. */
-export const PROBE_TIER_FLOOR: PromptTier = "workhorse";
+/** The capability the probe asks for: a session model below it, or one the base does not know, gets a notice. */
+export const PROBE_TIER_FLOOR: PromptTier = "frontier";
 export const PROBE_TIER_NOTICE = "[fixture:below-tier-floor]";
+export const PROBE_UNKNOWN_MODEL_NOTICE = "[fixture:unknown-model]";
 /** The setting the profile declares for the notice (`settings` in ../../index.ts): false keeps it quiet. */
 export const PROBE_TIER_SETTING = "fixtureTierNotice";
 /** A command that writes a page into the product's state folder and opens it. */
 export const PROBE_COMMAND = "fixture-page";
 
 export default function probe(pi: ExtensionAPI) {
-	// While loading, before the probe's own handlers: the tier's owner on the bus classifies first.
-	const tier = sessionModelTier(pi);
-	/** The user's notice, at the session's start and at each switch of model; never in the request. */
-	const tierNotice = (ctx: ExtensionContext) => {
-		if (tiersBelow(tier(), PROBE_TIER_FLOOR) <= 0) return;
+	/**
+	 * The user's notice, at the session's start and at each switch of model;
+	 * never in the request. Judged by the model's capability, not the prompt
+	 * register (`sessionModelTier`), which a knob or Haiku's frontier forms move.
+	 */
+	const tierNotice = (ctx: ExtensionContext, model = ctx.model) => {
+		const { tier, known } = modelCapability(model);
+		if (known && tiersBelow(tier, PROBE_TIER_FLOOR) <= 0) return;
 		// Read at each boundary: the user may have switched it off since the last one.
 		if (productSetting(PROBE_TIER_SETTING, ctx.cwd) === false) return;
+		const text = known ? PROBE_TIER_NOTICE : PROBE_UNKNOWN_MODEL_NOTICE;
 		// Joined with the other startup and model-switch notices; stderr in print and JSON modes.
-		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", PROBE_TIER_NOTICE);
-		else notifyOrPrint(ctx, PROBE_TIER_NOTICE, "warning");
+		if (ctx.hasUI) queueNotice(pi.events, ctx, "warning", text);
+		else notifyOrPrint(ctx, text, "warning");
 	};
 	pi.on("session_start", (_event, ctx) => tierNotice(ctx));
-	pi.on("model_select", (_event, ctx) => tierNotice(ctx));
+	pi.on("model_select", (event, ctx) => tierNotice(ctx, event.model));
 	pi.registerTool({
 		name: PROBE_TOOL,
 		label: "Fixture probe",

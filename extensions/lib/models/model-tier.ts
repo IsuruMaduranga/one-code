@@ -166,25 +166,36 @@ export function classifyModelTier(
 	env: NodeJS.ProcessEnv = process.env,
 	purpose: TierPurpose = "prompt",
 ): TierClassification {
+	const { tier, reason } = classifyWithBasis(model, env, purpose);
+	return { tier, reason };
+}
+
+/**
+ * `classifyModelTier` with whether a rule that knows the model decided: the
+ * user's `modelTiers` entry, a vendor's frontier rule or a catalog entry
+ * (`known`), or a guess for a model none of them knows (no model, an id
+ * the catalogs lack, a custom provider, no price), or the prompt-tier knob.
+ */
+function classifyWithBasis(model: Model<Api> | undefined, env: NodeJS.ProcessEnv, purpose: TierPurpose): TierClassification & { known: boolean } {
 	const forced = tierOverride(env);
-	if (forced) return { tier: forced, reason: envName("PROMPT_TIER") };
-	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
+	if (forced) return { tier: forced, reason: envName("PROMPT_TIER"), known: false };
+	if (!model) return { tier: "tiny", reason: "no model", known: false }; // unknown model → maximum scaffolding
 	const configured = configuredModelTier(model);
-	if (configured) return { tier: configured, reason: "modelTiers setting" };
-	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist" };
-	if (purpose === "prompt" && isHaikuWithFrontierForms(model)) return { tier: "frontier", reason: "anthropic frontier allowlist (prompt and tool forms)" };
-	if (isOpenAIFrontier(model)) return { tier: "frontier", reason: "openai frontier allowlist" };
+	if (configured) return { tier: configured, reason: "modelTiers setting", known: true };
+	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist", known: true };
+	if (purpose === "prompt" && isHaikuWithFrontierForms(model)) return { tier: "frontier", reason: "anthropic frontier allowlist (prompt and tool forms)", known: true };
+	if (isOpenAIFrontier(model)) return { tier: "frontier", reason: "openai frontier allowlist", known: true };
 	const entry = catalogModelFor(model);
-	if (entry) return { tier: entry.tier, reason: `catalog ${entry.id}: ${entry.reason}` };
+	if (entry) return { tier: entry.tier, reason: `catalog ${entry.id}: ${entry.reason}`, known: true };
 	const id = baseModelId(model.id);
 	const size = sizeFromName(id);
-	if (size !== undefined && size < TINY_PARAMS) return { tier: "tiny", reason: "not in the catalogs; a small size in its id" };
-	if (size === undefined && smallByName(id)) return { tier: "tiny", reason: "not in the catalogs; a small-model name" };
+	if (size !== undefined && size < TINY_PARAMS) return { tier: "tiny", reason: "not in the catalogs; a small size in its id", known: false };
+	if (size === undefined && smallByName(id)) return { tier: "tiny", reason: "not in the catalogs; a small-model name", known: false };
 	if (modelIdentity(model).confidence === "opaque" && !isKnownProvider(model.provider)) {
-		return { tier: "tiny", reason: "custom provider, not in the catalogs" };
+		return { tier: "tiny", reason: "custom provider, not in the catalogs", known: false };
 	}
-	if (pricedInput(model) === undefined) return { tier: "tiny", reason: "unpriced, not in the catalogs" };
-	return { tier: "cheap", reason: "not in the catalogs" };
+	if (pricedInput(model) === undefined) return { tier: "tiny", reason: "unpriced, not in the catalogs", known: false };
+	return { tier: "cheap", reason: "not in the catalogs", known: false };
 }
 
 /**
@@ -385,6 +396,29 @@ const INTRINSIC_TIER_ENV: NodeJS.ProcessEnv = Object.freeze({}) as NodeJS.Proces
  */
 export function intrinsicTier(model: Model<Api>): PromptTier {
 	return classifyModelTier(model, INTRINSIC_TIER_ENV, "capability").tier;
+}
+
+/** A model's capability tier, and whether a rule that knows the model decided it (`modelCapability`). */
+export interface ModelCapability {
+	tier: PromptTier;
+	/**
+	 * True when the user's `modelTiers` entry, a vendor's frontier rule or a
+	 * catalog entry (by size, price or age against the vendor's models)
+	 * decided; false for no model and for a model none of them knows (an id
+	 * the catalogs lack, a custom provider, no price), whose tier is a guess.
+	 */
+	known: boolean;
+}
+
+/**
+ * The model's capability tier, the reading `intrinsicTier` gives (Haiku 5
+ * and later below frontier, `*_PROMPT_TIER` ignored, the user's `modelTiers`
+ * applied), with whether it is known or guessed. For judging a model, not
+ * for text that must match the session's prompt register (`sessionModelTier`).
+ */
+export function modelCapability(model: Model<Api> | undefined): ModelCapability {
+	const { tier, known } = classifyWithBasis(model, INTRINSIC_TIER_ENV, "capability");
+	return { tier, known };
 }
 
 /** Whether `tier` is at least as capable as `floor` (frontier ≥ workhorse ≥ cheap ≥ tiny). */
