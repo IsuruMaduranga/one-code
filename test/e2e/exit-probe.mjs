@@ -12,18 +12,24 @@
  *   node test/e2e/exit-probe.mjs                 every ending this platform supports
  *   node test/e2e/exit-probe.mjs --only rpc-stdin,new
  *   node test/e2e/exit-probe.mjs --keep          keep each run's temp root
+ *   node test/e2e/exit-probe.mjs --jobs 1        one run at a time (default 3)
  *
  * Detection does not trust our bookkeeping: pi runs with a unique tag in its
  * environment (EXIT_PROBE_TAG), inherited by every descendant, and every
  * fixture also carries `<tag>:<role>` on its command line. After the ending
- * and a grace period the probe scans the process table: macOS `ps -E` (which
- * hides a platform binary's environment, hence the command-line tag), Linux
+ * the probe polls the command lines (`commandScan`) until every process the
+ * ending's column expects gone is gone, for at most a grace period, then
+ * scans the full process table: macOS `ps -E` (which hides a platform
+ * binary's environment, hence the command-line tag), Linux
  * /proc/<pid>/environ and cmdline, Windows Win32_Process command lines. A
  * process with the tag but no role is reported as "unknown" and fails, since
- * nothing but One Code could have started it. For the `new` and `resume`
- * endings pi is still running: the processes alive before the switch that are
- * still alive after it are the survivors, and the run then ends with stdin
- * closed and is checked again as `rpc-stdin`.
+ * nothing but One Code could have started it; a failing table is scanned
+ * again once the grace is over, so nothing fails sooner than it would after
+ * the full grace. For the `new` and `resume` endings pi is still running: the
+ * processes alive before the switch that are still alive after it are the
+ * survivors, and the run then ends with stdin closed and is checked again as
+ * `rpc-stdin`. Runs that need no pty go `--jobs` at a time; the pty runs
+ * (`tui-*`) go one at a time after them.
  *
  * A run also fails when pi does not exit within EXIT_DEADLINE_MS of its
  * ending (a handle keeping it alive), or when a fixture never started (the
@@ -37,21 +43,20 @@ import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { withCompactionKeepBackfilled } from "../../extensions/lib/app/compaction-keep.mjs";
-import { withReplacedBuiltinsOff } from "../../extensions/lib/app/replaced-builtins.mjs";
+import { alive } from "../unit/helpers/process-alive.ts";
 import { cellOutcome, ENDINGS, expectation, keptOutcome, parsePs, SPAWNERS, spawnerOf } from "./exit-probe-policy.mjs";
+import { killHard, repo, rpcClient, writeFreshHome } from "./lib/harness.mjs";
 
 const { values: opts } = parseArgs({
 	options: {
 		only: { type: "string" },
 		keep: { type: "boolean", default: false },
+		jobs: { type: "string", default: "3" },
 	},
 });
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const piCli = join(repo, "node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js");
 const fixture = join(repo, "test/e2e/exit-probe-fixture.ts");
 const procScript = join(repo, "test/e2e/exit-probe-proc.mjs");
@@ -62,12 +67,21 @@ const MODEL = "anthropic/claude-opus-5-5";
 const START_DEADLINE_MS = 60_000;
 /** pi must exit within this long of its ending. */
 const EXIT_DEADLINE_MS = 30_000;
-/** After pi exits: time for a TERM sent at exit to land. */
+/** After pi exits: the most time a TERM sent at exit (and the watchdog's KILL after it) gets to land. */
 const EXIT_GRACE_MS = 3_000;
-/** After a session switch: an MCP close waits 2 s for the server, signals it, then waits 2 s more. */
+/** After a session switch: an MCP close waits 2 s for the server, signals it, then waits 2 s more. The held SIGINT waits all of it. */
 const SWITCH_GRACE_MS = 8_000;
+/** The most an interactive pi gets to take the terminal and start its session before the prompt is typed. */
+const TUI_START_MS = 6_000;
+/** Between two polls of the process table. */
+const POLL_MS = isWin ? 500 : 100;
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+
+/** Poll `condition` until it holds or `deadline` (a Date.now() value) passes. */
+async function pollUntil(condition, deadline) {
+	while (!condition() && Date.now() < deadline) await sleep(POLL_MS);
+}
 
 // ---------------------------------------------------------------------------
 // The process table
@@ -116,26 +130,35 @@ function scan(tag) {
 		.filter((p) => p.pid !== process.pid);
 }
 
-function killHard(pid) {
-	try {
-		if (isWin) execFileSync("taskkill.exe", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore", windowsHide: true });
-		else process.kill(pid, "SIGKILL");
-	} catch {
-		// Already gone.
+/**
+ * The live processes with `tag` on their command line, which every fixture
+ * carries: the cheap scan the polls use (one plain `ps` on macOS, no
+ * environments read on Linux). Only `scan` sees a process tagged in its
+ * environment alone, so only `scan` judges.
+ */
+function commandScan(tag) {
+	if (process.platform === "darwin") {
+		const out = execFileSync("ps", ["-ww", "-ax", "-o", "pid=,ppid=,command="], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+		return parsePs(out, tag).filter((p) => p.pid !== process.pid);
 	}
+	if (process.platform === "linux") {
+		const found = [];
+		for (const name of readdirSync("/proc")) {
+			if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+			try {
+				const command = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0").join(" ").trim();
+				if (command.includes(tag)) found.push({ pid: Number(name), ppid: 0, command });
+			} catch {
+				// Gone while reading.
+			}
+		}
+		return found;
+	}
+	return scan(tag);
 }
 
 // ---------------------------------------------------------------------------
 // One run's world
-
-function cleanEnv() {
-	const env = {};
-	for (const [key, value] of Object.entries(process.env)) {
-		if (/^(PI_|CC_|ONECODE_|ONE_CODE_|CLAUDE_|ANTHROPIC_|OPENAI_|OPENROUTER_|OPEN_ROUTER_|BRAVE_|TAVILY_|EXA_|EXIT_PROBE_|GOLDEN_)/.test(key)) continue;
-		env[key] = value;
-	}
-	return env;
-}
 
 const q = (path) => `"${path}"`;
 /** A path for a bash command line (Git Bash on Windows reads forward slashes). */
@@ -157,11 +180,9 @@ function writeLauncher(path, server, label) {
 
 function makeWorld(tag) {
 	const root = join(realpathSync(os.tmpdir()), `exit-probe-${tag}`);
-	const home = join(root, "home");
+	const { home, project, env: baseEnv } = writeFreshHome(root, { model: MODEL, tier: "frontier", extraPrefixes: ["EXIT_PROBE_", "GOLDEN_"] });
 	const bin = join(root, "bin");
-	const project = join(root, "project");
-	const agentDir = join(home, ".pi", "agent");
-	for (const dir of [agentDir, join(home, ".onecode"), join(home, ".claude"), bin, project]) mkdirSync(dir, { recursive: true });
+	for (const dir of [join(home, ".claude"), bin]) mkdirSync(dir, { recursive: true });
 	writeFileSync(join(project, "README.md"), "# Exit probe project\n");
 
 	writeLauncher(join(bin, "gopls"), join(repo, "test/e2e/golden-lsp-server.mjs"), `${tag}:lsp`);
@@ -170,18 +191,9 @@ function makeWorld(tag) {
 	const hook = `${bashPath(process.execPath)} ${bashPath(procScript)} fork ${tag}:hook`;
 	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: hook }] }] } }, null, 2)}\n`);
 
-	const settings = withCompactionKeepBackfilled({ quietStartup: true, packages: [repo], extensions: withReplacedBuiltinsOff(undefined).extensions }).settings;
-	writeFileSync(join(agentDir, "settings.json"), `${JSON.stringify(settings, null, 2)}\n`);
-	writeFileSync(join(home, ".onecode", "settings.json"), `${JSON.stringify({ modelTiers: { [MODEL]: "frontier" } }, null, 2)}\n`);
-
 	const env = {
-		...cleanEnv(),
-		HOME: home,
-		...(isWin ? { USERPROFILE: home } : {}),
-		GOLDEN_DUMP: join(root, "requests.jsonl"),
+		...baseEnv,
 		ANTHROPIC_API_KEY: "sk-ant-exit-probe",
-		ONECODE_NO_UPDATE_CHECK: "1",
-		TZ: "UTC",
 		TERM: "xterm-256color",
 		PATH: `${bin}${isWin ? ";" : ":"}${process.env.PATH ?? process.env.Path ?? ""}`,
 		EXIT_PROBE_TAG: tag,
@@ -224,18 +236,10 @@ function startPi(world, args, { tui = false } = {}) {
 	const child = spawn("/bin/sh", ["-c", `cat | ${scriptLine}`], { cwd: world.project, env: world.env, stdio: ["pipe", "pipe", "pipe"], detached: true });
 	child.stdin.on("error", () => {});
 	let pid;
-	const isAlive = (target) => {
-		try {
-			process.kill(target, 0);
-			return true;
-		} catch {
-			return false;
-		}
-	};
 	const exited = (async () => {
 		for (let i = 0; i < 100 && !existsSync(pidFile); i++) await sleep(100);
 		pid = Number(readFileSync(pidFile, "utf8"));
-		while (isAlive(pid)) await sleep(200);
+		while (alive(pid)) await sleep(POLL_MS);
 		child.stdin.end();
 		return { code: null, signal: null };
 	})();
@@ -248,7 +252,7 @@ function startPi(world, args, { tui = false } = {}) {
 			}
 		}
 	};
-	return withOutput(child, { child, get pid() { return pid; }, exited, kill, write: (keys) => child.stdin.write(keys), running: () => pid !== undefined && isAlive(pid) });
+	return withOutput(child, { child, get pid() { return pid; }, exited, kill, write: (keys) => child.stdin.write(keys), running: () => pid !== undefined && alive(pid) });
 }
 
 /** `pi` with `output()`: what its child wrote so far, the tail kept. */
@@ -264,54 +268,22 @@ function withOutput(child, pi) {
 	return Object.assign(pi, { output: () => output });
 }
 
-/** A JSONL RPC client over the child's stdio: `send(command)` resolves with its response; `waitFor(predicate)` with the first matching event. */
-function rpcClient(child) {
-	let buffer = "";
-	let next = 0;
-	const waiters = [];
+/**
+ * The RPC client (lib/harness.mjs) with the probe's dialog policy: the switch
+ * guard asks before a session switch stops running work
+ * (tools/background/switch-guard.ts), and the probe means to switch. Any other
+ * dialog means something asked for permission: it is cancelled and listed in
+ * `dialogs`, and shows as a fixture that never started.
+ */
+function probeRpc(child) {
 	const dialogs = [];
-	child.stdout.on("data", (chunk) => {
-		buffer += chunk;
-		let at;
-		while ((at = buffer.indexOf("\n")) !== -1) {
-			const line = buffer.slice(0, at);
-			buffer = buffer.slice(at + 1);
-			let event;
-			try {
-				event = JSON.parse(line);
-			} catch {
-				continue;
-			}
-			// The switch guard asks before a session switch stops running work
-			// (tools/background/switch-guard.ts): the probe means to switch. Any
-			// other dialog means something asked for permission: cancel it, and it
-			// shows as a fixture that never started.
-			if (event.type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(event.method)) {
-				const stop = event.method === "select" ? event.options?.find((option) => option === SWITCH_STOP) : undefined;
-				if (!stop) dialogs.push(event.title ?? event.message ?? event.method);
-				const response = stop ? { value: stop } : { cancelled: true };
-				child.stdin.write(`${JSON.stringify({ type: "extension_ui_response", id: event.id, ...response })}\n`);
-			}
-			for (const waiter of [...waiters]) {
-				if (waiter.match(event)) {
-					waiters.splice(waiters.indexOf(waiter), 1);
-					waiter.resolve(event);
-				}
-			}
-		}
+	const rpc = rpcClient(child, (event) => {
+		const stop = event.method === "select" ? event.options?.find((option) => option === SWITCH_STOP) : undefined;
+		if (stop) return { value: stop };
+		dialogs.push(event.title ?? event.message ?? event.method);
+		return undefined;
 	});
-	const waitFor = (match, ms = START_DEADLINE_MS) =>
-		new Promise((resolveWait, reject) => {
-			const timer = setTimeout(() => reject(new Error(`timed out waiting for an RPC event`)), ms);
-			waiters.push({ match, resolve: (event) => (clearTimeout(timer), resolveWait(event)) });
-		});
-	const send = (command) => {
-		const id = `probe-${next++}`;
-		const response = waitFor((event) => event.type === "response" && event.id === id);
-		child.stdin.write(`${JSON.stringify({ id, ...command })}\n`);
-		return response;
-	};
-	return { send, waitFor, dialogs };
+	return { ...rpc, dialogs };
 }
 
 const PROMPT = "PROBE_TOOLS: make the scripted calls.";
@@ -322,11 +294,10 @@ const SWITCH_STOP = "Stop them and continue";
 async function waitForSpawners(tag, want, piPid, ms = START_DEADLINE_MS) {
 	const seen = new Set();
 	const deadline = Date.now() + ms;
-	while (Date.now() < deadline) {
-		for (const p of scan(tag)) if (p.pid !== piPid) seen.add(spawnerOf(p.command, tag));
-		if (want.every((id) => seen.has(id))) return seen;
-		await sleep(isWin ? 1_500 : 500);
-	}
+	await pollUntil(() => {
+		for (const p of commandScan(tag)) if (p.pid !== piPid) seen.add(spawnerOf(p.command, tag));
+		return want.every((id) => seen.has(id));
+	}, deadline);
 	return seen;
 }
 
@@ -359,6 +330,25 @@ function judge({ tag, ending, starts, seen, piPid, only }) {
 	return { cells, alive };
 }
 
+/**
+ * Judge as `judge` does, once the processes `ending` expects gone are gone:
+ * poll the command lines until none of them is left (and `ready()` holds), for
+ * at most `capMs`, then judge on the full table. A failing judgement before
+ * the cap (a process tagged only in its environment, which the poll cannot
+ * see) is judged again at the cap, so nothing fails sooner than after the
+ * full grace.
+ */
+async function settleAndJudge(args, capMs, ready = () => true) {
+	const { tag, ending, piPid, only } = args;
+	const deadline = Date.now() + capMs;
+	const leftToGo = () => commandScan(tag).some((p) => p.pid !== piPid && (!only || only.has(p.pid)) && expectation(spawnerOf(p.command, tag), ending).verdict === "gone");
+	await pollUntil(() => ready() && !leftToGo(), deadline);
+	const judged = judge(args);
+	if (!judged.cells.some((cell) => cell.fails) || Date.now() >= deadline) return judged;
+	await sleep(deadline - Date.now());
+	return judge(args);
+}
+
 // ---------------------------------------------------------------------------
 // Endings
 
@@ -383,17 +373,18 @@ async function runEnding(ending) {
 				let done = false;
 				pi.exited.then(() => (done = true));
 				const deadline = Date.now() + START_DEADLINE_MS + EXIT_DEADLINE_MS;
-				while (!done && Date.now() < deadline) {
-					for (const p of scan(tag)) if (p.pid !== pi.child.pid) seen.add(spawnerOf(p.command, tag));
-					await sleep(300);
-				}
+				await pollUntil(() => {
+					for (const p of commandScan(tag)) if (p.pid !== pi.child.pid) seen.add(spawnerOf(p.command, tag));
+					return done;
+				}, deadline);
 				// The run's own end is its ending: a run still going here hangs.
 				if (!done) result.problems.push(`print-done: the one-shot run did not finish within ${(START_DEADLINE_MS + EXIT_DEADLINE_MS) / 1000} s of its start`);
 			}
 			await finish(result, pi, ending, tag, seen);
 		} else if (ending.tui) {
 			pi = startPi(world, [], { tui: true });
-			await sleep(6_000);
+			// Ready once the TUI has the terminal (bracketed paste on) and the session has started (its SessionStart hook ran).
+			await pollUntil(() => pi.output().includes("\x1b[?2004h") && commandScan(tag).some((p) => spawnerOf(p.command, tag) === "hook"), Date.now() + TUI_START_MS);
 			pi.write(`${PROMPT}\r`);
 			const seen = await waitForSpawners(tag, ending.starts, pi.pid);
 			if (ending.id === "tui-crash") {
@@ -411,7 +402,7 @@ async function runEnding(ending) {
 		} else {
 			if (ending.id === "rpc-sigint-held") world.env.EXIT_PROBE_HOLD_SIGINT = "1";
 			pi = startPi(world, ["--mode", "rpc"]);
-			const rpc = rpcClient(pi.child);
+			const rpc = probeRpc(pi.child);
 			let resumeTo;
 			if (ending.id === "resume") {
 				// A first session to come back to, then a fresh one for the fixtures.
@@ -428,6 +419,7 @@ async function runEnding(ending) {
 			if (rpc.dialogs.length > 0) result.problems.push(`dialogs cancelled: ${rpc.dialogs.join("; ")}`);
 			if (ending.keeps) {
 				// pi survives this signal: whatever it ended, it ended while still running.
+				// The full wait proves survival, so it is not cut short.
 				const before = scan(tag).filter((p) => p.pid !== pi.child.pid);
 				process.kill(pi.child.pid, "SIGINT");
 				await sleep(SWITCH_GRACE_MS);
@@ -444,8 +436,7 @@ async function runEnding(ending) {
 				const before = new Set(scan(tag).filter((p) => p.pid !== pi.child.pid).map((p) => p.pid));
 				const switched = ending.id === "new" ? await rpc.send({ type: "new_session" }) : await rpc.send({ type: "switch_session", sessionPath: resumeTo });
 				if (!switched.success || switched.data?.cancelled) result.problems.push(`${ending.id}: the switch did not happen (${JSON.stringify(switched)})`);
-				await sleep(SWITCH_GRACE_MS);
-				const { cells } = judge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: pi.child.pid, only: before });
+				const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: pi.child.pid, only: before }, SWITCH_GRACE_MS);
 				result.cells.push(...cells);
 				pi.child.stdin.end();
 				await finish(result, pi, { ...ending, id: "rpc-stdin", via: `${ending.id}, then stdin closed` }, tag, seen);
@@ -485,7 +476,7 @@ async function runEnding(ending) {
 	return result;
 }
 
-/** Wait for pi's exit, give the exit-time TERMs their grace, and judge the column. */
+/** Wait for pi's exit, give the exit-time TERMs up to their grace, and judge the column. */
 async function finish(result, pi, ending, tag, seen) {
 	const exit = await awaitExit(pi, ending.via ?? ending.id);
 	result.exit = exit;
@@ -495,8 +486,7 @@ async function finish(result, pi, ending, tag, seen) {
 	}
 	// A crash ending must have crashed, not quit some other way.
 	if (ending.id.endsWith("-crash") && !pi.output().includes("exit-probe: deliberate crash")) result.problems.push(`${ending.id}: pi exited without the deliberate crash`);
-	await sleep(EXIT_GRACE_MS);
-	const { cells } = judge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: undefined });
+	const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: undefined }, EXIT_GRACE_MS);
 	for (const cell of cells) cell.via = ending.via;
 	result.cells.push(...cells);
 }
@@ -510,20 +500,14 @@ function supported(ending) {
 	return undefined;
 }
 
-const selected = ENDINGS.filter((e) => !opts.only || opts.only.split(",").includes(e.id));
-const results = [];
-for (const ending of selected) {
-	const why = supported(ending);
-	if (why) {
-		results.push({ ending: ending.id, skipped: why, cells: [], problems: [] });
-		console.log(`skip  ${ending.id}: ${why}`);
-		continue;
+/** Print one run's line, its survivors and its problems. */
+function report(ending, result) {
+	if (result.skipped) {
+		console.log(`skip  ${ending.id}: ${result.skipped}`);
+		return;
 	}
-	const started = Date.now();
-	const result = await runEnding(ending);
-	results.push(result);
 	const bad = result.cells.filter((c) => c.fails).length + result.problems.length;
-	console.log(`${bad ? "FAIL" : "ok  "}  ${ending.id} (${Math.round((Date.now() - started) / 1000)} s${result.exit ? `, pi exited in ${(result.exit.ms / 1000).toFixed(1)} s` : ""})`);
+	console.log(`${bad ? "FAIL" : "ok  "}  ${ending.id} (${Math.round(result.ms / 1000)} s${result.exit ? `, pi exited in ${(result.exit.ms / 1000).toFixed(1)} s` : ""})`);
 	for (const cell of result.cells.filter((c) => c.survivors.length > 0 || c.ended)) {
 		for (const p of [...cell.survivors, ...(cell.ended ?? [])]) console.log(`      ${cell.status.padEnd(15)} ${cell.via ?? cell.ending} / ${cell.spawner}: pid ${p.pid} ${p.command.slice(0, 220)}`);
 	}
@@ -531,6 +515,34 @@ for (const ending of selected) {
 	if (result.tail && bad) console.log(`      output tail:\n${result.tail.split("\n").slice(-25).map((l) => `        ${l}`).join("\n")}`);
 	if (result.root) console.log(`      kept ${result.root}`);
 }
+
+const selected = ENDINGS.filter((e) => !opts.only || opts.only.split(",").includes(e.id));
+const results = new Array(selected.length);
+let printed = 0;
+/** Record run `index` and print every finished run up to the first one still going, in table order. */
+const finished = (index, result) => {
+	results[index] = result;
+	while (printed < selected.length && results[printed]) report(selected[printed], results[printed++]);
+};
+const timed = async (ending) => {
+	const started = Date.now();
+	const result = await runEnding(ending);
+	return { ...result, ms: Date.now() - started };
+};
+
+// The runs with no pty, `--jobs` at a time; then the pty runs, one at a time.
+const queue = [];
+selected.forEach((ending, index) => {
+	const why = supported(ending);
+	if (why) finished(index, { ending: ending.id, skipped: why, cells: [], problems: [] });
+	else queue.push({ ending, index });
+});
+const pooled = queue.filter(({ ending }) => !ending.tui);
+const lanes = Array.from({ length: Math.max(1, Number(opts.jobs) || 1) }, async () => {
+	for (let job = pooled.shift(); job; job = pooled.shift()) finished(job.index, await timed(job.ending));
+});
+await Promise.all(lanes);
+for (const { ending, index } of queue.filter(({ ending }) => ending.tui)) finished(index, await timed(ending));
 
 // The summary: one row per spawner, one column per ending (a switch's second check is its own column).
 const columns = [];
