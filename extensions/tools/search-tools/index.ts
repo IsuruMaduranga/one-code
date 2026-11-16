@@ -15,7 +15,7 @@
  */
 
 import { feature } from "../../lib/profile/feature.ts";
-import { toolLive } from "../../lib/profile/profile.ts";
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { searchToolsEnabled } from "../../lib/models/model-tier.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
@@ -24,10 +24,14 @@ import { withSearchTools } from "./tools.ts";
 
 function searchToolsExtension(pi: ExtensionAPI) {
 	const requestTier = sessionModelTier(pi);
+	// The session's own tools: a child's answer is not the main session's
+	// (pi's tool flags never reach a child), and the bash description is told
+	// from the same view.
+	const view = sessionView(pi);
 	const apply = () => {
 		const tier = requestTier();
 		const active = pi.getActiveTools();
-		const next = withSearchTools(active, searchToolsEnabled(tier, toolLive));
+		const next = withSearchTools(active, searchToolsEnabled(tier, (tool) => view.live.has(tool)));
 		if (next.join("\0") !== active.join("\0")) pi.setActiveTools(next);
 	};
 
