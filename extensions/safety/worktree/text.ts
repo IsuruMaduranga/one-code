@@ -6,6 +6,7 @@
  * guards' refusals are in lib/rules/worktree-guard-text.ts: subagent
  * worktree isolation uses them too.
  */
+import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import type { CheckoutProgram } from "../../lib/shell/git-checkout-programs.ts";
 import { checkoutProgram } from "../../lib/rules/worktree-guard-text.ts";
 
@@ -51,7 +52,7 @@ export interface WorktreeText {
 		exit: Record<"action" | "discard_changes", string>;
 	};
 	/** Search terms for `tool_search`, per tool, beyond its name and description. */
-	searchKeywords: Record<"enter_worktree" | "exit_worktree", string[]>;
+	searchKeywords: Record<Extract<DeferrableTool, `${string}_worktree`>, string[]>;
 }
 
 /** The group's results, refusals and notes, which the base words (`worktreeResultText`). */

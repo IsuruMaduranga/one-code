@@ -46,6 +46,7 @@ export type { SubagentsText } from "../agents/subagents/text.ts";
 export type { SystemPromptText } from "../request/system-prompt/text.ts";
 export type { TasksText } from "../tools/tasks/text.ts";
 export type { ToolSearchText } from "../request/tool-search/text.ts";
+export type { DeferrableTool } from "../lib/request/deferrable-tools.ts";
 export type { ToolStyleText } from "../tools/tool-style/text.ts";
 export type { WebFetchText } from "../tools/web-fetch/text.ts";
 export type { WebSearchText } from "../tools/web/text.ts";
@@ -54,3 +55,5 @@ export type { WorktreeText } from "../safety/worktree/text.ts";
 export type { ProductProvider, ProviderVendor, WireFeature } from "../lib/profile/product-providers.ts";
 export type { ReadOnlyCommands, ReadOnlySubcommand } from "../lib/shell/product-read-only.ts";
 export type { ProductLanguageServer } from "../lib/profile/language-servers.ts";
+// The folder every profile of the product shares (sign-in, sessions, users' profiles, a product's downloads), whichever profile runs: a declaration that names a file there (a language server's jar) needs it at load, where no session exists. `brand.mjs` is plain JS with no pi imports, a leaf the text may load.
+export { sharedStateDir } from "../lib/profile/brand.mjs";

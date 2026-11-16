@@ -40,9 +40,9 @@ import { projectMemoryDir } from "../../extensions/lib/context/memory.ts";
 const WRAPPED = Symbol.for("one-code.golden-fixture");
 
 const REPLY_TEXT = "<analysis>Golden.</analysis>\n<summary>Golden summary.</summary>";
-type Messages = Array<{ role?: string; content?: unknown }>;
+export type Messages = Array<{ role?: string; content?: unknown }>;
 /** A scripted call; an input computed from the conversation so far reads what an earlier result said. */
-type ToolCall = { id: string; name: string; input: Record<string, unknown> | ((messages: Messages) => Record<string, unknown>) };
+export type ToolCall = { id: string; name: string; input: Record<string, unknown> | ((messages: Messages) => Record<string, unknown>) };
 
 const TOOL_CALLS: ToolCall[] = [
 	{ id: "toolu_golden_1", name: "read", input: { path: "README.md" } },
@@ -847,24 +847,43 @@ function roundsFor(text: string): ToolCall[][] {
  * it, and the newest turn is tool results). Mid-conversation `system`
  * messages may sit anywhere after it, so the search skips them.
  */
-function scriptedCalls(messages: Messages): ToolCall[] | undefined {
-	const round = scriptedRound(messages);
+function scriptedCalls(model: ScriptedModel, messages: Messages): ToolCall[] | undefined {
+	const round = scriptedRound(model, messages);
 	return round?.map((call) => (typeof call.input === "function" ? { ...call, input: call.input(messages) } : call));
 }
 
-function scriptedRound(messages: Messages): ToolCall[] | undefined {
+function scriptedRound(model: ScriptedModel, messages: Messages): ToolCall[] | undefined {
 	const isResults = (m: { role?: string; content?: unknown }) => m.role === "tool" || (m.role === "user" && JSON.stringify(m.content).includes("tool_result"));
-	const goldenAt = messages.findLastIndex((m) => m.role === "user" && !isResults(m) && JSON.stringify(m.content).includes("GOLDEN_TOOLS"));
-	if (goldenAt < 0 || messages.slice(goldenAt + 1).some((m) => m.role === "user" && !isResults(m))) return undefined;
-	const rounds = roundsFor(JSON.stringify(messages[goldenAt].content));
-	const after = messages.slice(goldenAt + 1).filter((m) => m.role !== "system");
+	const goldenAt = messages.findLastIndex((m) => m.role === "user" && !isResults(m) && JSON.stringify(m.content).includes(model.marker));
+	const after = messages.slice(goldenAt + 1).filter((m) => m.role !== "system" && !model.ignore?.(m));
+	if (goldenAt < 0 || after.some((m) => m.role === "user" && !isResults(m))) return undefined;
+	const rounds = model.roundsFor(JSON.stringify(messages[goldenAt].content));
 	const replies = after.filter((m) => m.role === "assistant").length;
 	if (replies === 0) return rounds[0];
 	const last = after.at(-1);
 	return last && isResults(last) ? rounds[replies] : undefined;
 }
 
-export default function goldenFixture(_pi: ExtensionAPI) {
+/**
+ * A scripted model: the user message that carries `marker` starts the script,
+ * and `roundsFor(its text)` gives the rounds of calls that answer it. Every
+ * other request gets the fixed reply (or a classifier verdict).
+ */
+export interface ScriptedModel {
+	marker: string;
+	roundsFor(text: string): ToolCall[][];
+	/** Messages the script reads past (a notification steered in mid-script); none by default. */
+	ignore?(message: Messages[number]): boolean;
+}
+
+const GOLDEN_MODEL: ScriptedModel = { marker: "GOLDEN_TOOLS", roundsFor };
+
+/**
+ * Wrap `globalThis.fetch` with `model` once per process (a child session's
+ * load of the same fixture finds it wrapped). Another offline harness
+ * (exit-probe-fixture.ts) installs its own script through this.
+ */
+export function installScriptedModel(model: ScriptedModel): void {
 	if ((globalThis.fetch as { [WRAPPED]?: true })[WRAPPED]) return;
 	const out = process.env.GOLDEN_DUMP;
 	if (!out) throw new Error("golden-fixture: set GOLDEN_DUMP to the file the request bodies go to");
@@ -890,7 +909,7 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 		const server = anthropic ? serverToolReply(raw) : undefined;
 		if (server) return new Response(server, { status: 200, headers: { "content-type": "text/event-stream", "request-id": "req_golden" } });
 		const verdict = classifierVerdict(raw);
-		const calls = verdict === undefined ? scriptedCalls(body.messages as Array<{ role?: string; content?: unknown }>) : undefined;
+		const calls = verdict === undefined ? scriptedCalls(model, body.messages as Array<{ role?: string; content?: unknown }>) : undefined;
 		const text = verdict ?? REPLY_TEXT;
 		return new Response(anthropic ? anthropicReply(calls, text) : chatReply(calls, text), {
 			status: 200,
@@ -899,4 +918,8 @@ export default function goldenFixture(_pi: ExtensionAPI) {
 	}) as typeof fetch & { [WRAPPED]?: true };
 	wrapped[WRAPPED] = true;
 	globalThis.fetch = wrapped;
+}
+
+export default function goldenFixture(_pi: ExtensionAPI) {
+	installScriptedModel(GOLDEN_MODEL);
 }

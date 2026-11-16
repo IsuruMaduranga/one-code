@@ -16,7 +16,7 @@ import { createWriteStream } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { BackgroundTask } from "../agents/task-registry.ts";
 import { whenAborted } from "../core/abort.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "./process-tree.ts";
+import { KILL_GRACE_MS, spawnOwnedTree, waitForChildExit } from "./process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "./shell-spawn.ts";
 import type { ShellResultText } from "./shell-text.ts";
 
@@ -64,13 +64,17 @@ export interface StartBackgroundBashOptions {
 }
 
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
-	// Own process group, so stop/timeout can signal the whole tree (lib/shell-run/process-tree.ts).
-	const child = spawnShellCommand(options.shell ?? bashSpawnOrThrow(), options.command, {
-		cwd: options.cwd,
-		...detachedSpawnOptions(),
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-	rememberProcessGroup(child);
+	// An owned tree, so stop/timeout can signal the whole tree (lib/shell-run/process-tree.ts).
+	// What a finished shell leaves behind is deliberate: no endGroupWithLauncher.
+	const shell = options.shell ?? bashSpawnOrThrow();
+	const tree = spawnOwnedTree((detached) =>
+		spawnShellCommand(shell, options.command, {
+			cwd: options.cwd,
+			...detached,
+			stdio: ["ignore", "pipe", "pipe"],
+		}),
+	);
+	const child = tree.child;
 
 	let stored = "";
 	let overflowed = false;
@@ -120,7 +124,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 			stopRequested = true;
 			// SIGTERM the tree, SIGKILL after the grace: a command that traps TERM
 			// would otherwise never close, and a blocking one-shot run never return.
-			stopProcessTree(child, KILL_GRACE_MS);
+			tree.stop(KILL_GRACE_MS);
 		},
 		finished,
 	};
@@ -129,7 +133,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	if (options.timeoutSeconds && options.timeoutSeconds > 0) {
 		timer = setTimeout(() => {
 			timedOut = true;
-			stopProcessTree(child, KILL_GRACE_MS);
+			tree.stop(KILL_GRACE_MS);
 		}, options.timeoutSeconds * 1000);
 		timer.unref?.();
 	}

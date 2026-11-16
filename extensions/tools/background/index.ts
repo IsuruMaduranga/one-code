@@ -22,9 +22,10 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { whenAborted } from "../../lib/core/abort.ts";
+import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
+import { KILL_GRACE_MS, spawnOwnedTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../../lib/shell-run/shell-spawn.ts";
 import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
@@ -565,19 +566,23 @@ function backgroundExtension(pi: ExtensionAPI) {
 
 			let stop: () => void;
 			if (params.command) {
-				// Own process group: stop() must end the COMMAND, not just the `$SHELL -c`
+				// An owned tree: stop() must end the COMMAND, not just the `$SHELL -c`
 				// leader — with zsh a `cmd; echo` or a pipeline otherwise lives on as an
 				// orphan holding the stdout pipe, so the task never finishes and, in a
 				// one-shot run, the process cannot exit (LIFECYCLE-REVIEW M2, measured).
 				// The session's bash (Git Bash on Windows) — lib/shell-run/shell-spawn.ts.
 				const bash = bashSpawn();
-				if (!bash.spawn) return startFailed({ kind: "noShell", osMessage: bash.error });
-				const child = spawnShellCommand(bash.spawn, params.command, {
-					cwd: ctx.cwd,
-					...detachedSpawnOptions(),
-					stdio: ["ignore", "pipe", "pipe"],
-				});
-				rememberProcessGroup(child);
+				const shell = bash.spawn;
+				if (!shell) return startFailed({ kind: "noShell", osMessage: bash.error });
+				const command = params.command;
+				const tree = spawnOwnedTree((detached) =>
+					spawnShellCommand(shell, command, {
+						cwd: ctx.cwd,
+						...detached,
+						stdio: ["ignore", "pipe", "pipe"],
+					}),
+				);
+				const child = tree.child;
 				const lines = new MonitorLineSplitter();
 				// Streaming decoders: a UTF-8 character split across reads stays whole.
 				const stdoutText = new StringDecoder("utf8");
@@ -607,7 +612,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				);
 				stop = () => {
 					stopRequested = true;
-					stopProcessTree(child, KILL_GRACE_MS);
+					tree.stop(KILL_GRACE_MS);
 				};
 			} else {
 				let ws: WebSocket;
@@ -873,14 +878,15 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	// schedule_wakeup stays eager, as Claude Code's ScheduleWakeup is.
-	for (const [name, keywords] of Object.entries({
+	const deferredKeywords = {
 		monitor: ["monitor", "watch", "background", "tail", "events", "stream", "websocket"],
 		task_output: ["task", "background", "output", "status", "wait"],
 		task_stop: ["task", "background", "stop", "kill", "cancel"],
 		cron_create: ["cron", "schedule", "recurring", "remind", "timer", "every", "later"],
 		cron_list: ["cron", "schedule", "list", "jobs", "scheduled"],
 		cron_delete: ["cron", "schedule", "cancel", "delete", "stop"],
-	})) {
+	} satisfies Partial<Record<DeferrableTool, string[]>>;
+	for (const [name, keywords] of Object.entries(deferredKeywords)) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords });
 	}
 

@@ -135,7 +135,7 @@ export class DeferredRegistry {
 
 /** The listing's profile words: a hint per tool, and the closing paragraph. */
 export interface ListingWords {
-	listingHints?: Readonly<Record<string, string>>;
+	listingHints?: Readonly<Record<string, string | undefined>>;
 	listingClose?: string;
 }
 
@@ -148,7 +148,7 @@ export type OwnerHints = (name: string) => string | undefined;
  */
 const listingLine = (name: string, words: ListingWords, ownerHints?: OwnerHints): string => {
 	const profile = words.listingHints;
-	const hint = profile && Object.hasOwn(profile, name) ? profile[name] : ownerHints?.(name);
+	const hint = profile && Object.hasOwn(profile, name) && profile[name] !== undefined ? profile[name] : ownerHints?.(name);
 	return hint ? `${name}: ${hint}` : name;
 };
 

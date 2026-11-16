@@ -239,6 +239,20 @@ describe("mcp wiring", () => {
 		expect(instructions!.order).toBe(CONTEXT_ORDER.mcp);
 	});
 
+	it("connects each server once when one session starts twice, and closes it at shutdown", async () => {
+		// RPC's new_session emits session_start twice on the same instance
+		// (lib/notify/session-lifecycle.ts). A second connect replaced the first
+		// connection in the live map, and the first was never closed: its server
+		// ran until the process exited (the exit probe's resume run).
+		writeUserServers({ demo: { command: "demo-server", args: [] } });
+		await boot();
+		await fake.fireOne("session_start", { reason: "new" }, createFakeCtx({ cwd, hasUI: false }));
+		expect(state.connectCalls).toEqual(["demo"]);
+
+		await fake.fire("session_shutdown", {}, createFakeCtx({ cwd, hasUI: false }));
+		expect(state.closeCalls).toEqual(["demo"]);
+	});
+
 	it("a resumed epoch that told a server whose configuration was removed hears it dropped at the tail", async () => {
 		await boot(); // no config is deliberately written
 		const notices = renderInEpoch(fake.events, { connected: [{ name: "gone", instructions: "Use the old server." }], failed: [] });

@@ -12,10 +12,12 @@
  * is what every task and hook waits on (findings §22, 2026-09-19 addendum).
  */
 import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
+import { alive, until } from "./helpers/process-alive.ts";
 
 const win32 = process.platform === "win32";
 
@@ -257,6 +259,82 @@ describe("stopProcessTree", () => {
 		const settled = settledWithin(child, 4000);
 		stopProcessTree(child, 300);
 		expect(await settled).toBeLessThan(4000);
+	});
+});
+
+describe("spawnOwnedTree", () => {
+	/** A launcher that starts a member in its group (off the test's pipes), prints the member's pid and exits at once. */
+	const launcherLeavesMember = "sleep 30 </dev/null >/dev/null 2>&1 & echo $!";
+	/** Room for a loaded full-suite run: these wait on real processes. */
+	const LOADED_MS = 15_000;
+
+	/** Start `command` as an owned tree; resolves once the leader has printed its first line. */
+	const startTree = async (command: string, options?: Parameters<typeof spawnOwnedTree>[1]) => {
+		const tree = spawnOwnedTree((detached) => spawn(shell, ["-c", command], { ...detached, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }), options);
+		let out = "";
+		tree.child.stdout?.on("data", (chunk) => (out += chunk));
+		while (!out.includes("\n")) await new Promise((r) => setTimeout(r, 5));
+		return { tree, firstLine: out.trim() };
+	};
+
+	it("hands the spawn call the detached options and returns its child", async () => {
+		const start = vi.fn(() => spawn(shell, ["-c", "exit 0"], { stdio: "ignore", windowsHide: true }));
+		const tree = spawnOwnedTree(start);
+		expect(start).toHaveBeenCalledWith(detachedSpawnOptions());
+		expect(tree.child).toBe(start.mock.results[0]!.value);
+		await waitForChildExit(tree.child);
+	});
+
+	it.skipIf(win32)("starts the child as the leader of its own group", async () => {
+		const { tree } = await startTree("echo ready; sleep 30");
+		try {
+			expect(tree.alive()).toBe(true);
+		} finally {
+			tree.kill("SIGKILL");
+		}
+		expect(await until(() => !tree.alive(), 200)).toBe(true);
+	}, LOADED_MS);
+
+	it.skipIf(win32)("ends the rest of the group when the launcher exits, with endGroupWithLauncher", async () => {
+		const { tree, firstLine } = await startTree(launcherLeavesMember, { endGroupWithLauncher: true });
+		const member = Number(firstLine);
+		try {
+			expect(member).toBeGreaterThan(0);
+			expect(await until(() => !alive(member), 200)).toBe(true);
+			expect(tree.alive()).toBe(false);
+		} finally {
+			tree.kill("SIGKILL");
+		}
+	}, LOADED_MS);
+
+	it.skipIf(win32)("leaves what a finished leader started running, without endGroupWithLauncher", async () => {
+		const { tree, firstLine } = await startTree(launcherLeavesMember);
+		const member = Number(firstLine);
+		try {
+			if (tree.child.exitCode === null) await once(tree.child, "exit");
+			await new Promise((r) => setTimeout(r, 300));
+			expect(alive(member)).toBe(true);
+			expect(tree.alive()).toBe(true);
+		} finally {
+			tree.kill("SIGKILL");
+		}
+		expect(await until(() => !alive(member), 200)).toBe(true);
+	}, LOADED_MS);
+
+	it.skipIf(win32)("stop SIGTERMs the tree and SIGKILLs it after the grace", async () => {
+		const { tree } = await startTree("trap '' TERM; echo ready; sleep 30");
+		const closed = closeWithin(tree.child, 4000);
+		tree.stop(300);
+		const elapsed = await closed;
+		expect(elapsed).toBeGreaterThanOrEqual(250);
+		expect(elapsed).toBeLessThan(4000);
+	});
+
+	it("kill ends the whole tree at once", async () => {
+		const { tree } = await startTree("echo ready; sleep 30 | cat");
+		const settled = settledWithin(tree.child, 3000);
+		tree.kill("SIGKILL");
+		expect(await settled).toBeLessThan(3000);
 	});
 });
 

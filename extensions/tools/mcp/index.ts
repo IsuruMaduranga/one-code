@@ -20,6 +20,7 @@ import os from "node:os";
 import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { MCP_RESOURCE_TOOLS } from "../../lib/request/deferrable-tools.ts";
 import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
@@ -584,13 +585,21 @@ function mcpExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		for (const name of ["list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]) {
+		for (const name of MCP_RESOURCE_TOOLS) {
 			pi.events.emit(DEFER_CHANNEL, { name, keywords: text.resources.searchKeywords });
 		}
 		pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		// RPC's new_session emits session_start twice on the same instance
+		// (lib/notify/session-lifecycle.ts): connect once. A second connect
+		// replaced each connection in `connections`, and the replaced one was
+		// never closed, so its server ran until the process exited.
+		if (connecting) {
+			if (!ctx.hasUI) await connecting;
+			return;
+		}
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire
 		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive
