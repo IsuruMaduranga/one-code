@@ -28,7 +28,7 @@ await fetch(base + "/v1/messages?key=" + key, {
 // pi installs its own fetch at startup: a replacement that wraps the previous one.
 const previous = globalThis.fetch;
 globalThis.fetch = (input, init) => previous(input, init);
-await fetch(base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }) });
+await fetch(base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }, null, 2) });
 // A replacement that does not call the previous one (the golden fixture's shape).
 globalThis.fetch = async () => new Response("{}", { status: 503 });
 await fetch("https://example.invalid/catalog", { headers: { authorization: "Bearer " + key } });
@@ -70,6 +70,11 @@ describe("capture-fetch preload and summary", () => {
 			["example.invalid", "/down", "error"],
 		]);
 		expect(rows[0].body).toMatchObject({ model: "m-1", messages: [] });
+		// The size of the body as sent, not of the record's re-serialized copy.
+		expect(rows[0].bytes).toBe(Buffer.byteLength(JSON.stringify({ model: "m-1", cache_control: { type: "ephemeral" }, system: [{ type: "text", text: "s", cache_control: { type: "ephemeral" } }], messages: [] })));
+		// A pretty-printed body: its size is its own, larger than the record's compact copy.
+		expect(rows[1].bytes).toBe(Buffer.byteLength(JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }, null, 2)));
+		expect(rows[3].bytes).toBe(0);
 		expect(rows[3].body).toEqual({ unreadable: "ReadableStream" });
 		expect(rows[4].body).toEqual({ model: "m-3", input: [] });
 		expect(rows[5].body).toBeNull();
