@@ -30,6 +30,12 @@ on:
       - "test/e2e/lib/harness.mjs"
       - ".github/workflows/live-smoke.yml"
 
+# The job runs code it did not write (npm's install scripts, a live model's
+# tool calls) and writes nothing to the repository, so the token carries read
+# access only. The OpenRouter key reaches it as a secret, not through the token.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: ${{ matrix.os }} (${{ matrix.shell }})
