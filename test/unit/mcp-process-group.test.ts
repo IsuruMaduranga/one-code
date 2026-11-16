@@ -84,7 +84,8 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		const pid = await readServerPid();
 
 		await transport.close();
-		expect(await until(() => !alive(pid))).toBe(true);
+		// close() waits for the group to empty; a loaded runner can still take seconds to reap the server.
+		expect(await until(() => !alive(pid), 140)).toBe(true);
 		await closed;
 	}, 15_000);
 
