@@ -15,10 +15,12 @@
  *   built-in APIs and filled an empty key from the environment, which pi's
  *   provider never does.
  *
- * - OpenRouter's open-weight models: `openRouterCacheMarksRegistration` wraps
+ * - OpenRouter's Chat Completions models: `openRouterRegistration` wraps
  *   pi-ai's `openAICompletionsApi()` so their requests carry cache breakpoints
- *   (lib/request/openrouter-cache-marks.ts), registered for the `openrouter`
- *   provider by request/cache-marks. Side calls reach it through the registry.
+ *   (lib/request/openrouter-cache-marks.ts) and skip the hosts that defeat the
+ *   cache (lib/request/openrouter-ignored-hosts.ts), registered for the
+ *   `openrouter` provider by request/cache-marks. Side calls reach it through
+ *   the registry.
  *
  * `anthropicMessagesApi` and `openAICompletionsApi` exist on every pi-ai in the
  * peer range (1.0.0 to 1.5.2, through `/compat`); when the running pi-ai lacks
@@ -30,7 +32,7 @@ import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { credentialCause, credentialRefusalMessage, isCredentialRefusal } from "./credential-refusal.ts";
 import { type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMessageThreads } from "./message-threads.ts";
-import { type OpenRouterCacheMarksConfig, openRouterCacheMarksProvider } from "./openrouter-cache-marks.ts";
+import { type OpenRouterProviderConfig, openRouterProvider } from "./openrouter-cache-marks.ts";
 
 type Stream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 
@@ -49,15 +51,15 @@ export function threadlessAnthropicRegistration(): ThreadlessProviderConfig<Mode
 }
 
 /**
- * The `pi.registerProvider("openrouter", …)` config that puts cache breakpoints
- * on the open-weight models: pi-ai's Chat Completions implementation (the one
- * pi's `openrouter` provider dispatches to) with the model's
- * `cacheControlFormat` set, handed pi's resolved options untouched. Undefined
- * when the running pi-ai has no `openAICompletionsApi`.
+ * The `pi.registerProvider("openrouter", …)` config that passes each Chat
+ * Completions model through `adjust` (cache breakpoints, skipped hosts) before
+ * pi-ai's implementation (the one pi's `openrouter` provider dispatches to)
+ * builds the request, handed pi's resolved options untouched. Undefined when
+ * the running pi-ai has no `openAICompletionsApi`.
  */
-export function openRouterCacheMarksRegistration(): OpenRouterCacheMarksConfig<Model<Api>, TranscriptContext, SimpleStreamOptions, AssistantMessageEventStream> | undefined {
+export function openRouterRegistration(adjust: (model: Model<Api>) => Model<Api>): OpenRouterProviderConfig<Model<Api>, TranscriptContext, SimpleStreamOptions, AssistantMessageEventStream> | undefined {
 	if (typeof piAi.openAICompletionsApi !== "function") return undefined;
-	return openRouterCacheMarksProvider(piAi.openAICompletionsApi().streamSimple);
+	return openRouterProvider(piAi.openAICompletionsApi().streamSimple, adjust);
 }
 
 /** The slice of pi's model registry a side call sends through, and asks why a credential did not resolve. */
