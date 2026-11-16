@@ -392,13 +392,16 @@ const pendingKills = new Set<ChildProcess>();
  * the leader's state: a group already gone makes that an ESRCH, and a live
  * group keeps its id reserved, so the id cannot name anyone else. The timer
  * is unref'd (it must never be what keeps a one-shot process alive); a
- * process exit before it fires hands the group to the exit watchdog.
+ * process exit before it fires hands the group to the exit watchdog. A tree
+ * already in its grace is left to it: a second SIGTERM (with its SIGSTOP and
+ * SIGCONT) could land in a server's shutdown handler.
  */
 function stopProcessTree(child: ChildProcess, graceMs: number): void {
+	if (pendingKills.has(child)) return;
 	killProcessTree(child, "SIGTERM");
 	// taskkill /F is already forceful; there is no gentler first signal to grace.
 	if (process.platform === "win32") return;
-	if (child.pid == null || pendingKills.has(child)) return;
+	if (child.pid == null) return;
 	pendingKills.add(child);
 	const timer = setTimeout(() => {
 		if (!pendingKills.delete(child)) return;
@@ -410,7 +413,7 @@ function stopProcessTree(child: ChildProcess, graceMs: number): void {
 /** A long-lived child in its own process group, owned until this process exits, and how to end its tree. */
 export interface OwnedTree {
 	readonly child: ChildProcess;
-	/** SIGTERM the tree now and SIGKILL its group after `graceMs` (`stopProcessTree`). */
+	/** SIGTERM the tree now and SIGKILL its group after `graceMs`; a tree already stopping is left to that stop (`stopProcessTree`). */
 	stop(graceMs: number): void;
 	/** Send one signal to the whole tree, with no grace (`killProcessTree`). */
 	kill(signal: NodeJS.Signals): void;

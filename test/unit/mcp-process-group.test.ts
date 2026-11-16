@@ -88,6 +88,28 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		await closed;
 	}, 15_000);
 
+	it("gets one SIGTERM, and close() waits for it, when the launcher exits on the closed stdin", async () => {
+		// The launcher exits once its stdin closes and leaves the server, which
+		// takes half a second in its SIGTERM handler: the launcher's exit already
+		// stopped the group, so close() must not signal it again or return early.
+		const log = join(dir, "terms.log");
+		const server = [
+			`require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));`,
+			`process.on("SIGTERM", () => { require("node:fs").appendFileSync(process.env.TERM_LOG, "TERM\\n"); setTimeout(() => process.exit(0), 500); });`,
+			`setInterval(() => {}, 1000);`,
+		].join("\n");
+		const transport = new ProcessGroupStdioTransport(
+			{ command: "/bin/sh", args: ["-c", `"${process.execPath}" -e "$SERVER" & cat >/dev/null`], env: { ...process.env, SERVER: server, PID_FILE: pidFile, TERM_LOG: log } },
+			framing,
+		);
+		await transport.start();
+		const pid = await readServerPid();
+
+		await transport.close();
+		expect(alive(pid)).toBe(false);
+		expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["TERM"]);
+	}, 15_000);
+
 	it("is ended when its launcher dies mid-session", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		await transport.start();

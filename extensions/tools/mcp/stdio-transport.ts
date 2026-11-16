@@ -43,6 +43,11 @@ export interface StdioFraming {
 	serializeMessage(message: JSONRPCMessage): string;
 }
 
+/** How often `close()` checks whether the stopped group has emptied. */
+const GROUP_POLL_MS = 50;
+/** How long `close()` waits past the TERM grace for the SIGKILLed group to empty. */
+const KILL_SETTLE_MS = 250;
+
 export class ProcessGroupStdioTransport implements Transport {
 	onclose?: () => void;
 	onerror?: (error: Error) => void;
@@ -138,10 +143,14 @@ export class ProcessGroupStdioTransport implements Transport {
 				// Already closed.
 			}
 			await within(KILL_GRACE_MS);
-			// The leader still running, or a group it left behind: TERM the group now, KILL it after the grace.
+			// The leader still running, or a group it left behind: TERM the group now, KILL it after the
+			// grace. A launcher that exited during the wait already started that stop (endGroupWithLauncher),
+			// which `stop` leaves alone. Either way, wait for the group itself, not the leader's exit.
 			if (tree.alive()) {
 				tree.stop(KILL_GRACE_MS);
-				await within(KILL_GRACE_MS);
+				for (let waited = 0; tree.alive() && waited < KILL_GRACE_MS + KILL_SETTLE_MS; waited += GROUP_POLL_MS) {
+					await new Promise<void>((resolve) => setTimeout(resolve, GROUP_POLL_MS).unref());
+				}
 			}
 		}
 		this.readBuffer.clear();
