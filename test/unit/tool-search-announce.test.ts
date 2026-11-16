@@ -94,10 +94,11 @@ describe("tool-search listing and render-time addenda", () => {
 		const gpt = { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" };
 		const hints = { enter_plan_mode: "When the task is not simple, use it.", web_fetch: "When you fetch, use it." };
 		const soft = "Only when asked, use it.";
-		/** Run `body` on a profile whose words give enter_plan_mode a hint for other models and web_fetch none. */
+		const close = "Load a tool before calling it.";
+		/** Run `body` on a profile whose words give enter_plan_mode a hint for other models and web_fetch none, and close the listing with `close`. */
 		const withWords = (body: () => void) => {
 			const active = activeProfile();
-			const toolSearch = { ...active.text.toolSearch!, listingHints: hints, listingHintsOtherModels: { enter_plan_mode: soft } };
+			const toolSearch = { ...active.text.toolSearch!, listingHints: hints, listingHintsOtherModels: { enter_plan_mode: soft }, listingClose: close };
 			setActiveProfileForTest({ ...active, text: { ...active.text, toolSearch } });
 			try {
 				body();
@@ -118,7 +119,7 @@ describe("tool-search listing and render-time addenda", () => {
 		it("keeps the profile's hint byte for byte on a Claude-family model, in the listing and the addendum", () =>
 			withWords(() => {
 				const fake = start(claude);
-				expect(listed(fake)).toEqual([toolSearchResultText.listingHead, `web_fetch: ${hints.web_fetch}`, `enter_plan_mode: ${hints.enter_plan_mode}`, "", activeProfile().text.toolSearch!.listingClose]);
+				expect(listed(fake)).toEqual([toolSearchResultText.listingHead, `web_fetch: ${hints.web_fetch}`, `enter_plan_mode: ${hints.enter_plan_mode}`, "", close]);
 				expect(fake.render({ told: { tools: ["web_fetch"] }, model: claude })).toEqual([
 					{ text: [toolSearchResultText.addendumHead, `enter_plan_mode: ${hints.enter_plan_mode}`].join("\n"), facts: [{ kind: "tools", names: ["enter_plan_mode"] }] },
 				]);
