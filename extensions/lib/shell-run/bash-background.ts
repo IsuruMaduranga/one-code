@@ -16,7 +16,7 @@ import { createWriteStream } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { BackgroundTask } from "../agents/task-registry.ts";
 import { whenAborted } from "../core/abort.ts";
-import { KILL_GRACE_MS, spawnOwnedTree, waitForChildExit } from "./process-tree.ts";
+import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree, waitForChildExit } from "./process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "./shell-spawn.ts";
 import type { ShellResultText } from "./shell-text.ts";
 
@@ -63,17 +63,18 @@ export interface StartBackgroundBashOptions {
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
+/**
+ * Run `command` under `shell` as an owned tree (lib/shell-run/process-tree.ts),
+ * stdout and stderr piped, so a stop or a timeout signals the whole tree and
+ * not only the `$SHELL -c` leader. What a finished shell leaves behind is
+ * deliberate: no endGroupWithLauncher. Background shells and monitors start here.
+ */
+export function spawnOwnedShell({ shell, command, cwd }: { shell: ShellSpawn; command: string; cwd: string }): OwnedTree {
+	return spawnOwnedTree((detached) => spawnShellCommand(shell, command, { cwd, ...detached, stdio: ["ignore", "pipe", "pipe"] }));
+}
+
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
-	// An owned tree, so stop/timeout can signal the whole tree (lib/shell-run/process-tree.ts).
-	// What a finished shell leaves behind is deliberate: no endGroupWithLauncher.
-	const shell = options.shell ?? bashSpawnOrThrow();
-	const tree = spawnOwnedTree((detached) =>
-		spawnShellCommand(shell, options.command, {
-			cwd: options.cwd,
-			...detached,
-			stdio: ["ignore", "pipe", "pipe"],
-		}),
-	);
+	const tree = spawnOwnedShell({ shell: options.shell ?? bashSpawnOrThrow(), command: options.command, cwd: options.cwd });
 	const child = tree.child;
 
 	let stored = "";

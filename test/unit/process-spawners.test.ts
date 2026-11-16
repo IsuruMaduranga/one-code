@@ -36,7 +36,10 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/lib/agents/agent-worktree.ts": { kind: "awaited", how: "git, promisified" },
 	"extensions/lib/context/git-status.ts": { kind: "awaited", how: "git, synchronous with a timeout" },
 	"extensions/lib/context/git.ts": { kind: "awaited", how: "git, with a timeout" },
-	"extensions/lib/shell-run/bash-background.ts": { kind: "registered", how: "background shells: an owned tree, stopped on task_stop or the timeout; a finished shell's leftovers live until the process exits" },
+	"extensions/lib/shell-run/bash-background.ts": {
+		kind: "registered",
+		how: "background shells and monitors (spawnOwnedShell): an owned tree, stopped on task_stop, the timeout or the deadline; a finished shell's leftovers live until the process exits",
+	},
 	"extensions/lib/shell-run/process-tree.ts": {
 		kind: "exception",
 		how: "the kills themselves: taskkill.exe, unref'd, ends on its own; the exit watchdog SIGKILLs what outlasts SIGTERM and exits within KILL_GRACE_MS",
@@ -49,7 +52,6 @@ const SPAWNERS: Record<string, Lifetime> = {
 	"extensions/safety/hooks/executor.ts": { kind: "awaited", how: "waitForChildExit with a timeout that kills the hook's group; a SessionEnd hook is fire-and-forget by design" },
 	"extensions/safety/permissions/auto-mode/setup-run.ts": { kind: "awaited", how: "probe commands with a timeout" },
 	"extensions/safety/worktree/index.ts": { kind: "awaited", how: "git, promisified" },
-	"extensions/tools/background/index.ts": { kind: "registered", how: "monitors: an owned tree, stopped on task_stop or the deadline" },
 	"extensions/tools/bash/index.ts": { kind: "awaited", how: "pi's bash tool waits for its command and kills the tree on abort or timeout" },
 	"extensions/tools/lsp/client.ts": { kind: "registered", how: "language servers: an owned tree, killed on stop, the group ended when its launcher exits" },
 	"extensions/tools/mcp/stdio-transport.ts": { kind: "registered", how: "stdio MCP servers: an owned tree, stopped on close, the group ended when its launcher exits" },
