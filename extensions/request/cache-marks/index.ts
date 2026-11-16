@@ -16,7 +16,8 @@
  * It also registers the `openrouter` provider's Chat Completions stream with
  * pi's own breakpoints turned on for the open-weight models, some of whose
  * hosts cache nothing without them (lib/request/openrouter-cache-marks.ts).
- * `*_CACHE_MARKS=0` turns both off, to compare a run with and without marks.
+ * `*_CACHE_MARKS=0` turns both off, to compare a run with and without marks;
+ * `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones.
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
@@ -25,12 +26,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../../lib/request/anthropic-server-tools.ts";
 import { openRouterCacheMarksRegistration } from "../../lib/request/anthropic-stream.ts";
+import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled } from "../../lib/request/openrouter-cache-marks.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
-	if (knobValue("CACHE_MARKS") === "0") return;
-	const openRouter = openRouterCacheMarksRegistration();
+	if (knobValue(CACHE_MARKS_KNOB) === "0") return;
+	const openRouter = openRouterCacheMarksEnabled() ? openRouterCacheMarksRegistration() : undefined;
 	if (openRouter) pi.registerProvider("openrouter", openRouter);
 	/** The plan of the request being sent; a warm reuses it. */
 	let plan: RequestPlan | undefined;

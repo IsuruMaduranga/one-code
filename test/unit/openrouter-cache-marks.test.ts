@@ -1,14 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { getModels } from "@earendil-works/pi-ai/compat";
-import { openRouterCacheMarksProvider, takesOpenRouterCacheMarks, withOpenRouterCacheMarks } from "../../extensions/lib/request/openrouter-cache-marks.ts";
+import { MARKED_VENDORS, openRouterCacheMarksEnabled, openRouterCacheMarksProvider, takesOpenRouterCacheMarks, withOpenRouterCacheMarks } from "../../extensions/lib/request/openrouter-cache-marks.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { openRouterCacheMarksRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
 
 const model = (id: string, extra: Record<string, unknown> = {}) => ({ id, api: "openai-completions", provider: "openrouter", compat: { thinkingFormat: "openrouter" }, ...extra });
 
 describe("takesOpenRouterCacheMarks", () => {
-	it("marks OpenRouter's open-weight Chat Completions models", () => {
-		for (const id of ["qwen/qwen3.8-27b", "qwen/qwen3.7-flash", "deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3", "moonshotai/kimi-k3", "minimax/minimax-m3", "~moonshotai/kimi-latest", "rekaai/reka-flash-3"]) {
+	it("marks the measured vendors' OpenRouter Chat Completions models, and only those vendors", () => {
+		expect([...MARKED_VENDORS].sort()).toEqual(["deepseek", "minimax", "qwen", "z-ai"]);
+		for (const id of ["qwen/qwen3.8-27b", "qwen/qwen3.7-flash", "deepseek/deepseek-v4.1-flash", "~deepseek/deepseek-latest", "z-ai/glm-5.3", "minimax/minimax-m3"]) {
 			expect(takesOpenRouterCacheMarks(model(id)), id).toBe(true);
+		}
+	});
+
+	it("leaves an unmeasured open-weight vendor at pi's default", () => {
+		for (const id of ["x-ai/grok-5", "mistralai/mistral-large-3", "moonshotai/kimi-k3", "~moonshotai/kimi-latest", "rekaai/reka-flash-3", "meta-llama/llama-5"]) {
+			expect(takesOpenRouterCacheMarks(model(id)), id).toBe(false);
 		}
 	});
 
@@ -41,6 +49,21 @@ describe("withOpenRouterCacheMarks", () => {
 	it("returns a model it leaves alone as itself", () => {
 		const gemini = model("google/gemini-3.8-flash");
 		expect(withOpenRouterCacheMarks(gemini)).toBe(gemini);
+	});
+});
+
+describe("openRouterCacheMarksEnabled", () => {
+	const own = envName("OPENROUTER_CACHE_MARKS");
+	const all = envName("CACHE_MARKS");
+
+	it("is on by default and with any other value", () => {
+		expect(openRouterCacheMarksEnabled({})).toBe(true);
+		expect(openRouterCacheMarksEnabled({ [own]: "1", [all]: "" })).toBe(true);
+	});
+
+	it("is off when its own switch is 0, or the switch for every cache mark is", () => {
+		expect(openRouterCacheMarksEnabled({ [own]: "0" })).toBe(false);
+		expect(openRouterCacheMarksEnabled({ [all]: "0" })).toBe(false);
 	});
 });
 

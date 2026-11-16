@@ -1,16 +1,15 @@
 /**
- * Explicit cache breakpoints on OpenRouter's open-weight models (pure).
+ * Explicit cache breakpoints on OpenRouter's open-weight models.
  *
- * OpenRouter serves an open-weight model (Qwen, DeepSeek, GLM, Kimi, MiniMax
- * and the rest) through many third-party hosts and keeps a session on the host
- * that served its first request (`x-session-id`, which pi-ai sends). Most hosts
- * reuse a prefix on their own, but some read nothing unless the request carries
- * Anthropic-style `cache_control` breakpoints: Reka on Qwen 3.8 27B read 0 on
- * every request of a session, a byte-identical repeat included, and read the
- * cache once the breakpoints were there; Alibaba, Qwen's own host, reads
- * further with them. Hosts that cache by themselves (Wafer, Modal,
- * InferenceNet, MiniMax) read the same with or without them, and none rejected
- * them (working-docs/findings, "OpenRouter hosts that cache only with
+ * OpenRouter serves an open-weight model through many third-party hosts and
+ * keeps a session on the host that served its first request (`x-session-id`,
+ * which pi-ai sends). Most hosts reuse a prefix on their own, but some read
+ * nothing unless the request carries Anthropic-style `cache_control`
+ * breakpoints: Reka on Qwen 3.8 27B read 0 on every request of a session, a
+ * byte-identical repeat included, and read the cache once the breakpoints were
+ * there; Alibaba, Qwen's own host, reads further with them. Hosts that cache by
+ * themselves (Wafer, Modal, InferenceNet, MiniMax) read the same with or
+ * without them (working-docs/findings, "OpenRouter hosts that cache only with
  * breakpoints", 2026-11-16).
  *
  * pi-ai already has the placement: `compat.cacheControlFormat: "anthropic"`
@@ -20,18 +19,40 @@
  * built from, the way message-threads.ts turns threads off: never on the
  * registry's shared objects.
  *
- * Kept at pi's default: Anthropic (pi already marks), Google (OpenRouter
- * bills Gemini's explicit cache writes and storage, while its implicit cache is
- * free), OpenAI (its own breakpoint format, and implicit caching otherwise) and
- * OpenRouter's own routers (`openrouter/auto` can land on any of those).
+ * Only the vendors in `MARKED_VENDORS` take the marks: those whose OpenRouter
+ * hosts were measured accepting them. Every other vendor stays at pi's default,
+ * so an untested host never starts failing or billing differently because of
+ * us. To add a vendor, replay a logged request on one of its models through
+ * OpenRouter with the marks, pinned to its hosts (`provider.order`,
+ * `allow_fallbacks: false`), see each accept them and read the cache on the
+ * next request, record that in the findings, then add the vendor here.
+ *
+ * `<envPrefix>_OPENROUTER_CACHE_MARKS=0` turns these marks off alone;
+ * `<envPrefix>_CACHE_MARKS=0` turns them off with the Anthropic ones.
  */
+
+import { knobValue } from "../profile/knobs.ts";
 
 /** The pi provider and API this applies to. */
 export const OPENROUTER_PROVIDER = "openrouter";
 export const OPENROUTER_CACHE_MARKS_API = "openai-completions";
 
-/** Model-id vendors (the part before the slash, without a leading `~`) left at pi's default. */
-const DEFAULT_VENDORS: ReadonlySet<string> = new Set(["anthropic", "google", "openai", "openrouter"]);
+/**
+ * Model-id vendors (the part before the slash, without a leading `~`) whose
+ * models take the marks, each measured on 2026-11-16: qwen (Reka, Alibaba,
+ * Wafer), deepseek (InferenceNet, OpenInference), z-ai (Wafer), minimax
+ * (MiniMax).
+ */
+export const MARKED_VENDORS: ReadonlySet<string> = new Set(["qwen", "deepseek", "z-ai", "minimax"]);
+
+/** The knob that turns these marks off alone (`<envPrefix>_OPENROUTER_CACHE_MARKS=0`), and the one that turns every cache mark off. */
+export const OPENROUTER_CACHE_MARKS_KNOB = "OPENROUTER_CACHE_MARKS";
+export const CACHE_MARKS_KNOB = "CACHE_MARKS";
+
+/** Whether the OpenRouter marks are on in `vars` (the process environment by default): neither knob is `0`. */
+export function openRouterCacheMarksEnabled(vars: Readonly<Record<string, unknown>> = process.env): boolean {
+	return knobValue(CACHE_MARKS_KNOB, vars) !== "0" && knobValue(OPENROUTER_CACHE_MARKS_KNOB, vars) !== "0";
+}
 
 /** The fields of a pi `Model` this module reads. */
 export interface CacheMarksModel {
@@ -41,13 +62,13 @@ export interface CacheMarksModel {
 	compat?: unknown;
 }
 
-/** Whether pi should mark `model`'s requests: an OpenRouter Chat Completions model of an open-weight vendor whose compat names no format. */
+/** Whether pi should mark `model`'s requests: an OpenRouter Chat Completions model of a measured vendor whose compat names no format. */
 export function takesOpenRouterCacheMarks(model: CacheMarksModel): boolean {
 	if (model.provider !== OPENROUTER_PROVIDER || model.api !== OPENROUTER_CACHE_MARKS_API) return false;
 	const compat = (model.compat ?? {}) as Record<string, unknown>;
 	if (compat.cacheControlFormat !== undefined) return false;
 	const vendor = model.id.replace(/^~/, "").split("/")[0];
-	return !DEFAULT_VENDORS.has(vendor);
+	return MARKED_VENDORS.has(vendor);
 }
 
 /** `model` with Anthropic-style breakpoints on, as a copy; the model itself when it does not take them. */
