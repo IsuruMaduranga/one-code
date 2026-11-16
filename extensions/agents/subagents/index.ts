@@ -703,7 +703,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// Every refusal since the menu was last told, each named, with the default as it is now.
 		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
 		else if (refusal) refusal = { ...refusal, replacement: resolution.model };
-		publishBlock("subagent-models", text);
+		// The menu serves the Agent tool's and workflow agents' `model` field.
+		publishBlock("subagent-models", registered("Agent") || registered("workflow") ? text : null);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
@@ -729,9 +730,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return catalogMemo.text;
 	};
-	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
+	/**
+	 * Whether pi registered a tool: registered, not active, so deferral or a
+	 * tier's withdrawal never flips a block. pi's `--tools`/`--exclude-tools`
+	 * leave a tool unregistered, and the blocks naming it go with it; a
+	 * session resumed under other flags announces the change on the tail.
+	 */
+	const registered = (name: string): boolean => pi.getAllTools().some((tool) => tool.name === name);
+	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", registered("Agent") ? agentCatalog(ctx) : null);
 
-	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? words.delegationSteer : null);
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" && registered("Agent") ? words.delegationSteer : null);
 
 	let shuttingDown = false;
 
