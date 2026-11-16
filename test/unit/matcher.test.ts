@@ -160,13 +160,13 @@ describe("read-only commands need no rule of their own", () => {
 				expect(d.rule?.raw).toBe("Bash(gh api *)");
 			}
 		}
-		expect(decide({ ...shell, mode: "default", subject: "gh pr view 1 && git status && grep -n x README.md", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
-		expect(decide({ ...shell, mode: "default", subject: "gh pr view 1 && echo $(cat README.md)", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...shell, mode: "default", subject: "git status && grep -n x README.md && gh pr view 1", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...shell, mode: "default", subject: "echo $(cat README.md) && gh pr view 1", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
 	});
 
 	it("needs a real rule for at least one command", () => {
 		expect(findBashAllowRule(gh, "ls | head", "bash", { readOnly: () => true })).toBeUndefined();
-		expect(findBashAllowRule(gh, "gh pr view 1 | head", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
+		expect(findBashAllowRule(gh, "gh pr view 1 | head", "bash", { readOnly: () => true, readsNoFile: () => true })?.raw).toBe("Bash(gh pr view:*)");
 		expect(findBashAllowRule(gh, "gh pr view 1 | head", "bash")).toBeUndefined();
 	});
 
@@ -202,9 +202,57 @@ describe("read-only commands need no rule of their own", () => {
 			expect(findBashAllowRule(rules([raw]), subject, "bash", { readOnly: () => true }), subject).toBeUndefined();
 		}
 		// A read-only command fed only to other read-only commands runs nothing it is fed.
-		expect(findBashAllowRule(gh, "gh pr view 1 | grep x | head", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
+		expect(findBashAllowRule(gh, "gh pr view 1 | grep x | head", "bash", { readOnly: () => true, readsNoFile: () => true })?.raw).toBe("Bash(gh pr view:*)");
 		expect(findBashAllowRule(gh, "echo x | head && gh pr view 1", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
 		expect(findBashAllowRule(gh, "echo x | grep x | gh pr view 1", "bash", { readOnly: () => true })).toBeUndefined();
+	});
+
+	// The read-only proof judges the files as they are before the line runs.
+	describe("only while nothing before it can have changed the files", () => {
+		const covered = (mode: "default" | "auto" | "plan", subject: string, raw: string[]) => {
+			const d = decide({ ...shell, mode, subject, allow: rules(raw) });
+			return d.decision === "allow" && d.cause === "rule";
+		};
+
+		it("never covers a read through a link an earlier ruled command made", () => {
+			for (const [subject, raw] of [
+				["ln -s ~/.ssh/id_rsa k && cat k", "Bash(ln -s:*)"],
+				["git checkout x && cat link", "Bash(git checkout:*)"],
+			]) {
+				for (const mode of ["default", "auto"] as const) expect(covered(mode, subject, [raw]), `${mode}: ${subject}`).toBe(false);
+			}
+		});
+
+		it("covers a read-only command that runs before every command the proof could not clear", () => {
+			for (const mode of ["default", "auto"] as const) {
+				expect(covered(mode, "cat README.md && gh pr view 1", ["Bash(gh pr view:*)"]), mode).toBe(true);
+				expect(covered(mode, "cat README.md; gh pr view 1", ["Bash(gh pr view:*)"]), mode).toBe(true);
+				// An earlier ruled command the proof clears changes no file.
+				expect(covered(mode, "git status && cat README.md", ["Bash(git status:*)"]), mode).toBe(true);
+				for (const subject of ["gh pr view 1 && cat README.md", "gh pr view 1; cat README.md", "gh pr view 1 | head; cat README.md"]) {
+					expect(covered(mode, subject, ["Bash(gh pr view:*)"]), `${mode}: ${subject}`).toBe(false);
+				}
+			}
+		});
+
+		it("covers a later pipeline stage after such a command only when it reads no file, just the pipe", () => {
+			for (const mode of ["default", "auto", "plan"] as const) {
+				expect(covered(mode, "gh api repos/o/r/contents --jq '.[].name' | head", ["Bash(gh api *)"]), mode).toBe(true);
+				expect(covered(mode, "gh pr view 1 | grep pat | head", ["Bash(gh pr view:*)"]), mode).toBe(true);
+				expect(covered(mode, "gh pr view 1 | jq . | wc -l", ["Bash(gh pr view:*)"]), mode).toBe(true);
+			}
+			for (const mode of ["default", "auto"] as const) {
+				for (const [subject, raw] of [
+					["gh api repos/o/r/contents | grep pat file", "Bash(gh api *)"],
+					["ln -s secret k | cat k", "Bash(ln -s:*)"],
+					["gh pr view 1 | grep -r pat", "Bash(gh pr view:*)"],
+					["gh pr view 1 | cat - README.md", "Bash(gh pr view:*)"],
+					["gh pr view 1 | head < notes.txt", "Bash(gh pr view:*)"],
+				]) {
+					expect(covered(mode, subject, [raw]), `${mode}: ${subject}`).toBe(false);
+				}
+			}
+		});
 	});
 });
 

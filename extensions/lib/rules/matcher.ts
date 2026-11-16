@@ -410,8 +410,11 @@ export function isShellTool(toolName: string): boolean {
  * (`Bash(gh api *)` covers `gh api x --jq y | head`), provided a rule covers
  * at least one other command and no command a rule covers reads its output
  * later in the pipeline (`echo code | sqlite3 app.db` still needs a rule for
- * `echo`); the rule
- * returned is that one. The read-only shortcut
+ * `echo`). The proof sees the files as they are before the line runs, so
+ * such a command must also come before every ruled command not itself
+ * proved read-only, or be a later pipeline stage that reads no file, only
+ * the pipe (`readsNoFile`: `| head`, `| grep pat`); `ln -s ~/.ssh/id_rsa k &&
+ * cat k` needs a rule for `cat`. The read-only shortcut
  * is off when the line moves directory first (`cd /etc && git commit -m
  * "$(cat passwd)"`), since the check resolves paths from the working
  * directory. An unparseable line, or one with a construct the pre-gate does
@@ -422,7 +425,7 @@ export function findBashAllowRule(
 	rules: PermissionRule[],
 	command: string,
 	toolName = "bash",
-	opts: { readOnly?: (command: string) => boolean } = {},
+	opts: { readOnly?: (command: string) => boolean; readsNoFile?: (command: string) => boolean } = {},
 ): PermissionRule | undefined {
 	const cmd = command.trim();
 	if (!cmd) return undefined;
@@ -467,6 +470,15 @@ export function findBashAllowRule(
 	const ruled = new Set(topLevel.flatMap((seg, index) => (segmentRules[index] ? seg.scopes : [])));
 	const later = new Map(parsed.pipelines.flatMap((members) => members.map((scope, i) => [scope, members.slice(i + 1)] as const)));
 	const feedsRule = (seg: { scopes: number[] }) => seg.scopes.some((scope) => later.get(scope)?.some((reader) => ruled.has(reader)));
+	const laterStages = new Set(parsed.pipelines.flatMap((members) => members.slice(1)));
+	const proofs = new Map<number, boolean>();
+	const readOnlyAt = (index: number): boolean => {
+		const known = proofs.get(index);
+		if (known !== undefined) return known;
+		const proved = opts.readOnly?.(topLevel[index].raw) ?? false;
+		proofs.set(index, proved);
+		return proved;
+	};
 	for (const [index, seg] of topLevel.entries()) {
 		if (segmentRules[index]) continue;
 		// A command the pre-gate proves read-only by itself needs no rule of its
@@ -475,8 +487,14 @@ export function findBashAllowRule(
 		// the proof would resolve from the wrong directory, and for a command
 		// whose output a rule's command reads later in the pipeline: that
 		// command may run it (`echo 'rm -rf ~' | sudo bash` under `Bash(sudo bash)`).
-		if (!topLevelMoves && !feedsRule(seg) && opts.readOnly?.(seg.raw)) continue;
-		return undefined;
+		if (topLevelMoves || feedsRule(seg) || !readOnlyAt(index)) return undefined;
+		// The proof judged the files as they are before the line runs, so it
+		// holds only while nothing before this command can have changed them:
+		// every ruled command before it is itself proved read-only (`cat a && gh
+		// pr view 1`), or it is a later pipeline stage that reads no file at all,
+		// only the pipe (`gh api … | head`). Not `ln -s ~/.ssh/id_rsa k && cat k`.
+		const afterUnproven = segmentRules.slice(0, index).some((rule, before) => rule !== undefined && !readOnlyAt(before));
+		if (afterUnproven && !(seg.scopes.some((scope) => laterStages.has(scope)) && opts.readsNoFile?.(seg.raw))) return undefined;
 	}
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
@@ -1170,6 +1188,11 @@ export function decide(params: DecideInput): Decision {
 	const isReadOnly = (evidence: ShellEvidence): boolean => evidence.verdict === "safe" && evidence.writes.length === 0;
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
 	const readOnlyShell = (command: string): boolean => isReadOnly(shellEvidence(command));
+	/** The pre-gate's proof that a read-only command reads no file, only its stdin (`ShellEvidence.readsNoFile`). */
+	const readsNoFileShell = (command: string): boolean => {
+		const evidence = shellEvidence(command);
+		return isReadOnly(evidence) && evidence.readsNoFile;
+	};
 
 	// In dontAsk mode anything that would prompt is denied instead — including
 	// explicit ask rules: there is no user to put the question to.
@@ -1319,7 +1342,7 @@ export function decide(params: DecideInput): Decision {
 				allow.filter((rule) => !isBroadExecutionRule(rule)),
 				subject,
 				tool,
-				{ readOnly: readOnlyShell },
+				{ readOnly: readOnlyShell, readsNoFile: readsNoFileShell },
 			);
 			if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
 		}
@@ -1452,7 +1475,7 @@ export function decide(params: DecideInput): Decision {
 	const allowRule =
 		subjectKind(tool) === "command"
 			? subject
-				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell })
+				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell, readsNoFile: readsNoFileShell })
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) {
