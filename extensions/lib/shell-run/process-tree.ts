@@ -268,6 +268,15 @@ const EXIT_WATCHDOG = [
 	"setTimeout(() => { clearInterval(poll); for (const g of groups) { try { process.kill(-g, 'SIGKILL'); } catch {} } }, grace);",
 ].join("\n");
 
+/** How long an exiting process waits, blocking, for groups it just sent SIGTERM to empty before it leaves the rest to the watchdog. */
+const EXIT_TERM_WAIT_MS = 25;
+const EXIT_TERM_POLL_MS = 5;
+
+/** Block this thread for `ms` (an exit handler cannot await). */
+function sleepSync(ms: number): void {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
  * The process is exiting and the groups in `children` were just sent SIGTERM.
  * An exit handler cannot wait out a grace period, so a member that ignores or
@@ -277,10 +286,26 @@ const EXIT_WATCHDOG = [
  * `KILL_GRACE_MS` and exits as soon as none is. It names groups only: a group
  * id stays reserved while any member lives, so it cannot reach a stranger.
  * POSIX only; Windows' taskkill /F is already forceful.
+ *
+ * Most groups die of the SIGTERM at once, so when every leader has already
+ * exited (a finished shell's daemons) the handler first waits, blocking, up
+ * to `EXIT_TERM_WAIT_MS` and starts the watchdog only for the groups still
+ * there. A leader this process has not reaped (still running, or dead with
+ * its exit not yet handled) is a zombie until this process exits, and a
+ * zombie keeps its group probeable, so a group with such a leader cannot be
+ * judged here: it goes to the watchdog without the wait.
  */
 function killAfterExit(children: ChildProcess[]): void {
-	const groups = children.map((child) => child.pid).filter((pid): pid is number => pid != null);
-	if (process.platform === "win32" || groups.length === 0) return;
+	let live = children.filter((child) => child.pid != null);
+	if (process.platform === "win32" || live.length === 0) return;
+	if (live.every(leaderExited)) {
+		for (let waited = 0; waited < EXIT_TERM_WAIT_MS && live.length > 0; waited += EXIT_TERM_POLL_MS) {
+			sleepSync(EXIT_TERM_POLL_MS);
+			live = live.filter(rememberedGroupAlive);
+		}
+		if (live.length === 0) return;
+	}
+	const groups = live.map((child) => child.pid as number);
 	try {
 		const watchdog = spawn(process.execPath, ["-e", EXIT_WATCHDOG, String(KILL_GRACE_MS), ...groups.map(String)], {
 			detached: true,

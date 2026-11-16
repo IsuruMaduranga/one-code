@@ -7,9 +7,11 @@
  */
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { KILL_GRACE_MS } from "../../extensions/lib/shell-run/process-tree.ts";
 import { alive, until } from "./helpers/process-alive.ts";
 
@@ -88,6 +90,56 @@ describe.skipIf(process.platform === "win32")("a remembered group when its owner
 
 /** A worker that ends on SIGTERM, left by a shell that has finished. */
 const WORKER = `sleep 60 & printf "%s %s\\n" "$$" "$!"`;
+
+/**
+ * Logs every exit watchdog the owner starts (a `node -e` spawn) to `log`, one
+ * line of group ids each: the owner's `node:child_process` exports are patched
+ * and synced into the ES module bindings process-tree.ts imported.
+ */
+const logWatchdogs = (log: string) =>
+	[
+		`import { createRequire, syncBuiltinESMExports } from "node:module";`,
+		`import { appendFileSync } from "node:fs";`,
+		`const childProcess = createRequire(import.meta.url)("node:child_process");`,
+		`const spawnBefore = childProcess.spawn;`,
+		`childProcess.spawn = function (command, args, ...rest) { if (args?.[0] === "-e") appendFileSync(${JSON.stringify(log)}, args.slice(3).join(" ") + "\\n"); return spawnBefore.call(this, command, args, ...rest); };`,
+		`syncBuiltinESMExports();`,
+	].join("\n");
+
+describe.skipIf(process.platform === "win32")("the exit watchdog", () => {
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "exit-watchdog-"));
+	});
+	afterEach(() => rmSync(dir, { recursive: true, force: true }));
+	const watchdogs = (log: string) => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []);
+
+	it("is not started when every group ends on the SIGTERM", async () => {
+		const log = join(dir, "watchdogs.log");
+		const run = await startOwner(WORKER, "process.exit(0);", logWatchdogs(log));
+		try {
+			run.owner.stdin!.write("go\n");
+			await run.exited;
+			expect(await until(() => !alive(run.worker))).toBe(true);
+			expect(watchdogs(log)).toEqual([]);
+		} finally {
+			run.cleanup();
+		}
+	}, 15_000);
+
+	it("is started for a group that outlasts the SIGTERM, naming that group", async () => {
+		const log = join(dir, "watchdogs.log");
+		const run = await startOwner(STUBBORN_WORKER, "process.exit(0);", logWatchdogs(log));
+		try {
+			run.owner.stdin!.write("go\n");
+			await run.exited;
+			expect(watchdogs(log)).toEqual([String(run.group)]);
+			expect(await goneAfterGrace(run.worker)).toBe(true);
+		} finally {
+			run.cleanup();
+		}
+	}, 15_000);
+});
 
 /**
  * pi's bundle loads signal-exit v3 (through proper-lockfile) as the owner
