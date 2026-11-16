@@ -102,17 +102,16 @@ export class ProcessGroupStdioTransport implements Transport {
 		});
 	}
 
+	/** The SDK's read loop: a bad line or a throwing handler goes to `onerror`, never out of the stdout listener (an uncaught exception would end pi). */
 	private drain(): void {
 		for (;;) {
-			let message: JSONRPCMessage | null;
 			try {
-				message = this.readBuffer.readMessage();
+				const message = this.readBuffer.readMessage();
+				if (message === null) return;
+				this.onmessage?.(message);
 			} catch (error) {
 				this.onerror?.(error as Error);
-				continue;
 			}
-			if (message === null) return;
-			this.onmessage?.(message);
 		}
 	}
 

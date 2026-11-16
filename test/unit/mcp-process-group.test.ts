@@ -74,6 +74,25 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		await transport.close();
 	}, 15_000);
 
+	it("hands a message handler's throw to onerror and goes on delivering", async () => {
+		// Two messages in one chunk, and an exit on the closed stdin so close() ends at once.
+		const lines = [1, 2].map((id) => JSON.stringify({ jsonrpc: "2.0", id, result: {} })).join("\n");
+		const server = `process.stdout.write(${JSON.stringify(`${lines}\n`)}); process.stdin.on("end", () => process.exit(0)); process.stdin.resume();`;
+		const transport = new ProcessGroupStdioTransport({ command: process.execPath, args: ["-e", server], env: process.env }, framing);
+		const errors: Error[] = [];
+		transport.onerror = (error) => errors.push(error);
+		const second = new Promise((resolveMessage) => {
+			transport.onmessage = (message) => {
+				if ((message as { id?: number }).id === 1) throw new Error("handler failed");
+				resolveMessage(message);
+			};
+		});
+		await transport.start();
+		expect(await second).toMatchObject({ id: 2 });
+		expect(errors.map((error) => error.message)).toEqual(["handler failed"]);
+		await transport.close();
+	}, 15_000);
+
 	it("is ended by close() when it ignores a closed stdin", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		const closed = new Promise<void>((resolveClose) => {
