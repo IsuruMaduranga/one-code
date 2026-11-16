@@ -145,6 +145,13 @@ describe("text naming another tool", () => {
 		for (const tier of PROMPT_TIERS) expect(mentions(prompt(["--exclude-tools", "Agent"], tier), "Agent", {}), tier).toEqual([]);
 	});
 
+	it("leaves SendMessage out of list_agents under pi's --exclude-tools SendMessage", () => {
+		// A profile cannot turn SendMessage off (it is pinned); pi's flag takes it out alone.
+		const { subagents } = profile.text({ live: { has: (tool) => tool !== "SendMessage" } });
+		expect(mentions(subagents?.listAgentsDescription ?? "", "SendMessage", ENGLISH)).toEqual([]);
+		expect(profile.text({ live: { has: () => true } }).subagents?.listAgentsDescription).toContain("so you know which ones SendMessage can reach.");
+	});
+
 	it("is unchanged when every tool is on", () => {
 		const all = profile.text({ live: { has: () => true } });
 		expect(all.planMode?.descriptions.exit_plan_mode).toContain("ask_user_question");

@@ -15,10 +15,13 @@ const AGENT_PASSAGES: ToolPassages = {
 	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
 };
 
-/** The passages of SendMessage's and list_agents' words that name a sibling tool: list_agents can be off alone, and pi's `--exclude-tools Agent` takes Agent out alone. */
+/** The passages of SendMessage's and list_agents' words that name a sibling tool: list_agents can be off alone, and pi's `--exclude-tools` takes Agent or SendMessage out alone. */
 const SEND_MESSAGE_PASSAGES: ToolPassages = { list_agents: [" To discover the names of running or finished agents, use list_agents."] };
 const SEND_TO_PASSAGES: ToolPassages = { Agent: [["from a previous Agent run", "from a previous agent run"]] };
-const LIST_AGENTS_PASSAGES: ToolPassages = { Agent: [" (use Agent action:'list' for that)"] };
+const LIST_AGENTS_PASSAGES: ToolPassages = {
+	Agent: [" (use Agent action:'list' for that)"],
+	SendMessage: [[" — so you know which ones SendMessage can reach.", "."]],
+};
 
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const subagentsText = (live: LiveTools): SubagentsText => {
