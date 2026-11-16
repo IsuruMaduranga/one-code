@@ -47,7 +47,10 @@ async function membersStarted(child: ReturnType<typeof spawn>, names: string[]):
 			return false;
 		}
 	};
-	expect(await until(() => names.every(running), 200)).toBe(true);
+	const started = await until(() => names.every(running), 200);
+	// A failed wait must not leave the group holding its pipes for 30 s.
+	if (!started) killProcessTree(child, "SIGKILL");
+	expect(started).toBe(true);
 }
 
 function spawnShell(command: string) {
@@ -118,6 +121,8 @@ describe("killProcessTree", { timeout: LOADED_MS }, () => {
 		let exitedAt = 0;
 		child.once("exit", () => (exitedAt = Date.now()));
 		await waitForChildExit(child);
+		// The wait settled on the leader's exit, not on an error path.
+		expect(exitedAt).toBeGreaterThan(0);
 		expect(Date.now() - exitedAt).toBeLessThan(EXIT_STDIO_MAX_MS + 2000);
 		killProcessTree(child, "SIGKILL"); // the loop is not the leader's group on Windows; best effort
 	});
