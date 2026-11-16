@@ -17,9 +17,10 @@
  * itself takes the rest of its group with it, as a language server's does
  * (tools/lsp/client.ts).
  *
- * The close sequence keeps the SDK's shape: end stdin, give the server 2 s to
- * exit, then SIGTERM the group and SIGKILL it after `KILL_GRACE_MS`. On Windows
- * the kill is `taskkill /T` while the leader lives (process-tree.ts).
+ * The close sequence keeps the SDK's shape: end stdin, give the server
+ * `KILL_GRACE_MS` (2 s, the SDK's wait) to exit, then SIGTERM the group and
+ * SIGKILL it after `KILL_GRACE_MS` more. On Windows the kill is `taskkill /T`
+ * while the leader lives (process-tree.ts).
  */
 
 import { spawn } from "node:child_process";
@@ -28,9 +29,6 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
 import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
-
-/** How long `close()` lets a server exit on its own once its stdin is closed (the SDK's wait). */
-export const CLOSE_GRACE_MS = 2_000;
 
 export interface StdioServerParams {
 	command: string;
@@ -60,10 +58,6 @@ export class ProcessGroupStdioTransport implements Transport {
 		private readonly framing: StdioFraming,
 	) {
 		this.readBuffer = new framing.ReadBuffer();
-	}
-
-	get pid(): number | undefined {
-		return this.tree?.child.pid;
 	}
 
 	start(): Promise<void> {
@@ -143,7 +137,7 @@ export class ProcessGroupStdioTransport implements Transport {
 			} catch {
 				// Already closed.
 			}
-			await within(CLOSE_GRACE_MS);
+			await within(KILL_GRACE_MS);
 			// The leader still running, or a group it left behind: TERM the group now, KILL it after the grace.
 			if (tree.alive()) {
 				tree.stop(KILL_GRACE_MS);

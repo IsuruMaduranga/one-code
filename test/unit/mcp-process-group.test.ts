@@ -93,8 +93,9 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		await transport.start();
 		const pid = await readServerPid();
-		const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
-		expect(launcherPid).toBe(transport.pid);
+		const [launcherPid, group] = execFileSync("ps", ["-o", "ppid=,pgid=", "-p", String(pid)], { encoding: "utf8" }).trim().split(/\s+/).map(Number);
+		// The server's parent is the launcher, which leads the server's own group.
+		expect(group).toBe(launcherPid);
 
 		process.kill(launcherPid, "SIGKILL");
 		expect(await until(() => !alive(pid))).toBe(true);
