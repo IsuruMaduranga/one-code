@@ -25,7 +25,7 @@ import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-wri
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../../lib/agents/agent-cron.ts";
-import { profileText, toolLive } from "../../lib/profile/profile.ts";
+import { activeProfile, profileText, toolLive } from "../../lib/profile/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { isPathAtOrUnder } from "../../lib/profile/paths.ts";
@@ -1689,8 +1689,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
 		// The child's cron tools reach this session's store (lib/agents/agent-cron.ts);
-		// none when the background feature is off (no store answers them).
-		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
+		// none when the background feature is off (no store answers them). pi's
+		// tool flags filter this session's registry, not a child's, so they count
+		// only for a fork, whose tools must match this session's to read its cache.
+		const cronLive = record.agent === FORK_AGENT ? toolLive("cron_create") : activeProfile().profileLive.has("cron_create");
+		const cronText = cronLive ? profileText().background?.cron : undefined;
 		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]) : [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
