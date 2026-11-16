@@ -188,6 +188,18 @@ hook runs with each one, whatever the channel; see [Hooks](hooks.md).
 Notifications come only from the terminal interface, never from a one-shot
 or RPC run.
 
+## Shell commands you type
+
+Start a line with `!` to run a shell command yourself, such as `!git status`.
+When the model is idle, One Code starts a turn as soon as the command
+finishes, so the model reacts to the output without you typing anything.
+Start the line with `!!` instead to run the command without putting its
+output in the model's context. A `!!` command never starts a turn.
+
+No turn starts when you cancel the command (press **Esc** while it runs), or
+when you typed it while the model was working. In that case the output
+travels with your next message.
+
 ## Keyboard shortcuts
 
 The full list of One Code and pi shortcuts is in the

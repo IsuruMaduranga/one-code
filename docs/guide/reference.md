@@ -124,7 +124,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+x** | Copy the last reply. While the model works with a message queued or typed, it starts **ctrl+x ctrl+s** instead. |
 | **PgUp**, **PgDn**, **ctrl+home**, **ctrl+end** | Scroll the transcript in full-screen mode. On pi before 1.0.3, **Home** and **End** jump to the top and bottom instead. |
 | **ctrl+shift+f** | Search the transcript in full-screen mode. |
-| **!** at the start of a line | Run a shell command yourself. |
+| **!** at the start of a line | Run a shell command yourself. The model answers it right away when idle. **!!** keeps the output out of the context and starts no turn. See [Shell commands you type](terminal-interface.md#shell-commands-you-type). |
 
 Rebind keys in pi's keybindings file; see pi's documentation.
 
@@ -151,7 +151,7 @@ extension install, use `pi` in place of `onecode`.
 | `--thinking <level>` | Start at a thinking level. |
 | `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. On pi 1.0 and later, `--provider` needs `--model` too. |
 | `--tui-mode fullscreen`, `--tui-mode regular` | Full-screen interface (the default under the app and on pi 1.0 and later), or the terminal's normal screen with its scrollback. |
-| `--tools <list>` | Restrict the tools available. |
+| `--tools <list>` | Restrict the tools available. Without `Agent` in the list (or with pi's `--exclude-tools Agent`), the model is not told about agent types it cannot start. |
 | `-e <source>` | Load an extra extension. |
 | `--offline` | Skip network checks, including the update check. |
 | `--append-system-prompt <text>` | Append to the system prompt. |

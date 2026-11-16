@@ -59,9 +59,9 @@ blocked actions in a row and prompts you once; approving resumes it. Also
 check `/permissions`: an `ask` rule prompts in every mode.
 
 **An allow rule I wrote has no effect in auto mode.** Broad execution rules
-(`Bash(*)`, wildcarded interpreters, delegation rules) are suspended in
-auto mode so they can't bypass the classifier. Session grants from the
-approval prompt are also ignored there. Narrow the rule or switch to
+(`Bash(*)`, wildcarded shells, interpreters and wrappers, delegation rules)
+are suspended in auto mode so they can't bypass the classifier. Session
+grants from the approval prompt are also ignored there. Narrow the rule or switch to
 accept-edits or manual mode.
 
 **A project's `defaultMode: "auto"` is ignored.** Project-scope settings

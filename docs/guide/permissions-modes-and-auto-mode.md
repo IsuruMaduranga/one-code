@@ -96,6 +96,35 @@ the substitution only reads files inside the project. So
 doesn't allow `npm test $(curl …)`. A line containing a subshell, a loop, or
 a function is never covered by a prefix or wildcard `allow` rule.
 
+On a line with several commands, a command that One Code can confirm is
+read-only needs no rule of its own when an `allow` rule covers another
+command on the line. `Bash(gh api *)` covers `gh api repos/o/r | head`. This
+holds only when nothing earlier on the line could have changed files, so
+`ln -s ~/.ssh/id_rsa k && cat k` still needs a rule for `cat`. It also does
+not hold for a command piped into a ruled command: with
+`Bash(sqlite3 app.db)`, `echo 'select 1' | sqlite3 app.db` still needs a
+rule for `echo`, because the program at the end of a pipe may run what it
+reads. PowerShell lines still need a rule for each statement.
+
+### Broad allow rules
+
+Some `allow` rules would hand the model a way to run anything. One Code
+calls them broad, and auto mode ignores them so the classifier decides.
+Plan mode ignores them too. A rule is broad when it:
+
+- starts with a wildcard, such as `Bash(*)`, `Bash(* *)`, or `Bash(*-*)`;
+- allows a shell, an interpreter, or a command wrapper with a wildcard, such
+  as `Bash(bash *)`, `Bash(python3 *)`, `Bash(sudo *)`, `Bash(env *)`,
+  `Bash(xargs *)`, or `Bash(ssh *)`. The program is matched by name, so
+  `/usr/bin/python3` and `python3.12` count;
+- is an exact rule that starts a bare shell or interpreter, such as
+  `Bash(sh)` or `Bash(bash -s)`, because it runs whatever is piped in;
+- allows a toolchain to run arbitrary code, such as `Bash(npm run *)`,
+  `Bash(npx *)`, or `Bash(make *)`; or
+- allows delegation to subagents (`Agent`).
+
+A narrow rule such as `Bash(npm test:*)` is not broad.
+
 ### PowerShell rule patterns
 
 `PowerShell(...)` rules have the same shape and follow Claude Code's
@@ -382,9 +411,29 @@ code. Only read-only tools and edits to one plan file are available.
   `plan` agent, and then write the plan.
 - You can read and edit the plan file yourself while the model works.
 
+Shell commands follow one order while you plan:
+
+- A command that One Code can confirm is read-only runs.
+- A command with a visible write, such as a redirect to a file or `rm`, is
+  refused.
+- Any other command prompts you, with **Yes** to run it once or **No**. This
+  covers commands One Code can't confirm are read-only, like `gh pr view 1`.
+- An `allow` rule you wrote skips that prompt only for a program One Code has
+  no read-only knowledge of. With `Bash(gh pr view:*)`, `gh pr view 1` runs
+  without a prompt. A rule never covers a shell, an interpreter, or another
+  program that runs code it is given (`sudo`, `xargs`, `python3`, `sqlite3`),
+  and never covers a known program that could write, such as `sed -i`. A
+  rule that is [broad](#broad-allow-rules) is ignored.
+- "Don't ask again" grants don't apply in plan mode, and an `ask` rule still
+  asks.
+
+With nobody to answer, as in print mode, the command is refused.
+
 Enter plan mode by cycling to it with **ctrl+q** (**alt+m** on Windows and WSL), by starting with
 `--permission-mode plan`, or by asking the model to plan first (it can call
-`enter_plan_mode` itself).
+`enter_plan_mode` itself). Claude models may do that on their own for a task that
+isn't simple. Other models enter plan mode only when you ask for a plan or for plan
+mode.
 
 When the model finishes, it calls `exit_plan_mode` and an approval dialog
 shows the plan. Nothing runs until you choose. The choices are:
@@ -524,8 +573,9 @@ differently: it tells the model permission was granted, but judges the
 retry again.
 
 Allow rules that are broad enough to pre-approve arbitrary execution, such
-as `Bash(*)`, a wildcarded interpreter, or a rule that allows delegation to
-subagents, are suspended in auto mode so they can't bypass the classifier.
+as `Bash(*)`, a wildcarded shell, interpreter, or wrapper, or a rule that
+allows delegation to subagents, are suspended in auto mode so they can't
+bypass the classifier. See [Broad allow rules](#broad-allow-rules).
 Session grants from the approval prompt don't apply in auto mode either.
 
 ### The classifier model
