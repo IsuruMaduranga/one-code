@@ -11,7 +11,8 @@ import { stream as bedrockStream } from "@earendil-works/pi-ai/api/bedrock-conve
 import { stream as completionsStream } from "@earendil-works/pi-ai/api/openai-completions";
 import { stream as responsesStream } from "@earendil-works/pi-ai/api/openai-responses";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
-import { cacheClassifierHistory } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { cacheClassifierHistory, classifierCarriesBreakpoints, classifierDropsBreakpoints, dropClassifierBreakpoints } from "../../extensions/safety/permissions/auto-mode/cache.ts";
+import { withOpenRouterCacheMarks } from "../../extensions/lib/request/openrouter-cache-marks.ts";
 import { cacheSideCallConversation } from "../../extensions/lib/side-calls/side-call-cache.ts";
 
 const base = { reasoning: false, input: ["text"], contextWindow: 200_000, maxTokens: 4000, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
@@ -50,6 +51,32 @@ const markers = (value: unknown): number =>
 	Array.isArray(value) ? value.reduce((sum: number, entry) => sum + markers(entry), 0)
 	: value && typeof value === "object" ? ("cache_control" in value || "cachePoint" in value ? 1 : 0) + Object.entries(value).reduce((sum, [key, entry]) => sum + (key === "cache_control" || key === "cachePoint" ? 0 : markers(entry)), 0)
 	: 0;
+
+describe("classifier on an OpenRouter model One Code marks", () => {
+	const qwen = { ...openrouterClaude, id: "qwen/qwen3.7-flash", name: "Qwen via OpenRouter" } as Model<"openai-completions">;
+
+	it("drops every breakpoint, leaving the payload pi-ai sends unmarked", async () => {
+		expect(classifierDropsBreakpoints(qwen)).toBe(true);
+		expect(classifierCarriesBreakpoints(qwen)).toBe(false);
+		const call = [{ role: "user", content: parts.join(""), timestamp: 1 }];
+		// The registration gives the model Anthropic's format, so pi-ai marks the system prompt and the user message.
+		const marked = await payloadOf(withOpenRouterCacheMarks(qwen), "Classifier ruleset", call, () => {});
+		expect(markers(marked)).toBe(2);
+		const dropped = await payloadOf(withOpenRouterCacheMarks(qwen), "Classifier ruleset", call, (payload) => expect(dropClassifierBreakpoints(payload)).toBe(2));
+		const plain = await payloadOf(qwen, "Classifier ruleset", call, () => {});
+		expect(markers(dropped)).toBe(0);
+		expect(dropped).toEqual(plain);
+		expect(dropped.messages.map((m: Wire) => typeof m.content)).toEqual(["string", "string"]);
+	});
+
+	it("keeps the history breakpoints on Claude through OpenRouter and on unmarked vendors", () => {
+		expect(classifierDropsBreakpoints(openrouterClaude)).toBe(false);
+		expect(classifierCarriesBreakpoints(openrouterClaude)).toBe(true);
+		const grok = { ...openrouterClaude, id: "x-ai/grok-5" } as Model<"openai-completions">;
+		expect(classifierDropsBreakpoints(grok)).toBe(false);
+		expect(classifierDropsBreakpoints({ ...qwen, compat: { cacheControlFormat: "anthropic" } } as Model<"openai-completions">)).toBe(false);
+	});
+});
 
 describe("classifier history breakpoints", () => {
 	it("marks the reusable history, not the action, on OpenRouter's Anthropic format", async () => {

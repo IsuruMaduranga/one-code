@@ -2,6 +2,7 @@
 
 import { isCachePoint, MAX_SIDE_CALL_CACHE_MARKERS, payloadMarkers } from "../../../lib/side-calls/side-call-cache.ts";
 import { isPlainObject } from "../../../lib/core/plain-object.ts";
+import { takesOpenRouterCacheMarks } from "../../../lib/request/openrouter-cache-marks.ts";
 
 type WireRecord = Record<string, unknown>;
 
@@ -31,11 +32,55 @@ export const MAX_RESPONSES_HISTORY_MARKS = 1000;
  * of the leading developer block or an explicit breakpoint, so without one the
  * growing user message is never read back past the system prompt. Every other
  * API (Codex's Responses backend, older OpenAI models) reuses a prefix that
- * ends inside a message and keeps the single string.
+ * ends inside a message and keeps the single string. So does an OpenRouter
+ * model whose breakpoints One Code adds (`classifierDropsBreakpoints`).
  */
-export function classifierCarriesBreakpoints(model: { api: string; compat?: unknown }): boolean {
+export function classifierCarriesBreakpoints(model: { id?: string; provider?: string; api: string; compat?: unknown }): boolean {
+	if (classifierDropsBreakpoints(model)) return false;
 	return MARKER_APIS.has(model.api)
 		|| (model.api === "openai-responses" && isPlainObject(model.compat) && model.compat.supportsExplicitPromptCacheMode === true);
+}
+
+/**
+ * Whether the classifier sends `model` no cache breakpoints at all: an
+ * OpenRouter open-weight model that takes them only through One Code's
+ * registration (lib/request/openrouter-cache-marks.ts). Their hosts cache at
+ * whole messages when a request carries breakpoints, and a breakpoint turns
+ * the implicit prefix cache off: the classifier's transcript grows inside its
+ * one user message, so a marked call reads back only to the end of the system
+ * message. Alibaba on qwen3.7-flash read 27,722 of 31,760 on every later call
+ * with the marks, writing about 4,000 more at 1.25x each time, and 31,616 with
+ * none; Reka on qwen3.8-27b read no more with them (findings §93, the
+ * classifier section). Unmarked, the request is the one pi sends without
+ * breakpoints, and the host's prefix cache reads the transcript.
+ */
+export function classifierDropsBreakpoints(model: { id?: string; provider?: string; api: string; compat?: unknown }): boolean {
+	return typeof model.id === "string" && typeof model.provider === "string" && takesOpenRouterCacheMarks({ id: model.id, provider: model.provider, api: model.api, compat: model.compat });
+}
+
+/**
+ * Take every `cache_control` marker off a Chat Completions classifier payload
+ * and give a message whose only part was marked its plain string back, the
+ * shape pi-ai sends without breakpoints (it turns a string into one marked
+ * text part to mark it). Returns how many markers it removed.
+ */
+export function dropClassifierBreakpoints(payload: unknown): number {
+	if (!isPlainObject(payload) || !Array.isArray(payload.messages)) return 0;
+	let removed = 0;
+	for (const message of payload.messages) {
+		if (!isPlainObject(message) || !Array.isArray(message.content)) continue;
+		const marked = message.content.filter((part) => isPlainObject(part) && part.cache_control !== undefined).length;
+		if (marked === 0) continue;
+		removed += marked;
+		const parts = message.content.map((part) => {
+			if (!isPlainObject(part) || part.cache_control === undefined) return part;
+			const { cache_control: _marker, ...rest } = part;
+			return rest;
+		});
+		const [only] = parts;
+		message.content = parts.length === 1 && isPlainObject(only) && only.type === "text" && typeof only.text === "string" && Object.keys(only).length === 2 ? only.text : parts;
+	}
+	return removed;
 }
 
 /**

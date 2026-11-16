@@ -12,7 +12,9 @@
  *   boundaries and puts the breakpoint before the pending action and stage
  *   instruction (cache.ts). Both stages and later gated calls can read that
  *   prefix; the system markers stay intact. Other APIs keep the single string
- *   and their provider's prefix caching.
+ *   and their provider's prefix caching, and so does an OpenRouter open-weight
+ *   model whose breakpoints One Code adds: its payload loses them (cache.ts
+ *   `classifierDropsBreakpoints`).
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -30,7 +32,7 @@ import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choi
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
 import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../../lib/models/model-policy.ts";
 import type { AutoModeConfig } from "../../../lib/rules/auto-mode-config.ts";
-import { cacheClassifierHistory, classifierCarriesBreakpoints } from "./cache.ts";
+import { cacheClassifierHistory, classifierCarriesBreakpoints, classifierDropsBreakpoints, dropClassifierBreakpoints } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -439,7 +441,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(classifierCarriesBreakpoints(model) ? {
+					...(classifierDropsBreakpoints(model) ? {
+						onPayload: (payload: unknown) => {
+							dropClassifierBreakpoints(payload);
+						},
+					} : classifierCarriesBreakpoints(model) ? {
 						onPayload: (payload: unknown) => {
 							cacheMarks = cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							// A review's history ends in the subagent's calls, which the next gate
