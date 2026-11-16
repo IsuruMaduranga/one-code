@@ -341,7 +341,7 @@ function terminateRememberedGroups(): void {
  * module instance alive, and reach its set, even after pi evaluates the module
  * again (a /reload, a /resume into another directory: findings §8).
  */
-export function rememberProcessGroup(child: ChildProcess): void {
+function rememberProcessGroup(child: ChildProcess): void {
 	if (child.pid == null || rememberedGroups.has(child)) return;
 	rememberedGroups.add(child);
 	child.once("exit", reapGroups);
@@ -398,7 +398,7 @@ function killPendingAtExit(): void {
  * is unref'd (it must never be what keeps a one-shot process alive); a
  * process exit before it fires runs the SIGKILL from the `exit` hook.
  */
-export function stopProcessTree(child: ChildProcess, graceMs: number): void {
+function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	killProcessTree(child, "SIGTERM");
 	// taskkill /F is already forceful; there is no gentler first signal to grace.
 	if (process.platform === "win32") return;

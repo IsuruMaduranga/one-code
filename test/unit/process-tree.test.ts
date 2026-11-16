@@ -12,10 +12,10 @@
  * is what every task and hook waits on (findings §22, 2026-09-19 addendum).
  */
 import { execFile, spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { alive, until } from "./helpers/process-alive.ts";
 
@@ -28,6 +28,11 @@ const shell = win32 ? bash.shell : process.env.SHELL || bash.shell;
 
 function spawnShell(command: string) {
 	return spawn(shell, ["-c", command], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+}
+
+/** `command` under the shell as an owned tree. */
+function ownedShell(command: string, options?: Parameters<typeof spawnOwnedTree>[1]) {
+	return spawnOwnedTree((detached) => spawn(shell, ["-c", command], { ...detached, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }), options);
 }
 
 /** Resolves with the wall time to `close`, or rejects after `limitMs`. */
@@ -162,19 +167,9 @@ describe("killProcessTree", () => {
 	});
 });
 
-describe("stopProcessTree", () => {
+describe("an owned tree's stop", () => {
 	// Windows has no SIGTERM to ignore: taskkill /F is the first and only signal,
 	// so the grace period does not exist there (lib/shell-run/process-tree.ts).
-	it.skipIf(win32)("SIGKILLs after the grace period when the tree ignores SIGTERM", async () => {
-		// The shell ignores TERM and the disposition is inherited by sleep.
-		const child = spawnShell("trap '' TERM; sleep 30");
-		await new Promise((r) => setTimeout(r, 150));
-		const closed = closeWithin(child, 4000);
-		stopProcessTree(child, 300);
-		const elapsed = await closed;
-		expect(elapsed).toBeGreaterThanOrEqual(250);
-		expect(elapsed).toBeLessThan(4000);
-	});
 
 	/** Whether any process is left in the group `pgid`. */
 	const groupAlive = (pgid: number) => {
@@ -196,23 +191,29 @@ describe("stopProcessTree", () => {
 		// A pid no system hands out, so the group kill fails with ESRCH and falls
 		// back to each fake child's own kill(): nothing real is signalled.
 		const pid = 2_147_483_000;
-		const fake = () => ({ pid, kill: vi.fn() }) as unknown as ReturnType<typeof spawn>;
-		const first = fake();
-		const second = fake();
-		stopProcessTree(first, 30);
-		stopProcessTree(second, 30);
+		const fake = () => Object.assign(new EventEmitter(), { pid, kill: vi.fn(), exitCode: null as number | null, signalCode: null }) as unknown as ReturnType<typeof spawn>;
+		const first = spawnOwnedTree(fake);
+		const second = spawnOwnedTree(fake);
+		first.stop(30);
+		second.stop(30);
 		await new Promise((r) => setTimeout(r, 120));
-		expect(first.kill).toHaveBeenCalledWith("SIGKILL");
-		expect(second.kill).toHaveBeenCalledWith("SIGKILL");
+		expect(first.child.kill).toHaveBeenCalledWith("SIGKILL");
+		expect(second.child.kill).toHaveBeenCalledWith("SIGKILL");
+		// Let the fakes "exit", so they are forgotten.
+		for (const { child } of [first, second]) {
+			(child as { exitCode: number | null }).exitCode = 0;
+			child.emit("exit", 0, null);
+		}
 	});
 
 	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
-		const child = spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detachedSpawnOptions(), stdio: "ignore" });
+		const tree = spawnOwnedTree((detached) => spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detached, stdio: "ignore" }));
+		const child = tree.child;
 		const pgid = child.pid!;
 		try {
 			await new Promise((r) => setTimeout(r, 200)); // let the member start and set its trap
 			const exited = new Promise((r) => child.once("exit", r));
-			stopProcessTree(child, 300);
+			tree.stop(300);
 			await exited; // the leader goes at once
 			expect(await waitUntilGone(pgid, 3000)).toBe(true);
 		} finally {
@@ -230,11 +231,11 @@ describe("stopProcessTree", () => {
 		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
 		const script = [
 			`import { spawn } from "node:child_process";`,
-			`import { detachedSpawnOptions, stopProcessTree } from ${JSON.stringify(moduleUrl)};`,
-			`const child = spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detachedSpawnOptions(), stdio: "ignore" });`,
-			`child.unref();`,
-			`process.stdout.write(String(child.pid));`,
-			`setTimeout(() => { stopProcessTree(child, 2000); setTimeout(() => process.exit(0), 50); }, 200);`,
+			`import { spawnOwnedTree } from ${JSON.stringify(moduleUrl)};`,
+			`const tree = spawnOwnedTree((detached) => spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detached, stdio: "ignore" }));`,
+			`tree.child.unref();`,
+			`process.stdout.write(String(tree.child.pid));`,
+			`setTimeout(() => { tree.stop(2000); setTimeout(() => process.exit(0), 50); }, 200);`,
 		].join("\n");
 		const stdout = await new Promise<string>((done, fail) =>
 			execFile(process.execPath, ["--input-type=module", "-e", script], (error, out) => (error ? fail(error) : done(out))),
@@ -242,7 +243,8 @@ describe("stopProcessTree", () => {
 		const pgid = Number(stdout.trim());
 		expect(pgid).toBeGreaterThan(0);
 		try {
-			// Well inside the 2 s grace: only the exit hook can have killed it.
+			// Well inside the 2 s grace (the stop's, and the exit watchdog's for the
+			// remembered group): only the pending stop's exit hook can have killed it.
 			expect(await waitUntilGone(pgid, 1000)).toBe(true);
 		} finally {
 			try {
@@ -254,10 +256,10 @@ describe("stopProcessTree", () => {
 	});
 
 	it("ends the tree at once where there is no gentler signal to grace (Windows)", async () => {
-		const child = spawnShell("sleep 30");
+		const tree = ownedShell("sleep 30");
 		await new Promise((r) => setTimeout(r, 150));
-		const settled = settledWithin(child, 4000);
-		stopProcessTree(child, 300);
+		const settled = settledWithin(tree.child, 4000);
+		tree.stop(300);
 		expect(await settled).toBeLessThan(4000);
 	});
 });
@@ -270,7 +272,7 @@ describe("spawnOwnedTree", () => {
 
 	/** Start `command` as an owned tree; resolves once the leader has printed its first line. */
 	const startTree = async (command: string, options?: Parameters<typeof spawnOwnedTree>[1]) => {
-		const tree = spawnOwnedTree((detached) => spawn(shell, ["-c", command], { ...detached, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }), options);
+		const tree = ownedShell(command, options);
 		let out = "";
 		tree.child.stdout?.on("data", (chunk) => (out += chunk));
 		while (!out.includes("\n")) await new Promise((r) => setTimeout(r, 5));

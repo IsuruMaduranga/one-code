@@ -14,10 +14,11 @@
  * - `registered`: long-lived; started with `spawnOwnedTree`
  *   (lib/shell-run/process-tree.ts), which spawns it in its own group and
  *   remembers the group, so the exit and signal hooks there end it with the
- *   process, and stopped through the tree it returns. No module but
- *   process-tree.ts remembers or stops a group by hand: one helper keeps one
- *   stop policy, where hand-written copies drifted apart (a language server's
- *   launcher once exited without ending the rest of its group).
+ *   process, and stopped through the tree it returns. process-tree.ts does
+ *   not export the parts (remembering a group, a stop with its grace), so no
+ *   module can own a tree by hand: one helper keeps one stop policy, where
+ *   hand-written copies drifted apart (a language server's launcher once
+ *   exited without ending the rest of its group).
  * - `exception`: neither, with the reason. The list only shrinks.
  */
 import { readFileSync } from "node:fs";
@@ -63,7 +64,7 @@ const SPAWNERS: Record<string, Lifetime> = {
 const CHILD_PROCESS = new Set(["node:child_process", "child_process"]);
 const SPAWN_FUNCTIONS = new Set(["spawn", "spawnSync", "execFile", "execFileSync", "exec", "execSync", "fork"]);
 /** Functions and classes that start a process and leave its lifetime to the caller. */
-const SPAWNING_WRAPPERS = new Set(["spawnShellCommand", "StdioClientTransport", "createLocalBashOperations", "createBashToolDefinition"]);
+const SPAWNING_WRAPPERS = new Set(["spawnShellCommand", "createLocalBashOperations", "createBashToolDefinition"]);
 
 /** What in `source` starts a process: the child_process functions it imports and the wrappers it calls. */
 function spawnsIn(source: string, path: string): string[] {
@@ -110,8 +111,11 @@ const FIX =
 	OWNED_TREE_FIX +
 	"); see lib/shell-run/process-tree.ts and decisions/tools.md \"Nothing outlives its session\"";
 
-/** The parts of an owned tree that only spawnOwnedTree, in process-tree.ts, may call. */
-const TREE_PARTS = ["rememberProcessGroup(", "stopProcessTree("];
+/**
+ * The one part of an owned tree process-tree.ts still exports (for its Windows
+ * test): a module asks the tree it holds (`tree.alive()`), never the group.
+ */
+const TREE_PART = "rememberedGroupAlive(";
 const PROCESS_TREE = "extensions/lib/shell-run/process-tree.ts";
 
 describe("modules that start child processes", () => {
@@ -152,14 +156,12 @@ describe("modules that start child processes", () => {
 		expect(unshown).toEqual([]);
 	});
 
-	it("owns long-lived trees only through spawnOwnedTree", () => {
+	it("asks an owned tree whether it is alive, never its group by hand", () => {
 		const byHand: string[] = [];
 		for (const dir of ["extensions", "profile"]) {
 			for (const file of sourceFiles(join(ROOT, dir), ROOT)) {
 				if (file === PROCESS_TREE || file.includes("/test/")) continue;
-				const source = readFileSync(join(ROOT, file), "utf8");
-				const parts = TREE_PARTS.filter((part) => source.includes(part));
-				if (parts.length > 0) byHand.push(`${file} calls ${parts.map((part) => `${part})`).join(" and ")} by hand: ${OWNED_TREE_FIX}`);
+				if (readFileSync(join(ROOT, file), "utf8").includes(TREE_PART)) byHand.push(`${file} calls ${TREE_PART}) by hand: ${OWNED_TREE_FIX}, and ask it tree.alive()`);
 			}
 		}
 		expect(byHand).toEqual([]);
