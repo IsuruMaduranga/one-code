@@ -6,8 +6,7 @@
  * closing it (a crash, where pi exits without `session_shutdown`). The SDK's
  * own transport failed all three (test/e2e/exit-probe.mjs).
  */
-import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -15,12 +14,12 @@ import { join, resolve } from "node:path";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProcessGroupStdioTransport } from "../../extensions/tools/mcp/stdio-transport.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, startOwner, until } from "./helpers/process-alive.ts";
 
-/** Answers every request with an empty result; with STUBBORN it outlives a closed stdin. */
+/** Answers every request with an empty result; with EXIT_PROBE_STUBBORN it outlives a closed stdin (test/e2e/stubborn.mjs). */
 const SERVER = `
 if (process.env.PID_FILE) require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));
-if (process.env.STUBBORN) { setInterval(() => {}, 1000); process.stdin.on("error", () => {}); process.stdout.on("error", () => {}); }
+require(${JSON.stringify(resolve("test/e2e/stubborn.mjs"))});
 let buffered = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -39,7 +38,7 @@ const framing = { ReadBuffer, serializeMessage };
 const launcherParams = (pidFile: string) => ({
 	command: "/bin/sh",
 	args: ["-c", `"${process.execPath}" -e "$SERVER"; :`],
-	env: { ...process.env, SERVER, PID_FILE: pidFile, STUBBORN: "1" },
+	env: { ...process.env, SERVER, PID_FILE: pidFile, EXIT_PROBE_STUBBORN: "1" },
 });
 
 describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launcher", () => {
@@ -116,23 +115,17 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 			`process.stdout.write("ready\\n");`,
 			`process.stdin.once("data", () => { throw new Error("crash"); });`,
 		].join("\n");
-		const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["pipe", "pipe", "pipe"] });
-		let stderr = "";
-		owner.stderr.on("data", (chunk) => {
-			stderr += chunk;
-		});
-		const exited = once(owner, "exit");
+		const run = await startOwner(script);
 		try {
-			const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${stderr}`)))]);
-			expect(String(chunk)).toContain("ready");
+			expect(run.ready).toContain("ready");
 			const pid = await readServerPid();
 
-			owner.stdin.write("crash\n");
-			const [code] = await exited;
+			run.owner.stdin.write("crash\n");
+			const [code] = await run.exited;
 			expect(code).toBe(1);
 			expect(await until(() => !alive(pid))).toBe(true);
 		} finally {
-			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
+			run.kill();
 		}
 	}, 15_000);
 });

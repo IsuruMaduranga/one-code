@@ -5,63 +5,15 @@
  * separate Node process running a background shell that leaves a worker
  * behind, as a dev server's supervisor does.
  */
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { KILL_GRACE_MS } from "../../extensions/lib/shell-run/process-tree.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, startShellOwner, until } from "./helpers/process-alive.ts";
 
 /** A worker that ignores SIGTERM (and SIGHUP, SIGINT), left by a shell that has finished. */
 const STUBBORN_WORKER = `(trap '' TERM HUP INT; exec sleep 60) & printf "%s %s\\n" "$$" "$!"`;
-
-interface Owner {
-	worker: number;
-	group: number;
-	owner: ReturnType<typeof spawn>;
-	exited: Promise<unknown[]>;
-	cleanup(): void;
-}
-
-/** Start an owner that runs `command` as a background shell, then does `onInput` when written to. */
-async function startOwner(command: string, onInput: string, preamble = ""): Promise<Owner> {
-	const moduleUrl = pathToFileURL(resolve("extensions/lib/shell-run/bash-background.ts")).href;
-	const script = [
-		`import { runBackgroundBashBlocking } from ${JSON.stringify(moduleUrl)};`,
-		preamble,
-		`setInterval(() => {}, 1000);`,
-		`const result = await runBackgroundBashBlocking({ text: { earlierTruncated: '', spoolLost: () => '', emptyOutput: '' }, id: 'exit-test', command: ${JSON.stringify(command)}, description: 'worker', cwd: process.cwd() });`,
-		`process.stdout.write(result.output);`,
-		`process.stdin.on('data', () => { ${onInput} });`,
-	].join("\n");
-	const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["pipe", "pipe", "pipe"] });
-	const exited = once(owner, "exit");
-	let error = "";
-	owner.stderr.on("data", (chunk) => {
-		error += chunk;
-	});
-	const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${error}`)))]);
-	const [group, worker] = String(chunk).trim().split(/\s+/).map(Number);
-	return {
-		worker,
-		group,
-		owner,
-		exited,
-		cleanup: () => {
-			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
-			for (const target of [-group, worker]) {
-				try {
-					process.kill(target, "SIGKILL");
-				} catch {
-					// Gone.
-				}
-			}
-		},
-	};
-}
 
 /** Polls for the grace plus a margin. */
 const goneAfterGrace = (pid: number) => until(() => !alive(pid), Math.ceil((KILL_GRACE_MS + 2_000) / 50));
@@ -73,11 +25,11 @@ describe.skipIf(process.platform === "win32")("a remembered group when its owner
 		["dies of SIGINT", "", "SIGINT"],
 		["dies of SIGTERM", "", "SIGTERM"],
 	] as const)("SIGKILLs a member that ignores SIGTERM after the grace when the owner %s", async (_, onInput, signal) => {
-		const run = await startOwner(STUBBORN_WORKER, onInput);
+		const run = await startShellOwner(STUBBORN_WORKER, onInput);
 		try {
 			expect(alive(run.worker)).toBe(true);
 			if (signal) run.owner.kill(signal);
-			else run.owner.stdin!.write("go\n");
+			else run.owner.stdin.write("go\n");
 			await run.exited;
 			// SIGTERM alone leaves it running: it is still there right after the owner.
 			expect(alive(run.worker)).toBe(true);
@@ -116,9 +68,9 @@ describe.skipIf(process.platform === "win32")("the exit watchdog", () => {
 
 	it("is not started when every group ends on the SIGTERM", async () => {
 		const log = join(dir, "watchdogs.log");
-		const run = await startOwner(WORKER, "process.exit(0);", logWatchdogs(log));
+		const run = await startShellOwner(WORKER, "process.exit(0);", logWatchdogs(log));
 		try {
-			run.owner.stdin!.write("go\n");
+			run.owner.stdin.write("go\n");
 			await run.exited;
 			expect(await until(() => !alive(run.worker))).toBe(true);
 			expect(watchdogs(log)).toEqual([]);
@@ -129,9 +81,9 @@ describe.skipIf(process.platform === "win32")("the exit watchdog", () => {
 
 	it("is started for a group that outlasts the SIGTERM, naming that group", async () => {
 		const log = join(dir, "watchdogs.log");
-		const run = await startOwner(STUBBORN_WORKER, "process.exit(0);", logWatchdogs(log));
+		const run = await startShellOwner(STUBBORN_WORKER, "process.exit(0);", logWatchdogs(log));
 		try {
-			run.owner.stdin!.write("go\n");
+			run.owner.stdin.write("go\n");
 			await run.exited;
 			expect(watchdogs(log)).toEqual([String(run.group)]);
 			expect(await goneAfterGrace(run.worker)).toBe(true);
@@ -150,7 +102,7 @@ const SIGNAL_EXIT_LOADED = `if (!process.__signal_exit_emitter__?.count || proce
 
 describe.skipIf(process.platform === "win32")("a remembered group when its owner survives a signal", () => {
 	it("is left running when another listener keeps the owner alive, and ended when the owner exits", async () => {
-		const run = await startOwner(WORKER, "process.exit(0);", `process.on("SIGINT", () => {});`);
+		const run = await startShellOwner(WORKER, "process.exit(0);", `process.on("SIGINT", () => {});`);
 		try {
 			run.owner.kill("SIGINT");
 			await new Promise((resolveWait) => setTimeout(resolveWait, 500));
@@ -161,7 +113,7 @@ describe.skipIf(process.platform === "win32")("a remembered group when its owner
 			await new Promise((resolveWait) => setTimeout(resolveWait, 300));
 			expect(alive(run.worker)).toBe(true);
 
-			run.owner.stdin!.write("go\n");
+			run.owner.stdin.write("go\n");
 			await run.exited;
 			expect(await until(() => !alive(run.worker))).toBe(true);
 		} finally {
@@ -170,7 +122,7 @@ describe.skipIf(process.platform === "win32")("a remembered group when its owner
 	}, 15_000);
 
 	it("is ended when a signal-exit observer re-raises the signal", async () => {
-		const run = await startOwner(WORKER, "", SIGNAL_EXIT_LOADED);
+		const run = await startShellOwner(WORKER, "", SIGNAL_EXIT_LOADED);
 		try {
 			run.owner.kill("SIGINT");
 			const [, signal] = await run.exited;

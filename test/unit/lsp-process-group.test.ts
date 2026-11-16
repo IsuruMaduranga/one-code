@@ -7,15 +7,14 @@
  * process exits without stopping it (a crash, where pi calls `process.exit`
  * without a `session_shutdown`).
  */
-import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient } from "../../extensions/tools/lsp/client.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, startOwner, until } from "./helpers/process-alive.ts";
 import { RECORDING_SERVER } from "./helpers/recording-lsp-server.ts";
 
 /** `; :` keeps the shell from replacing itself with node: the server is the script's child. */
@@ -88,23 +87,17 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 			`process.stdout.write("ready\\n");`,
 			`process.stdin.once("data", () => { throw new Error("crash"); });`,
 		].join("\n");
-		const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["pipe", "pipe", "pipe"] });
-		let stderr = "";
-		owner.stderr.on("data", (chunk) => {
-			stderr += chunk;
-		});
-		const exited = once(owner, "exit");
+		const run = await startOwner(script);
 		try {
-			const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${stderr}`)))]);
-			expect(String(chunk)).toContain("ready");
+			expect(run.ready).toContain("ready");
 			const pid = await readServerPid();
 
-			owner.stdin.write("crash\n");
-			const [code] = await exited;
+			run.owner.stdin.write("crash\n");
+			const [code] = await run.exited;
 			expect(code).toBe(1);
 			expect(await until(() => !alive(pid))).toBe(true);
 		} finally {
-			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
+			run.kill();
 		}
 	});
 });
