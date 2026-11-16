@@ -8,12 +8,13 @@ wake-ups, and how the results of background work reach the model.
 
 ## The task list
 
-For multi-step work the model keeps a structured task list, using the
-`task_create`, `task_get`, `task_list`, and `task_update` tools. Frontier
-models and Sonnet 5 or later run without them, as in Claude Code, unless you
-set `ONECODE_ENABLE_TODO_TOOLS=1` ([Providers and
-models](providers-and-models.md#prompting-adapts-to-the-model)). Each task
-has a subject, a description, a status (pending, in progress, or
+The structured task list is off by default, for every model. Models that
+had one kept lists for ordinary work they'd have done fine without, so One
+Code leaves out the `task_create`, `task_get`, `task_list`, and
+`task_update` tools and the prompt line that points at them. Set
+`ONECODE_ENABLE_TODO_TOOLS=1` to turn them on for any model. The prompt then
+tells the model to keep a list only for long work with many separate steps,
+or when you hand it a list of requests. Each task has a subject, a description, a status (pending, in progress, or
 completed), an optional owner, and dependencies on other tasks.
 
 While the list has entries, a pinned widget below the transcript shows a
@@ -31,7 +32,8 @@ tasks: see [Talk to an agent](subagents-and-workflows.md#talk-to-an-agent).
 
 The list is stored inside the session, so it survives a resume and follows
 the branch you're on in `/tree`. A list that was already finished comes back
-empty. If the model hasn't touched the list for
+empty. Without the task tools, a list restored from an older session stays
+hidden, since nothing could update it. If the model hasn't touched a list for
 a while during a long task, it's reminded that the list exists.
 
 ## Background shells

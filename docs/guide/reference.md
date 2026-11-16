@@ -211,7 +211,7 @@ mode. When both spellings are set, One Code's wins.
 | `ONECODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of your user settings; a non-bash binary is ignored with a warning. |
 | `ONECODE_SUBAGENT_MODEL` | Default subagent model. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` applies only on a Claude session. |
 | `ONECODE_DISABLE_AUTO_MEMORY=1` | Turn auto-memory off, overriding the setting in `/memory`. `0` turns it on. |
-| `ONECODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
+| `ONECODE_ENABLE_TODO_TOOLS=1` | Give the model the task tools, which every model runs without by default. |
 | `ONECODE_LOOP_KEEPALIVE=0` | Turn off the fallback wake-up of a self-paced `/loop`. |
 | `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` | How long an unanswered auto-mode prompt waits before it denies the action, in milliseconds (default 120000). |
 
