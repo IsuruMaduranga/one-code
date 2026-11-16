@@ -507,14 +507,27 @@ export function findBashAllowRule(
 	// of: the last one that starts before it (segments are in source order, and
 	// a command starts before its own substitutions). A later command than the
 	// true one only counts more commands as running first.
+	const containers = new Map<number, number>();
 	const containerOf = (index: number): number => {
+		const known = containers.get(index);
+		if (known !== undefined) return known;
 		const at = parsed.segments.findIndex((seg) => seg.substitution === index);
 		let container = topLevel.length;
 		for (const [position, seg] of parsed.segments.entries()) {
 			if (position >= at) break;
 			if (seg.substitution === undefined && seg.raw.length > 0) container = topLevel.indexOf(seg);
 		}
+		containers.set(index, container);
 		return container;
+	};
+	// Each substitution's proof, run once: it runs the whole pre-gate.
+	const substitutionProofs = new Map<number, boolean>();
+	const substitutionReadOnly = (index: number): boolean => {
+		const known = substitutionProofs.get(index);
+		if (known !== undefined) return known;
+		const proved = opts.readOnly?.(parsed.substitutions[index]) ?? false;
+		substitutionProofs.set(index, proved);
+		return proved;
 	};
 	// The top-level commands that run alongside the one at `index`: the other
 	// members of its pipelines.
@@ -524,7 +537,7 @@ export function findBashAllowRule(
 	};
 	const innerOf = parsed.substitutions.map((_, index) => parsed.segments.filter((seg) => seg.substitution === index));
 	const byRule = innerOf.map((inner) => inner.every((seg) => ruleFor(seg.raw)));
-	for (const [index, text] of parsed.substitutions.entries()) {
+	for (const index of parsed.substitutions.keys()) {
 		if (byRule[index]) continue;
 		// The proof clears a substitution only under the same order as a
 		// top-level command: no ruled command the proof could not clear runs
@@ -532,12 +545,12 @@ export function findBashAllowRule(
 		// ~/.ssh/id_rsa k && git commit -m "$(cat k)"` is not covered), nor does
 		// a substitution a rule cleared in that same command (`git commit -m
 		// "$(ln -sf …)" -F "$(cat k)"`).
-		if (proofOff || !opts.readOnly?.(text)) return undefined;
+		if (proofOff || !substitutionReadOnly(index)) return undefined;
 		const container = containerOf(index);
 		const unproven = (other: number) => segmentRules[other] !== undefined && !readOnlyAt(other);
 		if ([...segmentRules.keys()].slice(0, container).some(unproven) || alongside(container).some(unproven)) return undefined;
-		for (const [other, otherText] of parsed.substitutions.entries()) {
-			if (other !== index && byRule[other] && containerOf(other) === container && !opts.readOnly(otherText)) return undefined;
+		for (const other of parsed.substitutions.keys()) {
+			if (other !== index && byRule[other] && containerOf(other) === container && !substitutionReadOnly(other)) return undefined;
 		}
 	}
 	return first;

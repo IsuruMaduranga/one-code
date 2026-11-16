@@ -274,6 +274,17 @@ describe("read-only commands need no rule of their own", () => {
 				}
 			});
 
+			it("runs each substitution's proof once, however many substitutions the command has", () => {
+				const proved: string[] = [];
+				const readOnly = (command: string) => {
+					proved.push(command);
+					return true;
+				};
+				const words = Array.from({ length: 6 }, (_, i) => `-m "$(git commit -m ${i})" -m "$(cat f${i})"`).join(" ");
+				expect(findBashAllowRule(rules(["Bash(git commit:*)"]), `git commit ${words}`, "bash", { readOnly })).toBeDefined();
+				expect(proved.length).toBe(new Set(proved).size);
+			});
+
 			it("leaves plan mode as it was", () => {
 				expect(decide({ ...shell, mode: "plan", subject: 'ln -sf ~/.ssh/id_rsa k && git commit -m "$(cat k)"', allow: rules(lnCommit) })).toEqual({ decision: "deny", cause: "plan-mode" });
 				expect(decide({ ...shell, mode: "plan", subject: 'git commit -m "$(cat README.md)"', allow: rules(["Bash(git commit:*)"]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
