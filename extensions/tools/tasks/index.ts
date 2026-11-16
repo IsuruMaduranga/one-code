@@ -23,7 +23,6 @@ import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
 import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
-import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { toolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { requireText } from "../../lib/profile/profile.ts";
@@ -49,14 +48,17 @@ const TASK_TOOLS = new Set<DeferrableTool>(["task_create", "task_get", "task_lis
 
 function tasksExtension(pi: ExtensionAPI) {
 	const text = requireText("tasks");
-	const requestTier = sessionModelTier(pi);
 	const store = new TaskStore();
 	const toggleKey = taskToggleKey();
 	let widgetHidden = false;
 
+	// Set by the gate below: the session runs without the task tools.
+	let withheld = false;
+
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		if (store.list().length === 0) {
+		// A list restored from the branch stays off screen while no tool can update it.
+		if (withheld || store.list().length === 0) {
 			ctx.ui.setWidget("cc-tasks", undefined);
 			return;
 		}
@@ -110,13 +112,12 @@ function tasksExtension(pi: ExtensionAPI) {
 		updateWidget(ctx);
 	};
 
-	// Claude Code's model gate: frontier models and Sonnet 5+ run without the
-	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/models/model-tier.ts
-	// taskToolsEnabled). Re-applied on a model change, so switching to a model
-	// that has them brings them back through the deferred listing.
-	let withheld = false;
-	const applyModelGate = (model: Parameters<typeof taskToolsEnabled>[0]) => {
-		const enabled = taskToolsEnabled(model, process.env, requestTier());
+	// The task tools are off unless the ENABLE_TODO_TOOLS knob turns them on
+	// (lib/models/model-tier.ts taskToolsEnabled), for every model: withheld
+	// through tool-search, so they leave the deferred listing and a call the
+	// branch remembers gets the withdrawn-tool steer, not a load hint.
+	const applyGate = () => {
+		const enabled = taskToolsEnabled();
 		if (enabled === !withheld) return;
 		withheld = !enabled;
 		for (const name of TASK_TOOLS) {
@@ -126,11 +127,10 @@ function tasksExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		applyGate();
 		reconstructState(ctx);
-		applyModelGate(ctx.model);
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
-	pi.on("model_select", (event) => applyModelGate(event.model));
 	pi.on("session_shutdown", () => cancelClear());
 
 	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
@@ -147,8 +147,10 @@ function tasksExtension(pi: ExtensionAPI) {
 	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
 
 	pi.on("turn_end", () => {
-		// Claude Code's reminder needs TaskUpdate in the tool list.
-		if (withheld) return;
+		// Claude Code's reminder needs TaskUpdate in the tool list. It also
+		// waits for a list to exist: without one it would push a list onto
+		// ordinary work, which the task tools are not for.
+		if (withheld || store.list().length === 0) return;
 		turnsSinceTaskUse++;
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;

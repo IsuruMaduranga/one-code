@@ -334,44 +334,19 @@ describe("usesClaudeCodeFastPaths (decisions/auto-mode.md, \"Two gates by model 
 	});
 });
 
-describe("taskToolsEnabled (Claude Code's model gate for the task tools)", () => {
-	it("withholds them from frontier models and Sonnet 5 or later", () => {
-		for (const [id, provider] of [
-			["claude-fable-5-1", "anthropic"],
-			["claude-opus-5-5", "anthropic"],
-			["claude-sonnet-5", "anthropic"],
-			["claude-sonnet-5-2", "anthropic"],
-			["gpt-6-astra", "openai"],
-			["gpt-6-sol", "openai-codex"],
-		]) {
-			expect(taskToolsEnabled(model(id, provider, 2), noEnv), id).toBe(false);
-		}
+describe("taskToolsEnabled (the task tools are off unless a knob turns them on)", () => {
+	it("is off by default, whatever the session model", () => {
+		expect(taskToolsEnabled(noEnv)).toBe(false);
+		expect(taskToolsEnabled({ [envName("PROMPT_TIER")]: "tiny" } as NodeJS.ProcessEnv)).toBe(false);
 	});
 
-	it("keeps them for older and third-party models, and an unknown model", () => {
-		for (const [id, provider] of [
-			["claude-sonnet-4-6", "anthropic"],
-			["claude-haiku-4-5", "anthropic"],
-			["gpt-5.6-sol", "openai"],
-			["gpt-6-luna", "openai"],
-			["deepseek/deepseek-v4.1-flash", "openrouter"],
-			["anthropic/claude-opus-5.5", "openrouter"],
-		]) {
-			expect(taskToolsEnabled(model(id, provider, 2), noEnv), id).toBe(true);
-		}
-		expect(taskToolsEnabled(undefined, noEnv)).toBe(true);
-	});
-
-	it("turns them back on with the product's ENABLE_TODO_TOOLS knob", () => {
-		const opus = model("claude-opus-5-5", "anthropic");
+	it("turns them on with the product's ENABLE_TODO_TOOLS knob", () => {
 		const knob = envName("ENABLE_TODO_TOOLS");
-		for (const value of ["1", "true", "YES", "on"]) {
-			expect(taskToolsEnabled(opus, { [knob]: value } as NodeJS.ProcessEnv)).toBe(true);
+		for (const value of ["1", "true", "YES", " on "]) {
+			expect(taskToolsEnabled({ [knob]: value } as NodeJS.ProcessEnv), value).toBe(true);
 		}
-		expect(taskToolsEnabled(opus, { [knob]: "0" } as NodeJS.ProcessEnv)).toBe(false);
-	});
-
-	it("follows a forced tier", () => {
-		expect(taskToolsEnabled(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), { [envName("PROMPT_TIER")]: "frontier" } as NodeJS.ProcessEnv)).toBe(false);
+		for (const value of ["0", "false", ""]) {
+			expect(taskToolsEnabled({ [knob]: value } as NodeJS.ProcessEnv), value).toBe(false);
+		}
 	});
 });

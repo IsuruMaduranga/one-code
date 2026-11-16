@@ -57,8 +57,8 @@ export function buildClaudeCodeSystemPrompt(
 	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,
-	/** False when the session model runs without the task tools (`lib/models/model-tier.ts taskToolsEnabled`). */
-	taskTools = true,
+	/** True only when the session has the task tools (`lib/models/model-tier.ts taskToolsEnabled`): off unless a knob turns them on. */
+	taskTools = false,
 	/** Sections other extensions announced, in announcement order. */
 	extraSections: readonly SystemPromptSection[] = [],
 	/** The tools and features of the session the sections render for (lib/agents/child-extensions.ts sessionView); the main session's by default. */

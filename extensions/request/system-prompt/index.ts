@@ -114,7 +114,6 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	};
 
 	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
-		const model = ctx.model;
 		const tier = requestTier();
 		// The same constant the context-budget extension puts on every user
 		// message, and only while that extension runs.
@@ -124,7 +123,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const appended = [options.appendSystemPrompt, user?.appendSystemPrompt].filter(Boolean).join("\n\n");
 		if (user?.systemPrompt !== undefined) return [user.systemPrompt, appended].filter(Boolean).join("\n\n");
 		if (user?.appendSystemPrompt !== undefined) options = { ...options, appendSystemPrompt: appended };
-		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier) && toolLive("task_create"), [...extraSections.values()], view);
+		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled() && toolLive("task_create"), [...extraSections.values()], view);
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the

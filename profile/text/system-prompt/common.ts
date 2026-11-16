@@ -16,11 +16,12 @@ export interface PromptBundle {
 	/** Whether the memory section uses the long spec (`lib/context/memory.ts`). */
 	verboseMemory: boolean;
 	/**
-	 * `lead` without the bullets that steer to `task_create`, for a session model
-	 * that runs without the task tools (Claude Code writes its TaskCreate line
-	 * only when the tool is enabled). Absent when `lead` has no such bullet.
+	 * `lead` with the bullet that steers to `task_create`, for a session the
+	 * `ENABLE_TODO_TOOLS` knob gives the task tools (`lead` has none: the tools
+	 * are off by default, and Claude Code writes its TaskCreate line only when
+	 * the tool is enabled). Absent when the register has no such bullet.
 	 */
-	leadWithoutTaskTools?: string[];
+	leadWithTaskTools?: string[];
 	/** `lead` built for the session's tool set, when the text names a tool the set decides (tiny's shell tool). */
 	leadFor?: (session: { taskTools: boolean; tools: readonly string[] | undefined }) => string[];
 }

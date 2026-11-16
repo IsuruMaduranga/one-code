@@ -47,15 +47,17 @@ Decide up front which the request needs:
 - When it could be read either way → treat it as a task and act.
 Do the work rather than asking permission to start. Ask the user when you genuinely cannot proceed without an answer, and before the risky actions listed under "Executing actions with care".`;
 
-const LOW_TASK_LINE = ` - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.`;
+/** Only in a session the ENABLE_TODO_TOOLS knob gives the task tools. */
+export const LOW_TASK_LINE = ` - Use a task list (\`task_create\`, deferred: load it with \`tool_search select:task_create,task_update\`) only for work that will take many separate steps over a long session, or for a list of requests from the user. For ordinary tasks, do the work without one. When a list exists, mark each task completed as soon as it is done.`;
 
-/** Built with or without the task bullet: the session model may run without the task tools. */
+/** Built with or without the task bullet: the task tools are off unless a knob turns them on. */
 const usingTools = (taskTools: boolean) => `# Using your tools
  - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the grep, find and ls tools to search for files or content (not the find/grep/ls commands in the shell). Reserve the shell for commands that genuinely need it.${taskTools ? `\n${LOW_TASK_LINE}` : ""}
  - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising.
  - You can call multiple independent tools in one response — do so when the calls don't depend on each other.`;
 
-export const USING_TOOLS = usingTools(true);
+export const USING_TOOLS = usingTools(false);
+export const USING_TOOLS_WITH_TASK_TOOLS = usingTools(true);
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATING_WORK in mid.ts and the delegation steer in
@@ -96,8 +98,8 @@ const lowLead = (taskTools: boolean, shellTool = shellToolPhrase(undefined)) => 
 ];
 
 export const lowBundle: PromptBundle = {
-	lead: lowLead(true),
-	leadWithoutTaskTools: lowLead(false),
+	lead: lowLead(false),
+	leadWithTaskTools: lowLead(true),
 	leadFor: ({ taskTools, tools }) => lowLead(taskTools, shellToolPhrase(tools)),
 	tail: [STAYING_ON_TRACK, CONTEXT_MANAGEMENT],
 	verboseMemory: true,

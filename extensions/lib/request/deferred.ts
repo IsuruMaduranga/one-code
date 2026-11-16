@@ -737,8 +737,8 @@ export function loaderUnavailableReminderText(): string {
 }
 
 /**
- * The correction for a tool WITHHOLD_CHANNEL took away (the task tools on a
- * frontier or Sonnet 5+ model): unlike an ordinary deferred miss, `tool_search`
+ * The correction for a tool WITHHOLD_CHANNEL took away (the task tools while
+ * the ENABLE_TODO_TOOLS knob is off): unlike an ordinary deferred miss, `tool_search`
  * cannot load it — the name is gone from the registry, not merely inactive —
  * so the steer must NOT repeat `deferredMissReminderText`'s "load it with
  * tool_search" advice, which would just fail again.

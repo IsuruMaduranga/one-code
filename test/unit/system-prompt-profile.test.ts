@@ -109,7 +109,7 @@ describe("system prompt from the profile", () => {
 		const a = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		const b = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		expect(a).toBe(b);
-		const lead = requireText("systemPrompt").lead({ tier: "frontier", taskTools: true, tools: ["bash", "read", "skill"] });
+		const lead = requireText("systemPrompt").lead({ tier: "frontier", taskTools: false, tools: ["bash", "read", "skill"] });
 		expect(a.startsWith(`${lead.join("\n\n")}\n\n`)).toBe(true);
 	});
 });

@@ -15,7 +15,7 @@ import type { LiveFeatures, LiveTools } from "../../lib/profile/live-tools.ts";
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
 export interface SystemPromptSession {
 	tier: PromptTier;
-	/** False when the session model runs without the task tools (lib/models/model-tier.ts taskToolsEnabled). */
+	/** True only when the session has the task tools (lib/models/model-tier.ts taskToolsEnabled): off unless a knob turns them on. */
 	taskTools: boolean;
 	/**
 	 * The session's active tools, as pi selects them; undefined before pi

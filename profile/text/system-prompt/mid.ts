@@ -61,15 +61,15 @@ Examples of the kind of risky actions that warrant user confirmation:
 
 When you encounter an obstacle, do not use destructive actions as a shortcut to simply make it go away. For instance, try to identify root causes and fix underlying issues rather than bypassing safety checks (e.g. --no-verify). If you discover unexpected state like unfamiliar files, branches, or configuration, investigate before deleting or overwriting, as it may represent the user's in-progress work. If you're unsure whether the user would want something kept, prefer a reversible step (move it aside, rename it, or stash it) over deleting; files you created yourself this session (scratch outputs, experiment intermediates) are yours to clean up freely. For example, typically resolve merge conflicts rather than discarding changes; similarly, if a lock file exists, investigate what process holds it rather than deleting it. In a git repository, run \`git status\` before any command that could discard uncommitted work (git checkout/restore/reset/clean, rm -rf on a repo path, restoring from a snapshot), and stash (with \`-u\` for untracked) or commit anything you find first. And when staging or committing: review what's included (\`git status\` after a broad \`git add\`), and if you see anything suspicious that might reveal secrets — even if the filename looks innocuous — double-check the file's contents before pushing. In short: only take risky actions carefully, and when in doubt, ask before acting. Follow both the spirit and letter of these instructions - measure twice, cut once.`;
 
-/** Claude Code drops this line for a model that runs without the task tools. */
-export const TASK_LINE = ` - Use task_create (deferred — load it with \`tool_search select:task_create,task_update\`) to plan and track work. Mark each task completed as soon as it's done; don't batch.`;
+/** Only in a session the ENABLE_TODO_TOOLS knob gives the task tools (Claude Code drops its line without them). */
+export const TASK_LINE = ` - Keep a task list with task_create (deferred: load it with \`tool_search select:task_create,task_update\`) only for work that will take many separate steps over a long session, or for a list of requests from the user. For ordinary tasks, do the work without one. When a list exists, mark each task completed as soon as it's done; don't batch.`;
 
-/** Built with or without the task line: the session model may run without the task tools. */
+/** Built with or without the task line: the task tools are off unless a knob turns them on. */
 const usingTools = (taskTools: boolean) =>
 	`# Using your tools\n - Prefer dedicated tools over bash when one fits (read, edit, write) — reserve bash for shell-only operations.${taskTools ? `\n${TASK_LINE}` : ""}\n - You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.`;
 
-export const USING_TOOLS = usingTools(true);
-export const USING_TOOLS_WITHOUT_TASK_TOOLS = usingTools(false);
+export const USING_TOOLS = usingTools(false);
+export const USING_TOOLS_WITH_TASK_TOOLS = usingTools(true);
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATE_STRICT in low.ts (tiny prompt) and
@@ -121,7 +121,7 @@ const midLead = (usingToolsSection: string) => [
 
 export const midBundle: PromptBundle = {
 	lead: midLead(USING_TOOLS),
-	leadWithoutTaskTools: midLead(USING_TOOLS_WITHOUT_TASK_TOOLS),
+	leadWithTaskTools: midLead(USING_TOOLS_WITH_TASK_TOOLS),
 	tail: [CONTEXT_MANAGEMENT],
 	verboseMemory: true,
 };

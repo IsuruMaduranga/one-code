@@ -1,7 +1,9 @@
 /**
  * The task tools' model-facing texts: Claude Code's TaskCreate, TaskUpdate,
  * TaskGet and TaskList descriptions and parameter texts, with One Code's tool
- * names (pure). The schemas are the same on both sides.
+ * names (pure). The schemas are the same on both sides. TaskCreate's "when to
+ * use" list is narrowed to long work and the user's own lists: models given
+ * the tools kept needless lists for ordinary tasks.
  */
 
 export const TASK_CREATE_DESCRIPTION = `Use this tool to create a structured task list for your current coding session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
@@ -9,14 +11,11 @@ It also helps the user understand the progress of the task and overall progress 
 
 ## When to Use This Tool
 
-Use this tool proactively in these scenarios:
+Use this tool only in these scenarios:
 
-- Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
-- Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
-- Plan mode - When using plan mode, create a task list to track the work
+- Long multi-step work - When the work will take many separate steps over a long session
 - User explicitly requests todo list - When the user directly asks you to use the todo list
 - User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
-- After receiving new instructions - Immediately capture user requirements as tasks
 - When you start working on a task - Mark it as in_progress BEFORE beginning work
 - After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation
 
@@ -25,10 +24,10 @@ Use this tool proactively in these scenarios:
 Skip using this tool when:
 - There is only a single, straightforward task
 - The task is trivial and tracking it provides no organizational benefit
-- The task can be completed in less than 3 trivial steps
+- The task is an ordinary one, even with a few steps
 - The task is purely conversational or informational
 
-NOTE that you should not use this tool if there is only one trivial task to do. In this case you are better off just doing the task directly.
+NOTE that for ordinary tasks you are better off doing the work directly, without a task list.
 
 ## Task Fields
 

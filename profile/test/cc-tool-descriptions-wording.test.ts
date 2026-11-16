@@ -30,7 +30,7 @@ describe("the shipped texts", () => {
 		["WebFetch long", WEB_FETCH_LONG_DESCRIPTION, 1653, "332637519274c002"],
 		["WebSearch long", WEB_SEARCH_LONG_DESCRIPTION, 1473, "e552812379795d9b"],
 		["NotebookEdit", NOTEBOOK_EDIT_DESCRIPTION, 803, "5a701ed8db42b168"],
-		["TaskCreate", TASK_CREATE_DESCRIPTION, 2148, "031fab8e56dfee27"],
+		["TaskCreate (its \"when to use\" list narrowed to long work)", TASK_CREATE_DESCRIPTION, 1842, "9f5fa813679e8f30"],
 		["TaskUpdate", TASK_UPDATE_DESCRIPTION, 2245, "d0d6e2f7e19354e7"],
 		["TaskGet", TASK_GET_DESCRIPTION, 733, "4158d4726eb58d59"],
 		["TaskList", TASK_LIST_DESCRIPTION, 1001, "87e632e37738bf17"],
