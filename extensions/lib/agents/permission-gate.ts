@@ -50,7 +50,7 @@ import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type Perm
 import { projectAllowApproved } from "../consent/project-trust.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../rules/settings.ts";
 import type { PermissionBridge } from "./subagent-gate.ts";
-import { refusalText } from "../rules/permission-text.ts";
+import { refusalText, unansweredAskReason } from "../rules/permission-text.ts";
 import { resolveForContainment, toAbsolute } from "../shell/paths.ts";
 
 /** A directory's realpath for containment, or the path itself when nothing about it resolves. */
@@ -276,16 +276,10 @@ export function permissionGateFactory(
 				const outsideWorkingDir = result.cause === "working-dir";
 				return {
 					block: true,
-					reason: refusalText(
+					reason:
 						result.decision === "deny"
-							? { kind: "childDenied", rule: result.rule?.raw }
-							: // Plan mode's ask with nobody to answer it is refused as plan mode refuses.
-								result.cause === "plan-unproven"
-								? { kind: "planMode" }
-								: liveMode === "auto"
-								? { kind: "childNoClassifier", outsideWorkingDir }
-								: { kind: "childNeedsApproval", outsideWorkingDir },
-					),
+							? refusalText({ kind: "childDenied", rule: result.rule?.raw })
+							: unansweredAskReason(result.cause, liveMode === "auto" ? { kind: "childNoClassifier", outsideWorkingDir } : { kind: "childNeedsApproval", outsideWorkingDir }),
 				};
 			});
 		},

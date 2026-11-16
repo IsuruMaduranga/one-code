@@ -14,7 +14,7 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { domainToASCII } from "node:url";
-import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
+import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, programName, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -452,14 +452,15 @@ export function findBashAllowRule(
 	const ruleFor = (raw: string) => bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, raw));
 	const topLevel = parsed.segments.filter((seg) => seg.substitution === undefined && seg.raw.length > 0);
 	if (topLevel.length === 0) return undefined;
+	const segmentRules = topLevel.map((seg) => ruleFor(seg.raw));
+	// At least one command must be the rule's: a line of read-only commands
+	// alone is the read-only fast path's to judge, not a rule's. Checked before
+	// any read-only proof, which runs the whole pre-gate per command.
+	const first = segmentRules.find((rule) => rule !== undefined);
+	if (!first) return undefined;
 	const topLevelMoves = topLevel.some(movesDirectory);
-	let first: PermissionRule | undefined;
-	for (const seg of topLevel) {
-		const rule = ruleFor(seg.raw);
-		if (rule) {
-			first ??= rule;
-			continue;
-		}
+	for (const [index, seg] of topLevel.entries()) {
+		if (segmentRules[index]) continue;
 		// A command the pre-gate proves read-only by itself needs no rule of its
 		// own (`gh api … | head`), as Claude Code allows a read-only subcommand
 		// on its own. Off after a `cd` on the line, whose later relative paths
@@ -467,9 +468,6 @@ export function findBashAllowRule(
 		if (!topLevelMoves && opts.readOnly?.(seg.raw)) continue;
 		return undefined;
 	}
-	// At least one command must be the rule's: a line of read-only commands
-	// alone is the read-only fast path's to judge, not a rule's.
-	if (!first) return undefined;
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
 		if (inner.every((seg) => ruleFor(seg.raw))) continue;
@@ -1119,8 +1117,9 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	const rawHead = pattern.split(/[\s*]/)[0] ?? "";
 	// A PowerShell alias is as broad as its cmdlet: `PowerShell(iex *)` is
 	// `Invoke-Expression *`, `PowerShell(saps *)` is `Start-Process *`.
-	const head = rule.tool === "powershell" ? canonicalCommandName(rawHead.replace(/:$/, "")).toLowerCase() : rawHead.replace(/:$/, "");
-	const kind = runnerKind(commandBasename(head));
+	const bareHead = rawHead.replace(/:$/, "");
+	const head = rule.tool === "powershell" ? canonicalCommandName(bareHead).toLowerCase() : bareHead;
+	const kind = runnerKind(programName(head));
 	if (!wildcard) {
 		// An exact rule matches one command, which is narrow however powerful
 		// that command is, unless it is a shell or interpreter given no operand
@@ -1140,11 +1139,6 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	if (/^-(c|e)[\s:='"]*\*+['"]*$/.test(rest)) return true;
 	// `npm test:*` names the script, so it stays narrow.
 	return false;
-}
-
-/** A command word's program name: its basename, lowercased, without a Windows executable extension. */
-function commandBasename(word: string): string {
-	return (word.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 export function decide(params: DecideInput): Decision {
@@ -1265,6 +1259,20 @@ export function decide(params: DecideInput): Decision {
 	};
 
 	/**
+	 * Whether a stage after the first of a pipeline on the line is not provably
+	 * read-only by itself. A program reading a pipe may run what it reads (a
+	 * shell, `perl5.34`, `dc`, `sqlite3 db`), and no list of such programs is
+	 * complete, so in plan mode an allow rule covers only a line whose later
+	 * stages the pre-gate clears on their own (`gh pr view 1 | head`).
+	 */
+	const pipesIntoUnproven = (command: string): boolean => {
+		const { segments, pipelines, parseFailed } = parseCommand(command.trim());
+		if (parseFailed) return true;
+		const fed = new Set(pipelines.flatMap((members) => members.slice(1)));
+		return segments.some((segment) => segment.scopes.some((scope) => fed.has(scope)) && !readOnlyShell(segment.raw));
+	};
+
+	/**
 	 * Plan mode's answer for a shell line (bash, PowerShell), in this order:
 	 *
 	 * 1. A write the line names is refused: never asked about, never allowed
@@ -1287,29 +1295,16 @@ export function decide(params: DecideInput): Decision {
 	 * An unproven line's ask carries `plan-unproven`: it goes to the user,
 	 * never to auto mode's classifier (the mode is plan, so nothing below the
 	 * plan branch runs), and with no user to answer it the caller refuses it
-	 * with the plan-mode text.
+	 * with the plan-mode text. `ruleMayCover` is a thunk: it parses the line
+	 * again, so it runs only when step 4 is reached.
 	 */
-	/**
-	 * Whether a stage after the first of a pipeline on the line is not provably
-	 * read-only by itself. A program reading a pipe may run what it reads (a
-	 * shell, `perl5.34`, `dc`, `sqlite3 db`), and no list of such programs is
-	 * complete, so in plan mode an allow rule covers only a line whose later
-	 * stages the pre-gate clears on their own (`gh pr view 1 | head`).
-	 */
-	const pipesIntoUnproven = (command: string): boolean => {
-		const { segments, pipelines, parseFailed } = parseCommand(command.trim());
-		if (parseFailed) return true;
-		const fed = new Set(pipelines.flatMap((members) => members.slice(1)));
-		return segments.some((segment) => segment.scopes.some((scope) => fed.has(scope)) && !readOnlyShell(segment.raw));
-	};
-
-	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: boolean }): Decision => {
+	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: () => boolean }): Decision => {
 		if (line.writes) return { decision: "deny", cause: "plan-mode" };
 		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
 		if (askRule) return line.readOnly || line.readOnlyOutside ? askOrDeny(askRule) : { decision: "ask", rule: askRule, cause: "plan-unproven" };
 		if (line.readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (line.readOnlyOutside) return { decision: "ask", cause: "working-dir" };
-		if (line.ruleMayCover && !(tool === "bash" && redirectEscapes(subject))) {
+		if (line.ruleMayCover() && !(tool === "bash" && redirectEscapes(subject))) {
 			const allowRule = findBashAllowRule(
 				allow.filter((rule) => !isBroadExecutionRule(rule)),
 				subject,
@@ -1351,7 +1346,7 @@ export function decide(params: DecideInput): Decision {
 				// Read-only, but of a path outside the working directory: still a
 				// read, put to the user as the read tools' outside read is.
 				readOnlyOutside: evidence.readOnlyOutside && evidence.writes.length === 0,
-				ruleMayCover: evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(commandBasename(name))) && !pipesIntoUnproven(subject),
+				ruleMayCover: () => evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(programName(name))) && !pipesIntoUnproven(subject),
 			});
 		}
 		// The PowerShell counterpart, judged from PowerShell's own parse
@@ -1365,7 +1360,7 @@ export function decide(params: DecideInput): Decision {
 				writes: powershellTreeNamesWrite(parse),
 				readOnly: powershellReadOnly({ parse, cwd, home: homedir(), readableRoots }).readOnly,
 				readOnlyOutside: false,
-				ruleMayCover: powershellTreeUnlistedOnly(parse, { cwd, home: homedir() }, (name) => !gateKnowsCommand(name) && !runsOtherCode(name)),
+				ruleMayCover: () => powershellTreeUnlistedOnly(parse, { cwd, home: homedir() }, (name) => !gateKnowsCommand(name) && !runsOtherCode(name)),
 			});
 		}
 		if (isPlanReadOnlyTool(toolName, tool)) {

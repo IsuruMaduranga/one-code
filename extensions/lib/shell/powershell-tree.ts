@@ -27,7 +27,7 @@ import { readdirSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, touchesGuardedPath } from "./paths.ts";
-import { isGuardedWritePath, isMutationCommand, removalLoses } from "./shell-analysis.ts";
+import { isGuardedWritePath, isMutationCommand, programName, removalLoses } from "./shell-analysis.ts";
 import type { PowerShellAstNode, PowerShellParse } from "./powershell-parser.ts";
 import {
 	applicationArgument,
@@ -576,11 +576,6 @@ export function powershellTreeNamesWrite(parse: PowerShellParse): boolean {
 function redirectsToNull({ nodes, children }: Tree, i: number): boolean {
 	const [location] = children[i];
 	return children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null";
-}
-
-/** A command's program name: the basename, lowercased, without a Windows executable extension. */
-function programName(spelled: string): string {
-	return (spelled.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 /** The node kinds a plain native-program line is made of: pipelines, statements, literal words and stream merges. */

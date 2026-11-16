@@ -203,3 +203,13 @@ export const permissionText = wordsInForce("permissions", permissionWords);
 
 /** Why the gate refused a call, in this session's words. */
 export const refusalText = (refusal: PermissionRefusal): string => permissionText().refused(refusal);
+
+/**
+ * Why an ask nobody answered was refused (no UI, or the prompt was dismissed
+ * by an abort), for the parent's gate and a child's alike. Plan mode's ask
+ * (`plan-unproven`) is refused as plan mode refuses everything else (settled
+ * in decisions/modes.md, "Plan mode is file-based"); any other ask keeps its
+ * own words, `otherwise`.
+ */
+export const unansweredAskReason = (cause: string | undefined, otherwise: PermissionRefusal): string =>
+	refusalText(cause === "plan-unproven" ? { kind: "planMode" } : otherwise);

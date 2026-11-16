@@ -565,6 +565,16 @@ export function gitSubcommand(args: Token[]): { sub?: string; rest: Token[] } {
 	return { rest: [] };
 }
 
+/**
+ * A command word's program name: its basename, lowercased, without a Windows
+ * executable extension (`.exe`, `.cmd`, `.bat`, `.com`). Plan mode's runner
+ * check and the PowerShell tree read it; the bash gate's own `commandName`
+ * below strips `.exe` only.
+ */
+export function programName(word: string): string {
+	return (word.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+}
+
 /** Basename of a command token, `.exe` stripped, lowercased. */
 function commandName(token: string): string {
 	const withForwardSlashes = token.trim().toLowerCase().replace(/\\/g, "/");
