@@ -8,19 +8,19 @@ import { cellOutcome, ENDINGS, expectation, keptOutcome, parsePs, SPAWNERS, spaw
 const TAG = "xp0123456789abcdef";
 
 describe("the exit probe's expectations", () => {
-	it("requires every spawner but the open ones to be gone when the process ends", () => {
+	it("requires every spawner but a hook's leftovers to be gone when the process ends", () => {
 		for (const ending of ENDINGS.filter((e) => !e.alive)) {
 			for (const { id } of SPAWNERS) {
 				const { verdict } = expectation(id, ending.id, "darwin");
-				expect(verdict, `${id} / ${ending.id}`).toBe(id === "hook" ? "open" : "gone");
+				expect(verdict, `${id} / ${ending.id}`).toBe(id === "hook" ? "may survive" : "gone");
 			}
 		}
 	});
 
-	it("lets a background shell's leftovers outlive a session switch, and nothing else", () => {
+	it("lets a hook's and a background shell's leftovers outlive a session switch, and nothing else", () => {
 		for (const ending of ["new", "resume"]) {
 			const allowed = SPAWNERS.map((s) => s.id).filter((id) => expectation(id, ending, "linux").verdict === "may survive");
-			expect(allowed).toEqual(["bg-daemon", "bg-noterm", "sub-daemon"]);
+			expect(allowed).toEqual(["hook", "bg-daemon", "bg-noterm", "sub-daemon"]);
 		}
 	});
 

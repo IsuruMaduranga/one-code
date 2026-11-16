@@ -61,8 +61,8 @@ export function expectation(spawner, ending, platform = process.platform) {
 	if (spawner === "unknown") return { verdict: "gone", reason: "a tagged process no fixture names: something One Code started" };
 	if (spawner === "hook") {
 		return {
-			verdict: "open",
-			reason: "a hook's leftovers are neither remembered nor ended once the hook exits (safety/hooks/executor.ts); no decision covers them",
+			verdict: "may survive",
+			reason: "a hook may start a long-lived process on purpose (a SessionStart dev server), as Claude Code allows; only a timeout, abort or output overflow ends its group (safety/hooks/executor.ts, decisions/hooks.md)",
 		};
 	}
 	if (DAEMONS.has(spawner) && platform === "win32") {
