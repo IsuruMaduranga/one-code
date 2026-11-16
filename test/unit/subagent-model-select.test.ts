@@ -184,6 +184,53 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolveSubagentModel({ ...input, configuredDefault: setting("opus") }).model?.id).toBe("claude-opus-4-8");
 	});
 
+	describe("an agent file with model: inherit", () => {
+		const all = [...anthropic, ...openai];
+
+		it("runs on the session model, not the configured default or the automatic cheaper pick", () => {
+			const input = { agentModel: "inherit", sessionModel: anthropic[0], available: all };
+			const withDefault = resolveSubagentModel({ ...input, configuredDefault: setting("haiku") });
+			expect(withDefault.model?.id).toBe("claude-opus-4-8");
+			expect(withDefault.source).toBe("session");
+			expect(withDefault.notices).toEqual([]);
+			// No configured default: the cheaper same-provider model is not picked either.
+			expect(resolveSubagentModel(input).model?.id).toBe("claude-opus-4-8");
+			expect(resolveSubagentModel({ sessionModel: anthropic[0], available: all }).model?.id).not.toBe("claude-opus-4-8");
+		});
+
+		it("is honored on a non-Claude session, where an agent-file model on another provider is skipped", () => {
+			const resolution = resolveSubagentModel({
+				agentModel: "inherit",
+				sessionModel: openai[0],
+				available: all,
+				configuredDefault: setting("gpt-5-mini"),
+			});
+			expect(resolution.model?.id).toBe("gpt-5.1");
+			expect(resolution.source).toBe("session");
+			expect(resolution.notices).toEqual([]);
+		});
+
+		it("loses to a per-call model", () => {
+			const resolution = resolveSubagentModel({ requested: "haiku", agentModel: "inherit", sessionModel: anthropic[0], available: all });
+			expect(resolution.model?.id).toBe("claude-haiku-4-5");
+			expect(resolution.source).toBe("call");
+		});
+
+		it("reads the session model at resolve time", () => {
+			const input = { agentModel: "inherit", available: all, configuredDefault: setting("haiku") };
+			expect(resolveSubagentModel({ ...input, sessionModel: anthropic[0] }).model?.id).toBe("claude-opus-4-8");
+			expect(resolveSubagentModel({ ...input, sessionModel: anthropic[1] }).model?.id).toBe("claude-sonnet-5-5");
+		});
+
+		it("leaves an agent without a model as before: the configured default, then the automatic pick", () => {
+			const input = { sessionModel: anthropic[0], available: all };
+			expect(resolveSubagentModel({ ...input, configuredDefault: setting("haiku") }).model?.id).toBe("claude-haiku-4-5");
+			const automatic = resolveSubagentModel(input);
+			expect(automatic.source).toBe("automatic");
+			expect(resolveSubagentModel({ ...input, agentModel: undefined })).toEqual(automatic);
+		});
+	});
+
 	it("reads a configured auto as the automatic pick, on every provider, with no notice", () => {
 		for (const [session, available] of [
 			[anthropic[0], [...anthropic, ...openai]],
