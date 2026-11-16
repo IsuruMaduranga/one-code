@@ -563,16 +563,59 @@ const FILE_WRITE_CMDLETS = new Set([
  * line is safe: a line this misses is still one no read-only check cleared.
  */
 export function powershellTreeNamesWrite(parse: PowerShellParse): boolean {
-	const { nodes, children } = buildTree(parse);
-	return nodes.some((node, i) => {
-		if (node.type === "FileRedirectionAst") {
-			const [location] = children[i];
-			return !(children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null");
-		}
+	const tree = buildTree(parse);
+	return tree.nodes.some((node, i) => {
+		if (node.type === "FileRedirectionAst") return !redirectsToNull(tree, i);
 		if (node.type !== "CommandAst") return false;
 		const spelled = (node.resolvedName || node.name || "").toLowerCase();
-		const base = spelled.split(/[\\/]/).at(-1)?.replace(/\.exe$/, "") ?? "";
-		return FILE_WRITE_CMDLETS.has(spelled) || isMutationCommand(base);
+		return FILE_WRITE_CMDLETS.has(spelled) || isMutationCommand(programName(spelled));
+	});
+}
+
+/** Whether the file redirection at `i` sends its stream to `$null`, which writes no file. */
+function redirectsToNull({ nodes, children }: Tree, i: number): boolean {
+	const [location] = children[i];
+	return children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null";
+}
+
+/** A command's program name: the basename, lowercased, without a Windows executable extension. */
+function programName(spelled: string): string {
+	return (spelled.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+}
+
+/** The node kinds a plain native-program line is made of: pipelines, statements, literal words and stream merges. */
+const PLAIN_LINE_NODES = new Set(["ScriptBlockAst", "NamedBlockAst", "PipelineAst", "PipelineChainAst", "CommandAst", "StringConstantExpressionAst", "ConstantExpressionAst", "MergingRedirectionAst"]);
+
+/**
+ * Whether the line is only native programs `unlisted` accepts (by program
+ * name), called by name with literal arguments: no cmdlet, function or alias
+ * (`Set-Location`, `Invoke-WebRequest`, `iex`), no `&` or `.` invocation, no
+ * variable, subexpression, script block, member call or background job, no
+ * redirection but to `$null`, and no argument naming a credential path.
+ * PowerShell's counterpart of the bash gate's `unlistedOnly`, read by plan
+ * mode only, to decide whether a user's allow rule may cover the line; when
+ * in doubt it says no, and the line is put to the user.
+ */
+export function powershellTreeUnlistedOnly(parse: PowerShellParse, opts: PowerShellTreeOptions, unlisted: (program: string) => boolean): boolean {
+	if (parse.errors.length > 0) return false;
+	const tree = buildTree(parse);
+	const { nodes } = tree;
+	return nodes.every((node, i) => {
+		if (node.type === "FileRedirectionAst") return redirectsToNull(tree, i);
+		if (node.type === "VariableExpressionAst") return node.parent >= 0 && nodes[node.parent].type === "FileRedirectionAst" && redirectsToNull(tree, node.parent);
+		if (!PLAIN_LINE_NODES.has(node.type) || node.background) return false;
+		if (node.type === "CommandAst") {
+			const spelled = node.resolvedName || node.name;
+			if (!spelled || (node.operator && node.operator !== "Unknown")) return false;
+			if (node.commandType !== undefined && node.commandType !== "Application") return false;
+			return unlisted(programName(spelled));
+		}
+		if (node.type === "StringConstantExpressionAst") {
+			const value = node.value ?? "";
+			const absolute = value ? powershellPathAbsolute(value, opts) : undefined;
+			return !isSensitivePath(value) && !(absolute !== undefined && isSensitivePath(absolute));
+		}
+		return true;
 	});
 }
 

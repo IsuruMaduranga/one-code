@@ -114,6 +114,17 @@ export interface ShellEvidence {
 	 * qualifies an escalation.
 	 */
 	containedNonNetwork: boolean;
+	/**
+	 * True when every reason this escalated is a command this check knows
+	 * nothing about: a program with no option table, no git or find branch and
+	 * no product read-only entry (`gh`, `jq`-like tools it has never listed).
+	 * No write, network, path, wrapper, assignment, substitution, `cd` or
+	 * unmodelled syntax, and no known command that failed its table. A fact
+	 * for plan mode, which lets a user's allow rule cover only such a line
+	 * (lib/rules/matcher.ts `decide`); it never changes the verdict. Never true
+	 * for a "safe" verdict.
+	 */
+	unlistedOnly: boolean;
 }
 
 /**
@@ -261,6 +272,26 @@ const MUTATION_COMMANDS = new Set([
 /** Whether `name` (a command word, basename, lowercased) is one of the filesystem-mutating commands above. */
 export function isMutationCommand(name: string): boolean {
 	return MUTATION_COMMANDS.has(name);
+}
+
+/**
+ * Whether this check knows the command `name` (a basename, lowercased): it has
+ * an option table, a git or find branch or a product read-only entry for it,
+ * or lists it as mutating, network-capable or a script interpreter. The
+ * PowerShell side of `unlistedOnly`: a native program the bash check knows is
+ * one plan mode will not let an allow rule cover unexamined.
+ */
+export function gateKnowsCommand(name: string): boolean {
+	return (
+		READ_ONLY_COMMANDS.has(name) ||
+		name === "git" ||
+		name === "find" ||
+		name === "cd" ||
+		MUTATION_COMMANDS.has(name) ||
+		NETWORK_COMMANDS.has(name) ||
+		SCRIPT_INTERPRETERS.has(name) ||
+		productReadOnlySubcommands(name) !== undefined
+	);
 }
 
 /**
@@ -859,6 +890,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		readOnlyOutside: false,
 		readsOnly: false,
 		containedNonNetwork: false,
+		unlistedOnly: false,
 	};
 	/**
 	 * Set by any escalation reason that is NOT a bare in-project mutation — i.e.
@@ -871,8 +903,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	let escalatedBeyondReads = false;
 	/** Set by any escalation that is neither an outside-cwd read nor a read naming a guarded path (see readsOnly). */
 	let escalatedBeyondNamedReads = false;
-	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean; namedRead?: boolean }) => {
+	/** Set by any escalation that is not a command this check knows nothing about (see unlistedOnly). */
+	let escalatedBeyondUnlisted = false;
+	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean; namedRead?: boolean; unlisted?: boolean }) => {
 		evidence.verdict = "escalate";
+		if (!opts?.unlisted) escalatedBeyondUnlisted = true;
 		if (!opts?.contained) uncontained = true;
 		if (!opts?.outsideRead) escalatedBeyondReads = true;
 		if (!opts?.outsideRead && !opts?.namedRead) escalatedBeyondNamedReads = true;
@@ -1225,7 +1260,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				else if (!rest.every((word) => !word.dynamic && isNameOperand(word.value))) escalate(`runs ${name} ${subcommand.value} with an argument that is not a short name, and the command may send it over the network`);
 			}
 		} else if (!isMutation) {
-			escalate(`runs ${name}, which is not on the read-only allowlist`);
+			escalate(`runs ${name}, which is not on the read-only allowlist`, { unlisted: true });
 		}
 
 		// The positional destinations of writing commands are the paths that get
@@ -1323,6 +1358,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 	evidence.readsOnly = evidence.verdict === "escalate" && !escalatedBeyondNamedReads;
+	evidence.unlistedOnly = evidence.verdict === "escalate" && !escalatedBeyondUnlisted;
 
 	return evidence;
 }

@@ -3,7 +3,8 @@
  * pre-gate cannot prove read-only (`decide()` cause `plan-unproven`): the
  * user is asked, never auto mode's classifier, whatever mode plan mode was
  * entered from; with nobody to answer, the call is refused with the plan-mode
- * text; and a "Yes" lets that one call through, nothing broader.
+ * text; a "Yes" lets that one call through and nothing is remembered; and a
+ * session grant minted before planning does not apply while planning.
  */
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -128,16 +129,28 @@ describe("plan mode asks the user about an unproven shell line", () => {
 		expect(prompts).toHaveLength(3);
 	});
 
-	it("offers only the exact-command grant, which never covers another line", async () => {
-		answerWith = 1;
+	it("offers allow-once and deny only, so nothing is remembered", async () => {
+		expect(await bash(GH_VIEW)).toBeUndefined();
+		expect(prompts[0].options).toEqual(["Yes", "No, tell the agent what to do differently"]);
+	});
+
+	it("does not apply a session grant minted before planning", async () => {
+		fake.events.emit(MODE_CHANNEL, { mode: "default" });
+		answerWith = 1; // "don't ask again for this exact command"
 		expect(await bash(GH_VIEW)).toBeUndefined();
 		expect(prompts[0].options[1]).toBe("Yes, and don't ask again for this exact command this session");
 		expect(await bash(GH_VIEW)).toBeUndefined();
 		expect(prompts).toHaveLength(1);
+
 		answerWith = 0;
-		expect(await bash(GH_API)).toBeUndefined();
-		expect(await bash(`${GH_VIEW} && gh pr merge 188`)).toBeUndefined();
-		expect(prompts).toHaveLength(3);
+		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
+		expect(await bash(GH_VIEW)).toBeUndefined();
+		expect(prompts).toHaveLength(2);
+		expect(prompts[1].title).toContain("in plan mode");
+		// Back out of plan mode, the grant holds again.
+		fake.events.emit(MODE_CHANNEL, { mode: "default" });
+		expect(await bash(GH_VIEW)).toBeUndefined();
+		expect(prompts).toHaveLength(2);
 	});
 
 	it("a subagent's call through the bridge with no parent UI is refused with the plan-mode text", async () => {

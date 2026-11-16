@@ -385,7 +385,66 @@ describe("decide", () => {
 				const subject = raw === "Bash(npm run:*)" ? "npm run build" : raw === "Bash(python3 -c:*)" ? "python3 -c 'print(1)'" : "gh pr view 1";
 				expect(decide({ ...plan, subject, allow: rules([raw]) }), raw).toEqual({ decision: "ask", cause: "plan-unproven" });
 			}
-			expect(decide({ ...plan, subject: "npm test", allow: rules(["Bash(npm test:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		});
+
+		// A rule names a command, not what its options do: in plan mode it covers
+		// only a program the pre-gate knows nothing about, and never one that runs
+		// other code. Every case here ran under its rule before the tightening.
+		it.each<[string, string[]]>([
+			["sed -i s/a/b/ f", ["Bash(sed:*)"]],
+			["curl https://x.test -o ~/.zshrc", ["Bash(curl:*)"]],
+			["find . -delete", ["Bash(find:*)"]],
+			["find / -exec sh -c 'rm -rf x' \\;", ["Bash(find:*)"]],
+			["git diff --output=/etc/x", ["Bash(git diff:*)"]],
+			["git push --force", ["Bash(git:*)"]],
+			["git clean -fdx", ["Bash(git:*)"]],
+			["git -c alias.x='!rm -rf y' x", ["Bash(git:*)"]],
+			["awk 'BEGIN{system(\"rm -rf x\")}'", ["Bash(awk:*)"]],
+			["vim -c ':!rm -rf x'", ["Bash(vim:*)"]],
+			["sudo rm -rf x", ["Bash(sudo:*)"]],
+			["gh pr view 1 | sh", ["Bash(gh pr view:*)", "Bash(sh)"]],
+			["doas rm -rf x", ["Bash(doas:*)"]],
+			["watch rm -rf x", ["Bash(watch:*)"]],
+			["busybox rm -rf x", ["Bash(busybox:*)"]],
+			["parallel rm ::: x", ["Bash(parallel:*)"]],
+			["dash -c 'rm -rf x'", ["Bash(dash:*)"]],
+			["ksh -c 'rm -rf x'", ["Bash(ksh:*)"]],
+			["tsx -e 'x'", ["Bash(tsx:*)"]],
+			["lua -e 'os.remove(\"x\")'", ["Bash(lua:*)"]],
+			["/usr/bin/python3 -c 'import shutil'", ["Bash(/usr/bin/python3:*)"]],
+			["git push --force", ["Bash(* *)"]],
+			["python3 -c 'import os'", ["Bash(*-*)"]],
+			["python3 -c 'import os'", ["Bash(python3 -*)"]],
+			["cat ~/.ssh/id_rsa", ["Bash(cat:*)"]],
+			["npm test", ["Bash(npm test:*)"]],
+			["make install", ["Bash(make install)"]],
+			["less +'!rm x' f", ["Bash(less:*)"]],
+			["FOO=1 gh pr view 1", ["Bash(gh pr view:*)"]],
+			["gh pr view $(git commit -m x)", ["Bash(gh pr view:*)", "Bash(git commit:*)"]],
+			["gh pr view 1 < /etc/passwd", ["Bash(gh pr view:*)"]],
+			["cd /etc && gh pr view 1", ["Bash(gh pr view:*)", "Bash(cd:*)"]],
+		])("ignores the rule for %s under %j", (subject, raw) => {
+			expect(decide({ ...plan, subject, allow: rules(raw) })).toEqual({ decision: "ask", cause: "plan-unproven" });
+		});
+
+		it("still lets a rule cover the read-only gh calls it exists for", () => {
+			const view = "gh pr view 188 --repo o/r --json title";
+			const api = "gh api repos/o/r/contents --jq '.[].name'";
+			for (const raw of ["Bash(gh pr view:*)", "Bash(gh pr *)"]) {
+				expect(decide({ ...plan, subject: view, allow: rules([raw]) }), raw).toMatchObject({ decision: "allow", cause: "rule" });
+			}
+			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+			for (const subject of [view, api]) expect(decide({ ...plan, subject }), subject).toEqual({ decision: "ask", cause: "plan-unproven" });
+		});
+
+		it("checks ask rules before the read-only allowance, as the other modes do", () => {
+			const askLog = rules(["Bash(git log:*)"]);
+			const d = decide({ ...plan, subject: "git log --oneline -5", ask: askLog });
+			expect(d).toMatchObject({ decision: "ask", cause: "rule" });
+			expect(d.rule?.raw).toBe("Bash(git log:*)");
+			expect(decide({ ...plan, subject: "git log --oneline -5" })).toEqual({ decision: "allow", cause: "plan-readonly" });
+			// A named write is still refused, not asked about, under an ask rule.
+			expect(decide({ ...plan, subject: "git log > out.txt", ask: askLog })).toEqual({ decision: "deny", cause: "plan-mode" });
 		});
 
 		it("asks under an ask rule even when an allow rule matches too, and a deny rule still wins", () => {

@@ -390,7 +390,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const sessionGate = processState<SessionGate>("permissions:session-gate", () => ({ allows: [], pause: new PauseTracker(), denials: new DenialStore() }));
 	const sessionAllows = sessionGate.allows;
-	const activeSessionAllows = () => (mode === "auto" ? [] : sessionAllows);
+	// Neither auto mode (the classifier is the boundary) nor plan mode (a rule
+	// minted before planning must not let a write past it) applies them.
+	const activeSessionAllows = () => (mode === "auto" || mode === "plan" ? [] : sessionAllows);
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
 	let warnedTooBroad = "";

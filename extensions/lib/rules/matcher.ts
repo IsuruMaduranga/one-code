@@ -14,11 +14,11 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { domainToASCII } from "node:url";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
+import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
-import { powershellTreeContainedEdits, powershellTreeNamesWrite } from "../shell/powershell-tree.ts";
+import { powershellTreeContainedEdits, powershellTreeNamesWrite, powershellTreeUnlistedOnly } from "../shell/powershell-tree.ts";
 import type { PowerShellParse } from "../shell/powershell-parser.ts";
 import {
 	canonicalCommandName,
@@ -1054,6 +1054,41 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	return false;
 }
 
+/**
+ * Programs that run other programs or code from their arguments, stdin or
+ * files, beyond `INTERPRETERS_AND_RUNNERS`: wrappers the pre-gate treats as
+ * unknown commands (`sudo`, `watch`, `busybox`), the wrappers it peels (for
+ * PowerShell, which does not peel them), more shells and interpreters,
+ * editors and pagers with shell escapes, task runners and schedulers. Plan
+ * mode never lets an allow rule cover a line that runs one. Missing a name
+ * here lets a user's rule for that program run it unprompted in plan mode,
+ * so the list errs wide.
+ */
+const PLAN_CODE_RUNNERS = new Set([
+	// Wrappers and privilege changers.
+	"sudo", "doas", "su", "runuser", "pkexec", "watch", "busybox", "parallel", "exec", "caffeinate", "chroot", "nsenter", "unshare",
+	"time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin", "strace", "ltrace", "gdb", "lldb",
+	// Shells and interpreters.
+	"dash", "ksh", "mksh", "tcsh", "csh", "ash", "tsx", "ts-node", "lua", "luajit", "tclsh", "wish", "expect", "rscript", "julia", "swift",
+	"groovy", "scala", "kotlin", "elixir", "erl", "escript", "ghci", "runghc", "irb", "jshell", "awk", "gawk", "mawk", "nawk", "sed",
+	// Editors and pagers with shell escapes.
+	"vim", "vi", "nvim", "view", "ex", "emacs", "ed", "nano", "less", "more", "most", "man",
+	// Build and task runners, package managers, containers and schedulers.
+	"rake", "just", "ninja", "cmake", "bazel", "ant", "sbt", "lein", "mix", "composer", "bundle", "gem", "pipx", "conda", "mamba",
+	"rustup", "podman", "nerdctl", "vagrant", "terraform", "ansible", "ansible-playbook", "tmux", "screen", "at", "batch", "crontab",
+	"systemd-run", "launchctl", "open", "xdg-open", "entr", "nodemon",
+]);
+
+/** Whether the program `name` (a basename, lowercased) runs other programs or code it is given. */
+function runsOtherCode(name: string): boolean {
+	return INTERPRETERS_AND_RUNNERS.test(name) || PLAN_CODE_RUNNERS.has(name);
+}
+
+/** A command word's program name: its basename, lowercased, without a Windows executable extension. */
+function commandBasename(word: string): string {
+	return (word.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+}
+
 export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
 	/**
@@ -1172,28 +1207,45 @@ export function decide(params: DecideInput): Decision {
 	};
 
 	/**
-	 * Plan mode's answer for a shell line it could not prove read-only, in this
-	 * order: a write the line names is refused (never asked about, never
-	 * allowed by a rule); an ask rule asks; an allow rule allows, matched as the
-	 * other modes match it (every subcommand in its literal spelling, never a
-	 * redirect outside the working space), except a rule broad enough to run
-	 * anything (`isBroadExecutionRule`), which would turn plan mode off for the
-	 * shell; anything else is put to the user. Every ask here carries
-	 * `plan-unproven`: it goes to the user, never to auto mode's classifier
-	 * (the mode is plan, so nothing below the plan branch runs), and with no
-	 * user to answer it the caller refuses it with the plan-mode text.
+	 * Plan mode's answer for a shell line (bash, PowerShell), in this order:
+	 *
+	 * 1. A write the line names is refused: never asked about, never allowed
+	 *    by a rule.
+	 * 2. An ask rule asks, before the read-only allowance, as in the other modes.
+	 * 3. A provably read-only line runs (`plan-readonly`); a read-only line that
+	 *    reads outside the working directory is put to the user as a read.
+	 * 4. An allow rule allows, matched as the other modes match it (every
+	 *    subcommand in its literal spelling, never a redirect outside the
+	 *    working space), but only for a line whose one objection is a program
+	 *    the pre-gate knows nothing about (`ruleMayCover`: `gh`, not `sed -i`,
+	 *    `git push` or `cat ~/.ssh/id_rsa`) and that runs no program which runs
+	 *    other code (`runsOtherCode`), and never by a rule broad enough to run
+	 *    anything (`isBroadExecutionRule`). A rule names a command, not what
+	 *    its options do, so a known command that failed its table, or a runner
+	 *    whose arguments are code, would let a rule approve a write the gate
+	 *    cannot see.
+	 * 5. Anything else is put to the user.
+	 *
+	 * An unproven line's ask carries `plan-unproven`: it goes to the user,
+	 * never to auto mode's classifier (the mode is plan, so nothing below the
+	 * plan branch runs), and with no user to answer it the caller refuses it
+	 * with the plan-mode text.
 	 */
-	const planShellLine = (writes: boolean): Decision => {
-		if (writes) return { decision: "deny", cause: "plan-mode" };
+	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: boolean }): Decision => {
+		if (line.writes) return { decision: "deny", cause: "plan-mode" };
 		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
-		if (askRule) return { decision: "ask", rule: askRule, cause: "plan-unproven" };
-		const allowRule = findBashAllowRule(
-			allow.filter((rule) => !isBroadExecutionRule(rule)),
-			subject,
-			tool,
-			{ readOnly: readOnlyShell },
-		);
-		if (allowRule && !(tool === "bash" && redirectEscapes(subject))) return { decision: "allow", rule: allowRule, cause: "rule" };
+		if (askRule) return line.readOnly || line.readOnlyOutside ? askOrDeny(askRule) : { decision: "ask", rule: askRule, cause: "plan-unproven" };
+		if (line.readOnly) return { decision: "allow", cause: "plan-readonly" };
+		if (line.readOnlyOutside) return { decision: "ask", cause: "working-dir" };
+		if (line.ruleMayCover && !(tool === "bash" && redirectEscapes(subject))) {
+			const allowRule = findBashAllowRule(
+				allow.filter((rule) => !isBroadExecutionRule(rule)),
+				subject,
+				tool,
+				{ readOnly: readOnlyShell },
+			);
+			if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
+		}
 		return { decision: "ask", cause: "plan-unproven" };
 	};
 
@@ -1221,20 +1273,28 @@ export function decide(params: DecideInput): Decision {
 		const readableRoots = sessionReadableRoots();
 		if (tool === "bash" && subject) {
 			const evidence = shellEvidence(subject);
-			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
-			// Read-only, but of a path outside the working directory: still a read,
-			// so it is put to the user rather than refused as a plan-mode mutation
-			// (the read tools ask for the same path below).
-			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
-			return planShellLine(namesWrite(evidence));
+			return planShellLine({
+				writes: namesWrite(evidence),
+				readOnly: isReadOnly(evidence),
+				// Read-only, but of a path outside the working directory: still a
+				// read, put to the user as the read tools' outside read is.
+				readOnlyOutside: evidence.readOnlyOutside && evidence.writes.length === 0,
+				ruleMayCover: evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(commandBasename(name))),
+			});
 		}
-		// The PowerShell counterpart: read-only cmdlets on in-project paths,
-		// judged from PowerShell's own parse (powershell-tree.ts). A line
-		// PowerShell has not parsed is refused: without the parse no write in it
-		// can be seen, and the gate clears nothing it has not parsed.
+		// The PowerShell counterpart, judged from PowerShell's own parse
+		// (powershell-tree.ts). A line PowerShell has not parsed is refused:
+		// without the parse no write in it can be seen, and the gate clears
+		// nothing it has not parsed.
 		if (tool === "powershell" && subject) {
-			if (powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-			if (params.powershellParse) return planShellLine(powershellTreeNamesWrite(params.powershellParse));
+			const parse = params.powershellParse;
+			if (!parse) return { decision: "deny", cause: "plan-mode" };
+			return planShellLine({
+				writes: powershellTreeNamesWrite(parse),
+				readOnly: powershellReadOnly({ parse, cwd, home: homedir(), readableRoots }).readOnly,
+				readOnlyOutside: false,
+				ruleMayCover: powershellTreeUnlistedOnly(parse, { cwd, home: homedir() }, (name) => !gateKnowsCommand(name) && !runsOtherCode(name)),
+			});
 		}
 		if (isPlanReadOnlyTool(toolName, tool)) {
 			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
