@@ -19,6 +19,7 @@ import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
 export interface SubagentClauses {
 	taskAliasNote: string;
 	toolNamesHint: string;
+	toolsLeftOut(p: { name: string; tools: string[] }): string;
 }
 
 /** What an agent may use, as its catalog row says. */
@@ -126,6 +127,8 @@ export interface SubagentsResultText {
 	renamed(p: { wanted: string; takenBy: string; name: string }): string;
 	/** An agent file whose `tools` list matches no tool. */
 	unusableTools(p: { name: string; tools: string[] }): string;
+	/** The tools an agent file names that pi's tool flags removed from the session: the agent starts without them. */
+	toolsLeftOut(p: { name: string; tools: string[] }): string;
 	/** Creating an isolation worktree was refused; `program` names what git would run. */
 	worktreeRefused(p: { program: CheckoutProgram }): string;
 	/** A worktree kept because it holds the agent's work. */
@@ -315,6 +318,7 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		noOutput: "(Subagent completed but returned no output.)",
 		modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 		renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
+		toolsLeftOut: (p) => product.toolsLeftOut(p),
 		unusableTools: ({ name, tools }) => `Agent "${name}" lists tools (${tools.join(", ")}) that match no available tool. ${product.toolNamesHint}`,
 		worktreeRefused: ({ program }) =>
 			`Cannot create an isolation worktree: ${checkoutProgram(program)}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`,

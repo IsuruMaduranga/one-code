@@ -193,13 +193,6 @@ export interface ResolvedProfile {
 	disabledTools: ReadonlySet<string>;
 	/** Which tools the session can have: the switch is not off, the feature registering it (TOOL_FEATURES) is on, and pi's launch flags keep it registered (`launchTools`). */
 	live: LiveTools;
-	/**
-	 * `live` before pi's launch flags: what the profile's switches and
-	 * features leave on. An in-process child starts from it, since the base
-	 * chooses a child's tools itself and pi's flags never reach it
-	 * (lib/agents/child-extensions.ts, lib/agents/agent-catalog.ts agentToolOptions).
-	 */
-	profileLive: LiveTools;
 	/** The registry filter pi's `--tools`, `--exclude-tools` and `--no-tools` make for this process (lib/profile/pi-tool-flags.ts); absent when they filter nothing. */
 	launchTools?: PiToolFilter;
 	/** Absolute entry files child sessions load after the base's own. */
@@ -334,7 +327,6 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools,
 		live,
-		profileLive,
 		...(launchTools ? { launchTools } : {}),
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,

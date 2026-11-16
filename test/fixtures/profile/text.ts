@@ -441,6 +441,7 @@ export const subagents: NonNullable<ProfileText["subagents"]> = {
 		},
 	},
 	forkTask: (p) => mark("subagents.forkTask", p),
+	toolsLeftOut: ({ name, tools }) => `[subagents.toolsLeftOut ${name}: ${tools.join(",")}]`,
 	delegationSteer: "[subagents.delegationSteer]",
 	delegationWithdrawn: "[subagents.delegationWithdrawn]",
 	catalogWithdrawn: "[subagents.catalogWithdrawn]",

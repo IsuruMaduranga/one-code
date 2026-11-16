@@ -29,6 +29,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 		taskAliasNote: "Claude Code names this parameter `prompt` — either is accepted",
 		toolNamesHint:
 			"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
+		toolsLeftOut: ({ name, tools }) => `Agent "${name}" runs without ${tools.join(", ")}, which this session's tool flags leave out.`,
 		agentDescription: ({ form, configDir }) => withoutOff(agentDescription(form, configDir), live, AGENT_PASSAGES),
 		agentPromptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		agentParams: {

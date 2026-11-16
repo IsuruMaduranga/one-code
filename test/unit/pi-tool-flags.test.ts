@@ -177,10 +177,12 @@ describe("the live tool set under pi's tool flags", () => {
 		expect(off.live.has("read")).toBe(true);
 	});
 
-	it("leaves an in-process child's tools to the profile, which chooses them", () => {
+	it("restricts an in-process child's view as it restricts the session", () => {
 		setActiveProfileForTest(resolved(["--exclude-tools", "web_fetch"]));
 		expect(activeProfile().live.has("web_fetch")).toBe(false);
-		expect(childLive().has("web_fetch")).toBe(activeProfile().profileLive.has("web_fetch"));
+		expect(childLive().has("web_fetch")).toBe(false);
+		setActiveProfileForTest(resolved([]));
+		expect(childLive().has("web_fetch")).toBe(true);
 	});
 
 	it("builds the profile's text for the flags", () => {
