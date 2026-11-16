@@ -56,7 +56,7 @@ import {
 	clearThinkingEnabled,
 	sessionRequestHeaders,
 	withClearThinking,
-} from "../../request/context-management/index.ts";
+} from "../../lib/request/context-management.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../lib/request/precompact-instructions.ts";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../../lib/models/model-policy.ts";

@@ -8,7 +8,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, Usage } from "@earendil-works/pi-ai";
 import { completeThreadless } from "../request/anthropic-stream.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { sessionRequestHeaders } from "../../request/context-management/index.ts";
+import { sessionRequestHeaders } from "../request/context-management.ts";
 import { extendPayload, LAST_REQUEST_CHANNEL, LastExchange, type RequestCapture, replayOutputCap, replayTail } from "./request-replay.ts";
 import { answerText } from "./side-call.ts";
 
