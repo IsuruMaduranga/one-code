@@ -19,6 +19,13 @@ export interface ToolSearchText {
 	 * `DeferRequest` instead.
 	 */
 	listingHints?: Partial<Record<DeferrableTool, string>>;
+	/**
+	 * Per deferred tool, the hint for a session whose model is not
+	 * Claude-family, in place of its `listingHints` entry; a tool with none
+	 * keeps that entry. The base picks between the two for the model each
+	 * epoch renders the listing for.
+	 */
+	listingHintsOtherModels?: Partial<Record<DeferrableTool, string>>;
 	/** The paragraph after the listing's names, on loading a tool the next step needs. */
 	listingClose?: string;
 }

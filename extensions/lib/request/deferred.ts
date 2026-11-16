@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { acceptsAnthropicWire, anthropicModelId } from "../models/model-policy.ts";
+import { isClaudeFamilyModel } from "../models/model-family.ts";
 import { parseClaudeId } from "../profile/claude-id.ts";
 import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
@@ -136,7 +137,24 @@ export class DeferredRegistry {
 /** The listing's profile words: a hint per tool, and the closing paragraph. */
 export interface ListingWords {
 	listingHints?: Readonly<Record<string, string | undefined>>;
+	/** Per tool, the hint a request to a model outside the Claude family carries in place of its `listingHints` entry. */
+	listingHintsOtherModels?: Readonly<Record<string, string | undefined>>;
 	listingClose?: string;
+}
+
+/**
+ * The listing words a request to `model` carries. A hint written for Claude
+ * can read as an order to another model (a GPT model entered plan mode unasked
+ * on an ordinary task), so outside the Claude family a profile's per-tool
+ * override replaces that tool's hint. A Claude-family model, or a session with
+ * no model yet, gets the words unchanged (the same object).
+ */
+export function listingWordsFor(words: ListingWords, model: { provider?: string; id?: string } | undefined): ListingWords {
+	const other = words.listingHintsOtherModels;
+	if (!other || !model?.provider || !model.id || isClaudeFamilyModel({ provider: model.provider, id: model.id })) return words;
+	const overrides = Object.entries(other).filter(([, hint]) => hint !== undefined);
+	if (overrides.length === 0) return words;
+	return { ...words, listingHints: { ...words.listingHints, ...Object.fromEntries(overrides) } };
 }
 
 /** A tool owner's own listing hint (`DeferRequest.hint`), by name. */

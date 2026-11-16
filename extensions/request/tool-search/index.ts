@@ -38,6 +38,7 @@ import {
 	DeferredRegistry,
 	deferralEnabled,
 	deferredReminderText,
+	listingWordsFor,
 	loaderUnavailableReminderText,
 	type DeferRequest,
 	resultText,
@@ -128,7 +129,11 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	/**
 	 * The deferred-tools listing as live state: what an epoch's message 1 says.
 	 * Inside an epoch message 1 is the record, so a change here is announced by
-	 * the render step below, never by rewriting it.
+	 * the render step below, never by rewriting it. Its hints depend on the
+	 * model (lib/request/deferred.ts listingWordsFor), so it is published again
+	 * at every turn_start, which carries the model of the request that follows:
+	 * a model switch opens an epoch, and that epoch renders the words for its
+	 * own model.
 	 */
 	const publishListing = () => {
 		if (!alive()) return;
@@ -139,7 +144,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			key: "deferred-tools",
-			text: deferredReminderText(available, words, ownerHints),
+			text: deferredReminderText(available, listingWordsFor(words, currentModel), ownerHints),
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.deferredTools,
 			facts: [{ kind: "tools", names: available.map((tool) => tool.name) }],
@@ -189,8 +194,9 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		if (removed.length > 0) request.blocks.push({ text: deferredRemovedText(removed), facts: [{ kind: "tools", names: removed, removed: true }] });
 		const added = [...loadable].filter((name) => !told.has(name));
 		if (added.length === 0) return;
+		const listingWords = listingWordsFor(words, request.model);
 		if (!supportsToolAdditions(request.model)) {
-			request.blocks.push({ text: deferredAddendumText(added, words, ownerHints), facts: [{ kind: "tools", names: added }] });
+			request.blocks.push({ text: deferredAddendumText(added, listingWords, ownerHints), facts: [{ kind: "tools", names: added }] });
 			return;
 		}
 		// Here an addendum is a tool_addition, callable at once: only a tool the
@@ -198,7 +204,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// announced; one that arrived since waits for the next request.
 		const active = new Set(pi.getActiveTools());
 		const callable = added.filter((name) => active.has(name));
-		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable, words, ownerHints), facts: [{ kind: "tools", names: callable, callable: true }] });
+		if (callable.length > 0) request.blocks.push({ text: deferredAddendumText(callable, listingWords, ownerHints), facts: [{ kind: "tools", names: callable, callable: true }] });
 	});
 
 	/** The addenda the last `context` pass lifted off tool results, by call id (request/tool-search/tool-additions.ts). */
@@ -404,11 +410,14 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		reconcileNow();
 	});
 	// Every turn's tools are fixed right after this (pi's prepareRequest): the
-	// tools the request announces callable must be active by then.
+	// tools the request announces callable must be active by then. The listing
+	// follows the turn's model: unchanged text while it stays in one family, and
+	// inside an epoch message 1 is the record either way.
 	pi.on("turn_start", (_event, ctx) => {
 		freshLoads.clear();
 		if (ctx?.model) currentModel = ctx.model;
 		reconcileNow();
+		publishListing();
 	});
 
 	// A compaction opens an epoch, which lists every deferred tool again. The

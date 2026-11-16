@@ -4,6 +4,7 @@
  * paragraph on loading a tool the next step needs.
  */
 import { describe, expect, it } from "vitest";
+import { deferredReminderText, listingWordsFor } from "../../extensions/lib/request/deferred.ts";
 import { toolSearchText } from "../text/tool-search/index.ts";
 
 const all = { has: () => true };
@@ -18,6 +19,17 @@ describe("the deferred-tool listing words", () => {
 		expect(words.listingClose).toBe(
 			"When the step in front of you is one that an entry in this list is made for, and that tool is not loaded yet, load it as your next step. That holds even if you could do the step another way, with a general tool or in a plain-text reply. Loading runs nothing: it brings the tool's definition into the conversation, and you choose how to do the step once you have read it.",
 		);
+	});
+
+	it("tells a model outside the Claude family to enter plan mode only when asked, and keeps the Claude hint as it is", () => {
+		const words = toolSearchText(all);
+		const claudeHint = "When you are about to start writing code for a task that is not simple, use it and not a start on the edits, so that the user approves the approach first.";
+		const softHint = "When the user asks for a plan before any change, or asks to enter plan mode, use it; do not enter plan mode on your own initiative.";
+		expect(words.listingHints?.enter_plan_mode).toBe(claudeHint);
+		expect(words.listingHintsOtherModels).toEqual({ enter_plan_mode: softHint });
+		const line = (model: { provider: string; id: string }) => deferredReminderText([{ name: "enter_plan_mode" }], listingWordsFor(words, model)).split("\n")[1];
+		expect(line({ provider: "anthropic", id: "claude-opus-5-5" })).toBe(`enter_plan_mode: ${claudeHint}`);
+		expect(line({ provider: "openai", id: "gpt-6.1-sol" })).toBe(`enter_plan_mode: ${softHint}`);
 	});
 
 	it("leaves out the clauses that name a tool the session does not have", () => {
