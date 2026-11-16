@@ -240,7 +240,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
 			const clearThinking = clearThinkingEnabled(knobValue("CLEAR_THINKING"), cmModel);
-			const headers = sessionRequestHeaders(cmModel, undefined);
+			const headers = sessionRequestHeaders(cmModel);
 
 			// A replay sends the captured body (which already carries the
 			// clear_thinking edit) with the tail pi-ai just built appended.

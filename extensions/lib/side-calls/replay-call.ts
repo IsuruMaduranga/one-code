@@ -53,7 +53,7 @@ export async function replaySideCall(
 		model,
 		{ systemPrompt: "", messages: tail, tools: [] },
 		{
-			headers: sessionRequestHeaders(model, undefined),
+			headers: sessionRequestHeaders(model),
 			signal: AbortSignal.any([options.signal, timeout]),
 			maxTokens: cap,
 			sessionId: ctx.sessionManager.getSessionId(),

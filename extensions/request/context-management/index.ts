@@ -140,18 +140,18 @@ export function clearThinkingEnabled(flag: string | undefined, model: Anthropici
 }
 
 /**
- * The headers a side call on the session model needs so its request matches the
- * session's: the auth headers plus, where clear_thinking is on, the beta header
- * the session's requests carry (a side call bypasses our header hook).
+ * The extra headers a side call on the session model needs so its request
+ * matches the session's: where clear_thinking is on, the beta header the
+ * session's requests carry (a side call bypasses our header hook). pi merges
+ * them over the credential's own headers.
  */
-export function sessionRequestHeaders<H extends Record<string, string | null>>(
+export function sessionRequestHeaders(
 	model: { api?: string; provider?: string; baseUrl?: string; compat?: unknown } | undefined,
-	headers: H | undefined,
-): H | Record<string, string | null> | undefined {
+): Record<string, string> | undefined {
 	// compat is a provider union; clearThinkingEnabled only passes Anthropic models.
 	const anthropic = model as AnthropicishModel | undefined;
-	if (!clearThinkingEnabled(knobValue("CLEAR_THINKING"), anthropic)) return headers;
-	return { ...headers, "anthropic-beta": anthropicBetas(isAnthropicOAuth(), anthropic?.compat) };
+	if (!clearThinkingEnabled(knobValue("CLEAR_THINKING"), anthropic)) return undefined;
+	return { "anthropic-beta": anthropicBetas(isAnthropicOAuth(), anthropic?.compat) };
 }
 
 function contextManagementExtension(pi: ExtensionAPI) {
