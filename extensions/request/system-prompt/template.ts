@@ -16,6 +16,7 @@ import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
 import { activeProfile, profileText } from "../../lib/profile/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
+import type { SessionView } from "../../lib/agents/child-extensions.ts";
 import { cwdLine, type SectionSession, type SystemPromptSection, type SystemPromptSession, toolList } from "./text.ts";
 
 /** The active tools with a snippet, in registration order, and the tools' guidelines, deduplicated. */
@@ -56,15 +57,17 @@ export function buildClaudeCodeSystemPrompt(
 	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,
-	/** False when the session model runs without the task tools (`lib/models/model-tier.ts taskToolsEnabled`). */
-	taskTools = true,
+	/** True only when the session has the task tools (`lib/models/model-tier.ts taskToolsEnabled`): off unless a knob turns them on. */
+	taskTools = false,
 	/** Sections other extensions announced, in announcement order. */
 	extraSections: readonly SystemPromptSection[] = [],
+	/** The tools and features of the session the sections render for (lib/agents/child-extensions.ts sessionView); the main session's by default. */
+	view: Pick<SessionView, "live" | "features"> = { live: activeProfile().live, features: activeProfile().features },
 ): string {
 	const text = profileText().systemPrompt;
 	const session: SystemPromptSession = { tier, taskTools, tools: options.selectedTools };
-	// Other extensions' sections also get the tools the session can have, to cut passages by.
-	const sectionSession: SectionSession = { ...session, live: activeProfile().live };
+	// Other extensions' sections also get the tools the session can have and the features that run in it, to cut passages by.
+	const sectionSession: SectionSession = { ...session, live: view.live, features: view.features };
 	const extra = (place: SystemPromptSection["place"]) =>
 		extraSections.filter((section) => section.place === place).flatMap((section) => section.render(sectionSession) ?? []);
 	const { tools, guidelines } = toolListInputs(options);

@@ -587,6 +587,10 @@ async function sweep() {
 	// pi's own flag leaves Agent out of the registry; the text built for the live tool set follows it (lib/profile/pi-tool-flags.ts).
 	// Workhorse: its register has the system prompt's Agent passages, which frontier's lacks.
 	runs.push({ label: "pi --exclude-tools Agent", toolsOff: ["Agent"], config: { name: "sweep-exclude-agent", model: ANTHROPIC, tier: "workhorse", mode: "print", args: ["--exclude-tools", "Agent"] } });
+	// SendMessage: only pi's flag takes it out alone; the Agent tool's words and the catalog must stop naming it.
+	runs.push({ label: "pi --exclude-tools SendMessage", toolsOff: ["SendMessage"], config: { name: "sweep-exclude-send-message", model: ANTHROPIC, tier: "workhorse", mode: "print", args: ["--exclude-tools", "SendMessage"] } });
+	// The flags restrict a subagent too (lib/agents/agent-catalog.ts agentToolOptions): the tools turn, which runs one, must send web_fetch in no request, the child's included.
+	runs.push({ label: "pi --exclude-tools web_fetch, with a subagent", toolsOff: ["web_fetch"], children: true, config: { name: "sweep-exclude-web-fetch", model: ANTHROPIC, tier: "frontier", mode: "tools", args: ["--exclude-tools", "web_fetch"] } });
 	// The all-on baseline runs in the same pool; the tools a run loses against
 	// it, and which of them the request's text still names (a whole-word match,
 	// so a plain English word like "edit" can be a false hit), are text that
@@ -620,6 +624,16 @@ async function sweep() {
 		if (opts.dir) {
 			mkdirSync(goldenDir, { recursive: true });
 			writeFileSync(join(goldenDir, `${run.config.name}.json`), `${JSON.stringify(requests, null, 1)}\n`);
+		}
+		if (run.children) {
+			// A subagent's requests carry its hand-back tool; every request, the parent's and the child's, must leave the turned-off tools out.
+			const children = requests.filter((r) => toolNames(r.body).includes("SubagentHandback"));
+			const leakedAnywhere = (run.toolsOff ?? []).filter((name) => requests.some((r) => toolNames(r.body).includes(name)));
+			if (children.length === 0 || leakedAnywhere.length > 0) {
+				bad += 1;
+				console.log(`FAIL  ${run.label}: ${children.length === 0 ? "no subagent request" : `turned-off tools still sent: ${leakedAnywhere.join(", ")}`}`);
+				return;
+			}
 		}
 		const body = mainBody(requests);
 		const names = toolNames(body);

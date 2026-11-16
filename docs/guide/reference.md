@@ -151,7 +151,7 @@ extension install, use `pi` in place of `onecode`.
 | `--thinking <level>` | Start at a thinking level. |
 | `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. On pi 1.0 and later, `--provider` needs `--model` too. |
 | `--tui-mode fullscreen`, `--tui-mode regular` | Full-screen interface (the default under the app and on pi 1.0 and later), or the terminal's normal screen with its scrollback. |
-| `--tools <list>` | Restrict the tools available. Without `Agent` in the list (or with pi's `--exclude-tools Agent`), the model is not told about agent types it cannot start. |
+| `--tools <list>` | Restrict the tools available. Without `Agent` in the list (or with pi's `--exclude-tools Agent`), the model is not told about agent types it cannot start. Subagents and workflow agents follow the same flags: they lose the tools you left out, and never gain one their own agent file doesn't list. |
 | `-e <source>` | Load an extra extension. |
 | `--offline` | Skip network checks, including the update check. |
 | `--append-system-prompt <text>` | Append to the system prompt. |
@@ -211,7 +211,7 @@ mode. When both spellings are set, One Code's wins.
 | `ONECODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of your user settings; a non-bash binary is ignored with a warning. |
 | `ONECODE_SUBAGENT_MODEL` | Default subagent model. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` applies only on a Claude session. |
 | `ONECODE_DISABLE_AUTO_MEMORY=1` | Turn auto-memory off, overriding the setting in `/memory`. `0` turns it on. |
-| `ONECODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
+| `ONECODE_ENABLE_TODO_TOOLS=1` | Give the model the task tools, which every model runs without by default. |
 | `ONECODE_LOOP_KEEPALIVE=0` | Turn off the fallback wake-up of a self-paced `/loop`. |
 | `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` | How long an unanswered auto-mode prompt waits before it denies the action, in milliseconds (default 120000). |
 

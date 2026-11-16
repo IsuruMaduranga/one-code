@@ -11,6 +11,8 @@
  */
 import { type CronText, cronWords } from "../../lib/agents/cron-text.ts";
 import { memoOn } from "../../lib/core/text-spans.ts";
+import { type ToolPassages, withoutOff } from "../../lib/profile/live-tools.ts";
+import { activeProfile } from "../../lib/profile/profile.ts";
 
 export type WakeupMissingField = "delayAndReason" | "prompt" | "noop";
 
@@ -206,6 +208,9 @@ export interface TaskToolsResultText {
 	stopRequested(p: { id: string; description: string }): string;
 }
 
+/** The resident note's clause about SendMessage, which pi's --exclude-tools takes out alone (lib/profile/live-tools.ts). */
+const RESIDENT_ENDED_PASSAGES: ToolPassages = { SendMessage: [["; it can no longer be messaged live (SendMessage will resume it from its session file).", "."]] };
+
 /** The base's words of the group. */
 const taskToolsResultText: TaskToolsResultText = {
 	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.join(", ") || "(none)"}`,
@@ -217,7 +222,7 @@ const taskToolsResultText: TaskToolsResultText = {
 	clippedHeader: ({ path }) => `[Truncated. Full output: ${path}]\n\n`,
 	alreadyEnded: ({ id, status }) => `Task ${id} is already ${status}.`,
 	residentEnded: ({ id, description }) =>
-		`Terminated the resident agent behind ${id} (${description}); it can no longer be messaged live (SendMessage will resume it from its session file).`,
+		withoutOff(`Terminated the resident agent behind ${id} (${description}); it can no longer be messaged live (SendMessage will resume it from its session file).`, activeProfile().live, RESIDENT_ENDED_PASSAGES),
 	stopRequested: ({ id, description }) => `Stop requested for ${id} (${description}).`,
 };
 

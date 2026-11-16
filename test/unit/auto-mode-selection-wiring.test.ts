@@ -63,10 +63,21 @@ describe("automatic classifier selection wiring", () => {
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.some(([text]) => /in its workhorse tier or above contains/.test(text))).toBe(true);
+		expect(notify.mock.calls.filter(([text]) => /in its workhorse tier or above contains/.test(text))).toHaveLength(1);
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-7-sol");
+		await fake.fire("session_shutdown", {}, ctx);
+	});
+
+	it("announces nothing at startup when the pairing table keeps the session model as its classifier, and still names it on the badge", async () => {
+		pinCatalog([{ id: "anthropic/claude-haiku-5-5", released: "2026-10-07", price: [0.1, 0.5] }]);
+		const haiku = { provider: "anthropic", id: "claude-haiku-5-5", name: "Haiku", contextWindow: 200_000, maxTokens: 8192, cost: { input: 0.1, output: 0.5 } };
+		ctx = createFakeCtx({ cwd: join(home, "project"), model: haiku, modelRegistry: { getAvailable: () => [haiku] }, sessionManager: { getSessionId: () => "s", getSessionDir: () => join(home, "sessions"), getBranch: () => [] } });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		expect(statuses.at(-1)?.classifier).toBe("anthropic/claude-haiku-5-5");
+		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
+		expect(notify.mock.calls.filter(([text]) => /screen/i.test(String(text)))).toEqual([]);
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 

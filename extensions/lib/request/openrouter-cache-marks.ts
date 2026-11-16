@@ -76,8 +76,8 @@ export function withOpenRouterCacheMarks<M extends CacheMarksModel>(model: M): M
 	return { ...model, compat: { ...((model.compat ?? {}) as Record<string, unknown>), cacheControlFormat: "anthropic" } };
 }
 
-/** The `pi.registerProvider("openrouter", …)` config that marks the open-weight models' requests. */
-export interface OpenRouterCacheMarksConfig<M extends CacheMarksModel, C, O, R> {
+/** The `pi.registerProvider("openrouter", …)` config that adjusts the models of its Chat Completions requests. */
+export interface OpenRouterProviderConfig<M extends CacheMarksModel, C, O, R> {
 	api: typeof OPENROUTER_CACHE_MARKS_API;
 	streamSimple: (model: M, context: C, options?: O) => R;
 }
@@ -85,13 +85,14 @@ export interface OpenRouterCacheMarksConfig<M extends CacheMarksModel, C, O, R> 
 /**
  * A provider config whose stream hands every OpenRouter Chat Completions
  * request to `stream` (pi-ai's implementation, the one pi's own `openrouter`
- * provider dispatches to) with the model passed through
- * `withOpenRouterCacheMarks`. pi's provider composer calls it for that
- * provider's `openai-completions` models only, for the session loop, in-process
- * children and side calls alike (side calls send through the model registry),
- * with auth and headers already resolved; its `anthropic-messages` models stay
- * with pi's provider.
+ * provider dispatches to) with the model passed through `adjust`
+ * (`withOpenRouterCacheMarks`, lib/request/openrouter-ignored-hosts.ts
+ * `withOpenRouterIgnoredHosts`, or both). pi's provider composer calls it for
+ * that provider's `openai-completions` models only, for the session loop,
+ * in-process children and side calls alike (side calls send through the model
+ * registry), with auth and headers already resolved; its `anthropic-messages`
+ * models stay with pi's provider.
  */
-export function openRouterCacheMarksProvider<M extends CacheMarksModel, C, O, R>(stream: (model: M, context: C, options?: O) => R): OpenRouterCacheMarksConfig<M, C, O, R> {
-	return { api: OPENROUTER_CACHE_MARKS_API, streamSimple: (model, context, options) => stream(withOpenRouterCacheMarks(model), context, options) };
+export function openRouterProvider<M extends CacheMarksModel, C, O, R>(stream: (model: M, context: C, options?: O) => R, adjust: (model: M) => M): OpenRouterProviderConfig<M, C, O, R> {
+	return { api: OPENROUTER_CACHE_MARKS_API, streamSimple: (model, context, options) => stream(adjust(model), context, options) };
 }

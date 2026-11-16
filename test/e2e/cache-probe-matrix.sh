@@ -35,7 +35,7 @@
 # CACHE_PROBE_ONLY=login runs this leg alone.
 #
 # Override a model with CACHE_PROBE_ANTHROPIC, CACHE_PROBE_OPENAI,
-# CACHE_PROBE_CODEX, CACHE_PROBE_OPENROUTER, CACHE_PROBE_OPENROUTER_CLAUDE,
+# CACHE_PROBE_CODEX, CACHE_PROBE_OPENROUTER, CACHE_PROBE_OPENROUTER_QWEN, CACHE_PROBE_OPENROUTER_CLAUDE,
 # CACHE_PROBE_TOOL_ADDITION or CACHE_PROBE_LOGIN.
 # Each run includes the auto-mode classifier phase (cache-probe.sh). From a
 # sandboxed shell, run it inside tmux.
@@ -46,12 +46,15 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 # re-caches the conversation there by design (findings §7); its probe checks
 # the steady state without a load. A Claude model on OpenRouter is its own
 # request shape: Chat Completions carrying Anthropic's cache_control markers,
-# which the classifier and the side calls place themselves.
+# which the classifier and the side calls place themselves. Qwen on OpenRouter
+# is served by hosts that cache only with breakpoints (Reka) as well as by
+# implicit ones (findings §93); each line names the host that served it.
 RUNS=(
 	"${CACHE_PROBE_ANTHROPIC:-anthropic/claude-sonnet-5}|"
 	"${CACHE_PROBE_OPENAI:-openai/gpt-6.1-sol}|"
 	"${CACHE_PROBE_CODEX:-openai-codex/gpt-6.1-sol}|"
 	"${CACHE_PROBE_OPENROUTER:-openrouter/deepseek/deepseek-v4.1-flash}|--no-load"
+	"${CACHE_PROBE_OPENROUTER_QWEN:-openrouter/qwen/qwen3.8-27b}|--no-load"
 	"${CACHE_PROBE_OPENROUTER_CLAUDE:-openrouter/anthropic/claude-haiku-4.5}|--no-load"
 )
 

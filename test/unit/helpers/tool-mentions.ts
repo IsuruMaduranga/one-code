@@ -6,7 +6,7 @@
  */
 import { FEATURE_IDS, TOOL_FEATURES, toolSetProblems } from "../../../extensions/lib/profile/features.ts";
 import { PINNED_TOOLS } from "../../../extensions/lib/profile/profile.ts";
-import type { LiveTools } from "../../../extensions/lib/profile/live-tools.ts";
+import type { LiveFeatures, LiveTools } from "../../../extensions/lib/profile/live-tools.ts";
 import { PROMPT_TIERS } from "../../../extensions/lib/models/model-tier.ts";
 import { DEFERRABLE_TOOLS } from "../../../extensions/lib/request/deferrable-tools.ts";
 import type { SectionSession } from "../../../extensions/request/system-prompt/text.ts";
@@ -32,8 +32,8 @@ export function mentions(text: string, tool: string, english: EnglishPhrases): s
 	return found;
 }
 
-/** Tools pi's `--exclude-tools` takes out alone while their feature's other tools stay: Agent, which leaves SendMessage and list_agents behind. */
-const FLAG_ALONE: ReadonlySet<string> = new Set(["Agent"]);
+/** Tools pi's `--exclude-tools` takes out alone while their feature's other tools stay: Agent and SendMessage, each leaving the other and list_agents behind. */
+const FLAG_ALONE: ReadonlySet<string> = new Set(["Agent", "SendMessage"]);
 
 /**
  * Every text of `texts(live)` that names a tool the session lacks, with each
@@ -84,18 +84,21 @@ export function stalePassages(texts: (live: LiveTools) => NamedText[]): string[]
 const BASE_TOOLS: readonly string[] = [...new Set(["read", "bash", "edit", "write", ...Object.keys(TOOL_FEATURES)])];
 
 /**
- * Where a system-prompt section changes when a deferred tool loads, on every
- * tier, with and without the task tools: rendered with the session's
+ * Where a system-prompt section's bytes move inside a session, on every
+ * tier, with and without the task tools. Rendered with the session's
  * starting tools, then with each deferrable tool added (and all of them at
- * once), the bytes must be the same. A loaded tool joins pi's active list
- * (`tools`), and a prompt that follows it misses the cache from the top;
- * passages keyed on `live` never move. `deferred` names the tools the caller
- * defers itself (a product's own tool over DEFER_CHANNEL), loaded like the
- * base's. Empty when the section is stable.
+ * once), the bytes must be the same: a loaded tool joins pi's active list
+ * (`tools`), and a prompt that follows it misses the cache from the top,
+ * while passages keyed on `live` or `features` never move. A second render
+ * of the same session must match the first, so a section that reads the
+ * clock, a counter or a file shows up too. `deferred` names the tools the
+ * caller defers itself (a product's own tool over DEFER_CHANNEL), loaded
+ * like the base's; `live` and `features` default to everything on. Empty
+ * when the section is stable.
  */
 export function deferralChanges(
 	render: (session: SectionSession) => string | undefined,
-	{ live = { has: () => true }, deferred = [] }: { live?: LiveTools; deferred?: readonly string[] } = {},
+	{ live = { has: () => true }, features = { has: () => true }, deferred = [] }: { live?: LiveTools; features?: LiveFeatures; deferred?: readonly string[] } = {},
 ): string[] {
 	const changes: string[] = [];
 	const deferrable = [...new Set([...DEFERRABLE_TOOLS, ...deferred])];
@@ -103,10 +106,12 @@ export function deferralChanges(
 	const eager = BASE_TOOLS.filter((tool) => !deferrable.includes(tool));
 	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
-			const at = (tools: readonly string[]) => render({ tier, taskTools, tools, live });
+			const label = `${tier}${taskTools ? "" : " without task tools"}`;
+			const at = (tools: readonly string[]) => render({ tier, taskTools, tools, live, features });
 			const start = at(eager);
+			if (at(eager) !== start) changes.push(`${label}: a second render differs`);
 			for (const loaded of [...deferrable.map((tool) => [tool]), deferrable]) {
-				if (at([...eager, ...loaded]) !== start) changes.push(`${tier}${taskTools ? "" : " without task tools"}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
+				if (at([...eager, ...loaded]) !== start) changes.push(`${label}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
 			}
 		}
 	}

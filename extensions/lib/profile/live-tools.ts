@@ -12,6 +12,18 @@
  * profile's text imports it through extensions/sdk/profile.ts.
  */
 
+import type { FeatureId } from "./features.ts";
+
+/**
+ * Which features run in this session (lib/profile/features.ts): fixed for the
+ * process, as the profile and its off-switches decide which extensions load.
+ * A child session runs the features it loads an entry of
+ * (lib/agents/child-extensions.ts).
+ */
+export interface LiveFeatures {
+	has(feature: FeatureId): boolean;
+}
+
 export interface LiveTools {
 	has(tool: string): boolean;
 	/**

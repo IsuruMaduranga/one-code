@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { EXTENSIONS_DIR } from "../core/package-root.ts";
 import { memoOn } from "../core/text-spans.ts";
 import { featureOfEntry, TOOL_FEATURES } from "../profile/features.ts";
-import type { LiveTools } from "../profile/live-tools.ts";
+import type { LiveFeatures, LiveTools } from "../profile/live-tools.ts";
 import { brandedId } from "../profile/brand.mjs";
 import { activeProfile, requireText, type ResolvedProfile } from "../profile/profile.ts";
 import type { ProfileText } from "../profile/profile-contract.ts";
@@ -81,14 +81,16 @@ const CHILD_FEATURES = new Set(CHILD_EXTENSIONS.map(featureOfEntry));
 /** The tools the subagent runtime hands a child itself: the nested Agent, and SendMessage to its caller (agents/subagents/index.ts). */
 const HANDED_TO_CHILDREN: ReadonlySet<string> = new Set(["Agent", "SendMessage"]);
 
-const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; text: ProfileText } => {
+const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; features: LiveFeatures; text: ProfileText } => {
 	const live: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
-			return profile.profileLive.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
+			return profile.live.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
 		},
 	};
-	return { live, text: profile.textFor(live) };
+	// The features a child runs: on in the profile, with an entry the child loads (`childExtensionPaths`), the last one included.
+	const features: LiveFeatures = { has: (id) => profile.features.has(id) && (CHILD_FEATURES.has(id) || id === featureOfEntry(LAST_CHILD_EXTENSION)) };
+	return { live, features, text: profile.textFor(live) };
 });
 
 /** The channel a session's extensions ask "is this a child session?" on; only a child loader's event bus answers. */
@@ -117,6 +119,8 @@ export function markChildBus<B extends { on(channel: string, handler: (data: unk
 export interface SessionView {
 	child: boolean;
 	live: LiveTools;
+	/** The features that run in this session: the profile's, or for a child those it loads an entry of. */
+	features: LiveFeatures;
 	/** The profile's text group for this session's tools; stops the process when the profile lacks it, as `requireText` does. */
 	text<K extends keyof ProfileText>(group: K): NonNullable<ProfileText[K]>;
 }
@@ -124,9 +128,9 @@ export interface SessionView {
 export function sessionView(pi: { events: { emit(channel: string, data: unknown): void } }): SessionView {
 	const probe = { child: false };
 	pi.events.emit(CHILD_PROBE_CHANNEL, probe);
-	if (!probe.child) return { child: false, live: activeProfile().live, text: requireText };
+	if (!probe.child) return { child: false, live: activeProfile().live, features: activeProfile().features, text: requireText };
 	const view = childView(activeProfile());
-	return { child: true, live: view.live, text: (group) => view.text[group] ?? requireText(group) };
+	return { child: true, live: view.live, features: view.features, text: (group) => view.text[group] ?? requireText(group) };
 }
 
 /**
@@ -135,9 +139,9 @@ export function sessionView(pi: { events: { emit(channel: string, data: unknown)
  * workflow tools), and the two a subagent is handed. A workflow agent has
  * neither of those two; the shell text names them only to forbid one, which
  * a subagent must still hear. A resident's cron proxies count as absent: no
- * text of a child's own tools names them. pi's launch flags do not count:
- * they filter the main session's registry, and a child's tools are chosen
- * by the base (lib/agents/agent-catalog.ts agentToolOptions).
+ * text of a child's own tools names them. pi's launch flags count as they
+ * do for the main session: they restrict every child's tools too
+ * (lib/agents/agent-catalog.ts agentToolOptions).
  */
 export const childLive = (): LiveTools => childView(activeProfile()).live;
 

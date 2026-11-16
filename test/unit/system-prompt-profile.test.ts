@@ -68,7 +68,7 @@ describe("system prompt from the profile", () => {
 	});
 
 	it("hands announced sections the tools the session can have, which the profile decides", () => {
-		const profile: Profile = { features: {}, tools: {}, childExtensions: [], text: (options) => ({ ...shipped.text(options), systemPrompt: markers }) };
+		const profile: Profile = { features: { lsp: false }, tools: {}, childExtensions: [], text: (options) => ({ ...shipped.text(options), systemPrompt: markers }) };
 		setActiveProfileForTest(resolveProfile(profile, { [envName("TOOLS_OFF")]: "web_fetch" }, "/profile"));
 		const seen: SectionSession[] = [];
 		const section: SystemPromptSection = { id: "live", place: "tail", render: (session) => void seen.push(session) };
@@ -76,6 +76,8 @@ describe("system prompt from the profile", () => {
 		expect(seen.map(({ tier, taskTools, tools }) => ({ tier, taskTools, tools }))).toEqual([{ tier: "cheap", taskTools: true, tools: ["bash"] }]);
 		// Not the active list: web_search was never selected, and is still a tool the session can have.
 		expect([seen[0].live.has("web_fetch"), seen[0].live.has("web_search")]).toEqual([false, true]);
+		// And the features that run, which the profile turns off whatever tools are selected.
+		expect([seen[0].features.has("lsp"), seen[0].features.has("bash")]).toEqual([false, true]);
 	});
 
 	it("keeps its own blocks in place when a deferred tool loads", () => {
@@ -107,7 +109,7 @@ describe("system prompt from the profile", () => {
 		const a = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		const b = buildClaudeCodeSystemPrompt(options, { cwd: "/r", memoryDir: "/m" }, "frontier");
 		expect(a).toBe(b);
-		const lead = requireText("systemPrompt").lead({ tier: "frontier", taskTools: true, tools: ["bash", "read", "skill"] });
+		const lead = requireText("systemPrompt").lead({ tier: "frontier", taskTools: false, tools: ["bash", "read", "skill"] });
 		expect(a.startsWith(`${lead.join("\n\n")}\n\n`)).toBe(true);
 	});
 });

@@ -35,6 +35,7 @@ import { privateSessionScratchpadDir } from "../../lib/core/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../../lib/context/budget.ts";
 import { activeProfile, featureEnabled, toolLive } from "../../lib/profile/profile.ts";
+import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, scratchpadMoved } from "./text.ts";
@@ -62,6 +63,8 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	// pi matches a flag's name by its exact spelling, so each id is registered as written and in lower case.
 	for (const id of new Set((productBrand.profiles ?? []).flatMap((name) => [name, name.toLowerCase()]))) pi.registerFlag(id, { description: `Run under the ${id} profile (--profile ${id})`, type: "boolean" });
 	const requestTier = sessionModelTier(pi);
+	// The session's tools and features, fixed for the process: what announced sections render for.
+	const view = sessionView(pi);
 	let cachedEnv: EnvironmentInfo | undefined;
 	let cachedKey = "";
 	let scratchpad: string | undefined;
@@ -111,7 +114,6 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	};
 
 	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
-		const model = ctx.model;
 		const tier = requestTier();
 		// The same constant the context-budget extension puts on every user
 		// message, and only while that extension runs.
@@ -121,7 +123,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const appended = [options.appendSystemPrompt, user?.appendSystemPrompt].filter(Boolean).join("\n\n");
 		if (user?.systemPrompt !== undefined) return [user.systemPrompt, appended].filter(Boolean).join("\n\n");
 		if (user?.appendSystemPrompt !== undefined) options = { ...options, appendSystemPrompt: appended };
-		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier) && toolLive("task_create"), [...extraSections.values()]);
+		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled() && toolLive("task_create"), [...extraSections.values()], view);
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the

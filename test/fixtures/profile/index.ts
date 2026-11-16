@@ -25,5 +25,7 @@ export const profile: Profile = {
 	secretFiles: ["Fixture.secret"],
 	readOnlyCommands: { fixturectl: { show: { none: "--all", required: "--name" } } },
 	languageServers: { fixture: { command: "fixture-language-server", extensions: { ".fixturelang": "fixture" } } },
+	// The probe extension's switch for its tier notice (extensions/probe, PROBE_TIER_SETTING).
+	settings: { fixtureTierNotice: { type: "boolean", project: true, description: "[fixture:setting.fixtureTierNotice]" } },
 	text: () => allGroups,
 };

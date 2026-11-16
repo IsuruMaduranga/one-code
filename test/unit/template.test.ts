@@ -24,7 +24,7 @@ const env: EnvironmentInfo = {
 const baseOptions = { cwd: "/tmp/project" };
 const text = () => requireText("systemPrompt");
 /** The session the base builds for these options (no selected tools, task tools on). */
-const session = (tier: PromptTier) => ({ tier, taskTools: true, tools: undefined });
+const session = (tier: PromptTier) => ({ tier, taskTools: false, tools: undefined });
 
 describe("buildClaudeCodeSystemPrompt", () => {
 	it("includes the memory section for the session's memory folder", () => {

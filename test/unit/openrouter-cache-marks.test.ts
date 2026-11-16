@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { getModels } from "@earendil-works/pi-ai/compat";
-import { MARKED_VENDORS, openRouterCacheMarksEnabled, openRouterCacheMarksProvider, takesOpenRouterCacheMarks, withOpenRouterCacheMarks } from "../../extensions/lib/request/openrouter-cache-marks.ts";
+import { MARKED_VENDORS, openRouterCacheMarksEnabled, openRouterProvider, takesOpenRouterCacheMarks, withOpenRouterCacheMarks } from "../../extensions/lib/request/openrouter-cache-marks.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
-import { openRouterCacheMarksRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
+import { openRouterRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
 
 const model = (id: string, extra: Record<string, unknown> = {}) => ({ id, api: "openai-completions", provider: "openrouter", compat: { thinkingFormat: "openrouter" }, ...extra });
 
@@ -67,13 +67,13 @@ describe("openRouterCacheMarksEnabled", () => {
 	});
 });
 
-describe("openRouterCacheMarksProvider", () => {
+describe("openRouterProvider", () => {
 	it("registers for openai-completions and hands the stream the marked model with the context and options unchanged", () => {
 		const calls: unknown[][] = [];
-		const config = openRouterCacheMarksProvider((m: { id: string; api: string; provider: string; compat?: unknown }, context: string, options?: { sessionId: string }) => {
+		const config = openRouterProvider((m: { id: string; api: string; provider: string; compat?: unknown }, context: string, options?: { sessionId: string }) => {
 			calls.push([m, context, options]);
 			return "stream";
-		});
+		}, withOpenRouterCacheMarks);
 		expect(config.api).toBe("openai-completions");
 		expect(config.streamSimple(model("qwen/qwen3.8-27b"), "ctx", { sessionId: "s" })).toBe("stream");
 		expect(calls).toEqual([[{ ...model("qwen/qwen3.8-27b"), compat: { thinkingFormat: "openrouter", cacheControlFormat: "anthropic" } }, "ctx", { sessionId: "s" }]]);
@@ -82,7 +82,7 @@ describe("openRouterCacheMarksProvider", () => {
 
 describe("against pi-ai", () => {
 	it("pi-ai has the Chat Completions implementation the registration wraps", () => {
-		expect(openRouterCacheMarksRegistration()?.api).toBe("openai-completions");
+		expect(openRouterRegistration((m) => m)?.api).toBe("openai-completions");
 	});
 
 	it("the catalog still leaves the open-weight models unmarked, so the registration is what marks them", () => {

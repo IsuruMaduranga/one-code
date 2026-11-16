@@ -33,6 +33,7 @@ import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
 import { secretFileProblems } from "./secrets.ts";
+import { type ProductSetting, productSettingProblems } from "./settings-keys.ts";
 import { languageServerProblems, type ResolvedLanguageServer, resolveLanguageServers } from "./language-servers.ts";
 import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
@@ -169,6 +170,7 @@ const PROFILE_FIELDS: Readonly<Record<keyof Profile, true>> = {
 	secretFiles: true,
 	readOnlyCommands: true,
 	languageServers: true,
+	settings: true,
 	sources: true,
 	globalAgentsFiles: true,
 };
@@ -193,13 +195,6 @@ export interface ResolvedProfile {
 	disabledTools: ReadonlySet<string>;
 	/** Which tools the session can have: the switch is not off, the feature registering it (TOOL_FEATURES) is on, and pi's launch flags keep it registered (`launchTools`). */
 	live: LiveTools;
-	/**
-	 * `live` before pi's launch flags: what the profile's switches and
-	 * features leave on. An in-process child starts from it, since the base
-	 * chooses a child's tools itself and pi's flags never reach it
-	 * (lib/agents/child-extensions.ts, lib/agents/agent-catalog.ts agentToolOptions).
-	 */
-	profileLive: LiveTools;
 	/** The registry filter pi's `--tools`, `--exclude-tools` and `--no-tools` make for this process (lib/profile/pi-tool-flags.ts); absent when they filter nothing. */
 	launchTools?: PiToolFilter;
 	/** Absolute entry files child sessions load after the base's own. */
@@ -220,6 +215,8 @@ export interface ResolvedProfile {
 	readOnlyCommands: ReadonlyMap<string, ReadonlyMap<string, OptionSpec>>;
 	/** The profile's language servers, `${PROFILE_DIR}` filled in (lib/profile/language-servers.ts). */
 	languageServers: readonly ResolvedLanguageServer[];
+	/** The settings the profile declares for its own extensions (lib/profile/declared-settings.ts). */
+	settings: ReadonlyMap<string, ProductSetting>;
 	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
 	user?: UserProfile;
 }
@@ -257,7 +254,8 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * names an unknown feature, misspells a base tool, marks one autoAllow, turns
  * off or defers a pinned tool, names a child extension that is missing or
  * outside the profile's extensions folder, declares a provider entry the
- * base cannot read, turns off a tool its feature or another live tool
+ * base cannot read, declares a setting the base reads itself (or one
+ * without a type or description), turns off a tool its feature or another live tool
  * cannot do without, or leaves out a text group a feature that is on reads.
  * `extensionsRoot` is the folder child extension entries are relative to: the
  * product's, which every product profile shares (default: `profileDir`).
@@ -298,6 +296,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
 	problems.push(...languageServerProblems(profile.languageServers ?? {}));
+	problems.push(...productSettingProblems(profile.settings ?? {}));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -334,7 +333,6 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools,
 		live,
-		profileLive,
 		...(launchTools ? { launchTools } : {}),
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,
@@ -345,6 +343,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		secretFiles: new Set((profile.secretFiles ?? []).map((name) => name.toLowerCase())),
 		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 		languageServers: resolveLanguageServers(profile.languageServers ?? {}, profileDir),
+		settings: new Map(Object.entries(profile.settings ?? {})),
 		...(user ? { user } : {}),
 	};
 }

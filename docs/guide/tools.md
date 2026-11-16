@@ -142,7 +142,7 @@ plan mode it is refused. Deleting always asks you first. Deferred.
 
 | Tool | What it does |
 |---|---|
-| `task_create`, `task_get`, `task_list`, `task_update` | Maintain the structured task list shown in the pinned widget. Deferred. |
+| `task_create`, `task_get`, `task_list`, `task_update` | Maintain the structured task list shown in the pinned widget. Deferred, and off unless `ONECODE_ENABLE_TODO_TOOLS=1`. |
 | `monitor` | Watches a long-running command or a WebSocket and reports each output line as an event. Deferred. |
 | `task_output`, `task_stop` | Read the output of a background task or stop it. Deferred. |
 | `schedule_wakeup` | Schedules the next iteration of a self-paced `/loop`. The pending wake-up shows in `cron_list`. |

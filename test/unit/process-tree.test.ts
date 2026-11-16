@@ -11,7 +11,7 @@
  * same test process — so there the assertions time `waitForChildExit`, which
  * is what every task and hook waits on (findings §22, 2026-09-19 addendum).
  */
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -25,6 +25,33 @@ const win32 = process.platform === "win32";
 // case), the resolved bash — Git Bash — on Windows, where $SHELL is unset.
 const bash = bashSpawnOrThrow();
 const shell = win32 ? bash.shell : process.env.SHELL || bash.shell;
+
+/** Room for a loaded machine (a full suite with the base suite beside it): these tests wait on real processes. */
+const LOADED_MS = 15_000;
+/** What "at once" means here: far below the 30 s that every tree's `sleep 30` would hold the pipe if the kill missed it, with room for a loaded machine. */
+const AT_ONCE_MS = 10_000;
+
+/**
+ * Resolves once the group `child` leads runs every command in `names`: a
+ * member still being forked when the group signal goes out is missed, and
+ * holds the pipe for its 30 s. Windows has no groups (and no pgrep), so a
+ * short pause stands in there.
+ */
+async function membersStarted(child: ReturnType<typeof spawn>, names: string[]): Promise<void> {
+	if (win32) return new Promise((r) => setTimeout(r, 100));
+	const running = (name: string) => {
+		try {
+			execFileSync("pgrep", ["-g", String(child.pid), "-x", name], { stdio: "ignore" });
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const started = await until(() => names.every(running), 200);
+	// A failed wait must not leave the group holding its pipes for 30 s.
+	if (!started) killProcessTree(child, "SIGKILL");
+	expect(started).toBe(true);
+}
 
 function spawnShell(command: string) {
 	return spawn(shell, ["-c", command], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -57,21 +84,21 @@ async function exitWithin(child: ReturnType<typeof spawn>): Promise<number> {
 /** `close` on POSIX (the pipe closes with the tree); the exit-based wait on Windows. */
 const settledWithin = (child: ReturnType<typeof spawn>, limitMs: number) => (win32 ? exitWithin(child) : closeWithin(child, limitMs));
 
-describe("killProcessTree", () => {
+describe("killProcessTree", { timeout: LOADED_MS }, () => {
 	it("ends a pipeline's members, not just the shell, so the stdout pipe closes at once", async () => {
 		const child = spawnShell("sleep 30 | cat");
-		await new Promise((r) => setTimeout(r, 100)); // let the shell fork the pipeline
-		const settled = settledWithin(child, 3000);
+		await membersStarted(child, ["sleep", "cat"]);
+		const settled = settledWithin(child, AT_ONCE_MS);
 		killProcessTree(child);
-		expect(await settled).toBeLessThan(3000);
+		expect(await settled).toBeLessThan(AT_ONCE_MS);
 	});
 
 	it("ends a `cmd; more` sequence the same way", async () => {
 		const child = spawnShell("sleep 30; echo done");
-		await new Promise((r) => setTimeout(r, 100));
-		const settled = settledWithin(child, 3000);
+		await membersStarted(child, ["sleep"]);
+		const settled = settledWithin(child, AT_ONCE_MS);
 		killProcessTree(child);
-		expect(await settled).toBeLessThan(3000);
+		expect(await settled).toBeLessThan(AT_ONCE_MS);
 	});
 
 	it("waitForChildExit settles on exit plus the stdio grace, so a pipe a straggler holds cannot hang the wait", async () => {
@@ -81,18 +108,22 @@ describe("killProcessTree", () => {
 		const exited = waitForChildExit(child);
 		killProcessTree(child);
 		const { code, signal } = await exited;
-		expect(Date.now() - started).toBeLessThan(3000);
+		expect(Date.now() - started).toBeLessThan(AT_ONCE_MS);
 		expect(code === null || code !== 0 || signal !== null).toBe(true);
 	});
 
 	it("waitForChildExit settles within the post-exit cap when a straggler keeps writing to the inherited pipe", async () => {
 		// The leader exits at once; the backgrounded loop it left behind writes
-		// every 50 ms, re-arming the stdio grace forever without the cap.
+		// every 50 ms, re-arming the stdio grace forever without the cap. The cap
+		// counts from the leader's exit, so that is where the clock starts; the
+		// slack is for timers firing late on a loaded machine.
 		const child = spawnShell("(while true; do echo x; sleep 0.05; done) & exit 0");
-		const started = Date.now();
+		let exitedAt = 0;
+		child.once("exit", () => (exitedAt = Date.now()));
 		await waitForChildExit(child);
-		const elapsed = Date.now() - started;
-		expect(elapsed).toBeLessThan(EXIT_STDIO_MAX_MS + 1500);
+		// The wait settled on the leader's exit, not on an error path.
+		expect(exitedAt).toBeGreaterThan(0);
+		expect(Date.now() - exitedAt).toBeLessThan(EXIT_STDIO_MAX_MS + 2000);
 		killProcessTree(child, "SIGKILL"); // the loop is not the leader's group on Windows; best effort
 	});
 
@@ -103,7 +134,7 @@ describe("killProcessTree", () => {
 			const term = spawnShell("sleep 30");
 			const killed = spawnShell("sleep 30");
 			await new Promise((r) => setTimeout(r, 100));
-			const settled = Promise.all([settledWithin(term, 3000), settledWithin(killed, 3000)]);
+			const settled = Promise.all([settledWithin(term, AT_ONCE_MS), settledWithin(killed, AT_ONCE_MS)]);
 			killProcessTree(term);
 			killProcessTree(killed, "SIGKILL");
 			for (const [pid, signal] of kill.mock.calls) sent.push(`${pid === -term.pid! ? "term" : pid === -killed.pid! ? "killed" : "other"}:${signal}`);
@@ -125,7 +156,7 @@ describe("killProcessTree", () => {
 			return real(pid, signal as NodeJS.Signals);
 		});
 		try {
-			const settled = settledWithin(child, 3000);
+			const settled = settledWithin(child, AT_ONCE_MS);
 			killProcessTree(child, "SIGKILL");
 			expect(sent).toEqual(["SIGSTOP", "SIGKILL", "SIGCONT"]);
 			await settled; // the leader was still killed directly
@@ -156,7 +187,8 @@ describe("killProcessTree", () => {
 	});
 
 	it.skipIf(win32)("a frozen group still runs its TERM handler", async () => {
-		const child = spawn(bash.shell, ["-c", "trap 'echo handled; exit 0' TERM; echo ready; sleep 30 & wait"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
+		// `ready` comes once the member is forked, so the kill always finds a group of two.
+		const child = spawn(bash.shell, ["-c", "trap 'echo handled; exit 0' TERM; sleep 30 & echo ready; wait"], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"] });
 		let out = "";
 		child.stdout?.on("data", (chunk) => (out += chunk));
 		while (!out.includes("ready")) await new Promise((r) => setTimeout(r, 5));
@@ -167,7 +199,7 @@ describe("killProcessTree", () => {
 	});
 });
 
-describe("an owned tree's stop", () => {
+describe("an owned tree's stop", { timeout: LOADED_MS }, () => {
 	// Windows has no SIGTERM to ignore: taskkill /F is the first and only signal,
 	// so the grace period does not exist there (lib/shell-run/process-tree.ts).
 
@@ -184,8 +216,11 @@ describe("an owned tree's stop", () => {
 		for (let waited = 0; groupAlive(pgid) && waited < limitMs; waited += 50) await new Promise((r) => setTimeout(r, 50));
 		return !groupAlive(pgid);
 	};
-	/** A group whose leader dies on TERM while a member it forked ignores TERM (the `bash -c` wrapper around a dev server). */
-	const leaderDiesMemberResists = `sh -c 'trap "" TERM; while :; do sleep 0.2; done' & wait`;
+	/**
+	 * A group whose leader dies on TERM while a member it forked ignores TERM (the
+	 * `bash -c` wrapper around a dev server). The member prints `ready` once its trap is set.
+	 */
+	const leaderDiesMemberResists = `sh -c 'trap "" TERM; echo ready; while :; do sleep 0.2; done' & wait`;
 
 	it.skipIf(win32)("schedules the SIGKILL of a new child that reuses a pending child's pid", async () => {
 		// A pid no system hands out, so the group kill fails with ESRCH and falls
@@ -207,11 +242,11 @@ describe("an owned tree's stop", () => {
 	});
 
 	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
-		const tree = spawnOwnedTree((detached) => spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detached, stdio: "ignore" }));
+		const tree = spawnOwnedTree((detached) => spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detached, stdio: ["ignore", "pipe", "ignore"] }));
 		const child = tree.child;
 		const pgid = child.pid!;
 		try {
-			await new Promise((r) => setTimeout(r, 200)); // let the member start and set its trap
+			await once(child.stdout!, "data"); // the member has set its trap
 			const exited = new Promise((r) => child.once("exit", r));
 			tree.stop(300);
 			await exited; // the leader goes at once
@@ -226,16 +261,16 @@ describe("an owned tree's stop", () => {
 	});
 
 	it.skipIf(win32)("ends a stopped tree after the exit watchdog's grace when the process exits before its grace timer could fire (A3-M1, the quit path)", async () => {
-		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
-		// later, as pi's quit does (dispose, then process.exit).
+		// A throwaway node process stops its own TERM-resistant group once the member
+		// has set its trap, and exits 50 ms later, as pi's quit does (dispose, then process.exit).
 		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
 		const script = [
 			`import { spawn } from "node:child_process";`,
 			`import { spawnOwnedTree } from ${JSON.stringify(moduleUrl)};`,
-			`const tree = spawnOwnedTree((detached) => spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detached, stdio: "ignore" }));`,
+			`const tree = spawnOwnedTree((detached) => spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detached, stdio: ["ignore", "pipe", "ignore"] }));`,
 			`tree.child.unref();`,
 			`process.stdout.write(String(tree.child.pid));`,
-			`setTimeout(() => { tree.stop(2000); setTimeout(() => process.exit(0), 50); }, 200);`,
+			`tree.child.stdout.once("data", () => { tree.stop(2000); setTimeout(() => process.exit(0), 50); });`,
 		].join("\n");
 		const stdout = await new Promise<string>((done, fail) =>
 			execFile(process.execPath, ["--input-type=module", "-e", script], (error, out) => (error ? fail(error) : done(out))),
@@ -258,17 +293,15 @@ describe("an owned tree's stop", () => {
 	it("ends the tree at once where there is no gentler signal to grace (Windows)", async () => {
 		const tree = ownedShell("sleep 30");
 		await new Promise((r) => setTimeout(r, 150));
-		const settled = settledWithin(tree.child, 4000);
+		const settled = settledWithin(tree.child, AT_ONCE_MS);
 		tree.stop(300);
-		expect(await settled).toBeLessThan(4000);
+		expect(await settled).toBeLessThan(AT_ONCE_MS);
 	});
 });
 
-describe("spawnOwnedTree", () => {
+describe("spawnOwnedTree", { timeout: LOADED_MS }, () => {
 	/** A launcher that starts a member in its group (off the test's pipes), prints the member's pid and exits at once. */
 	const launcherLeavesMember = "sleep 30 </dev/null >/dev/null 2>&1 & echo $!";
-	/** Room for a loaded full-suite run: these wait on real processes. */
-	const LOADED_MS = 15_000;
 
 	/** Start `command` as an owned tree; resolves once the leader has printed its first line. */
 	const startTree = async (command: string, options?: Parameters<typeof spawnOwnedTree>[1]) => {
@@ -295,7 +328,7 @@ describe("spawnOwnedTree", () => {
 			tree.kill("SIGKILL");
 		}
 		expect(await until(() => !tree.alive(), 200)).toBe(true);
-	}, LOADED_MS);
+	});
 
 	it.skipIf(win32)("ends the rest of the group when the launcher exits, with endGroupWithLauncher", async () => {
 		const { tree, firstLine } = await startTree(launcherLeavesMember, { endGroupWithLauncher: true });
@@ -307,7 +340,7 @@ describe("spawnOwnedTree", () => {
 		} finally {
 			tree.kill("SIGKILL");
 		}
-	}, LOADED_MS);
+	});
 
 	it.skipIf(win32)("leaves what a finished leader started running, without endGroupWithLauncher", async () => {
 		const { tree, firstLine } = await startTree(launcherLeavesMember);
@@ -321,25 +354,26 @@ describe("spawnOwnedTree", () => {
 			tree.kill("SIGKILL");
 		}
 		expect(await until(() => !alive(member), 200)).toBe(true);
-	}, LOADED_MS);
+	});
 
 	it.skipIf(win32)("stop SIGTERMs the tree and SIGKILLs it after the grace", async () => {
 		const { tree } = await startTree("trap '' TERM; echo ready; sleep 30");
-		const closed = closeWithin(tree.child, 4000);
-		tree.stop(300);
+		const graceMs = 300;
+		const closed = closeWithin(tree.child, AT_ONCE_MS);
+		tree.stop(graceMs);
+		// No SIGKILL before the grace (the timer never fires early; 50 ms for clock
+		// rounding), and one after it, long before the TERM-ignoring sleep's 30 s.
 		const elapsed = await closed;
-		expect(elapsed).toBeGreaterThanOrEqual(250);
-		expect(elapsed).toBeLessThan(4000);
+		expect(elapsed).toBeGreaterThanOrEqual(graceMs - 50);
+		expect(elapsed).toBeLessThan(AT_ONCE_MS);
 	});
 
 	it("kill ends the whole tree at once", async () => {
 		const { tree } = await startTree("echo ready; sleep 30 | cat");
-		// Let the shell fork the pipeline: a member still being forked when the group
-		// signal goes out is missed, and holds the pipe open for its 30 s.
-		await new Promise((r) => setTimeout(r, 100));
-		const settled = settledWithin(tree.child, 3000);
+		await membersStarted(tree.child, ["sleep", "cat"]);
+		const settled = settledWithin(tree.child, AT_ONCE_MS);
 		tree.kill("SIGKILL");
-		expect(await settled).toBeLessThan(3000);
+		expect(await settled).toBeLessThan(AT_ONCE_MS);
 	});
 });
 

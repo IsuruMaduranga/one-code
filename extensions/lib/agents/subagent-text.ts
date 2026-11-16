@@ -19,6 +19,7 @@ import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
 export interface SubagentClauses {
 	taskAliasNote: string;
 	toolNamesHint: string;
+	toolsLeftOut(p: { name: string; tools: string[] }): string;
 }
 
 /** What an agent may use, as its catalog row says. */
@@ -126,6 +127,8 @@ export interface SubagentsResultText {
 	renamed(p: { wanted: string; takenBy: string; name: string }): string;
 	/** An agent file whose `tools` list matches no tool. */
 	unusableTools(p: { name: string; tools: string[] }): string;
+	/** The tools an agent file names that pi's tool flags removed from the session: the agent starts without them. */
+	toolsLeftOut(p: { name: string; tools: string[] }): string;
 	/** Creating an isolation worktree was refused; `program` names what git would run. */
 	worktreeRefused(p: { program: CheckoutProgram }): string;
 	/** A worktree kept because it holds the agent's work. */
@@ -288,6 +291,9 @@ const STATUS: Record<RunStatus, string> = {
 	finished: "finished (resume with SendMessage)",
 };
 
+/** A run row's status that names SendMessage, which pi's --exclude-tools takes out alone. */
+const ROW_PASSAGES: ToolPassages = { SendMessage: [" (resume with SendMessage)"] };
+
 /** The runs by name and task id, comma-separated. */
 const namedRuns = (runs: readonly PendingRun[]): string => runs.map((run) => `${run.name} (task ${run.taskId})`).join(", ");
 
@@ -296,6 +302,8 @@ const RESULT_PASSAGES: ToolPassages = {
 	read: [["Do NOT read or tail the output file", "Do NOT tail the output file"]],
 	task_output: [[", and task_output does not know this id.", "."]],
 	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], " Use task_stop to end one."],
+	// pi's --exclude-tools takes SendMessage out alone; after task_stop's cut the sentence starts with it.
+	SendMessage: [["; SendMessage reaches the agent even while it runs (the message is steered into its current turn).", "."], " SendMessage reaches the agent even while it runs (the message is steered into its current turn)."],
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
@@ -315,6 +323,7 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		noOutput: "(Subagent completed but returned no output.)",
 		modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 		renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
+		toolsLeftOut: (p) => product.toolsLeftOut(p),
 		unusableTools: ({ name, tools }) => `Agent "${name}" lists tools (${tools.join(", ")}) that match no available tool. ${product.toolNamesHint}`,
 		worktreeRefused: ({ program }) =>
 			`Cannot create an isolation worktree: ${checkoutProgram(program)}. Create the worktree with an explicitly approved git worktree add command, then start a session there without automatic isolation.`,
@@ -353,7 +362,7 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			`[${name}'s working directory ${cwd} no longer exists${worktreeRemoved ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ranIn}.]`,
 		noAgents: "No agents have been spawned in this session yet. Start one with the Agent tool.",
 		agentList: ({ rows }) => `Agents spawned this session:\n${rows.join("\n")}`,
-		agentRow: ({ name, agent, status, taskId }) => `- ${name} [${agent}] — ${STATUS[status]} (task ${taskId})`,
+		agentRow: ({ name, agent, status, taskId }) => withoutOff(`- ${name} [${agent}] — ${STATUS[status]} (task ${taskId})`, live, ROW_PASSAGES),
 		fromSubagent: ({ name, summary, body }) => `Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`,
 		parentMode: ({ mode }) =>
 			`The main session's permission mode is now "${mode}", and your tool calls are checked against it from here on.${mode === "plan" ? " Only read-only tools run now: do not edit files or change state." : ""}`,

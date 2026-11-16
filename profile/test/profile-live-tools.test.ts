@@ -23,7 +23,7 @@ const ENGLISH: EnglishPhrases = {
 	// The PowerShell description compares its syntax with the bash language.
 	bash: [/work like bash/, /works similarly to bash/, /or bash `export`/],
 	monitor: [/monitor for regressions/],
-	skill: [/a skill or slash command/],
+	skill: [/a skill or slash command/, /with a skill, agent/],
 	workflow: [/through this workflow/],
 	// SendMessage's recipient: an agent's name, not the tool.
 	Agent: [/Agent name \(or task id\)/],
@@ -68,6 +68,8 @@ function texts(live: LiveTools): NamedText[] {
 	}
 	push("SendMessage", "subagents", `${subagents.sendMessageDescription}\n${JSON.stringify(subagents.sendMessageParams)}`, "SendMessage");
 	push("list_agents", "subagents", subagents.listAgentsDescription, "list_agents");
+	push("Agent params", "subagents", JSON.stringify(subagents.agentParams), "Agent");
+	push("guide agent row", "subagents", subagents.guideAgent!.description);
 	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode, "exit_plan_mode");
 	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }), "workflow");
 	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })), "workflow");

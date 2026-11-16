@@ -604,8 +604,10 @@ again. One Code warns when your choice has a newer model in its line, sits two
 or more tiers below your session model, or has a smaller context window than
 your session's.
 
-When auto mode is on, the banner shows which classifier is in use, and a
-notice tells you when your own model is screening and why.
+When auto mode is on, the banner shows which classifier is in use. If your own
+model screens because nothing cheaper qualifies, a notice tells you why. If the
+pairing table keeps your model on purpose, there's nothing for you to do, so
+there's no notice, and `/doctor` says why.
 
 ### The safety floor
 

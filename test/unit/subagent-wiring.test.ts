@@ -661,27 +661,26 @@ describe("fork runs in a one-shot session", () => {
 		}
 	});
 
-	// pi's tool flags filter the main session's registry, not a child's: an
-	// allowlist without cron_create keeps a fresh agent's cron tools, and takes
-	// them from a fork only, whose tools must match the parent's.
-	it("lets pi's tool flags take the cron tools from a fork only", async () => {
-		const flagged = resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--tools", "read,bash,Agent"]));
-		expect(flagged.profileLive.has("cron_create")).toBe(true);
-		setActiveProfileForTest(flagged);
+	// pi's tool flags restrict a fresh agent as they restrict the parent, and a
+	// fork's tools must match the parent's: an allowlist without the cron tools
+	// takes them from both kinds, and the nested Agent it names stays.
+	it("lets pi's tool flags take the cron tools from a fork and a fresh agent alike", async () => {
+		setActiveProfileForTest(resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--tools", "read,bash,Agent"])));
 		try {
 			const { h, run } = await mountFork();
 			await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
 			await h.call("Agent", { subagent_type: "general-purpose", name: "reader", task: "Read the README" });
 			const names = (call: number) => ((run.mock.calls[call][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? []).map((tool) => tool.name);
 			expect(names(0)).not.toContain("cron_create");
-			expect(names(1)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
+			expect(names(1)).toContain("Agent");
+			expect(names(1).filter((name) => name.startsWith("cron_"))).toEqual([]);
 		} finally {
 			setActiveProfileForTest(undefined);
 		}
 	});
 
-	// Each cron tool on its own: a fork has exactly the ones the parent kept.
-	it("gives a fork only the cron tools pi's flags left the parent, tool by tool", async () => {
+	// Each cron tool on its own: both kinds get exactly the ones the parent kept.
+	it("gives a fork and a fresh agent only the cron tools pi's flags left the parent, tool by tool", async () => {
 		for (const [excluded, kept] of [
 			["cron_delete", ["cron_create", "cron_list"]],
 			["cron_create", ["cron_list", "cron_delete"]],
@@ -693,11 +692,16 @@ describe("fork runs in a one-shot session", () => {
 				await h.call("Agent", { subagent_type: "general-purpose", name: "reader", task: "Read the README" });
 				const cron = (call: number) => ((run.mock.calls[call][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? []).map((tool) => tool.name).filter((name) => name.startsWith("cron_"));
 				expect(cron(0), excluded).toEqual(kept);
-				expect(cron(1), excluded).toEqual(["cron_create", "cron_list", "cron_delete"]);
+				expect(cron(1), excluded).toEqual(kept);
 			} finally {
 				setActiveProfileForTest(undefined);
 			}
 		}
+		// Without a flag both kinds keep all three.
+		const { h, run } = await mountFork();
+		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+		await h.call("Agent", { subagent_type: "general-purpose", name: "reader", task: "Read the README" });
+		for (const call of [0, 1]) expect(((run.mock.calls[call][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? []).map((tool) => tool.name).filter((name) => name.startsWith("cron_"))).toEqual(["cron_create", "cron_list", "cron_delete"]);
 	});
 
 	it("shares the parent's MCP tools with a fork as the parent's own definitions", async () => {

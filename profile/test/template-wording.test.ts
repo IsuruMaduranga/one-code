@@ -174,17 +174,21 @@ describe("One Code's system prompt", () => {
 });
 
 describe("One Code's task line", () => {
-	it("drops the task_create line when the model runs without the task tools", () => {
+	it("carries the task_create line only when the knob gives the session the task tools", () => {
 		for (const tier of ["workhorse", "cheap", "tiny"] as const) {
-			const withTasks = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
-			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier, null, false);
+			const withTasks = buildClaudeCodeSystemPrompt(baseOptions, env, tier, null, true);
+			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
+			expect(without, tier).toBe(buildClaudeCodeSystemPrompt(baseOptions, env, tier, null, false));
 			expect(withTasks, tier).toContain("task_create");
 			expect(without, tier).not.toContain("task_create");
 			// Only the task bullet goes; the rest stays.
 			expect(withTasks.split("\n").length - without.split("\n").length, tier).toBe(1);
 		}
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse")).toContain(
-			"\n - Use task_create (deferred — load it with `tool_search select:task_create,task_update`) to plan and track work. Mark each task completed as soon as it's done; don't batch.\n",
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse", null, true)).toContain(
+			"\n - Keep a task list with task_create (deferred: load it with `tool_search select:task_create,task_update`) only for work that will take many separate steps over a long session, or for a list of requests from the user. For ordinary tasks, do the work without one. When a list exists, mark each task completed as soon as it's done; don't batch.\n",
+		);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "tiny", null, true)).toContain(
+			"\n - Use a task list (`task_create`, deferred: load it with `tool_search select:task_create,task_update`) only for work that will take many separate steps over a long session, or for a list of requests from the user. For ordinary tasks, do the work without one. When a list exists, mark each task completed as soon as it is done.\n",
 		);
 		// Frontier has no task line either way.
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, false)).toBe(

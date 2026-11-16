@@ -31,7 +31,8 @@ import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../../lib/agents/permission-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
 import { summarizeArgs } from "../../lib/ui/tui-render.ts";
-import { type AgentDefinition, agentFileSources, agentToolOptions, discoverAgents, unusableAllowlistError } from "../../lib/agents/agent-catalog.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { type AgentDefinition, agentFileSources, agentToolOptions, childMcpTools, discoverAgents, toolsRemovedByFlags, unusableAllowlistError } from "../../lib/agents/agent-catalog.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../../lib/plugins/plugins.ts";
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { oneTurnHandbackSlot, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
@@ -210,6 +211,8 @@ export class AgentRunner {
 	 * and reads it N-1 times (lib/side-calls/prefix-warm-gate.ts).
 	 */
 	private readonly warmGate = new PrefixWarmGate();
+	/** The agent types whose tools pi's flags cut, already told in the notices: once per run. */
+	private readonly toldToolsLeftOut = new Set<string>();
 
 	private constructor(options: AgentRunnerOptions, modelRuntime: ModelRuntime, agentCatalog: AgentDefinition[], availableModels: Model<Api>[]) {
 		this.options = options;
@@ -291,8 +294,15 @@ export class AgentRunner {
 		const handback = opts.schema ? undefined : oneTurnHandbackSlot();
 		const customTools: ToolDefinition[] = [
 			...(opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : []),
-			...mcpTools,
+			// The MCP tools pi's tool flags kept in this session, as the subagent runner gives them.
+			...childMcpTools(mcpTools),
 		];
+		// An agent file's tool that pi's tool flags removed: the agent still starts, and the script's notices say so once.
+		const removed = toolsRemovedByFlags(agentDef);
+		if (agentDef && removed.length > 0 && !this.toldToolsLeftOut.has(agentDef.name)) {
+			this.toldToolsLeftOut.add(agentDef.name);
+			this.options.onNotice?.(subagentResultText().toolsLeftOut({ name: agentDef.name, tools: removed }));
+		}
 
 		// The same child session a subagent gets (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26
 		// H2, H3, M6): the curated child extensions, the parent's MCP tools, and the

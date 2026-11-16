@@ -12,7 +12,9 @@
  *   boundaries and puts the breakpoint before the pending action and stage
  *   instruction (cache.ts). Both stages and later gated calls can read that
  *   prefix; the system markers stay intact. Other APIs keep the single string
- *   and their provider's prefix caching.
+ *   and their provider's prefix caching, and so does an OpenRouter open-weight
+ *   model whose breakpoints One Code adds: its payload loses them (cache.ts
+ *   `classifierDropsBreakpoints`).
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -30,7 +32,7 @@ import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choi
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
 import { classifierCostRatio, forcedReasoningLevel, isReasoningMandatoryError, modelSpec as spec, reasoningRetryLevel } from "../../../lib/models/model-policy.ts";
 import type { AutoModeConfig } from "../../../lib/rules/auto-mode-config.ts";
-import { cacheClassifierHistory, classifierCarriesBreakpoints } from "./cache.ts";
+import { cacheClassifierHistory, classifierCarriesBreakpoints, classifierDropsBreakpoints, dropClassifierBreakpoints } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -52,6 +54,7 @@ import {
 	classifierCandidates,
 	describeCandidate,
 	isModelUnavailableError,
+	isSilentFallback,
 	replyText,
 } from "../../../lib/models/classifier-model.ts";
 import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
@@ -294,11 +297,12 @@ export function classifierChain(
 	return chain;
 }
 
-/** The candidate chain (minus anything already unusable this session) and its notices. */
-function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
-	const { candidates: all, notices } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
+/** The candidate chain (minus anything already unusable this session), its notices and whether the chain's choice is announced at all. */
+function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[]; silent: boolean } {
+	const { candidates: all, notices, fallback } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-	if (usable.length > 0) return { candidates: usable, notices };
+	const silent = isSilentFallback(fallback);
+	if (usable.length > 0) return { candidates: usable, notices, silent };
 	// If everything has been rejected, the session model is still worth one more
 	// attempt: a gate that stops asking has stopped gating. It has to be the
 	// session model specifically — the *last* chain entry is the cost-ranked pick,
@@ -307,7 +311,7 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	// (`refusalStop`).
 	const session = all.filter((entry) => entry.source === "session");
 	const retry = session.length > 0 ? session : all.slice(-1);
-	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices };
+	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices, silent };
 }
 
 /**
@@ -339,7 +343,7 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
  * subagent run). See the module comment for the two-stage flow.
  */
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
-	const { candidates, notices } = remainingCandidates(deps);
+	const { candidates, notices, silent } = remainingCandidates(deps);
 	if (candidates.length === 0) {
 		if (deps.state.refused.size > 0) return refusalStop(deps);
 		return noVerdict({ kind: "noModel" });
@@ -439,7 +443,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(classifierCarriesBreakpoints(model) ? {
+					...(classifierDropsBreakpoints(model) ? {
+						onPayload: (payload: unknown) => {
+							dropClassifierBreakpoints(payload);
+						},
+					} : classifierCarriesBreakpoints(model) ? {
 						onPayload: (payload: unknown) => {
 							cacheMarks = cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							// A review's history ends in the subagent's calls, which the next gate
@@ -482,6 +490,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 								user: userText,
 								usage: reply.usage,
 								stopReason: reply.stopReason,
+								// The provider's id for the reply; on OpenRouter the probe looks the serving host up by it.
+								responseId: reply.responseId,
 							})}\n`,
 						);
 					} catch {
@@ -569,7 +579,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			// session and a working model is not re-litigated per call.
 			if (!deps.state.pinned) {
 				deps.state.pinned = model;
-				notifyOnce(deps, `using:${key}`, `Auto mode is screening calls with ${describeCandidate(candidate)}.`, "info");
+				// A choice the pairing table made on purpose (the session's own model) is not announced.
+				if (!silent) notifyOnce(deps, `using:${key}`, `Auto mode is screening calls with ${describeCandidate(candidate)}.`, "info");
 			}
 			if (debug) {
 				process.stderr.write(

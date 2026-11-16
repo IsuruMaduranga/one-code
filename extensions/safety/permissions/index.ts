@@ -62,7 +62,7 @@ import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
-import { describeCandidate } from "../../lib/models/classifier-model.ts";
+import { describeCandidate, isSilentFallback } from "../../lib/models/classifier-model.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../../lib/shell/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "./auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
@@ -658,7 +658,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		if (first && key && !classifierState.notified.has(key)) {
 			classifierState.notified.add(key);
 			if (choice.fallback) classifierState.notified.add(choice.fallback.text);
-			info.push(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`);
+			if (!isSilentFallback(choice.fallback)) info.push(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`);
 		}
 		if (info.length === 0) return;
 		if (opts.batched) queueNotice(pi.events, badgeCtx, "info", info.join("\n"));

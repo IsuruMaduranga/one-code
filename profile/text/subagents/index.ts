@@ -13,7 +13,15 @@ import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.t
 
 const AGENT_PASSAGES: ToolPassages = {
 	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
+	// pi's --exclude-tools takes SendMessage out alone: the facts that hold without it stay.
+	SendMessage: [
+		["- Use SendMessage with the agent's ID or name to continue a previously spawned agent with its context intact; a new Agent call starts fresh", "- A new Agent call starts fresh"],
+		["- To continue a previously spawned agent, use SendMessage with the agent's ID or name as the `to` field — that resumes it with full context. A new Agent call", "- A new Agent call"],
+		["- Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. ", "- "],
+	],
 };
+const AGENT_PARAM_PASSAGES: ToolPassages = { SendMessage: [", usable later with SendMessage"] };
+const GUIDE_PASSAGES: ToolPassages = { SendMessage: [" **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed one-code-guide agent that you can continue via SendMessage."] };
 
 /** The passages of SendMessage's and list_agents' words that name a sibling tool: list_agents can be off alone, and pi's `--exclude-tools` takes Agent or SendMessage out alone. */
 const SEND_MESSAGE_PASSAGES: ToolPassages = { list_agents: [" To discover the names of running or finished agents, use list_agents."] };
@@ -29,6 +37,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 		taskAliasNote: "Claude Code names this parameter `prompt` — either is accepted",
 		toolNamesHint:
 			"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
+		toolsLeftOut: ({ name, tools }) => `Agent "${name}" runs without ${tools.join(", ")}, which this session's tool flags leave out.`,
 		agentDescription: ({ form, configDir }) => withoutOff(agentDescription(form, configDir), live, AGENT_PASSAGES),
 		agentPromptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		agentParams: {
@@ -37,7 +46,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			task: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups).",
 			prompt: "Alias of `task` (Claude Code's name for it) — the task for the agent to perform.",
 			description: "A short (3-5 word) description of the task, shown as the run's title.",
-			name: "Name for this run, usable later with SendMessage (default: <agent>-<n>)",
+			name: withoutOff("Name for this run, usable later with SendMessage (default: <agent>-<n>)", live, AGENT_PARAM_PASSAGES),
 			model:
 				'Override the agent\'s model for this call: "sonnet"/"opus"/"haiku"/"fable" (resolved within this session\'s provider), "inherit", or an exact provider/model-id — see the subagent-models reminder for what is available. Rejected for fork runs (a fork keeps this conversation\'s model)',
 			allow_expensive: "Confirm a per-call `model` that costs more per token than this session's model. Set it only when the user explicitly asked for that model",
@@ -115,6 +124,6 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 		delegationWithdrawn: "The subagent delegation guidance previously shown for this conversation is no longer active.",
 		catalogWithdrawn: "The agent types listed earlier in this conversation can no longer be started, because the Agent tool is not available in this session.",
 		modelsWithdrawn: "The model list shown earlier in this conversation for subagents and workflow agents no longer applies.",
-		guideAgent,
+		guideAgent: { ...guideAgent, description: withoutOff(guideAgent.description, live, GUIDE_PASSAGES) },
 	};
 };

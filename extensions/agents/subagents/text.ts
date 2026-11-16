@@ -19,6 +19,8 @@ export interface SubagentsText {
 	toolNamesHint: string;
 	/** In the refusal for a call without a task: the note on the alias of `task`, as a clause. */
 	taskAliasNote: string;
+	/** The one-time note when pi's tool flags removed tools an agent file names: the agent starts without them. */
+	toolsLeftOut(p: { name: string; tools: string[] }): string;
 	agentDescription(p: { form: DescriptionForm; configDir: string }): string;
 	agentPromptSnippet: string;
 	agentParams: {

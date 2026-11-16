@@ -12,7 +12,7 @@ import { pairedModel } from "../../extensions/lib/models/model-pairings.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { useProfile } from "./helpers/profile.ts";
 import { acceptsAnthropicWire, anthropicModelId, BUILTIN_PROVIDER_POLICIES, modelIdentity, providerPolicy } from "../../extensions/lib/models/model-policy.ts";
-import { classifyModelTier, taskToolsEnabled } from "../../extensions/lib/models/model-tier.ts";
+import { classifyModelTier } from "../../extensions/lib/models/model-tier.ts";
 import { PROVIDER_VENDORS, type ProductProvider, WIRE_FEATURES } from "../../extensions/lib/profile/product-providers.ts";
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { supportsToolReferences } from "../../extensions/lib/request/deferred.ts";
@@ -56,9 +56,6 @@ describe("a provider the profile declares", () => {
 		// Haiku takes the frontier forms for the prompt only, as on Anthropic's provider.
 		expect(classifyModelTier(model("acme", "claude-haiku-5-5"), {}, "prompt").tier).toBe("frontier");
 		expect(classifyModelTier(model("acme", "claude-haiku-5-5"), {}, "capability").tier).not.toBe("frontier");
-		// Sonnet 5 runs without the task tools, as on Anthropic's provider.
-		expect(taskToolsEnabled(model("acme", "claude-sonnet-5"), {}, "workhorse")).toBe(false);
-		expect(taskToolsEnabled(model("other", "claude-sonnet-5"), {}, "workhorse")).toBe(true);
 	});
 
 	it("is matched in the catalog under its vendor, so the pairing table picks inside it", () => {

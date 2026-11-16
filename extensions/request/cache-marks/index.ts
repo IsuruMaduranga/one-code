@@ -14,10 +14,14 @@
  * limit is checked here.
  *
  * It also registers the `openrouter` provider's Chat Completions stream with
- * pi's own breakpoints turned on for the open-weight models, some of whose
- * hosts cache nothing without them (lib/request/openrouter-cache-marks.ts).
- * `*_CACHE_MARKS=0` turns both off, to compare a run with and without marks;
- * `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones.
+ * pi's own breakpoints turned on for the measured open-weight vendors, some of
+ * whose hosts cache nothing without them (lib/request/openrouter-cache-marks.ts),
+ * and with the hosts that defeat the prompt cache skipped on the models of
+ * their measured vendors
+ * (lib/request/openrouter-ignored-hosts.ts).
+ * `*_CACHE_MARKS=0` turns all marks off, to compare a run with and without
+ * them; `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones;
+ * `*_OPENROUTER_IGNORE_HOSTS=0` turns off the skipped hosts.
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
@@ -25,15 +29,23 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../../lib/request/anthropic-server-tools.ts";
-import { openRouterCacheMarksRegistration } from "../../lib/request/anthropic-stream.ts";
-import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled } from "../../lib/request/openrouter-cache-marks.ts";
+import { openRouterRegistration } from "../../lib/request/anthropic-stream.ts";
+import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled, withOpenRouterCacheMarks } from "../../lib/request/openrouter-cache-marks.ts";
+import { openRouterIgnoreHostsEnabled, withOpenRouterIgnoredHosts } from "../../lib/request/openrouter-ignored-hosts.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
+	const marks = openRouterCacheMarksEnabled();
+	const ignore = openRouterIgnoreHostsEnabled();
+	if (marks || ignore) {
+		const openRouter = openRouterRegistration((model) => {
+			const marked = marks ? withOpenRouterCacheMarks(model) : model;
+			return ignore ? withOpenRouterIgnoredHosts(marked) : marked;
+		});
+		if (openRouter) pi.registerProvider("openrouter", openRouter);
+	}
 	if (knobValue(CACHE_MARKS_KNOB) === "0") return;
-	const openRouter = openRouterCacheMarksEnabled() ? openRouterCacheMarksRegistration() : undefined;
-	if (openRouter) pi.registerProvider("openrouter", openRouter);
 	/** The plan of the request being sent; a warm reuses it. */
 	let plan: RequestPlan | undefined;
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {

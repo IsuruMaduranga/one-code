@@ -32,7 +32,8 @@ import { basename, join } from "node:path";
 import { loadPluginHooks } from "../../safety/hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../../safety/hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
-import { AUTO_MEMORY_KEY as AUTO_MEMORY } from "../../lib/context/auto-memory.ts";
+import { AUTO_MEMORY_KEY as AUTO_MEMORY, MCP_POLICY_KEYS, PRODUCT_LOCAL_KEYS, PRODUCT_USER_KEYS } from "../../lib/profile/settings-keys.ts";
+import { declaredSettingsIn, typed } from "../../lib/profile/declared-settings.ts";
 import { isPathAtOrUnder, productStateDir } from "../../lib/profile/paths.ts";
 import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/settings-files.ts";
 import { protectedFiles, type SettingsFile, sourceName, sourceSwitch } from "../../lib/profile/sources.ts";
@@ -96,11 +97,10 @@ export interface CompatReport {
  * loaders implement (lib/rules/settings.ts, safety/hooks/settings.ts, lib/rules/auto-mode-config.ts,
  * lib/models/subagent-default.ts, tools/mcp/trust.ts, lib/plugins/plugins.ts). A repository's own
  * files get no `autoMode` (the classifier is what contains the repo) and no `env`
- * (a checked-in env block must not route subagents).
+ * (a checked-in env block must not route subagents). The product's rows
+ * live in lib/profile/settings-keys.ts, where the profile's load check reads
+ * them too; `knownKeys` adds the settings the profile declares.
  */
-const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
-/** One Code's workflow keys, read from its user and project files (lib/profile/product-settings.ts). */
-const WORKFLOW_KEYS = ["enableWorkflows", "disableWorkflows", "workflowSizeGuideline"];
 // The MCP approval keys and `env` are read from the primary file alone, and the MCP tightening list from the
 // family's local file too: `knownKeys` adds them by role, so no row here lists them.
 const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", AUTO_MEMORY]);
@@ -110,34 +110,8 @@ const SCOPE_KEYS: Partial<Record<SettingsScope, ReadonlySet<string>>> = {
 	"borrowed-local": CLAUDE_PROJECT_KEYS,
 	// Not `enabledPlugins` (lib/profile/settings-files.ts readEnabledPlugins skips the managed file) and not `env`.
 	"borrowed-managed": new Set(["permissions", "hooks", "autoMode", AUTO_MEMORY]),
-	"product-user": new Set([
-		"subagentModel",
-		"subagentModelSetFor",
-		"autoMode",
-		"permissions",
-		"webSearch",
-		"disabledMcpServers",
-		// The /memory panel's auto-memory row (lib/context/auto-memory.ts); the source switch's key is added in knownKeys.
-		AUTO_MEMORY,
-		"modelTiers",
-		"suggestNewerModels",
-		"refreshModelCatalog",
-		"artifacts",
-		...WORKFLOW_KEYS,
-		// Remembered "No" answers to startup questions (ui/branding/declined.ts).
-		"compactionKeepDeclined",
-		"piBuiltinsTurnOffDeclined",
-	]),
-	"product-local": new Set([
-		"permissions",
-		"disabledMcpServers",
-		AUTO_MEMORY,
-		...WORKFLOW_KEYS,
-		// The external CLAUDE.md includes answer, per repository (lib/context/external-includes.ts).
-		"hasClaudeMdExternalIncludesApproved",
-		"hasClaudeMdExternalIncludesWarningShown",
-		"claudeMdExternalIncludesRoot",
-	]),
+	"product-user": new Set(PRODUCT_USER_KEYS),
+	"product-local": new Set(PRODUCT_LOCAL_KEYS),
 	"borrowed-state": new Set(),
 };
 
@@ -156,6 +130,8 @@ function knownKeys(file: SettingsFile, family: readonly SettingsFile[]): Readonl
 	// The /memory panel's switch row, saved in the product's user file.
 	const sw = sourceSwitch();
 	if (sw && file.owner === "product" && file.scope === "user") keys.add(sw.key);
+	// The settings the profile declares for its own extensions, from the product's user file and, with `project`, its per-project file.
+	if (file.owner === "product" && (file.scope === "user" || file.scope === "local")) for (const [key] of declaredSettingsIn(file.scope)) keys.add(key);
 	if (family.includes(file)) keys.add("hooks");
 	if (file.primary) for (const key of ["env", ...MCP_POLICY_KEYS]) keys.add(key);
 	if (family.includes(file) && file.scope === "local") keys.add("disabledMcpjsonServers");
@@ -347,6 +323,14 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 	}
 	if ("disabledMcpServers" in file && known.has("disabledMcpServers")) report.used.push(`disabledMcpServers: ${count(file.disabledMcpServers)} (via /mcp disable)`);
 	if (typeof file[AUTO_MEMORY] === "boolean" && known.has(AUTO_MEMORY)) report.used.push(`${AUTO_MEMORY}: ${file[AUTO_MEMORY]}`);
+	if (scope === "product-user" || scope === "product-local") {
+		for (const [key, setting] of declaredSettingsIn(scope === "product-user" ? "user" : "local")) {
+			if (!Object.hasOwn(file, key)) continue;
+			// A value of another type reads as unset (lib/profile/declared-settings.ts).
+			if (typed(file[key], setting) !== undefined) report.used.push(`${key}: ${JSON.stringify(file[key])} (${setting.description})`);
+			else report.ignored.push(`${key} (not a ${setting.type})`);
+		}
+	}
 
 	for (const key of Object.keys(file)) {
 		if (known.has(key) || SILENT_KEYS.has(key) || handled.has(key)) continue;

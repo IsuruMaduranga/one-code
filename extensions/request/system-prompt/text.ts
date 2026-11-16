@@ -10,12 +10,12 @@
 
 import { brandedId } from "../../lib/profile/brand.mjs";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
-import type { LiveTools } from "../../lib/profile/live-tools.ts";
+import type { LiveFeatures, LiveTools } from "../../lib/profile/live-tools.ts";
 
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
 export interface SystemPromptSession {
 	tier: PromptTier;
-	/** False when the session model runs without the task tools (lib/models/model-tier.ts taskToolsEnabled). */
+	/** True only when the session has the task tools (lib/models/model-tier.ts taskToolsEnabled): off unless a knob turns them on. */
 	taskTools: boolean;
 	/**
 	 * The session's active tools, as pi selects them; undefined before pi
@@ -28,14 +28,17 @@ export interface SystemPromptSession {
 }
 
 /**
- * What a section another extension adds may depend on: the session, and the
+ * What a section another extension adds may depend on: the session, the
  * tools it can have (`live`, the profile's answer: fixed for the process, a
- * deferred tool included before it loads). Cut a passage naming a tool that
- * is off with `withoutOff(text, live, passages)`, as the profile's own
- * sections do.
+ * deferred tool included before it loads) and the features that run in it
+ * (`features`, as fixed: a fact a feature adds whether or not its tool is
+ * registered, such as the lsp feature's diagnostics after an edit). Cut a
+ * passage naming a tool that is off with `withoutOff(text, live, passages)`,
+ * as the profile's own sections do.
  */
 export interface SectionSession extends SystemPromptSession {
 	live: LiveTools;
+	features: LiveFeatures;
 }
 
 export interface SystemPromptText {

@@ -15,6 +15,7 @@
  */
 
 import { activeProfile, catalogDir } from "../profile/profile.ts";
+import { type PiToolFilter, piRegisters } from "../profile/pi-tool-flags.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
@@ -270,6 +271,12 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
 	return allowlist.filter((name) => available.has(name));
 }
 
+/** The child's own report channels, never tools of the session: pi's tool flags leave them alone, but for an `--exclude-tools` pattern that matches one (agentToolOptions). */
+export const CHILD_REPORT_CHANNELS: readonly string[] = [SUBAGENT_HANDBACK, "structured_output"];
+
+/** The registry filter pi's tool flags made for this session, which every child follows. */
+const childFlags = (): PiToolFilter | undefined => activeProfile().launchTools;
+
 /**
  * pi's session tool options for a named agent: its allowlist with the child's
  * plumbing re-added, and its denylist. The one builder both runners use (the
@@ -277,14 +284,53 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
  * thing wherever it runs; the workflow runner once passed the raw allowlist and
  * no denylist, which stripped `structured_output` and ignored `disallowedTools`
  * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H2, H3).
+ *
+ * pi's `--tools`, `--exclude-tools` and `--no-tools` restrict a child as they
+ * restrict this session: its tools are its own minus every tool the flags
+ * removed, and the flags never add one its own list leaves out. A fork too:
+ * its requests carry this session's tools (agents/subagents/fork-cache.ts),
+ * and without the flags its tool_search could load one this session left out.
+ * The child's report channels (`CHILD_REPORT_CHANNELS`) are never the
+ * session's tools, so the flags keep them, except under an `--exclude-tools`
+ * pattern that matches one (see below).
  */
 export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: string[]; excludeTools?: string[] } {
+	const flags = childFlags();
+	const allowed = flags?.allowed;
+	let tools = childToolAllowlist(agent?.tools);
+	if (allowed) {
+		// The agent's own names the allowlist keeps, or the allowlist itself for an agent that lists none.
+		const own = agent?.tools ? agent.tools.filter((name) => piRegisters({ allowed }, name)) : allowed;
+		tools = [...new Set([...own, ...ALLOWLIST_ESSENTIALS.filter((name) => CHILD_REPORT_CHANNELS.includes(name) || piRegisters({ allowed }, name))])];
+	}
 	// The profile's disabled tools join pi's own excludeTools, which filters
 	// built-ins, extension tools and injected custom tools (shared MCP tools)
-	// alike (lib/profile/profile.ts).
-	const disabled = [...activeProfile().disabledTools];
-	const exclude = disabled.length > 0 ? [...new Set([...(agent?.excludeTools ?? []), ...disabled])] : agent?.excludeTools;
-	return { tools: childToolAllowlist(agent?.tools), excludeTools: exclude };
+	// alike (lib/profile/profile.ts); so do the flags' entries, but one that
+	// names a report channel exactly. A pattern stays even when it matches a
+	// report channel: pi's denylist takes no exceptions, and dropping the
+	// pattern would hand the child every other tool it removed from this
+	// session. The child then loses that channel too: a subagent's result
+	// falls back to its final message.
+	const excludedByFlags = (flags?.excluded ?? []).filter((entry) => !CHILD_REPORT_CHANNELS.includes(entry));
+	const added = [...activeProfile().disabledTools, ...excludedByFlags];
+	const exclude = added.length > 0 ? [...new Set([...(agent?.excludeTools ?? []), ...added])] : agent?.excludeTools;
+	return { tools, excludeTools: exclude };
+}
+
+/**
+ * The tools an agent's own `tools` list names that pi's tool flags removed
+ * from this session, so the child starts without them; empty for an agent
+ * that lists none (a fork has no agent file).
+ */
+export function toolsRemovedByFlags(agent: AgentDefinition | undefined): string[] {
+	const flags = childFlags();
+	return flags && agent?.tools ? agent.tools.filter((name) => !piRegisters(flags, name)) : [];
+}
+
+/** The shared MCP tools a child gets: the ones pi's tool flags kept in this session (pi's MCP rule, lib/profile/pi-tool-flags.ts). */
+export function childMcpTools<T extends { name: string }>(tools: readonly T[]): T[] {
+	const flags = childFlags();
+	return flags ? tools.filter((tool) => piRegisters(flags, tool.name)) : [...tools];
 }
 
 /**
@@ -294,6 +340,10 @@ export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: 
  * "complete" with an excuse.
  */
 export function unusableAllowlistError(agent: AgentDefinition | undefined, registered: string[]): string | undefined {
-	if (!agent?.tools || usableAllowlistedTools(registered, agent.tools).length > 0) return undefined;
-	return subagentResultText().unusableTools({ name: agent.name, tools: agent.tools });
+	if (!agent?.tools) return undefined;
+	// A tool pi's flags removed is missing on purpose: an agent left with none of its own still starts.
+	const removed = toolsRemovedByFlags(agent);
+	const wanted = agent.tools.filter((name) => !removed.includes(name));
+	if ((removed.length > 0 && wanted.length === 0) || usableAllowlistedTools(registered, wanted).length > 0) return undefined;
+	return subagentResultText().unusableTools({ name: agent.name, tools: wanted });
 }

@@ -1,6 +1,6 @@
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { classifierCandidates, describeCandidate, isModelUnavailableError } from "../../extensions/lib/models/classifier-model.ts";
+import { classifierCandidates, describeCandidate, isModelUnavailableError, isSilentFallback } from "../../extensions/lib/models/classifier-model.ts";
 import { CLASSIFIER_CALL_TOKENS, classifierCallCost } from "../../extensions/lib/models/model-policy.ts";
 import { intrinsicTier } from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
@@ -88,6 +88,30 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(result.candidates[0]).toEqual({ model: session, source: "session" });
 		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
 		expect(result.fallback?.text).toContain("in its workhorse tier or above contains its 1000000-token catalog context window");
+	});
+
+	it("keeps the session silently when the pairing table keeps it as its own classifier, recording why", () => {
+		pinCatalog([
+			...ANTHROPIC,
+			{ id: "anthropic/claude-haiku-5-5", released: "2026-10-07", price: [0.1, 0.5] },
+		]);
+		const session = model("anthropic", "claude-haiku-5-5", 0.1, 200_000);
+		const result = pickFull([session, model("anthropic", "claude-opus-5-5", 4, 200_000), model("anthropic", "claude-sonnet-5-5", 2, 200_000)], session);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		// No notice for a designed outcome; the fallback record stays for the doctor report.
+		expect(result.notices).toEqual([]);
+		expect(result.fallback).toMatchObject({ reason: "paired-session", text: expect.stringContaining("anthropic/claude-haiku-5-5, this session's model") });
+		expect(isSilentFallback(result.fallback)).toBe(true);
+	});
+
+	it("announces the two fallbacks a user can act on", () => {
+		const unknownWindow = pickFull([model("anthropic", "claude-opus-5-5", 4)], model("anthropic", "claude-opus-5-5", 4));
+		expect(unknownWindow.notices).toEqual([expect.objectContaining({ level: "info", fallbackReason: "unknown-session-context-window", text: unknownWindow.fallback?.text })]);
+		expect(isSilentFallback(unknownWindow.fallback)).toBe(false);
+		const session = model("openai", "gpt-x-large", 10, 1_000_000);
+		const nothing = pickFull([session, model("openai", "gpt-x-medium", 5, 200_000)], session);
+		expect(nothing.notices).toEqual([expect.objectContaining({ level: "info", fallbackReason: "no-qualifying-model", text: nothing.fallback?.text })]);
+		expect(isSilentFallback(nothing.fallback)).toBe(false);
 	});
 
 	it("never screens with a model in a lower tier, however much cheaper", () => {

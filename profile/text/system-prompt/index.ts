@@ -63,7 +63,7 @@ const liveSections = (sections: readonly string[], live: LiveTools): string[] =>
 export const systemPromptText = (live: LiveTools): SystemPromptText => ({
 	lead({ tier, taskTools, tools }) {
 		const bundle = BUNDLES[tier];
-		return liveSections(bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead)), live);
+		return liveSections(bundle.leadFor?.({ taskTools, tools }) ?? (taskTools ? (bundle.leadWithTaskTools ?? bundle.lead) : bundle.lead), live);
 	},
 	tail: ({ tier }) => liveSections(BUNDLES[tier].tail, live),
 	// Workhorse, cheap and tiny use the long memory spec.
