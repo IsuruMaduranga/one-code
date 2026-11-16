@@ -133,6 +133,16 @@ describe("decide()", () => {
 			["gh pr view $env:X", ["PowerShell(gh pr view:*)"]],
 			["gh gist create ~/.ssh/id_rsa", ["PowerShell(gh gist create:*)"]],
 			["sudo gh pr view 1", ["PowerShell(sudo:*)"]],
+			["perl5.34 -e 'unlink q(x)'", ["PowerShell(perl5.34:*)"]],
+			["tclsh8.5 x.tcl", ["PowerShell(tclsh8.5:*)"]],
+			["python3.12 -c 'x'", ["PowerShell(python3.12:*)"]],
+			["sqlite3 db '.shell rm -rf x'", ["PowerShell(sqlite3:*)"]],
+			["dc -e '!rm x'", ["PowerShell(dc:*)"]],
+			["SUDO rm x", ["PowerShell(SUDO:*)"]],
+			["nice gh pr view 1", ["PowerShell(nice:*)"]],
+			// A program fed by a pipe is never covered.
+			["gh pr view 1 | perl5.34", ["PowerShell(gh pr view:*)", "PowerShell(perl5.34)"]],
+			["gh pr view 1 | mytool", ["PowerShell(gh pr view:*)", "PowerShell(mytool)"]],
 		];
 		for (const [subject, raw] of cases) expect(await plan(subject, raw), subject).toMatchObject({ decision: "ask", cause: "plan-unproven" });
 		expect(await plan("gh pr view 1 2>&1", ["PowerShell(gh pr view:*)"])).toMatchObject({ decision: "allow", cause: "rule" });

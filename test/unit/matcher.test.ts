@@ -427,6 +427,83 @@ describe("decide", () => {
 			expect(decide({ ...plan, subject, allow: rules(raw) })).toEqual({ decision: "ask", cause: "plan-unproven" });
 		});
 
+		// Versioned interpreters, programs with a code or shell escape, more
+		// wrappers and runners, and builtins that change what a later word runs.
+		it.each<[string, string]>([
+			["perl5.34 -e 'unlink q(x)'", "Bash(perl5.34:*)"],
+			["/usr/bin/perl5.34 -e 'unlink q(x)'", "Bash(/usr/bin/perl5.34:*)"],
+			["tclsh8.5 x.tcl", "Bash(tclsh8.5:*)"],
+			["wish8.5 x.tcl", "Bash(wish8.5:*)"],
+			["php8.2 -r 'unlink(1);'", "Bash(php8.2:*)"],
+			["node22 -e 'x'", "Bash(node22:*)"],
+			["nodejs -e 'x'", "Bash(nodejs:*)"],
+			["ruby3.3 -e 'x'", "Bash(ruby3.3:*)"],
+			["bash5 -c 'rm x'", "Bash(bash5:*)"],
+			["zsh-5.9 -c 'rm x'", "Bash(zsh-5.9:*)"],
+			["pypy3 -c 'import os'", "Bash(pypy3:*)"],
+			["sqlite3 db '.shell rm -rf x'", "Bash(sqlite3:*)"],
+			["dc -e '!rm -rf x'", "Bash(dc:*)"],
+			["bc x.bc", "Bash(bc:*)"],
+			["m4 evil.m4", "Bash(m4:*)"],
+			["jjs x.js", "Bash(jjs:*)"],
+			["psql -c 'x'", "Bash(psql:*)"],
+			["mysql -e 'x'", "Bash(mysql:*)"],
+			["gnuplot -e 'x'", "Bash(gnuplot:*)"],
+			["R -e 'x'", "Bash(R:*)"],
+			["octave --eval 'x'", "Bash(octave:*)"],
+			["pdflatex -shell-escape x.tex", "Bash(pdflatex:*)"],
+			["xelatex x.tex", "Bash(xelatex:*)"],
+			["pandoc --lua-filter=x.lua a.md", "Bash(pandoc:*)"],
+			["fzf --preview 'rm -rf x'", "Bash(fzf:*)"],
+			["fakeroot rm -rf x", "Bash(fakeroot:*)"],
+			["firejail rm -rf x", "Bash(firejail:*)"],
+			["xvfb-run rm -rf x", "Bash(xvfb-run:*)"],
+			["nix-shell --run 'rm -rf x'", "Bash(nix-shell:*)"],
+			["nix run x", "Bash(nix:*)"],
+			["direnv exec . rm -rf x", "Bash(direnv:*)"],
+			["mise exec -- rm -rf x", "Bash(mise:*)"],
+			["asdf exec rm x", "Bash(asdf:*)"],
+			["valgrind rm -rf x", "Bash(valgrind:*)"],
+			["hyperfine 'rm -rf x'", "Bash(hyperfine:*)"],
+			["taskset 1 rm -rf x", "Bash(taskset:*)"],
+			["unbuffer rm -rf x", "Bash(unbuffer:*)"],
+			["chronic rm -rf x", "Bash(chronic:*)"],
+			["dbus-run-session rm -rf x", "Bash(dbus-run-session:*)"],
+			["xcrun rm -rf x", "Bash(xcrun:*)"],
+			["arch -arm64 rm -rf x", "Bash(arch:*)"],
+			["sandbox-exec -p x rm -rf x", "Bash(sandbox-exec:*)"],
+			["brew bundle exec rm -rf x", "Bash(brew:*)"],
+			["pytest", "Bash(pytest:*)"],
+			["tox", "Bash(tox:*)"],
+			["pre-commit run", "Bash(pre-commit:*)"],
+			["turbo run build", "Bash(turbo:*)"],
+			["nx run x", "Bash(nx:*)"],
+			["ssh-agent rm -rf x", "Bash(ssh-agent:*)"],
+			["SUDO -h", "Bash(SUDO:*)"],
+		])("ignores the rule for the code runner %s", (subject, raw) => {
+			expect(decide({ ...plan, subject, allow: rules([raw]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
+		});
+
+		it.each(["alias gh='rm -rf x'", "unalias gh", "hash -p /bin/rm gh", "enable -n test", "set -e", "shopt -s lastpipe", "source x.sh", ". x.sh", "trap 'rm x' EXIT", "export X=1", "declare X=1", "typeset X=1", "readonly X=1", "local X=1"])(
+			"ignores the rules for a line where the builtin %s changes what gh runs",
+			(builtin) => {
+				const word = builtin.split(" ")[0];
+				expect(decide({ ...plan, subject: `${builtin}; gh pr view 1`, allow: rules(["Bash(gh pr view:*)", `Bash(${word}:*)`]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			},
+		);
+
+		it("covers a pipeline only when every stage after the first is provably read-only", () => {
+			const gh = "Bash(gh pr view:*)";
+			for (const [stage, rule] of [["perl5.34", "Bash(perl5.34)"], ["dc", "Bash(dc)"], ["sqlite3 db", "Bash(sqlite3 db)"], ["unknown2", "Bash(unknown2:*)"], ["sh", "Bash(sh)"], ["pbcopy", "Bash(pbcopy)"]]) {
+				expect(decide({ ...plan, subject: `gh pr view 1 | ${stage}`, allow: rules([gh, rule]) }), stage).toEqual({ decision: "ask", cause: "plan-unproven" });
+			}
+			// A read-only stage still needs its own rule, as in every mode (findBashAllowRule).
+			const api = "gh api repos/o/r/contents --jq '.[].name' | head";
+			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)"]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)", "Bash(head:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+			expect(decide({ ...plan, subject: "gh pr view 1 2>&1 | grep x", allow: rules([gh, "Bash(grep:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		});
+
 		it("still lets a rule cover the read-only gh calls it exists for", () => {
 			const view = "gh pr view 188 --repo o/r --json title";
 			const api = "gh api repos/o/r/contents --jq '.[].name'";

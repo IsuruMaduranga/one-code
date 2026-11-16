@@ -590,7 +590,7 @@ const PLAIN_LINE_NODES = new Set(["ScriptBlockAst", "NamedBlockAst", "PipelineAs
  * Whether the line is only native programs `unlisted` accepts (by program
  * name), called by name with literal arguments: no cmdlet, function or alias
  * (`Set-Location`, `Invoke-WebRequest`, `iex`), no `&` or `.` invocation, no
- * variable, subexpression, script block, member call or background job, no
+ * program fed by a pipe, no variable, subexpression, script block, member call or background job, no
  * redirection but to `$null`, and no argument naming a credential path.
  * PowerShell's counterpart of the bash gate's `unlistedOnly`, read by plan
  * mode only, to decide whether a user's allow rule may cover the line; when
@@ -605,6 +605,9 @@ export function powershellTreeUnlistedOnly(parse: PowerShellParse, opts: PowerSh
 		if (node.type === "VariableExpressionAst") return node.parent >= 0 && nodes[node.parent].type === "FileRedirectionAst" && redirectsToNull(tree, node.parent);
 		if (!PLAIN_LINE_NODES.has(node.type) || node.background) return false;
 		if (node.type === "CommandAst") {
+			// A later pipeline stage reads the stage before it and may run what it
+			// reads; only a cmdlet could be proved not to, and none is accepted here.
+			if (node.parent >= 0 && nodes[node.parent].type === "PipelineAst" && tree.children[node.parent].find((child) => nodes[child].type === "CommandAst") !== i) return false;
 			const spelled = node.resolvedName || node.name;
 			if (!spelled || (node.operator && node.operator !== "Unknown")) return false;
 			if (node.commandType !== undefined && node.commandType !== "Application") return false;

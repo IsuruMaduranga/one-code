@@ -1077,11 +1077,26 @@ const PLAN_CODE_RUNNERS = new Set([
 	"rake", "just", "ninja", "cmake", "bazel", "ant", "sbt", "lein", "mix", "composer", "bundle", "gem", "pipx", "conda", "mamba",
 	"rustup", "podman", "nerdctl", "vagrant", "terraform", "ansible", "ansible-playbook", "tmux", "screen", "at", "batch", "crontab",
 	"systemd-run", "launchctl", "open", "xdg-open", "entr", "nodemon",
+	// More interpreters, and programs with a code or shell escape.
+	"nodejs", "pypy", "swiftc", "sqlite", "dc", "bc", "m", "jjs", "psql", "mysql", "gnuplot", "r", "octave", "pdflatex", "latex",
+	"xelatex", "lualatex", "luatex", "tex", "pandoc", "fzf",
+	// More wrappers and runners.
+	"fakeroot", "firejail", "xvfb-run", "nix-shell", "nix", "direnv", "mise", "asdf", "valgrind", "hyperfine", "taskset", "unbuffer",
+	"chronic", "dbus-run-session", "xcrun", "arch", "sandbox-exec", "brew", "pytest", "tox", "pre-commit", "turbo", "nx", "ssh-agent",
+	// Shell builtins that change what a later command word runs.
+	"hash", "alias", "unalias", "enable", "set", "shopt", "source", ".", "trap", "export", "declare", "typeset", "readonly", "local",
 ]);
 
-/** Whether the program `name` (a basename, lowercased) runs other programs or code it is given. */
+/**
+ * Whether the program `name` (a basename, lowercased) runs other programs or
+ * code it is given. A trailing version (`perl5.34`, `node22`, `zsh-5.9`) is
+ * stripped first, so the versioned name of an interpreter counts as the
+ * interpreter (the list names `m` for `m4` and `sqlite` for `sqlite3` that
+ * way). Plan mode only: `isBroadExecutionRule` keeps its own reading.
+ */
 function runsOtherCode(name: string): boolean {
-	return INTERPRETERS_AND_RUNNERS.test(name) || PLAN_CODE_RUNNERS.has(name);
+	const unversioned = name.replace(/-?[0-9][0-9.]*$/, "");
+	return [name, unversioned].some((candidate) => candidate !== "" && (INTERPRETERS_AND_RUNNERS.test(candidate) || PLAN_CODE_RUNNERS.has(candidate)));
 }
 
 /** A command word's program name: its basename, lowercased, without a Windows executable extension. */
@@ -1231,6 +1246,20 @@ export function decide(params: DecideInput): Decision {
 	 * plan branch runs), and with no user to answer it the caller refuses it
 	 * with the plan-mode text.
 	 */
+	/**
+	 * Whether a stage after the first of a pipeline on the line is not provably
+	 * read-only by itself. A program reading a pipe may run what it reads (a
+	 * shell, `perl5.34`, `dc`, `sqlite3 db`), and no list of such programs is
+	 * complete, so in plan mode an allow rule covers only a line whose later
+	 * stages the pre-gate clears on their own (`gh pr view 1 | head`).
+	 */
+	const pipesIntoUnproven = (command: string): boolean => {
+		const { segments, pipelines, parseFailed } = parseCommand(command.trim());
+		if (parseFailed) return true;
+		const fed = new Set(pipelines.flatMap((members) => members.slice(1)));
+		return segments.some((segment) => segment.scopes.some((scope) => fed.has(scope)) && !readOnlyShell(segment.raw));
+	};
+
 	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: boolean }): Decision => {
 		if (line.writes) return { decision: "deny", cause: "plan-mode" };
 		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
@@ -1279,7 +1308,7 @@ export function decide(params: DecideInput): Decision {
 				// Read-only, but of a path outside the working directory: still a
 				// read, put to the user as the read tools' outside read is.
 				readOnlyOutside: evidence.readOnlyOutside && evidence.writes.length === 0,
-				ruleMayCover: evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(commandBasename(name))),
+				ruleMayCover: evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(commandBasename(name))) && !pipesIntoUnproven(subject),
 			});
 		}
 		// The PowerShell counterpart, judged from PowerShell's own parse
