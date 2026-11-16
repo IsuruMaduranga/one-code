@@ -85,7 +85,7 @@ const childView = memoOn((profile: ResolvedProfile): { live: LiveTools; text: Pr
 	const live: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
-			return profile.live.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
+			return profile.profileLive.has(name) && (feature === undefined || CHILD_FEATURES.has(feature) || HANDED_TO_CHILDREN.has(name));
 		},
 	};
 	return { live, text: profile.textFor(live) };
@@ -135,7 +135,9 @@ export function sessionView(pi: { events: { emit(channel: string, data: unknown)
  * workflow tools), and the two a subagent is handed. A workflow agent has
  * neither of those two; the shell text names them only to forbid one, which
  * a subagent must still hear. A resident's cron proxies count as absent: no
- * text of a child's own tools names them.
+ * text of a child's own tools names them. pi's launch flags do not count:
+ * they filter the main session's registry, and a child's tools are chosen
+ * by the base (lib/agents/agent-catalog.ts agentToolOptions).
  */
 export const childLive = (): LiveTools => childView(activeProfile()).live;
 

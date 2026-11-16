@@ -7,7 +7,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { toolsInUse } from "../../extensions/lib/request/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
@@ -19,6 +19,8 @@ import skillExtension from "../../extensions/tools/skill/index.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { subagentWords } from "../../extensions/agents/subagents/words.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, type ResolvedProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { profile as shippedProfile } from "../../profile/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -122,12 +124,21 @@ describe("subagent blocks", () => {
 	const main = { provider: "openai", id: "main", name: "main", input: ["text"], cost: { input: 2, output: 8 } };
 	const other = { provider: "openai", id: "other", name: "other", input: ["text"], cost: { input: 1, output: 4 } };
 
+	// One profile without flags for the whole block: a test that spies on its words must find the same copy.
+	let plain: ResolvedProfile;
+	beforeAll(() => void (plain = activeProfile()));
+	afterEach(() => setActiveProfileForTest(plain));
+	afterAll(() => setActiveProfileForTest(undefined));
+
 	/**
-	 * `unregistered`: tools pi left out of its registry (its --tools and
-	 * --exclude-tools), so getAllTools does not list them; `workflow`: the
-	 * workflow tool is registered too.
+	 * `unregistered`: tools pi left out of its registry (its --exclude-tools),
+	 * so getAllTools does not list them and the live tool set leaves them out;
+	 * `workflow`: the workflow tool is registered too.
 	 */
 	async function mount({ unregistered = [], workflow = false }: { unregistered?: string[]; workflow?: boolean } = {}) {
+		// The fake registers no workflow tool unless asked: the flags leave it out with the rest.
+		const excluded = [...unregistered, ...(workflow ? [] : ["workflow"])];
+		setActiveProfileForTest(unregistered.length > 0 ? resolveProfile(shippedProfile, process.env, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", excluded.join(",")])) : plain);
 		const fake = createFakePi();
 		const reminders: Array<Reminder & { facts?: ToldFact[] }> = [];
 		fake.events.on(REMINDER_CHANNEL, (r) => reminders.push(r as Reminder));
@@ -147,7 +158,7 @@ describe("subagent blocks", () => {
 	};
 	const told = (reminders: Array<Reminder & { facts?: ToldFact[] }>) => ["subagent-models", "subagent-agents", "subagent-delegation"].flatMap((key) => liveFacts(reminders, key));
 
-	describe("follow the tools pi registered", () => {
+	describe("follow the tools the session can have, under pi's tool flags", () => {
 		beforeAll(() => vi.stubEnv(envName("PROMPT_TIER"), "tiny"));
 		afterAll(() => vi.unstubAllEnvs());
 

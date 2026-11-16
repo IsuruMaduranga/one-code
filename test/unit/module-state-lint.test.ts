@@ -33,6 +33,7 @@ const ALLOWED: Record<string, string> = {
 	"extensions/lib/models/model-tier.ts overrideMemo": "memo of the tier overrides file",
 	"extensions/lib/models/model-tier.ts overridesPinned": "test pin of the tier overrides",
 	"extensions/lib/profile/profile.ts active": "memo of the shipped profile resolved against the process environment, both constant for the process",
+	"extensions/lib/profile/profile.ts launchArgs": "the process's launch arguments, constant for the process (a test seam sets them)",
 	"extensions/lib/shell-run/process-tree.ts orphanReaper": "process resource: the poll for remembered groups whose leader exited",
 	"extensions/lib/shell-run/process-tree.ts rememberedGroups": "process resource: the groups the exit and signal listeners kill",
 	"extensions/lib/shell-run/process-tree.ts groupSignalHandlers": "process resource: one termination-signal listener per signal",

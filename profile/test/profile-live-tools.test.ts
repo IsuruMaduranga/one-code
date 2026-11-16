@@ -13,7 +13,9 @@ import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS, searchToolsEnabled } from "../../extensions/lib/models/model-tier.ts";
-import { deferralChanges, type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
+import { deferralChanges, type EnglishPhrases, mentions, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
+import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: EnglishPhrases = {
@@ -23,6 +25,8 @@ const ENGLISH: EnglishPhrases = {
 	monitor: [/monitor for regressions/],
 	skill: [/a skill or slash command/],
 	workflow: [/through this workflow/],
+	// SendMessage's recipient: an agent's name, not the tool.
+	Agent: [/Agent name \(or task id\)/],
 };
 
 const FORMS: DescriptionForm[] = ["short", "long"];
@@ -62,6 +66,8 @@ function texts(live: LiveTools): NamedText[] {
 			for (const searchTools of [true, false]) push(`bash ${form}`, "bash", shell.bashDescription({ form, autoMode: autoModeOn, searchTools }), "bash");
 		}
 	}
+	push("SendMessage", "subagents", `${subagents.sendMessageDescription}\n${JSON.stringify(subagents.sendMessageParams)}`, "SendMessage");
+	push("list_agents", "subagents", subagents.listAgentsDescription, "list_agents");
 	push("exit_plan_mode", "plan-mode", planMode.descriptions.exit_plan_mode, "exit_plan_mode");
 	push("workflow", "workflow", workflow.description({ guideline: "medium", configured: false }), "workflow");
 	push("workflow params", "workflow", JSON.stringify(workflow.params({ configDir: ".claude" })), "workflow");
@@ -122,6 +128,21 @@ describe("text naming another tool", () => {
 		// The sections key on the tools the session can have, never on the active list a loaded tool joins.
 		const { systemPrompt } = profile.text({ live: { has: () => true } });
 		expect(deferralChanges((session) => [...systemPrompt.lead(session), ...systemPrompt.tail(session), systemPrompt.memory("/m", session)].join("\n\n"))).toEqual([]);
+	});
+
+	it("drops the system prompt's Agent passages under pi's --exclude-tools Agent, on every tier", () => {
+		// The base renders the prompt for the flags (test/unit/pi-tool-flags.test.ts); here One Code's prompt has passages to drop.
+		const prompt = (args: string[], tier: (typeof PROMPT_TIERS)[number]) => {
+			setActiveProfileForTest(resolveProfile(profile, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(args)));
+			try {
+				return buildClaudeCodeSystemPrompt({ cwd: "/r" } as never, { cwd: "/r", memoryDir: "/m" } as never, tier);
+			} finally {
+				setActiveProfileForTest(undefined);
+			}
+		};
+		// Frontier's short register names no Agent; the longer ones do.
+		expect(PROMPT_TIERS.flatMap((tier) => mentions(prompt([], tier), "Agent", {}))).not.toEqual([]);
+		for (const tier of PROMPT_TIERS) expect(mentions(prompt(["--exclude-tools", "Agent"], tier), "Agent", {}), tier).toEqual([]);
 	});
 
 	it("is unchanged when every tool is on", () => {

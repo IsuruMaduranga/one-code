@@ -32,6 +32,9 @@ export function mentions(text: string, tool: string, english: EnglishPhrases): s
 	return found;
 }
 
+/** Tools pi's `--exclude-tools` takes out alone while their feature's other tools stay: Agent, which leaves SendMessage and list_agents behind. */
+const FLAG_ALONE: ReadonlySet<string> = new Set(["Agent"]);
+
 /**
  * Every text of `texts(live)` that names a tool the session lacks, with each
  * optional feature's tools off in turn, and edit. powershell is left out: a
@@ -53,8 +56,8 @@ export function toolLeaks(texts: (live: LiveTools) => NamedText[], english: Engl
 	// One tool off while its feature stays on: its siblings' texts are still sent.
 	const everyFeature = new Set(FEATURE_IDS);
 	for (const off of Object.keys(TOOL_FEATURES)) {
-		// A tool a profile cannot turn off alone is no case.
-		if (off === "powershell" || PINNED_TOOLS.has(off) || toolSetProblems(everyFeature, new Set([off])).length > 0) continue;
+		// A tool a profile cannot turn off alone is no case, unless pi's --exclude-tools takes it out alone (lib/profile/pi-tool-flags.ts).
+		if (!FLAG_ALONE.has(off) && (off === "powershell" || PINNED_TOOLS.has(off) || toolSetProblems(everyFeature, new Set([off])).length > 0)) continue;
 		const live: LiveTools = { has: (name) => name !== off };
 		for (const [label, , text, tool] of texts(live)) {
 			if (tool === off) continue;

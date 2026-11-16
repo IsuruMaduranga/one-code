@@ -704,7 +704,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
 		else if (refusal) refusal = { ...refusal, replacement: resolution.model };
 		// The menu serves the Agent tool's and workflow agents' `model` field.
-		publishBlock("subagent-models", registered("Agent") || registered("workflow") ? text : null);
+		publishBlock("subagent-models", toolLive("Agent") || toolLive("workflow") ? text : null);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
@@ -730,16 +730,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return catalogMemo.text;
 	};
-	/**
-	 * Whether pi registered a tool: registered, not active, so deferral or a
-	 * tier's withdrawal never flips a block. pi's `--tools`/`--exclude-tools`
-	 * leave a tool unregistered, and the blocks naming it go with it; a
-	 * session resumed under other flags announces the change on the tail.
-	 */
-	const registered = (name: string): boolean => pi.getAllTools().some((tool) => tool.name === name);
-	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", registered("Agent") ? agentCatalog(ctx) : null);
+	// The blocks follow the tools the session can have (`toolLive`), the answer
+	// every text naming a tool takes: registered, not active, so deferral or a
+	// tier's withdrawal never flips a block, and pi's `--tools`/`--exclude-tools`
+	// take a tool and its blocks out together (lib/profile/pi-tool-flags.ts). A
+	// session resumed under other flags announces the change on the tail.
+	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", toolLive("Agent") ? agentCatalog(ctx) : null);
 
-	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" && registered("Agent") ? words.delegationSteer : null);
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" && toolLive("Agent") ? words.delegationSteer : null);
 
 	let shuttingDown = false;
 

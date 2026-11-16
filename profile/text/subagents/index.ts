@@ -15,6 +15,11 @@ const AGENT_PASSAGES: ToolPassages = {
 	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
 };
 
+/** The passages of SendMessage's and list_agents' words that name a sibling tool: list_agents can be off alone, and pi's `--exclude-tools Agent` takes Agent out alone. */
+const SEND_MESSAGE_PASSAGES: ToolPassages = { list_agents: [" To discover the names of running or finished agents, use list_agents."] };
+const SEND_TO_PASSAGES: ToolPassages = { Agent: [["from a previous Agent run", "from a previous agent run"]] };
+const LIST_AGENTS_PASSAGES: ToolPassages = { Agent: [" (use Agent action:'list' for that)"] };
+
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const subagentsText = (live: LiveTools): SubagentsText => {
 	return {
@@ -48,15 +53,21 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			description: "A short (3-5 word) description of the task.",
 			name: "Name for this run (default: <agent>-<n>)",
 		},
-		sendMessageDescription:
+		sendMessageDescription: withoutOff(
 			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			live,
+			SEND_MESSAGE_PASSAGES,
+		),
 		sendMessageParams: {
-			to: "Agent name (or task id) from a previous Agent run",
+			to: withoutOff("Agent name (or task id) from a previous Agent run", live, SEND_TO_PASSAGES),
 			message: "Plain text message for the agent",
 			summary: "5-10 word preview shown in the UI",
 		},
-		listAgentsDescription:
+		listAgentsDescription: withoutOff(
 			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `resident` is idle but reachable live; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
+			live,
+			LIST_AGENTS_PASSAGES,
+		),
 		toMain: {
 			description:
 				'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then.',
