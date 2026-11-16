@@ -108,6 +108,24 @@ describe("classify: pinning and fallback", () => {
 		expect(notices.some((notice) => notice.includes("in the session's tier or above"))).toBe(true);
 	});
 
+	it("announces nothing when the pairing table keeps the session as its own classifier", async () => {
+		pinCatalog([{ id: "anthropic/claude-haiku-5-5", released: "2026-10-07", price: [0.1, 0.5] }]);
+		completeMock.mockResolvedValue(allowReply());
+		const haiku = model("anthropic", "claude-haiku-5-5", 0.1);
+		const { deps, notices } = makeDeps({ sessionModel: haiku, registry: { getAvailable: () => [haiku], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }) } as any });
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(deps.state.pinned).toBe(haiku);
+		expect(notices).toEqual([]);
+	});
+
+	it("announces once why the session screens itself when no cheaper model qualifies", async () => {
+		completeMock.mockResolvedValue(allowReply());
+		const { deps, notices } = makeDeps({ registry: { getAvailable: () => [sessionModel], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }) } as any });
+		await classify(request, deps);
+		await classify(request, deps);
+		expect(notices.filter((notice) => notice.includes("this session's model, because no cheaper"))).toHaveLength(1);
+	});
+
 	it("falls back to the session when the cheaper model times out", async () => {
 		completeMock.mockImplementation(async (m: any) => (m.id === miniModel.id ? abortedReply() : allowReply()));
 		const { deps } = makeDeps();

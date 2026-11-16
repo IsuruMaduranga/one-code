@@ -78,6 +78,17 @@ export interface ClassifierFallback {
 	text: string;
 }
 
+/**
+ * Whether a selection fallback is the designed outcome, so nothing is announced:
+ * the pairing table keeps the session's own model as its classifier on purpose,
+ * and the user has nothing to act on. The chain still records the `fallback`
+ * (the doctor report reads it); no notice, session-start line or "screening
+ * calls with" line is shown for it.
+ */
+export function isSilentFallback(fallback: ClassifierFallback | undefined): boolean {
+	return fallback?.reason === "paired-session";
+}
+
 /** A user-facing selection notice, tagged so an informational one is not shown as a warning. */
 export interface ClassifierNotice {
 	level: "info" | "warning";
@@ -162,7 +173,7 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	if (!sessionModel) return { candidates: [], notices: [] };
 	const sessionOnly = (fallback: ClassifierFallback): ClassifierChain => ({
 		candidates: [{ model: sessionModel, source: "session" }],
-		notices: [{ level: "info", text: fallback.text, fallbackReason: fallback.reason }],
+		notices: isSilentFallback(fallback) ? [] : [{ level: "info", text: fallback.text, fallbackReason: fallback.reason }],
 		fallback,
 	});
 	if (!hasCatalogContextWindow(sessionModel)) {

@@ -15,7 +15,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../../lib/ui/keys.ts";
 import { toolLive } from "../../lib/profile/profile.ts";
 import { loadAutoModeConfig } from "../../lib/rules/auto-mode-config.ts";
-import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../../lib/models/classifier-model.ts";
+import { type ClassifierFallback, classifierCandidates, describeCandidate, type ClassifierNotice, isSilentFallback } from "../../lib/models/classifier-model.ts";
 import { chosenModelWarnings, type ChosenModelWarning } from "../../lib/models/model-choice-warnings.ts";
 import { loadCatalogSources, readCatalogRefreshEnabled } from "../../lib/models/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../../lib/models/model-catalog.ts";
@@ -51,8 +51,11 @@ export interface ModelFacts {
 	subagentConfiguredInapplicable: boolean;
 	/** What the configured subagent default costs (newer model, far weaker than the session), when it is in effect. */
 	subagentWarnings: ChosenModelWarning[];
-	/** `configured`: the user's `autoMode.classifierModel`, as written. */
-	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
+	/**
+	 * `configured`: the user's `autoMode.classifierModel`, as written. `fallback`: why the
+	 * session model screens itself; a silent one has no notice, so this report is where it shows.
+	 */
+	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; fallback?: ClassifierFallback; configured?: string };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
 	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no *_PROMPT_TIER). */
 	tierReason?: string;
@@ -119,6 +122,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 			model: first?.model,
 			description: first ? describeCandidate(first) : undefined,
 			notices: chain.notices,
+			...(chain.fallback ? { fallback: chain.fallback } : {}),
 			configured: autoConfig.classifierModel,
 		},
 		reader,
@@ -228,6 +232,8 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			fix: "Choose one with /auto-mode model, or connect a provider with /login.",
 		});
 	}
+	// The report is what the user asked for, so it names a silent fallback that no notice announced.
+	if (isSilentFallback(classifier.fallback)) lines.push({ text: classifier.fallback!.text, indent: 1, level: "dim" });
 	for (const notice of classifier.notices) {
 		lines.push({ text: notice.text, indent: 1, level: notice.level === "warning" ? "warn" : "dim" });
 		if (notice.level === "warning") {
