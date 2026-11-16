@@ -100,9 +100,10 @@ describe("compaction fallback reporting", () => {
 		const { fake, ctx, event } = setup();
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
 		const registry = ctx.modelRegistry as { getApiKeyAndHeaders: unknown };
+		// pi's runtime refuses the call generically; the registry names the cause.
 		registry.getApiKeyAndHeaders = async () => ({ ok: false, error: "OAuth refresh failed for openrouter" });
+		complete.mockResolvedValue({ ...response("error"), errorMessage: "Provider is not configured: openrouter" } as never);
 		expect(await fake.fireOne("session_before_compact", event, ctx)).toBeUndefined();
-		expect(complete).not.toHaveBeenCalled();
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][0]).toContain("OAuth refresh failed for openrouter");
 		expect(notify.mock.calls[0][0]).toContain("/login");

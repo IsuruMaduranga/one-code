@@ -82,8 +82,7 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 			if (!model) return;
 			const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
 			if (!choice) return;
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-			if (!auth.ok) return;
+			// A model pi cannot send to comes back as an error reply with no text: no title.
 			const result = await runSideCall({
 				kind: "title",
 				model: choice.model,

@@ -26,7 +26,6 @@ export type FetchFailure =
 /** Why the reader model did not answer `prompt`. `osMessage` is the provider's or the system's own text. */
 export type ReaderFailure =
 	| { kind: "noModel" }
-	| { kind: "credentialsTimeout"; reader: string; seconds: number }
 	| { kind: "stoppedEarly"; reader: string; stopReason: string }
 	| { kind: "noText"; reader: string }
 	| { kind: "error"; reader: string; osMessage: string };
@@ -102,8 +101,6 @@ function readerFailure(failure: ReaderFailure): string {
 	switch (failure.kind) {
 		case "noModel":
 			return "no model available to read the page";
-		case "credentialsTimeout":
-			return `${failure.reader}: The reader's credentials did not resolve within ${failure.seconds} seconds.`;
 		case "stoppedEarly":
 			return `${failure.reader}: the call stopped early (${failure.stopReason})`;
 		case "noText":

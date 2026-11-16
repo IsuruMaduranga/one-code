@@ -253,19 +253,25 @@ describe("classify: pinning and fallback", () => {
 	});
 
 	it("walks auth failures the same way as provider rejections", async () => {
+		const unusable: Array<[string, string]> = [];
+		const getAuth = vi.fn(async (m: any) => (m.id === "gpt-5-mini" ? { ok: false as const, error: "no key" } : { ok: true as const, apiKey: "key" }));
 		const { deps } = makeDeps({
 			registry: {
 				getAvailable: () => [sessionModel, miniModel, tinyModel],
 				streamSimple: registryStream(completeSimple),
-				getApiKeyAndHeaders: async (m: any) =>
-					m.id === "gpt-5-mini" ? { ok: false as const, error: "no key" } : { ok: true as const, apiKey: "key" },
+				getApiKeyAndHeaders: getAuth,
 			} as any,
+			onModelUnusable: (model: string, error: string) => unusable.push([model, error]),
 		});
-		completeMock.mockResolvedValue(allowReply());
+		// pi's runtime refuses the model it cannot resolve a credential for, generically.
+		completeMock.mockImplementation(async (m: any) => (m.id === "gpt-5-mini" ? errorReply("Provider is not configured: openai") : allowReply()));
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("allow");
 		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(true);
+		expect(unusable).toEqual([["openai/gpt-5-mini", "no key"]]);
 		expect(deps.state.pinned?.id).toBe("gpt-5.1-mini");
+		// Only the failed call asked the registry why; the working model's calls did not.
+		expect(getAuth).toHaveBeenCalledTimes(1);
 	});
 });
 

@@ -25,6 +25,7 @@ import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeThreadless } from "../../../lib/request/anthropic-stream.ts";
+import { credentialFailure } from "../../../lib/side-calls/side-call-run.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
@@ -410,16 +411,6 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		const model = candidate.model;
 		const key = `${model.provider}/${model.id}`;
 
-		const auth = await deps.registry.getApiKeyAndHeaders(model);
-		if (!auth.ok) {
-			// No working credentials for this model: a subagent on it would fail the
-			// same way, so it is published like a provider refusal.
-			reject(key);
-			deps.onModelUnusable?.(key, auth.error);
-			lastError = auth.error;
-			continue;
-		}
-
 		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
 		// turns thinking off entirely when `reasoning` is absent (what a classifier
 		// wants), and `temperature` is deprecated/unsupported on several models and
@@ -599,6 +590,19 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 			if (kind === "cancelled") {
 				return noVerdict({ kind: "cancelled" });
+			}
+			// pi resolves the credential inside the call and refuses one it cannot
+			// resolve with a generic error, so a failed call asks why here. No working
+			// credentials for this model: a subagent on it would fail the same way, so
+			// it is published like a provider refusal.
+			if (kind !== "truncated" && kind !== "transcript-too-long") {
+				const credentials = await credentialFailure(deps.registry, model);
+				if (credentials) {
+					reject(key);
+					deps.onModelUnusable?.(key, credentials);
+					lastError = credentials;
+					continue;
+				}
 			}
 			// The provider is authoritative about its token window. Do not clip the
 			// history or retry another model: the gate must offer manual approval

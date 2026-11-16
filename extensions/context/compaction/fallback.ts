@@ -11,7 +11,7 @@
 export type CompactionFallback =
 	/** pi could not resolve the model's credentials. */
 	| { kind: "credentials"; detail: string }
-	/** The provider answered with an error (pi's setup errors, such as no credential, land here too). */
+	/** The provider answered with an error (pi's setup errors other than a credential, such as an unknown API, land here too). */
 	| { kind: "provider"; detail: string }
 	/** No reply within the compaction's own time limit. */
 	| { kind: "timeout"; seconds: number }

@@ -5,7 +5,9 @@
  * draft. The auto-mode classifier has its own transport and stays out of this.
  *
  * Every side call takes the same steps: let pi resolve the model's credential
- * and base URL, combine the caller's abort signal with a per-attempt timeout, key the request to the session (`<session id>:<kind>`,
+ * and base URL (once, inside the call; a caller asks `credentialFailure` why
+ * only after a failed reply), combine the caller's abort signal with a
+ * per-attempt timeout, key the request to the session (`<session id>:<kind>`,
  * stable across calls, so the provider's prompt cache is reused), apply the
  * caller's cache placement on the APIs it covers, log the attempt
  * (`*_SIDE_CALL_LOG`), retry with thinking on when the model cannot disable
@@ -17,6 +19,7 @@
  */
 
 import { type Api, type AssistantMessage, type Context, cleanupSessionResources, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { completeThreadless, type SideCallRegistry } from "../request/anthropic-stream.ts";
 import { withReasoningFallback } from "../models/model-policy.ts";
 import { SIDE_CALL_KINDS, type SideCallLogContext, logSideCallUsage } from "./side-call-usage.ts";
@@ -31,7 +34,7 @@ export interface SideCallRun {
 	/** Names the call in the cache key and the side-call log. */
 	kind: SideCallLogContext["kind"];
 	model: Model<Api>;
-	/** pi's model registry, which resolves `model`'s credential (the caller checks it can, and handles a failed lookup). */
+	/** pi's model registry, which resolves `model`'s credential inside the call; one that does not resolve comes back as a reply with `stopReason: "error"`. */
 	registry: SideCallRegistry;
 	/** The session's id; the call's cache key is `<sessionId>:<kind>`. */
 	sessionId: string;
@@ -89,4 +92,17 @@ export async function runSideCall(run: SideCallRun): Promise<AssistantMessage> {
 		run.learnedReasoning,
 		run.onUsage,
 	);
+}
+
+/**
+ * Why pi cannot resolve `model`'s credential (an expired login, a missing
+ * key), or undefined when it can. pi resolves the credential inside each call
+ * and refuses one it cannot resolve with the generic "Provider is not
+ * configured: <provider>", so a caller that names the cause, or routes on it,
+ * asks here only after a reply with `stopReason: "error"`: the success path
+ * resolves once.
+ */
+export async function credentialFailure(registry: Pick<ModelRegistry, "getApiKeyAndHeaders">, model: Model<Api>): Promise<string | undefined> {
+	const auth = await registry.getApiKeyAndHeaders(model);
+	return auth.ok ? undefined : auth.error;
 }

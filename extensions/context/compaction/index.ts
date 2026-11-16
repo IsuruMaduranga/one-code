@@ -72,6 +72,7 @@ import type { CompactionText, KeptTail, KeptTailLandmark } from "./text.ts";
 import { compactionResultText } from "./text.ts";
 import { type CompactionFallback, fallbackNotice, fallbackReason, replyFallback, thrownFallback } from "./fallback.ts";
 import { logSideCallFailure } from "../../lib/side-calls/side-call-usage.ts";
+import { credentialFailure } from "../../lib/side-calls/side-call-run.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
 const COMPACTION_TIMEOUT_MS = 120_000;
@@ -194,9 +195,6 @@ function compactionExtension(pi: ExtensionAPI) {
 		};
 
 		try {
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) return fallBack({ kind: "credentials", detail: auth.error });
-
 			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
 
 			// Prefer the captured request prefix — it is cache-aligned and already
@@ -290,7 +288,9 @@ function compactionExtension(pi: ExtensionAPI) {
 			// conversation with that incomplete checkpoint; let pi retry its summary.
 			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
 				if (event.signal.aborted) return undefined;
-				return fallBack(replyFallback(result, COMPACTION_TIMEOUT_MS));
+				// pi refuses a credential it cannot resolve with a generic error; name the cause.
+				const credentials = result.stopReason === "error" ? await credentialFailure(ctx.modelRegistry, model) : undefined;
+				return fallBack(credentials ? { kind: "credentials", detail: credentials } : replyFallback(result, COMPACTION_TIMEOUT_MS));
 			}
 
 			const text = result.content

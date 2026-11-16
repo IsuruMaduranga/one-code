@@ -92,8 +92,6 @@ function recapExtension(pi: ExtensionAPI) {
 	async function standaloneRecap(ctx: ExtensionContext, model: Model<Api>, messages: AgentMessage[], signal: AbortSignal): Promise<string> {
 		const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
 		if (!choice) return "";
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-		if (!auth.ok) return "";
 		// Name-only stubs of the active tools, so a history carrying tool_use
 		// blocks stays valid on strict providers (see the header note) without
 		// shipping every full schema (~6k tokens) to a call that must answer

@@ -65,7 +65,6 @@ describe("One Code's web_fetch text", () => {
 		const line = (failure: ReaderFailure) =>
 			webFetchResultText().header({ ...base, answer: { kind: "raw", readerFailure: failure } }).split("\n")[1];
 		expect(line({ kind: "noModel" })).toBe("Could not answer `prompt` (no model available to read the page); returning the raw page content instead.");
-		expect(line({ kind: "credentialsTimeout", reader: "p/r", seconds: 60 })).toContain("(p/r: The reader's credentials did not resolve within 60 seconds.)");
 		expect(line({ kind: "stoppedEarly", reader: "p/r", stopReason: "error" })).toContain("(p/r: the call stopped early (error))");
 		expect(line({ kind: "error", reader: "p/r", osMessage: "429 rate limited" })).toContain("(p/r: 429 rate limited)");
 	});

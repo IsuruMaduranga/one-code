@@ -23,7 +23,6 @@ import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
-import { DeadlineError, runWithDeadline } from "../../lib/side-calls/operation-deadline.ts";
 import { Type } from "typebox";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
@@ -101,14 +100,8 @@ async function answerFromPage(
 	const reader = `${choice.model.provider}/${choice.model.id}`;
 
 	try {
-		// Registry auth takes no signal, so it gets the deadline here; runSideCall
-		// bounds each model attempt itself, and a late resolution starts nothing.
-		const auth = await runWithDeadline(() => ctx.modelRegistry.getApiKeyAndHeaders(choice.model), {
-			signal,
-			timeoutMs: READER_TIMEOUT_MS,
-			message: "web_fetch: the reader's credentials did not resolve in time",
-		});
-		if (!auth.ok) return { failure: { kind: "error", reader, osMessage: auth.error } };
+		// pi resolves the reader's credential inside the call, raced against the
+		// attempt's timeout, and reports one it cannot resolve as the error below.
 		const messages = readerMessages(words, { prompt, markdown: entry.markdown, url, title: entry.title });
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
 		// a level up front for catalog-marked models and retries on the 400 for the
@@ -143,7 +136,6 @@ async function answerFromPage(
 		if (!answer) return { failure: { kind: "noText", reader } };
 		return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
 	} catch (error) {
-		if (error instanceof DeadlineError) return { failure: { kind: "credentialsTimeout", reader, seconds: error.timeoutMs / 1000 } };
 		return { failure: { kind: "error", reader, osMessage: (error as Error).message } };
 	}
 }

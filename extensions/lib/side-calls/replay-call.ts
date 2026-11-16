@@ -26,7 +26,7 @@ export function followLastExchange(pi: ExtensionAPI): SessionExchange {
  * Send `prompt` as the replay of the last request on `model`, after
  * `options.history` (earlier side exchanges), returning the answer's text.
  * Undefined when there is no capture for `model`, too little output room is
- * left, there is no API key, the call failed, or the reply called a tool or
+ * left, the call failed (a credential pi cannot resolve included), or the reply called a tool or
  * held no text (the replayed request declares the session's tools, and text
  * beside a tool call is a preamble, not the answer), so the caller runs its
  * standalone call instead; an empty string when the caller's own signal
@@ -45,8 +45,6 @@ export async function replaySideCall(
 	const tail = replayTail(wire.reply as Message | undefined, prompt, Date.now(), options.history);
 	const cap = replayOutputCap(wire.capture, tail);
 	if (cap === undefined) return undefined;
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) return undefined;
 	const timeout = AbortSignal.timeout(options.timeoutMs);
 	const result = await completeThreadless(
 		ctx.modelRegistry,
