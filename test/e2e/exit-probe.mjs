@@ -437,6 +437,8 @@ async function runEnding(ending) {
 				const switched = ending.id === "new" ? await rpc.send({ type: "new_session" }) : await rpc.send({ type: "switch_session", sessionPath: resumeTo });
 				if (!switched.success || switched.data?.cancelled) result.problems.push(`${ending.id}: the switch did not happen (${JSON.stringify(switched)})`);
 				const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: pi.child.pid, only: before }, SWITCH_GRACE_MS);
+				// An exit would end the old session's processes too: they are judged gone only if pi lives.
+				if (!pi.running()) result.problems.push(`${ending.id}: pi exited during the session switch`);
 				result.cells.push(...cells);
 				pi.child.stdin.end();
 				await finish(result, pi, { ...ending, id: "rpc-stdin", via: `${ending.id}, then stdin closed` }, tag, seen);
