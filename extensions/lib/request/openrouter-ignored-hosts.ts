@@ -11,8 +11,18 @@
  * 512-token blocks. To take a host off the list, measure it reading a grown
  * prompt's prefix, then delete its entry.
  *
- * Each request on an OpenRouter Chat Completions model carries
- * `provider.ignore` with these slugs (pi-ai sends `compat.openRouterRouting`
+ * A model whose only host is ignored fails every request ("All providers have
+ * been ignored"), which is worse than a cache miss. So each host is skipped
+ * only on the model-id vendors it was measured for: vendors where the host was
+ * seen defeating the cache AND every catalog model of that vendor it serves
+ * has at least one other host that caches (OpenRouter's endpoints API lists
+ * the hosts and their `input_cache_read` price). A vendor where one of its
+ * models has no other host would be scoped by exact model id instead. To widen
+ * a scope, measure the host on the new vendor's models, check each of those
+ * models has another caching host, then add the vendor.
+ *
+ * Each request on an OpenRouter Chat Completions model in a host's scope
+ * carries `provider.ignore` with its slug (pi-ai sends `compat.openRouterRouting`
  * as the `provider` object). The value depends only on the model and the
  * user's routing, so it is the same on every request of a session and on its
  * side calls, and the prompt prefix stays stable. OpenRouter skips an ignored
@@ -27,15 +37,33 @@ import { knobValue } from "../profile/knobs.ts";
 import type { CacheMarksModel } from "./openrouter-cache-marks.ts";
 import { OPENROUTER_CACHE_MARKS_API, OPENROUTER_PROVIDER } from "./openrouter-cache-marks.ts";
 
-/** A host that defeats the prompt cache: OpenRouter's slug (what `provider.ignore` takes), its display name, and when it was measured. */
+/**
+ * A host that defeats the prompt cache: OpenRouter's slug (what
+ * `provider.ignore` takes), its display name, when it was measured, and the
+ * model-id vendors (the part before the slash, without a leading `~`) it is
+ * skipped on.
+ */
 export interface IgnoredHost {
 	slug: string;
 	name: string;
 	measured: string;
+	vendors: readonly string[];
 }
 
-/** The hosts skipped today. */
-export const CACHE_DEFEATING_HOSTS: readonly IgnoredHost[] = [{ slug: "open-inference", name: "OpenInference", measured: "2026-11-16" }];
+/**
+ * The hosts skipped today. OpenInference: measured on
+ * deepseek/deepseek-v4.1-flash-1017. Of the catalog's OpenRouter models it
+ * serves deepseek-v4.1-flash (36 other hosts, each with a cache-read price),
+ * deepseek-v4.1-flash-1017 (47) and z-ai/glm-5.3-flash (41), checked on
+ * 2026-11-16; GLM is left out until the host is measured there.
+ */
+export const CACHE_DEFEATING_HOSTS: readonly IgnoredHost[] = [{ slug: "open-inference", name: "OpenInference", measured: "2026-11-16", vendors: ["deepseek"] }];
+
+/** The hosts whose scope holds `modelId`'s vendor. */
+export function hostsFor(modelId: string, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): IgnoredHost[] {
+	const vendor = modelId.replace(/^~/, "").split("/")[0];
+	return hosts.filter((host) => host.vendors.includes(vendor));
+}
 
 /** The knob that turns the list off (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=0`). */
 export const OPENROUTER_IGNORE_HOSTS_KNOB = "OPENROUTER_IGNORE_HOSTS";
@@ -67,12 +95,14 @@ export function withIgnoredHosts(routing: Routing | undefined, hosts: readonly I
 	return { ...routing, ignore: [...(Array.isArray(routing?.ignore) ? (routing.ignore as unknown[]) : []), ...added] };
 }
 
-/** `model` with the hosts skipped, as a copy; the model itself when it is not an OpenRouter Chat Completions model or nothing changes. */
+/** `model` with the hosts in its vendor's scope skipped, as a copy; the model itself when it is not an OpenRouter Chat Completions model, no host's scope holds it, or nothing changes. */
 export function withOpenRouterIgnoredHosts<M extends CacheMarksModel>(model: M): M {
 	if (model.provider !== OPENROUTER_PROVIDER || model.api !== OPENROUTER_CACHE_MARKS_API) return model;
 	const compat = (model.compat ?? {}) as Record<string, unknown>;
+	const hosts = hostsFor(model.id);
+	if (hosts.length === 0) return model;
 	const routing = compat.openRouterRouting as Routing | undefined;
-	const next = withIgnoredHosts(routing);
+	const next = withIgnoredHosts(routing, hosts);
 	if (next === routing) return model;
 	return { ...model, compat: { ...compat, openRouterRouting: next } };
 }

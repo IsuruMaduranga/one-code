@@ -16,7 +16,8 @@
  * It also registers the `openrouter` provider's Chat Completions stream with
  * pi's own breakpoints turned on for the measured open-weight vendors, some of
  * whose hosts cache nothing without them (lib/request/openrouter-cache-marks.ts),
- * and with the hosts that defeat the prompt cache skipped on every model
+ * and with the hosts that defeat the prompt cache skipped on the models of
+ * their measured vendors
  * (lib/request/openrouter-ignored-hosts.ts).
  * `*_CACHE_MARKS=0` turns all marks off, to compare a run with and without
  * them; `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones;
