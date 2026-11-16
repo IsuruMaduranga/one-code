@@ -15,6 +15,7 @@ import {
 	normalizeToolName,
 	parseRule,
 	parseRules,
+	type PermissionRule,
 	ruleMatches,
 	subjectKind,
 	toolTier,
@@ -91,11 +92,23 @@ describe("decide()", () => {
 		}
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("plan mode allows read-only cmdlets and denies the rest", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
-		const plan = async (subject: string) => decide({ ...base, subject, mode: "plan", powershellParse: await psParse(subject) });
+	it.skipIf(!HAVE_POWERSHELL)("plan mode allows read-only cmdlets, refuses a named write and asks about the rest", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
+		const plan = async (subject: string, rules: { ask?: PermissionRule[]; allow?: PermissionRule[] } = {}) => decide({ ...base, ...rules, subject, mode: "plan", powershellParse: await psParse(subject) });
 		expect(await plan("Get-ChildItem -Recurse src")).toMatchObject({ decision: "allow", cause: "plan-readonly" });
-		expect(await plan("git status")).toMatchObject({ decision: "deny", cause: "plan-mode" });
-		expect(await plan("Get-Content C:\\secrets.txt")).toMatchObject({ decision: "deny", cause: "plan-mode" });
+		expect(await plan("git status")).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+		expect(await plan("Get-Content C:\\secrets.txt")).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+		// A write the parse names is refused, a matching allow rule included.
+		for (const write of ["Set-Content notes.txt x", "New-Item -ItemType File x.txt", "Get-ChildItem > list.txt", "Remove-Item build -Recurse", "git status; Out-File -FilePath o.txt"]) {
+			expect(await plan(write), write).toMatchObject({ decision: "deny", cause: "plan-mode" });
+			expect(await plan(write, { allow: parseRules(["PowerShell"]) }), write).toMatchObject({ decision: "deny", cause: "plan-mode" });
+		}
+		// A redirection to $null or a stream merge writes no file.
+		expect(await plan("git status 2>$null")).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+		expect(await plan("git status 2>&1")).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+		// Ask rule, then allow rule (every statement covered), as for bash.
+		expect(await plan("git status", { ask: parseRules(["PowerShell(git status)"]), allow: parseRules(["PowerShell(git status)"]) })).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+		expect(await plan("git status", { allow: parseRules(["PowerShell(git status:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(await plan("git status; git push", { allow: parseRules(["PowerShell(git status:*)"]) })).toMatchObject({ decision: "ask", cause: "plan-unproven" });
 	});
 
 	it("plan mode denies even a read-only line PowerShell has not parsed", () => {

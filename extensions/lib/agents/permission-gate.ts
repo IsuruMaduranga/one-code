@@ -279,7 +279,10 @@ export function permissionGateFactory(
 					reason: refusalText(
 						result.decision === "deny"
 							? { kind: "childDenied", rule: result.rule?.raw }
-							: liveMode === "auto"
+							: // Plan mode's ask with nobody to answer it is refused as plan mode refuses.
+								result.cause === "plan-unproven"
+								? { kind: "planMode" }
+								: liveMode === "auto"
 								? { kind: "childNoClassifier", outsideWorkingDir }
 								: { kind: "childNeedsApproval", outsideWorkingDir },
 					),

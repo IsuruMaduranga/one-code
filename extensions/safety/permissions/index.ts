@@ -196,8 +196,18 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 	if (cause === "protected-path")
 		return `Allow ${actor} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`;
 	if (cause === "working-dir") return `Allow ${actor} outside the working directory?\n\n  ${preview || "(no arguments)"}`;
+	if (cause === "plan-unproven")
+		return `Allow ${actor} in plan mode?\n\n  ${preview}\n\n  Plan mode could not confirm this command only reads, so it asks you before running it.`;
 	return `Allow ${actor}?\n\n  ${preview || "(no arguments)"}`;
 };
+
+/**
+ * Why an ask nobody answered was refused: no UI, or the prompt was dismissed
+ * by an abort. Plan mode's ask (`plan-unproven`) is refused as plan mode
+ * refuses everything else (settled in decisions/modes.md, "Plan mode is
+ * file-based"); any other ask keeps its own words, `otherwise`.
+ */
+const unansweredAskReason = (cause: string, otherwise: string): string => (cause === "plan-unproven" ? refusalText({ kind: "planMode" }) : otherwise);
 
 /** Map a `decide()` deny result to its model-facing reason — shared by both gate paths. */
 const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string => {
@@ -1619,9 +1629,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// Paused: fall through to the resume prompt below.
 		}
 
-		// ask
+		// ask: the user's, never the classifier's (a classify decision was handled
+		// above, and decide() returns none in plan mode).
 		if (!ctx.hasUI) {
-			return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
+			return { block: true, reason: unansweredAskReason(result.cause, refusalText({ kind: "nonInteractive" })) };
 		}
 
 		const preview = previewSubject(matchSubject);
@@ -1640,7 +1651,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
 			bindGatePrompt(pi.events, ctx)(permissionAttention(event.toolName), ctx.signal, () => ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout })),
 		);
-		if (ctx.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "turn" }) };
+		if (ctx.signal?.aborted) return { block: true, reason: unansweredAskReason(result.cause, refusalText({ kind: "stoppedWhileWaiting", who: "turn" })) };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
 			return { block: true, reason: refusalText({ kind: "unansweredResume" }) };
@@ -1809,7 +1820,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
-		if (!ctx || !ctx.hasUI) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
+		if (!ctx || !ctx.hasUI) return { block: true, reason: unansweredAskReason(result.cause, refusalText({ kind: "nonInteractive" })) };
 		const preview = previewSubject(subject);
 		// Reaching here from the classify branch only happens while auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
@@ -1827,7 +1838,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, call.signal), (text, timeout) =>
 			bindGatePrompt(pi.events, ctx)(permissionAttention(toolName), call.signal, () => ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout })),
 		);
-		if (call.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "agent" }) };
+		if (call.signal?.aborted) return { block: true, reason: unansweredAskReason(result.cause, refusalText({ kind: "stoppedWhileWaiting", who: "agent" })) };
 		if (unanswered) {
 			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
 			return { block: true, reason: refusalText({ kind: "unansweredResume" }) };

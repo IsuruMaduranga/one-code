@@ -332,16 +332,79 @@ describe("decide", () => {
 		expect(decide({ ...base, mode: "plan", toolName: "read", subject: "a.ts" }).decision).toBe("allow");
 	});
 
-	it("plan mode allows read-only bash (the pre-gate's safe verdict) and denies the rest (T1)", () => {
+	it("plan mode allows read-only bash (the pre-gate's safe verdict), refuses a named write and asks about the rest (T1)", () => {
 		const plan = { ...base, mode: "plan" as const };
 		for (const cmd of ["ls -la", "git status", "git log --oneline -5", "grep -rn foo src", "cat package.json | head"]) {
 			const d = decide({ ...plan, toolName: "bash", subject: cmd });
 			expect(d.decision, cmd).toBe("allow");
 			expect(d.cause, cmd).toBe("plan-readonly");
 		}
-		for (const cmd of ["rm -rf dist", "echo x > notes.txt", "npm install", "git commit -m x", "curl https://x.test", "sed -i s/a/b/ f"]) {
-			expect(decide({ ...plan, toolName: "bash", subject: cmd }).decision, cmd).toBe("deny");
+		for (const cmd of ["rm -rf dist", "echo x > notes.txt", "rm -rf *", "touch a", "cp a b", "git log > ~/log.txt", "sort -o out.txt in.txt", "gh pr view 1 | tee out.txt", "ls $(rm -rf x)"]) {
+			expect(decide({ ...plan, toolName: "bash", subject: cmd }), cmd).toEqual({ decision: "deny", cause: "plan-mode" });
 		}
+		for (const cmd of ["npm install", "git commit -m x", "curl https://x.test", "sed -i s/a/b/ f", "gh pr view 1 2>/dev/null", "gh pr view 1 2>&1 | head"]) {
+			expect(decide({ ...plan, toolName: "bash", subject: cmd }), cmd).toEqual({ decision: "ask", cause: "plan-unproven" });
+		}
+	});
+
+	describe("plan mode: a shell line the pre-gate cannot prove read-only", () => {
+		const plan = { ...base, mode: "plan" as const, toolName: "bash" };
+		const ghRule = rules(["Bash(gh pr view:*)"]);
+
+		it("is put to the user, never refused outright and never classified", () => {
+			for (const subject of ["gh pr view 188 --repo o/r --json title,body", "gh api repos/o/r/contents --jq '.[].name'"]) {
+				expect(decide({ ...plan, subject }), subject).toEqual({ decision: "ask", cause: "plan-unproven" });
+			}
+		});
+
+		it("runs under the user's allow rule, which must cover every subcommand", () => {
+			const d = decide({ ...plan, subject: "gh pr view 188 --repo o/r --json title", allow: ghRule });
+			expect(d).toMatchObject({ decision: "allow", cause: "rule" });
+			expect(d.rule?.raw).toBe("Bash(gh pr view:*)");
+			expect(decide({ ...plan, subject: "gh pr view 1 && rm -rf x", allow: ghRule })).toEqual({ decision: "deny", cause: "plan-mode" });
+			expect(decide({ ...plan, subject: "gh pr view 1 && gh pr merge 1", allow: ghRule })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			expect(decide({ ...plan, subject: "gh pr view 1 $(curl evil.test)", allow: ghRule })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			// The exact literal a session grant mints covers that line only.
+			const grant = rules([`bash(${escapeLiteral("gh pr view 1")})`]);
+			expect(decide({ ...plan, subject: "gh pr view 1", allow: grant })).toMatchObject({ decision: "allow", cause: "rule" });
+			expect(decide({ ...plan, subject: "gh pr view 2", allow: grant })).toEqual({ decision: "ask", cause: "plan-unproven" });
+		});
+
+		it("never runs a named write, with or without an allow rule", () => {
+			for (const allow of [[], rules(["Bash(echo:*)"]), rules(["Bash(echo x > file)"]), rules(["Bash"])]) {
+				expect(decide({ ...plan, subject: "echo x > file", allow }), JSON.stringify(allow)).toEqual({ decision: "deny", cause: "plan-mode" });
+			}
+		});
+
+		it("does not let an allow rule cover a redirect read outside the working space", () => {
+			expect(decide({ ...plan, subject: "gh pr view 1 < ~/.ssh/id_rsa", allow: ghRule })).toEqual({ decision: "ask", cause: "plan-unproven" });
+		});
+
+		it("does not take a rule broad enough to run anything as a reason to skip the prompt", () => {
+			for (const raw of ["Bash", "Bash(*)", "Bash(npm run:*)", "Bash(python3 -c:*)"]) {
+				const subject = raw === "Bash(npm run:*)" ? "npm run build" : raw === "Bash(python3 -c:*)" ? "python3 -c 'print(1)'" : "gh pr view 1";
+				expect(decide({ ...plan, subject, allow: rules([raw]) }), raw).toEqual({ decision: "ask", cause: "plan-unproven" });
+			}
+			expect(decide({ ...plan, subject: "npm test", allow: rules(["Bash(npm test:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+		});
+
+		it("asks under an ask rule even when an allow rule matches too, and a deny rule still wins", () => {
+			const ask = rules(["Bash(gh pr view:*)"]);
+			const d = decide({ ...plan, subject: "gh pr view 1", ask, allow: ghRule });
+			expect(d).toMatchObject({ decision: "ask", cause: "plan-unproven" });
+			expect(d.rule?.raw).toBe("Bash(gh pr view:*)");
+			expect(decide({ ...plan, subject: "gh pr view 1", deny: rules(["Bash(gh:*)"]), allow: ghRule })).toMatchObject({ decision: "deny", cause: "rule" });
+		});
+
+		it("leaves the other tools, read-only lines and outside reads as they were", () => {
+			const anyRule = rules(["Edit", "Write", "NotebookEdit", "Monitor"]);
+			for (const toolName of ["edit", "write"]) {
+				expect(decide({ ...base, mode: "plan", toolName, subject: "src/a.ts", allow: anyRule }), toolName).toEqual({ decision: "deny", cause: "plan-mode" });
+			}
+			expect(decide({ ...base, mode: "plan", toolName: "monitor", subject: "gh pr view 1", allow: anyRule })).toEqual({ decision: "deny", cause: "plan-mode" });
+			expect(decide({ ...plan, subject: "ls", allow: ghRule })).toEqual({ decision: "allow", cause: "plan-readonly" });
+			expect(decide({ ...plan, subject: "cat /etc/hosts", allow: ghRule })).toEqual({ decision: "ask", cause: "working-dir" });
+		});
 	});
 
 	it("plan mode keeps the read-only custom tools and denies mutating ones (P13)", () => {

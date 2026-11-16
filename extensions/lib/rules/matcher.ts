@@ -14,11 +14,11 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { domainToASCII } from "node:url";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
-import { powershellTreeContainedEdits } from "../shell/powershell-tree.ts";
+import { powershellTreeContainedEdits, powershellTreeNamesWrite } from "../shell/powershell-tree.ts";
 import type { PowerShellParse } from "../shell/powershell-parser.ts";
 import {
 	canonicalCommandName,
@@ -935,6 +935,13 @@ export interface Decision {
 		| "plan-mode"
 		| "plan-file"
 		| "plan-readonly"
+		/**
+		 * Plan mode: a shell line the pre-gate could not prove read-only and that
+		 * names no write, put to the user (an ask rule may have matched, `rule`).
+		 * Never handed to the classifier; with no user to answer, refused with the
+		 * plan-mode text.
+		 */
+		| "plan-unproven"
 		| "memory-dir"
 		| "scratchpad-dir"
 		| "mode"
@@ -1103,45 +1110,6 @@ export function decide(params: DecideInput): Decision {
 
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
 
-	const tier = toolTier(toolName);
-	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(tool)) {
-		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
-		// protected-paths already excepts as working space).
-		const planFile = params.planFilePath;
-		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
-			const planTarget =
-				isPlanFilePath(subject, planFile, cwd) ||
-				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
-			if (planTarget) return { decision: "allow", cause: "plan-file" };
-		}
-		// Read-only bash stays usable while planning (Claude Code permits it). The
-		// auto-mode shell pre-gate's "safe" verdict means "every command is on the
-		// read-only allowlist, nothing leaves the project" — plus in-project
-		// redirect writes, which it records; a safe verdict with no writes is
-		// exactly read-only. Anything it cannot vouch for is denied as before.
-		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
-		// The harness's readable session dirs, as the auto-mode pre-gate sees them
-		// (safety/permissions/index.ts `readableRoots`): a plan-mode read of this project's
-		// transcripts is a read like any other.
-		const readableRoots = sessionReadableRoots();
-		if (tool === "bash" && subject) {
-			const evidence = shellEvidence(subject);
-			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
-			// Read-only, but of a path outside the working directory: still a read,
-			// so it is put to the user rather than refused as a plan-mode mutation
-			// (the read tools ask for the same path below).
-			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
-		}
-		// The PowerShell counterpart: read-only cmdlets on in-project paths,
-		// judged from PowerShell's own parse (powershell-tree.ts).
-		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-		if (isPlanReadOnlyTool(toolName, tool)) {
-			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
-			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
-		}
-		return { decision: "deny", cause: "plan-mode" };
-	}
-
 	/**
 	 * Whether an absolute path is a credential: the basename denylist, or at or
 	 * under one of the harness's own secret stores (`secretPaths`).
@@ -1165,6 +1133,116 @@ export function decide(params: DecideInput): Decision {
 		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
+	/** Whether a path is protected: the static list or a runtime-protected directory. */
+	const isProtected = (...candidates: (string | undefined)[]) =>
+		candidates.some(
+			(candidate) =>
+				candidate &&
+				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isAtOrInsideDir(candidate, dir, cwd))),
+		);
+	/**
+	 * Whether a redirect on the line reads or writes outside the working space,
+	 * onto a protected path, or somewhere only known at runtime (an expansion,
+	 * a glob, `~user`, or a relative target after a `cd`).
+	 */
+	const redirectEscapes = (command: string): boolean => {
+		const { segments, parseFailed } = parseCommand(command.trim());
+		// A line that did not parse may hide a redirect the segments dropped.
+		if (parseFailed) return /[<>]/.test(command);
+		const home = homedir();
+		// Only a `cd` before a redirect moves where its relative target lands.
+		let moved = false;
+		for (const segment of segments) {
+			if (movesDirectory(segment)) moved = true;
+			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
+			if (targets.length > 0 && segment.unknownTarget) return true;
+			for (const { value: target, write } of targets) {
+				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
+				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
+				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
+				const absolute = toAbsoluteBash(cwd, target, home);
+				const resolved = resolveForContainment(absolute) ?? absolute;
+				// Auto mode's unclassified writes stay in the working directory, a
+				// workspace directory's included (decisions/modes.md).
+				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"), !write)) return true;
+				if (isProtected(absolute, resolved)) return true;
+			}
+		}
+		return false;
+	};
+
+	/**
+	 * Plan mode's answer for a shell line it could not prove read-only, in this
+	 * order: a write the line names is refused (never asked about, never
+	 * allowed by a rule); an ask rule asks; an allow rule allows, matched as the
+	 * other modes match it (every subcommand in its literal spelling, never a
+	 * redirect outside the working space), except a rule broad enough to run
+	 * anything (`isBroadExecutionRule`), which would turn plan mode off for the
+	 * shell; anything else is put to the user. Every ask here carries
+	 * `plan-unproven`: it goes to the user, never to auto mode's classifier
+	 * (the mode is plan, so nothing below the plan branch runs), and with no
+	 * user to answer it the caller refuses it with the plan-mode text.
+	 */
+	const planShellLine = (writes: boolean): Decision => {
+		if (writes) return { decision: "deny", cause: "plan-mode" };
+		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+		if (askRule) return { decision: "ask", rule: askRule, cause: "plan-unproven" };
+		const allowRule = findBashAllowRule(
+			allow.filter((rule) => !isBroadExecutionRule(rule)),
+			subject,
+			tool,
+			{ readOnly: readOnlyShell },
+		);
+		if (allowRule && !(tool === "bash" && redirectEscapes(subject))) return { decision: "allow", rule: allowRule, cause: "rule" };
+		return { decision: "ask", cause: "plan-unproven" };
+	};
+
+	const tier = toolTier(toolName);
+	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(tool)) {
+		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
+		// protected-paths already excepts as working space).
+		const planFile = params.planFilePath;
+		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
+			const planTarget =
+				isPlanFilePath(subject, planFile, cwd) ||
+				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
+			if (planTarget) return { decision: "allow", cause: "plan-file" };
+		}
+		// Read-only bash stays usable while planning (Claude Code permits it). The
+		// auto-mode shell pre-gate's "safe" verdict means "every command is on the
+		// read-only allowlist, nothing leaves the project" — plus in-project
+		// redirect writes, which it records; a safe verdict with no writes is
+		// exactly read-only. A line it cannot vouch for takes `planShellLine`:
+		// refused when it names a write, otherwise a rule or the user decides.
+		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
+		// The harness's readable session dirs, as the auto-mode pre-gate sees them
+		// (safety/permissions/index.ts `readableRoots`): a plan-mode read of this project's
+		// transcripts is a read like any other.
+		const readableRoots = sessionReadableRoots();
+		if (tool === "bash" && subject) {
+			const evidence = shellEvidence(subject);
+			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
+			// Read-only, but of a path outside the working directory: still a read,
+			// so it is put to the user rather than refused as a plan-mode mutation
+			// (the read tools ask for the same path below).
+			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
+			return planShellLine(namesWrite(evidence));
+		}
+		// The PowerShell counterpart: read-only cmdlets on in-project paths,
+		// judged from PowerShell's own parse (powershell-tree.ts). A line
+		// PowerShell has not parsed is refused: without the parse no write in it
+		// can be seen, and the gate clears nothing it has not parsed.
+		if (tool === "powershell" && subject) {
+			if (powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
+			if (params.powershellParse) return planShellLine(powershellTreeNamesWrite(params.powershellParse));
+		}
+		if (isPlanReadOnlyTool(toolName, tool)) {
+			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
+		}
+		return { decision: "deny", cause: "plan-mode" };
+	}
+
 	// Claude Code's blockReadsOutsideWorkingDirectories refuses a read tool's
 	// outside path before any ask or allow rule can prompt for it or allow it
 	// (bypass mode returned above).
@@ -1208,12 +1286,6 @@ export function decide(params: DecideInput): Decision {
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
-	const isProtected = (...candidates: (string | undefined)[]) =>
-		candidates.some(
-			(candidate) =>
-				candidate &&
-				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isAtOrInsideDir(candidate, dir, cwd))),
-		);
 	if (isWritingTool(tool) && subject && isProtected(subject, params.resolvedSubject)) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
@@ -1224,37 +1296,6 @@ export function decide(params: DecideInput): Decision {
 		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
 		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
 		return { decision: "ask", cause: "working-dir" };
-	};
-
-	/**
-	 * Whether a redirect on the line reads or writes outside the working space,
-	 * onto a protected path, or somewhere only known at runtime (an expansion,
-	 * a glob, `~user`, or a relative target after a `cd`).
-	 */
-	const redirectEscapes = (command: string): boolean => {
-		const { segments, parseFailed } = parseCommand(command.trim());
-		// A line that did not parse may hide a redirect the segments dropped.
-		if (parseFailed) return /[<>]/.test(command);
-		const home = homedir();
-		// Only a `cd` before a redirect moves where its relative target lands.
-		let moved = false;
-		for (const segment of segments) {
-			if (movesDirectory(segment)) moved = true;
-			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
-			if (targets.length > 0 && segment.unknownTarget) return true;
-			for (const { value: target, write } of targets) {
-				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
-				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
-				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
-				const absolute = toAbsoluteBash(cwd, target, home);
-				const resolved = resolveForContainment(absolute) ?? absolute;
-				// Auto mode's unclassified writes stay in the working directory, a
-				// workspace directory's included (decisions/modes.md).
-				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"), !write)) return true;
-				if (isProtected(absolute, resolved)) return true;
-			}
-		}
-		return false;
 	};
 
 	// A custom tool's read outside the working space is never pre-approved by an

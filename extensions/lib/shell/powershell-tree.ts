@@ -27,7 +27,7 @@ import { readdirSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, touchesGuardedPath } from "./paths.ts";
-import { isGuardedWritePath, removalLoses } from "./shell-analysis.ts";
+import { isGuardedWritePath, isMutationCommand, removalLoses } from "./shell-analysis.ts";
 import type { PowerShellAstNode, PowerShellParse } from "./powershell-parser.ts";
 import {
 	applicationArgument,
@@ -530,6 +530,49 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
 			});
 		}
 		requireAllApproved(tree);
+	});
+}
+
+/**
+ * Cmdlets that write, move or remove files: Claude Code's acceptEdits cmdlets
+ * and the other common provider writes. Only `powershellTreeNamesWrite` reads
+ * it; a cmdlet missing here only means plan mode asks the user about the line
+ * instead of refusing it.
+ */
+const FILE_WRITE_CMDLETS = new Set([
+	...Object.keys(WRITE_CMDLETS),
+	"new-item",
+	"copy-item",
+	"move-item",
+	"rename-item",
+	"set-item",
+	"clear-item",
+	"out-file",
+	"tee-object",
+	"export-csv",
+	"export-clixml",
+]);
+
+/**
+ * Whether the line names a write: a redirection to a file (anything but
+ * `$null` or a stream merge), a file-writing cmdlet, or a native program the
+ * bash gate counts as filesystem-mutating (`rm`, `cp`, `tar`, … resolved to
+ * an application, as on macOS and Linux). PowerShell's counterpart of the bash
+ * gate's recorded writes (shell-analysis.ts `namesWrite`), read by plan mode
+ * only, to refuse such a line rather than ask about it. Not a verdict that a
+ * line is safe: a line this misses is still one no read-only check cleared.
+ */
+export function powershellTreeNamesWrite(parse: PowerShellParse): boolean {
+	const { nodes, children } = buildTree(parse);
+	return nodes.some((node, i) => {
+		if (node.type === "FileRedirectionAst") {
+			const [location] = children[i];
+			return !(children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null");
+		}
+		if (node.type !== "CommandAst") return false;
+		const spelled = (node.resolvedName || node.name || "").toLowerCase();
+		const base = spelled.split(/[\\/]/).at(-1)?.replace(/\.exe$/, "") ?? "";
+		return FILE_WRITE_CMDLETS.has(spelled) || isMutationCommand(base);
 	});
 }
 

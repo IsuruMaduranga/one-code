@@ -258,6 +258,22 @@ const MUTATION_COMMANDS = new Set([
 	"zip",
 ]);
 
+/** Whether `name` (a command word, basename, lowercased) is one of the filesystem-mutating commands above. */
+export function isMutationCommand(name: string): boolean {
+	return MUTATION_COMMANDS.has(name);
+}
+
+/**
+ * Whether the line writes by what this check saw: a write target it recorded
+ * (a redirect, a mutating command's operand, `sort -o`), or a mutating command
+ * whose targets it could not list (`rm *`). Plan mode refuses such a line
+ * outright (lib/rules/matcher.ts `decide`); a line this misses is one the
+ * pre-gate could not prove read-only either, which plan mode puts to the user.
+ */
+export function namesWrite(evidence: ShellEvidence): boolean {
+	return evidence.writes.length > 0 || evidence.commands.some(isMutationCommand);
+}
+
 /** The delete/truncate commands whose targets are every positional, bare names included. */
 const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
 
