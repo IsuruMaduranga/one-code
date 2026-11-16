@@ -33,6 +33,10 @@ export const PRODUCT_USER_KEYS: readonly string[] = [
 	// Remembered "No" answers to startup questions (ui/branding/declined.ts).
 	"compactionKeepDeclined",
 	"piBuiltinsTurnOffDeclined",
+	// The first outside-read prompt in auto mode, answered (lib/rules/settings.ts outsideReadPromptSeen).
+	"hasSeenAutoModeOutsideReadPrompt",
+	// The desktop notification channel (ui/desktop-notify).
+	"preferredNotifChannel",
 ];
 
 /** The base's keys in the product's per-project file (in its state folder, outside the checkout). */
@@ -52,11 +56,12 @@ export const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonSer
 
 /**
  * Keys the base takes from a file by its role rather than its row: `hooks`
- * from the primary file's family, `env` and the MCP approvals from the
- * primary file, which is the product's user file when no source provider
- * names another (lib/profile/settings-files.ts), and `$schema`.
+ * and `disableAllHooks` from the primary file's family
+ * (safety/hooks/settings.ts), `env` and the MCP approvals from the primary
+ * file, which is the product's user file when no source provider names
+ * another (lib/profile/settings-files.ts), and `$schema`.
  */
-const ROLE_KEYS: readonly string[] = ["hooks", "env", ...MCP_POLICY_KEYS, "$schema"];
+const ROLE_KEYS: readonly string[] = ["hooks", "disableAllHooks", "env", ...MCP_POLICY_KEYS, "$schema"];
 
 /** Every key the base reads from the product's files: a profile cannot declare one of these. */
 export const BASE_PRODUCT_KEYS: ReadonlySet<string> = new Set([...PRODUCT_USER_KEYS, ...PRODUCT_LOCAL_KEYS, ...ROLE_KEYS]);

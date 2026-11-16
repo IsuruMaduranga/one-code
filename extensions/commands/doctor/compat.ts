@@ -33,7 +33,7 @@ import { loadPluginHooks } from "../../safety/hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../../safety/hooks/settings.ts";
 // Claude Code's auto-memory switch, read through the whole settings ladder.
 import { AUTO_MEMORY_KEY as AUTO_MEMORY, MCP_POLICY_KEYS, PRODUCT_LOCAL_KEYS, PRODUCT_USER_KEYS } from "../../lib/profile/settings-keys.ts";
-import { declaredSettingsIn } from "../../lib/profile/declared-settings.ts";
+import { declaredSettingsIn, typed } from "../../lib/profile/declared-settings.ts";
 import { isPathAtOrUnder, productStateDir } from "../../lib/profile/paths.ts";
 import { isBorrowedUserFile, isRepoFile, primaryFamily, primarySettingsFile, settingsSources, type SourceId, sourceId } from "../../lib/profile/settings-files.ts";
 import { protectedFiles, type SettingsFile, sourceName, sourceSwitch } from "../../lib/profile/sources.ts";
@@ -325,9 +325,9 @@ function summarizeFile(source: SettingsFile, ladder: { primary?: SettingsFile; f
 	if (typeof file[AUTO_MEMORY] === "boolean" && known.has(AUTO_MEMORY)) report.used.push(`${AUTO_MEMORY}: ${file[AUTO_MEMORY]}`);
 	if (scope === "product-user" || scope === "product-local") {
 		for (const [key, setting] of declaredSettingsIn(scope === "product-user" ? "user" : "local")) {
-			if (!(key in file)) continue;
+			if (!Object.hasOwn(file, key)) continue;
 			// A value of another type reads as unset (lib/profile/declared-settings.ts).
-			if (typeof file[key] === setting.type) report.used.push(`${key}: ${JSON.stringify(file[key])} (${setting.description})`);
+			if (typed(file[key], setting) !== undefined) report.used.push(`${key}: ${JSON.stringify(file[key])} (${setting.description})`);
 			else report.ignored.push(`${key} (not a ${setting.type})`);
 		}
 	}

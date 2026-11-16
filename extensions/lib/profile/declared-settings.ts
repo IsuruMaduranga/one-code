@@ -16,12 +16,13 @@ import { readJsonFile } from "../core/atomic-write.ts";
 import { activeProfile } from "./profile.ts";
 import { productProjectSettingsPath, productSettingsPath } from "./product-settings.ts";
 import type { ProductSetting } from "./settings-keys.ts";
+import { sourceSwitch } from "./sources.ts";
 
 /** A declared setting's value, or undefined when no file sets it with its declared type. */
 export type ProductSettingValue = boolean | string | number;
 
-/** `value` when it has the declared type (a number must be finite). */
-function typed(value: unknown, setting: ProductSetting): ProductSettingValue | undefined {
+/** `value` when it has the declared type (a number must be finite); /doctor reports by the same test. */
+export function typed(value: unknown, setting: ProductSetting): ProductSettingValue | undefined {
 	if (typeof value !== setting.type) return undefined;
 	return typeof value === "number" && !Number.isFinite(value) ? undefined : (value as ProductSettingValue);
 }
@@ -38,11 +39,14 @@ export function productSetting(key: string, cwd: string, home: string = homedir(
 		const declared = [...activeProfile().settings.keys()];
 		throw new Error(`"${key}" is not a setting the profile declares (declared: ${declared.length > 0 ? declared.join(", ") : "none"}): add it to the profile's \`settings\` first.`);
 	}
+	// The source provider's switch is saved in the product's user file too, and the provider loads after the profile's load check.
+	if (key === sourceSwitch()?.key) throw new Error(`"${key}" is the source provider's switch, which the base reads from the product's settings file: declare the setting under another name.`);
 	const paths = [productSettingsPath(home, env), ...(setting.project ? [productProjectSettingsPath(cwd, home, env)] : [])];
 	let value: ProductSettingValue | undefined;
 	for (const path of paths) {
 		const file = readJsonFile<unknown>(path);
-		const found = file !== null && typeof file === "object" && !Array.isArray(file) ? typed((file as Record<string, unknown>)[key], setting) : undefined;
+		// Own keys only: a declared `constructor` must not read Object.prototype's.
+		const found = file !== null && typeof file === "object" && !Array.isArray(file) && Object.hasOwn(file, key) ? typed((file as Record<string, unknown>)[key], setting) : undefined;
 		if (found !== undefined) value = found;
 	}
 	return value;
