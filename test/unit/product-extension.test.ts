@@ -15,7 +15,12 @@ import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { PRODUCT_EXTENSIONS_DIR, PRODUCT_EXTENSIONS_ENTRY } from "../../extensions/lib/profile/features.ts";
 import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
 import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
+import * as sdk from "../../extensions/sdk/extension.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
+import { sessionModelTier } from "../../extensions/lib/models/session-model-tier.ts";
+import { tiersBelow } from "../../extensions/lib/models/model-tier.ts";
+import { queueNotice } from "../../extensions/lib/notify/notices.ts";
+import { notifyOrPrint } from "../../extensions/lib/notify/headless-output.ts";
 import { LSP_FILES_CHANGED_CHANNEL, type LspFilesChangedEvent } from "../../extensions/tools/lsp/request-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { deferralChanges } from "./helpers/tool-mentions.ts";
@@ -46,6 +51,8 @@ describe("a product's own extensions", () => {
 		fake.events.on(DEFER_CHANNEL, (data) => seen.deferred.push(data));
 		fake.events.on(SYSTEM_PROMPT_SECTION_CHANNEL, (data) => seen.sections.push(data as SystemPromptSection));
 		fake.events.on(REMINDER_CHANNEL, (data) => seen.reminders.push(data));
+		// A tier at the probe's floor: no notice joins the session_start handlers' work below.
+		vi.stubEnv(envName("PROMPT_TIER"), "frontier");
 		module.default(fake.pi as never);
 		expect(fake.tools.has(module.PROBE_TOOL)).toBe(true);
 		// The base's rows in the terminal, through the SDK.
@@ -60,7 +67,38 @@ describe("a product's own extensions", () => {
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, {});
+		vi.unstubAllEnvs();
 		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
+	});
+
+	it("offer the session's tier and the notice helpers the base itself uses", () => {
+		// The same functions, so a product's tier is the one the request was built for and its notices join the base's.
+		expect([sdk.sessionModelTier, sdk.tiersBelow, sdk.queueNotice, sdk.notifyOrPrint]).toEqual([sessionModelTier, tiersBelow, queueNotice, notifyOrPrint]);
+		expect(sdk.tiersBelow("cheap", "workhorse")).toBe(1);
+	});
+
+	it.skipIf(!existsSync(probe))("the fixture's probe tells the user when the session model sits below its tier, in the TUI and in print mode", async () => {
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TIER_NOTICE: string };
+		const start = async (tier: string, hasUI: boolean) => {
+			vi.stubEnv(envName("PROMPT_TIER"), tier);
+			const fake = createFakePi();
+			module.default(fake.pi as never);
+			const notices: Array<[string, string]> = [];
+			await fake.fire("session_start", {}, createFakeCtx({ hasUI, ui: { notify: (text: string, level: string) => notices.push([text, level]) } }));
+			// The lifecycle notices close their batch on the next macrotask.
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			return notices;
+		};
+		const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined);
+		try {
+			expect(await start("cheap", true)).toEqual([[module.PROBE_TIER_NOTICE, "warning"]]);
+			expect(await start("workhorse", true)).toEqual([]);
+			expect(await start("tiny", false)).toEqual([]);
+			expect(stderr).toHaveBeenCalledWith(module.PROBE_TIER_NOTICE);
+		} finally {
+			stderr.mockRestore();
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe writes into the product's state folder and opens it, or says why not", async () => {

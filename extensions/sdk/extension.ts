@@ -44,6 +44,25 @@
  * command, osMessage }` when the opener did not start) so the caller can show
  * the URL instead and say what failed.
  *
+ * A notice for the user by the session model's tier (a product that wants
+ * a stronger model than the one chosen, say) takes three more:
+ * `sessionModelTier(pi)` returns a reader of the session's tier, the one
+ * the system prompt and the tool descriptions use, fixed at `session_start`
+ * and at each `model_select`. Call it while the extension loads: the first
+ * caller on the event bus classifies, and every later one reads that
+ * owner's value over the bus (no module state is shared between
+ * extensions). The base's extensions load first, so the owner's handlers
+ * have run before the product's own `session_start` and `model_select`
+ * handlers read the tier; reading it before `session_start` throws.
+ * `tiersBelow(tier, floor)` says how many tiers the session sits below a
+ * floor (positive when below). Show the notice with `queueNotice(pi.events,
+ * ctx, level, text)` where the session has a UI, not with `ctx.ui.notify`:
+ * several extensions announce at those events, and a direct info notice
+ * overwrites the one before it, or is overwritten. Without a UI (print and
+ * JSON modes, where `ctx.ui.notify` does nothing) `notifyOrPrint(ctx, text,
+ * level)` writes it to stderr, never into the JSON event stream on stdout.
+ * A notice is for the user only and never goes into the request.
+ *
  * A product tool registers through pi like any tool. Two helpers keep it in
  * line with the base's own tools: `persistIfLarge` bounds a large text result
  * (the full text goes to a file the model can read back; never truncate),
@@ -63,3 +82,7 @@ export { type PersistOptions, persistIfLarge, sessionResultsDir } from "../lib/r
 export { toolRenderers } from "../lib/ui/tui-render.ts";
 export { productStateDir } from "../lib/profile/paths.ts";
 export { type NoBrowser, openInBrowser } from "../lib/ui/open-browser.ts";
+export { sessionModelTier } from "../lib/models/session-model-tier.ts";
+export { tiersBelow } from "../lib/models/model-tier.ts";
+export { type NoticeLevel, queueNotice } from "../lib/notify/notices.ts";
+export { notifyOrPrint } from "../lib/notify/headless-output.ts";
