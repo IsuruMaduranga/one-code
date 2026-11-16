@@ -60,7 +60,7 @@
  * directly; they are not owned past their wait.
  */
 
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { system32Path } from "../profile/paths.ts";
 import { brandedId, envName } from "../profile/brand.mjs";
 
@@ -121,6 +121,30 @@ function taskkillTree(child: ChildProcess): void {
 		proc.unref();
 	} catch {
 		direct();
+	}
+}
+
+/**
+ * The process is exiting on Windows: end every tree with one `taskkill /T /F`
+ * and wait for it. An exit handler cannot see an async taskkill through, and
+ * one started as the process leaves can be cut off before it walks the tree,
+ * so a fast crash left every tree running. Blocking costs the exit a few
+ * hundred milliseconds; /F has no grace to wait out anyway.
+ */
+function taskkillTreesAtExit(children: ChildProcess[]): void {
+	const pids = children.map((child) => child.pid).filter((pid): pid is number => pid != null);
+	if (pids.length === 0) return;
+	try {
+		execFileSync(system32Path("taskkill.exe"), ["/F", "/T", ...pids.flatMap((pid) => ["/PID", String(pid)])], { windowsHide: true, stdio: "ignore", timeout: 5_000 });
+	} catch {
+		// Some tree already gone (taskkill exits non-zero), or taskkill failed: the leaders are ended below.
+	}
+	for (const child of children) {
+		try {
+			child.kill();
+		} catch {
+			// Already gone.
+		}
 	}
 }
 
@@ -332,7 +356,8 @@ function killAfterExit(children: ChildProcess[]): void {
  */
 function terminateRememberedGroups(): void {
 	const live = [...new Set([...rememberedGroups, ...pendingKills])].filter(rememberedGroupAlive);
-	for (const child of live) if (!pendingKills.has(child)) killProcessTree(child, "SIGTERM");
+	if (process.platform === "win32") taskkillTreesAtExit(live);
+	else for (const child of live) if (!pendingKills.has(child)) killProcessTree(child, "SIGTERM");
 	rememberedGroups.clear();
 	pendingKills.clear();
 	releaseGroupListeners();

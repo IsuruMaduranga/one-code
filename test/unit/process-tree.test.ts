@@ -17,7 +17,7 @@ import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, KILL_GRACE_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, startOwner, until } from "./helpers/process-alive.ts";
 
 const win32 = process.platform === "win32";
 
@@ -365,4 +365,50 @@ describe("rememberedGroupAlive", () => {
 			expect(rememberedGroupAlive(child(null, null))).toBe(true);
 		});
 	});
+});
+
+// On Windows a tree is ended by `taskkill /T` from the exit hook. Started async as the
+// process left, it ended the launcher but not the server under it, on every exit and crash
+// (16 of 16 runs on the Windows runner); the hook now waits for it.
+describe.runIf(win32)("an owned tree on Windows when its owner leaves without stopping it", () => {
+	it.each([
+		["exits", "process.exit(0);"],
+		["crashes", 'setTimeout(() => { throw new Error("crash"); }, 0);'],
+	])("is ended when the owner %s", async (_, leave) => {
+		const { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { createRequire } = await import("node:module");
+		const dir = mkdtempSync(join(tmpdir(), "owned-tree-exit-"));
+		const pidFile = join(dir, "server.pid");
+		const jitiPath = createRequire(resolve("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).resolve("jiti");
+		const serverFile = join(dir, "server.cjs");
+		writeFileSync(serverFile, `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`);
+		// The launcher is cmd.exe waiting on a node server, the shape of a .cmd-shimmed language server.
+		const line = `""${process.execPath}" "${serverFile}""`;
+		const script = [
+			`import { createRequire } from "node:module";`,
+			`import { spawn } from "node:child_process";`,
+			`const { createJiti } = createRequire(import.meta.url)(${JSON.stringify(jitiPath)});`,
+			`const { spawnOwnedTree } = await createJiti(import.meta.url).import(${JSON.stringify(resolve("extensions/lib/shell-run/process-tree.ts"))});`,
+			`spawnOwnedTree((d) => spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", ${JSON.stringify(line)}], { ...d, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true }));`,
+			`setInterval(() => {}, 1000);`,
+			`process.stdout.write("ready\\n");`,
+			`process.stdin.once("data", () => { ${leave} });`,
+		].join("\n");
+		const run = await startOwner(script);
+		let pid: number | undefined;
+		try {
+			expect(await until(() => existsSync(pidFile), 200)).toBe(true);
+			pid = Number(readFileSync(pidFile, "utf8"));
+			expect(alive(pid)).toBe(true);
+			run.owner.stdin.write("go\n");
+			await run.exited;
+			expect(await until(() => !alive(pid!), 100)).toBe(true);
+		} finally {
+			run.kill();
+			if (pid && alive(pid)) process.kill(pid);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });
