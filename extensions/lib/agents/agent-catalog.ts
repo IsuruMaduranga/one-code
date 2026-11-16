@@ -15,7 +15,7 @@
  */
 
 import { activeProfile, catalogDir } from "../profile/profile.ts";
-import { matches, type PiToolFilter, piRegisters } from "../profile/pi-tool-flags.ts";
+import { type PiToolFilter, piRegisters } from "../profile/pi-tool-flags.ts";
 import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
@@ -271,7 +271,7 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
 	return allowlist.filter((name) => available.has(name));
 }
 
-/** The child's own report channels, never tools of the session: pi's tool flags leave them alone. */
+/** The child's own report channels, never tools of the session: pi's tool flags leave them alone, but for an `--exclude-tools` pattern that matches one (agentToolOptions). */
 export const CHILD_REPORT_CHANNELS: readonly string[] = [SUBAGENT_HANDBACK, "structured_output"];
 
 /** The registry filter pi's tool flags made for this session, which every child follows. */
@@ -291,7 +291,8 @@ const childFlags = (): PiToolFilter | undefined => activeProfile().launchTools;
  * its requests carry this session's tools (agents/subagents/fork-cache.ts),
  * and without the flags its tool_search could load one this session left out.
  * The child's report channels (`CHILD_REPORT_CHANNELS`) are never the
- * session's tools, so the flags keep them.
+ * session's tools, so the flags keep them, except under an `--exclude-tools`
+ * pattern that matches one (see below).
  */
 export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: string[]; excludeTools?: string[] } {
 	const flags = childFlags();
@@ -305,8 +306,12 @@ export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: 
 	// The profile's disabled tools join pi's own excludeTools, which filters
 	// built-ins, extension tools and injected custom tools (shared MCP tools)
 	// alike (lib/profile/profile.ts); so do the flags' entries, but one that
-	// would take a report channel.
-	const excludedByFlags = (flags?.excluded ?? []).filter((entry) => !CHILD_REPORT_CHANNELS.some((name) => matches([entry], name)));
+	// names a report channel exactly. A pattern stays even when it matches a
+	// report channel: pi's denylist takes no exceptions, and dropping the
+	// pattern would hand the child every other tool it removed from this
+	// session. The child then loses that channel too: a subagent's result
+	// falls back to its final message.
+	const excludedByFlags = (flags?.excluded ?? []).filter((entry) => !CHILD_REPORT_CHANNELS.includes(entry));
 	const added = [...activeProfile().disabledTools, ...excludedByFlags];
 	const exclude = added.length > 0 ? [...new Set([...(agent?.excludeTools ?? []), ...added])] : agent?.excludeTools;
 	return { tools, excludeTools: exclude };

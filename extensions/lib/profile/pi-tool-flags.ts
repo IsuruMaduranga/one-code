@@ -92,7 +92,7 @@ function withModifiers(entries: readonly string[]): string[] {
 }
 
 /** Whether `name` is one of `entries`: an exact name, or a pattern where `*` matches any characters. */
-export function matches(entries: readonly string[], name: string): boolean {
+function matches(entries: readonly string[], name: string): boolean {
 	return entries.some((entry) => (entry.includes("*") ? patternRegExp(entry).test(name) : entry === name));
 }
 

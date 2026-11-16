@@ -125,6 +125,23 @@ describe("a subagent under pi's tool flags", () => {
 		expect(output).toContain(subagentResultText().toolsLeftOut({ name: "flags-reader", tools: ["read", "bash", "web_fetch"] }));
 	});
 
+	it("gains no tool from an --exclude-tools pattern that also matches a report channel", async () => {
+		// `*_*` matches structured_output as well as web_fetch: the child loses both, never keeps web_fetch.
+		launch(["--exclude-tools", "*_*"]);
+		expect(activeProfile().live.has("web_fetch")).toBe(false);
+		const { tools } = await subagent({ agent: "flags-reader" });
+		expect(has(tools, "read", "bash", "web_fetch")).toEqual({ read: true, bash: true, web_fetch: false });
+		expect(tools.filter((name) => name.includes("_"))).toEqual([]);
+		// A fork, whose tools would otherwise be undefined and nothing excluded, too.
+		expect((await subagent({ fork: true })).tools.filter((name) => name.includes("_"))).toEqual([]);
+	});
+
+	it("keeps a report channel an --exclude-tools entry names exactly", async () => {
+		launch(["--exclude-tools", "SubagentHandback,web_fetch"]);
+		const { tools } = await subagent({ agent: "flags-reader" });
+		expect(has(tools, "SubagentHandback", "web_fetch")).toEqual({ SubagentHandback: true, web_fetch: false });
+	});
+
 	it("drops the shared MCP tools an allowlist with an mcp__ entry leaves out", async () => {
 		launch(["--tools", "read,mcp__other__*"]);
 		expect((await subagent({})).tools).not.toContain(MCP.name);
