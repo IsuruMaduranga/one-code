@@ -67,8 +67,8 @@ describe("the subagent result text", () => {
 		);
 	});
 
-	it("tells the model not to retry when every run failed because the session is ending", () => {
-		const text = subagentResultText().refused({ kind: "noneLaunched", lines: ["✗ x-1: the session ended before the agent started."], sessionEnded: true });
+	it("tells the model not to retry when a launch failed because the session is ending", () => {
+		const text = subagentResultText().refused({ kind: "sessionEnding", lines: ["✗ x-1: the session ended before the agent started."] });
 		expect(text).toBe(
 			"✗ x-1: the session ended before the agent started.\n\nNo agent started, so no notification will arrive: the session is ending. Do not call Agent again; finish without it and tell the user what is left.",
 		);

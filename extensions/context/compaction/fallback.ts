@@ -11,7 +11,7 @@
 export type CompactionFallback =
 	/** pi could not resolve the model's credentials. */
 	| { kind: "credentials"; detail: string }
-	/** The provider answered with an error (pi's setup errors, such as no credential, land here too). */
+	/** The provider answered with an error (pi's setup errors other than a credential, such as an unknown API, land here too). */
 	| { kind: "provider"; detail: string }
 	/** No reply within the compaction's own time limit. */
 	| { kind: "timeout"; seconds: number }
@@ -22,13 +22,11 @@ export type CompactionFallback =
 	/** The reply held no `<summary>` block. */
 	| { kind: "noSummary" };
 
-/** The fallback a finished call's reply means, or undefined when it is not one (a stop, or the user cancelled). */
-export function replyFallback(reply: { stopReason: string; errorMessage?: string }, cancelled: boolean, timeoutMs: number): CompactionFallback | undefined {
-	if (cancelled) return undefined;
+/** The fallback a reply means that stopped on an error, an abort (the time limit; the caller handles a user's cancel) or its output cap. */
+export function replyFallback(reply: { stopReason: string; errorMessage?: string }, timeoutMs: number): CompactionFallback {
 	if (reply.stopReason === "error") return { kind: "provider", detail: reply.errorMessage || "the provider returned an error" };
 	if (reply.stopReason === "aborted") return { kind: "timeout", seconds: Math.round(timeoutMs / 1000) };
-	if (reply.stopReason === "length") return { kind: "length" };
-	return undefined;
+	return { kind: "length" };
 }
 
 /** The fallback a thrown error means. */
@@ -65,11 +63,10 @@ export function fallbackNotice(fallback: CompactionFallback, model: string): str
 		case "credentials":
 			return `Compaction could not use ${model}: ${fallback.detail}. ${after} Check the provider's login (/login) or API key.`;
 		case "provider":
+		case "error":
 			return `Compaction on ${model} failed: ${fallback.detail}. ${after}`;
 		case "timeout":
 			return `Compaction on ${model} got no reply within ${fallback.seconds} seconds. ${after}`;
-		case "error":
-			return `Compaction on ${model} failed: ${fallback.detail}. ${after}`;
 		case "length":
 		case "noSummary":
 			return undefined;

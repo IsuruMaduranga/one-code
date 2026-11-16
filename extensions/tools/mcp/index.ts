@@ -21,7 +21,7 @@ import { isDeepStrictEqual } from "node:util";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { MCP_RESOURCE_TOOLS } from "../../lib/request/deferrable-tools.ts";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool, deferTool } from "../../lib/request/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { emptyToolResultContent } from "../../lib/request/empty-tool-result.ts";
@@ -230,10 +230,7 @@ function mcpExtension(pi: ExtensionAPI) {
 			sharedTools.push(def);
 
 			// Deferred: the model discovers these through tool_search.
-			pi.events.emit(DEFER_CHANNEL, {
-				name,
-				keywords: [connection.server.name, tool.name.replace(/[_-]/g, " "), "mcp"],
-			});
+			deferTool(pi.events, { name, keywords: [connection.server.name, tool.name.replace(/[_-]/g, " "), "mcp"] });
 		}
 		// Publish the live set so in-process subagents can share these connections.
 		if (sharedTools.length > 0) pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
@@ -264,6 +261,11 @@ function mcpExtension(pi: ExtensionAPI) {
 	const adoptConnection = (server: McpServer, connection: Connection): void => {
 		failures = failures.filter((f) => f.server.name !== server.name);
 		oauthNeeded.delete(server.name);
+		// Two connects for one server can overlap (a Reconnect or an Authenticate
+		// while the startup connect is still answering): the one replaced here is
+		// closed, or its server would run until the process exits.
+		const replaced = connections.get(server.name);
+		if (replaced && replaced !== connection) void close(replaced);
 		connections.set(server.name, connection);
 		// A server that dies (or drops the HTTP session) mid-session must not keep
 		// reading "connected" with a stale tool count; its tools stay registered
@@ -586,7 +588,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		});
 
 		for (const name of MCP_RESOURCE_TOOLS) {
-			pi.events.emit(DEFER_CHANNEL, { name, keywords: text.resources.searchKeywords });
+			deferBaseTool(pi.events, name, text.resources.searchKeywords);
 		}
 		pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
 	};

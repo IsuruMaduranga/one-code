@@ -11,8 +11,9 @@
  *   closes (pi-ai adds one to the last user message of a Claude model), and
  *   none on other models.
  *
- * What counts as a marker (`isCacheMarker`) is shared with the auto-mode
- * classifier's own placement (safety/permissions/auto-mode/cache.ts).
+ * What counts as a marker (`isCachePoint`, `payloadMarkers`) is shared with the
+ * auto-mode classifier's own placement (safety/permissions/auto-mode/cache.ts)
+ * and the ledger's wire comparison (lib/request/ledger/wire.ts).
  */
 
 import { isPlainObject } from "../core/plain-object.ts";
@@ -25,14 +26,9 @@ export const MAX_SIDE_CALL_CACHE_MARKERS = 4;
 
 type WireRecord = Record<string, unknown>;
 
-/** A cache breakpoint on the wire: an Anthropic-format `cache_control` field, or a Bedrock `{ cachePoint }` block. */
-export function isCacheMarker(block: unknown): boolean {
-	return isPlainObject(block) && (block.cache_control !== undefined || block.cachePoint !== undefined);
-}
-
 /** A Bedrock Converse cache point: a block that holds `cachePoint` and nothing else. */
-function isCachePoint(block: WireRecord): boolean {
-	return block.cachePoint !== undefined && Object.keys(block).length === 1;
+export function isCachePoint(block: unknown): block is { cachePoint: unknown } {
+	return isPlainObject(block) && block.cachePoint !== undefined && Object.keys(block).length === 1;
 }
 
 /**
@@ -54,19 +50,11 @@ export function cacheSideCallConversation(payload: unknown): void {
 	const sourceIndex = questionBlocks.findLastIndex((block) => block.cache_control !== undefined);
 	if (sourceIndex === -1) return;
 
-	const target = precedingCacheableBlock(messages, questionIndex);
+	const target = precedingBlock(messages, questionIndex, isCacheableBlock);
 	if (!target) return;
-	const marker = questionBlocks[sourceIndex].cache_control;
-	const nextQuestionBlocks = [...questionBlocks];
-	const { cache_control: _, ...unmarked } = questionBlocks[sourceIndex];
-	nextQuestionBlocks[sourceIndex] = unmarked;
-	const nextTargetBlocks = [...target.blocks];
-	nextTargetBlocks[target.blockIndex] = { ...target.blocks[target.blockIndex], cache_control: marker };
-	const nextMessages = [...messages];
-	nextMessages[questionIndex] = { ...question, content: nextQuestionBlocks };
-	nextMessages[target.messageIndex] = { ...target.message, content: nextTargetBlocks };
-	payload.messages = nextMessages;
-	capMarkers(payload);
+	const { cache_control: marker, ...unmarked } = questionBlocks[sourceIndex];
+	const nextTargetBlocks = target.blocks.with(target.blockIndex, { ...target.blocks[target.blockIndex], cache_control: marker });
+	commit(payload, messages, questionIndex, questionBlocks.with(sourceIndex, unmarked), target, nextTargetBlocks);
 }
 
 /**
@@ -75,33 +63,12 @@ export function cacheSideCallConversation(payload: unknown): void {
  */
 function moveCachePoint(payload: WireRecord, messages: unknown[], questionIndex: number, questionBlocks: WireRecord[]): void {
 	const sourceIndex = questionBlocks.findLastIndex(isCachePoint);
-	const target = precedingBedrockBlock(messages, questionIndex);
+	const target = precedingBlock(messages, questionIndex, isBedrockCacheableBlock);
 	if (!target) return;
 	const point = questionBlocks[sourceIndex];
-	const nextMessages = [...messages];
-	nextMessages[questionIndex] = { ...asMessage(messages[questionIndex]), content: questionBlocks.filter((_, index) => index !== sourceIndex) };
-	const after = target.blocks[target.blockIndex + 1];
-	const alreadyClosed = after !== undefined && isCachePoint(after);
-	const nextTargetBlocks = alreadyClosed ? target.blocks : [...target.blocks.slice(0, target.blockIndex + 1), point, ...target.blocks.slice(target.blockIndex + 1)];
-	nextMessages[target.messageIndex] = { ...target.message, content: nextTargetBlocks };
-	payload.messages = nextMessages;
-	capMarkers(payload);
-}
-
-/**
- * The last prior Bedrock block a cache point may follow: text that is not
- * blank, an image or a tool result, the Bedrock forms of pi-ai's Anthropic list
- * (`isCacheableBlock`). Bedrock content is always a block list.
- */
-function precedingBedrockBlock(messages: unknown[], questionIndex: number): Target | undefined {
-	for (let messageIndex = questionIndex - 1; messageIndex >= 0; messageIndex--) {
-		const message = asMessage(messages[messageIndex]);
-		if (!message) continue;
-		const content = blocks(message.content);
-		const blockIndex = content.findLastIndex((block) => (typeof block.text === "string" && block.text.trim() !== "") || block.image !== undefined || block.toolResult !== undefined);
-		if (blockIndex !== -1) return { messageIndex, message, blocks: content, blockIndex };
-	}
-	return undefined;
+	const alreadyClosed = isCachePoint(target.blocks[target.blockIndex + 1]);
+	const nextTargetBlocks = alreadyClosed ? target.blocks : target.blocks.toSpliced(target.blockIndex + 1, 0, point);
+	commit(payload, messages, questionIndex, questionBlocks.toSpliced(sourceIndex, 1), target, nextTargetBlocks);
 }
 
 interface Target {
@@ -111,8 +78,17 @@ interface Target {
 	blockIndex: number;
 }
 
-/** The last prior wire block Anthropic accepts as a message cache breakpoint. */
-function precedingCacheableBlock(messages: unknown[], questionIndex: number): Target | undefined {
+/** Put the question's and the target's new content into a copy of the message list, then cap the markers. */
+function commit(payload: WireRecord, messages: unknown[], questionIndex: number, questionBlocks: WireRecord[], target: Target, targetBlocks: WireRecord[]): void {
+	const nextMessages = [...messages];
+	nextMessages[questionIndex] = { ...asMessage(messages[questionIndex]), content: questionBlocks };
+	nextMessages[target.messageIndex] = { ...target.message, content: targetBlocks };
+	payload.messages = nextMessages;
+	capMarkers(payload);
+}
+
+/** The last block before the question that `cacheable` says a marker may close. */
+function precedingBlock(messages: unknown[], questionIndex: number, cacheable: (block: WireRecord) => boolean): Target | undefined {
 	for (let messageIndex = questionIndex - 1; messageIndex >= 0; messageIndex--) {
 		const message = asMessage(messages[messageIndex]);
 		if (!message) continue;
@@ -122,12 +98,13 @@ function precedingCacheableBlock(messages: unknown[], questionIndex: number): Ta
 		// the cache boundary. The text itself remains byte-for-byte unchanged.
 		// Chat Completions also sends assistant and tool text as strings; an
 		// empty one (a tool-call-only reply) cannot carry a marker, as in pi-ai.
+		// Bedrock content is always a block list.
 		if (typeof message.content === "string") {
 			if (message.content.length === 0) continue;
 			return { messageIndex, message, blocks: [{ type: "text", text: message.content }], blockIndex: 0 };
 		}
 		const content = blocks(message.content);
-		const blockIndex = content.findLastIndex(isCacheableBlock);
+		const blockIndex = content.findLastIndex(cacheable);
 		if (blockIndex !== -1) return { messageIndex, message, blocks: content, blockIndex };
 	}
 	return undefined;
@@ -141,7 +118,7 @@ function blocks(value: unknown): WireRecord[] {
 	return Array.isArray(value) && value.every(isPlainObject) ? value : [];
 }
 
-/** This is pi-ai's own list from its Anthropic message converter. */
+/** A block Anthropic accepts as a message cache breakpoint: pi-ai's own list from its Anthropic message converter. */
 function isCacheableBlock(block: WireRecord): boolean {
 	return (
 		block.type === "text" ||
@@ -152,42 +129,51 @@ function isCacheableBlock(block: WireRecord): boolean {
 	);
 }
 
-/** One marker and how to take it off: delete an Anthropic field, or remove a Bedrock cache point from its list. */
-interface Marker {
+/** A Bedrock block a cache point may follow: text that is not blank, an image or a tool result, the Bedrock forms of `isCacheableBlock`. */
+function isBedrockCacheableBlock(block: WireRecord): boolean {
+	return (typeof block.text === "string" && block.text.trim() !== "") || block.image !== undefined || block.toolResult !== undefined;
+}
+
+/** One cache marker: the message whose content holds it (none for a tool or system marker), and how to take it off. */
+export interface CacheMarker {
+	message?: WireRecord;
+	/** Delete an Anthropic `cache_control` field, or remove a Bedrock cache point from its list. */
 	remove: () => void;
 }
 
-/** Drop the earliest markers in wire order (tools, system, messages) past the limit of four. */
-function capMarkers(payload: WireRecord): void {
+/**
+ * Every cache marker of a payload, in wire order: the tool definitions
+ * (Bedrock's under `toolConfig`), the top-level system blocks, then each
+ * message's content blocks. Never inspects block payloads.
+ */
+export function payloadMarkers(payload: WireRecord): CacheMarker[] {
 	const toolConfig = isPlainObject(payload.toolConfig) ? payload.toolConfig : undefined;
-	const markers = [
+	const messages = Array.isArray(payload.messages) ? payload.messages : [];
+	return [
 		...listMarkers(payload.tools),
 		...listMarkers(toolConfig?.tools),
 		...listMarkers(payload.system),
-		...messageMarkers(payload.messages),
+		...messages.flatMap((message) => (isPlainObject(message) && Array.isArray(message.content) ? listMarkers(message.content, message) : [])),
 	];
+}
+
+/** Drop the earliest markers in wire order past the limit of four. */
+function capMarkers(payload: WireRecord): void {
+	const markers = payloadMarkers(payload);
 	const excess = markers.slice(0, Math.max(0, markers.length - MAX_SIDE_CALL_CACHE_MARKERS));
 	// Remove from the end of each list first, so an earlier cache point's index stays valid.
 	for (const marker of excess.reverse()) marker.remove();
 }
 
-/** The markers of a block list (tool definitions, top-level system blocks, a message's content). Never inspect block payloads. */
-function listMarkers(value: unknown): Marker[] {
+/** The markers of a block list (tool definitions, top-level system blocks, a message's content). */
+function listMarkers(value: unknown, message?: WireRecord): CacheMarker[] {
 	if (!Array.isArray(value)) return [];
-	return value.flatMap((entry, index): Marker[] => {
-		if (!isPlainObject(entry)) return [];
-		if (isCachePoint(entry)) return [{ remove: () => value.splice(index, 1) }];
-		return entry.cache_control !== undefined ? [{ remove: () => delete entry.cache_control }] : [];
+	return value.flatMap((entry, index): CacheMarker[] => {
+		if (isCachePoint(entry)) return [{ message, remove: () => value.splice(index, 1) }];
+		if (!isPlainObject(entry) || entry.cache_control === undefined) return [];
+		return [{ message, remove: () => delete entry.cache_control }];
 	});
 }
-
-/** Only a message content block is a conversation marker. */
-function messageMarkers(value: unknown): Marker[] {
-	if (!Array.isArray(value)) return [];
-	return value.flatMap((message) => (isPlainObject(message) && Array.isArray(message.content) ? listMarkers(message.content) : []));
-}
-
-
 
 /** The conversation cache placement a side call passes to `runSideCall` (`side-call-run.ts`). */
 export const CONVERSATION_CACHE_PLACEMENT = { apis: SIDE_CALL_CACHE_APIS, place: cacheSideCallConversation } as const;

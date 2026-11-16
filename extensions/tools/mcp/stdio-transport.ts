@@ -17,9 +17,10 @@
  * itself takes the rest of its group with it, as a language server's does
  * (tools/lsp/client.ts).
  *
- * The close sequence keeps the SDK's shape: end stdin, give the server 2 s to
- * exit, then SIGTERM the group and SIGKILL it after `KILL_GRACE_MS`. On Windows
- * the kill is `taskkill /T` while the leader lives (process-tree.ts).
+ * The close sequence keeps the SDK's shape: end stdin, give the server
+ * `KILL_GRACE_MS` (2 s, the SDK's wait) to exit, then SIGTERM the group and
+ * SIGKILL it after `KILL_GRACE_MS` more. On Windows the kill is `taskkill /T`
+ * while the leader lives (process-tree.ts).
  */
 
 import { spawn } from "node:child_process";
@@ -27,10 +28,7 @@ import { PassThrough } from "node:stream";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
-
-/** How long `close()` lets a server exit on its own once its stdin is closed (the SDK's wait). */
-export const CLOSE_GRACE_MS = 2_000;
+import { endTreeMaxMs, KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
 
 export interface StdioServerParams {
 	command: string;
@@ -44,6 +42,9 @@ export interface StdioFraming {
 	ReadBuffer: new () => { append(chunk: Buffer): void; readMessage(): JSONRPCMessage | null; clear(): void };
 	serializeMessage(message: JSONRPCMessage): string;
 }
+
+/** The longest `close()` takes: the stdin grace, then the TERM grace and the SIGKILL's settling. */
+export const STDIO_CLOSE_MAX_MS = endTreeMaxMs(KILL_GRACE_MS, KILL_GRACE_MS);
 
 export class ProcessGroupStdioTransport implements Transport {
 	onclose?: () => void;
@@ -60,10 +61,6 @@ export class ProcessGroupStdioTransport implements Transport {
 		private readonly framing: StdioFraming,
 	) {
 		this.readBuffer = new framing.ReadBuffer();
-	}
-
-	get pid(): number | undefined {
-		return this.tree?.child.pid;
 	}
 
 	start(): Promise<void> {
@@ -105,17 +102,16 @@ export class ProcessGroupStdioTransport implements Transport {
 		});
 	}
 
+	/** The SDK's read loop: a bad line or a throwing handler goes to `onerror`, never out of the stdout listener (an uncaught exception would end pi). */
 	private drain(): void {
 		for (;;) {
-			let message: JSONRPCMessage | null;
 			try {
-				message = this.readBuffer.readMessage();
+				const message = this.readBuffer.readMessage();
+				if (message === null) return;
+				this.onmessage?.(message);
 			} catch (error) {
 				this.onerror?.(error as Error);
-				continue;
 			}
-			if (message === null) return;
-			this.onmessage?.(message);
 		}
 	}
 
@@ -132,23 +128,15 @@ export class ProcessGroupStdioTransport implements Transport {
 		const tree = this.tree;
 		this.tree = undefined;
 		if (tree) {
-			const child = tree.child;
-			const exited = new Promise<void>((resolve) => {
-				if (child.exitCode !== null || child.signalCode !== null) resolve();
-				else child.once("exit", () => resolve());
-			});
-			const within = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms).unref())]);
 			try {
-				child.stdin?.end();
+				tree.child.stdin?.end();
 			} catch {
 				// Already closed.
 			}
-			await within(CLOSE_GRACE_MS);
-			// The leader still running, or a group it left behind: TERM the group now, KILL it after the grace.
-			if (tree.alive()) {
-				tree.stop(KILL_GRACE_MS);
-				await within(KILL_GRACE_MS);
-			}
+			// A server that exits on the closed stdin within the grace ends politely; then the group
+			// is TERMed, KILLed after the grace, and waited for, not only the leader. A launcher that
+			// exited during the wait already started that stop (endGroupWithLauncher), which is kept.
+			await tree.end(KILL_GRACE_MS, KILL_GRACE_MS);
 		}
 		this.readBuffer.clear();
 	}

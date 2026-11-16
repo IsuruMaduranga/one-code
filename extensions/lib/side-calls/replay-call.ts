@@ -8,7 +8,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model, Usage } from "@earendil-works/pi-ai";
 import { completeThreadless } from "../request/anthropic-stream.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { sessionRequestHeaders } from "../../request/context-management/index.ts";
+import { sessionRequestHeaders } from "../request/context-management.ts";
 import { extendPayload, LAST_REQUEST_CHANNEL, LastExchange, type RequestCapture, replayOutputCap, replayTail } from "./request-replay.ts";
 import { answerText } from "./side-call.ts";
 
@@ -26,12 +26,13 @@ export function followLastExchange(pi: ExtensionAPI): SessionExchange {
  * Send `prompt` as the replay of the last request on `model`, after
  * `options.history` (earlier side exchanges), returning the answer's text.
  * Undefined when there is no capture for `model`, too little output room is
- * left, there is no API key, the call failed, or the reply called a tool or
- * held no text (the replayed request declares the session's tools, and text
- * beside a tool call is a preamble, not the answer), so the caller runs its
- * standalone call instead; an empty string when the caller's own signal
- * aborted it. Throws when `timeoutMs` ran out: the time budget is spent, so a
- * standalone call must not start a second one.
+ * left, the call failed, or the reply called a tool or held no text (the
+ * replayed request declares the session's tools, and text beside a tool call
+ * is a preamble, not the answer), so the caller runs its standalone call
+ * instead; an empty string when the caller's own signal aborted it. Throws
+ * when `timeoutMs` ran out (the time budget is spent, so a standalone call
+ * must not start a second one) and on a credential refusal, with its message:
+ * the standalone call goes to the same provider and would be refused again.
  */
 export async function replaySideCall(
 	ctx: Pick<ExtensionContext, "modelRegistry" | "sessionManager">,
@@ -45,15 +46,13 @@ export async function replaySideCall(
 	const tail = replayTail(wire.reply as Message | undefined, prompt, Date.now(), options.history);
 	const cap = replayOutputCap(wire.capture, tail);
 	if (cap === undefined) return undefined;
-	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-	if (!auth.ok) return undefined;
 	const timeout = AbortSignal.timeout(options.timeoutMs);
 	const result = await completeThreadless(
 		ctx.modelRegistry,
 		model,
 		{ systemPrompt: "", messages: tail, tools: [] },
 		{
-			headers: sessionRequestHeaders(model, undefined),
+			headers: sessionRequestHeaders(model),
 			signal: AbortSignal.any([options.signal, timeout]),
 			maxTokens: cap,
 			sessionId: ctx.sessionManager.getSessionId(),
@@ -63,6 +62,7 @@ export async function replaySideCall(
 	options.onUsage(result.usage);
 	if (options.signal.aborted) return "";
 	if (timeout.aborted) throw new Error(`No answer within ${Math.round(options.timeoutMs / 1000)} seconds.`);
+	if (result.credentialError) throw new Error(result.errorMessage);
 	if (result.stopReason === "aborted" || result.stopReason === "error" || result.stopReason === "toolUse") return undefined;
 	return answerText(result.content) || undefined;
 }

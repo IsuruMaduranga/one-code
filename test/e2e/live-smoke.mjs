@@ -26,6 +26,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { killHard } from "./lib/harness.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -94,15 +95,7 @@ child.stderr.on("data", (d) => (stderr += d.toString()));
 let timedOut = false;
 const timer = setTimeout(() => {
 	timedOut = true;
-	// Plain JS cannot import lib/shell-run/process-tree.ts; this mirrors its Windows kill (taskkill /T /F from System32, then the leader).
-	if (process.platform === "win32" && child.pid) {
-		try {
-			execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });
-		} catch {}
-	}
-	try {
-		child.kill("SIGKILL");
-	} catch {}
+	if (child.pid) killHard(child.pid);
 }, timeoutMs);
 
 const exit = await new Promise((done) => {

@@ -24,7 +24,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
 import { checkoutGitRunsProgram } from "../../lib/shell/git-checkout-programs.ts";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { absoluteFrom, comparablePath, tryRealpath } from "../../lib/profile/paths.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
@@ -389,8 +389,8 @@ function worktreeExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	for (const [name, keywords] of Object.entries(text.searchKeywords)) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords });
+	for (const name of ["enter_worktree", "exit_worktree"] as const) {
+		deferBaseTool(pi.events, name, text.searchKeywords[name]);
 	}
 }
 

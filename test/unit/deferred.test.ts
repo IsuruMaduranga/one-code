@@ -253,6 +253,12 @@ describe("deferredReminderText", () => {
 			expect(deferredAddendumText(["late"], { listingHints: { late: "" } }, hints)).toBe([toolSearchResultText.addendumHead, "late"].join("\n"));
 		});
 
+		it("is used for a tool whose profile entry is explicitly undefined", () => {
+			const hints = owner({ late: "When you echo, use it." });
+			expect(deferredReminderText([{ name: "late" }], { listingHints: { late: undefined } }, hints)).toBe([toolSearchResultText.listingHead, "late: When you echo, use it."].join("\n"));
+			expect(deferredAddendumText(["late"], { listingHints: { late: undefined } }, hints)).toBe([toolSearchResultText.addendumHead, "late: When you echo, use it."].join("\n"));
+		});
+
 		it("is used for a tool whose name the profile's object only inherits", () => {
 			const hints = (name: string) => (name === "constructor" ? "When you build, use it." : undefined);
 			expect(deferredAddendumText(["constructor", "toString"], words, hints)).toBe([toolSearchResultText.addendumHead, "constructor: When you build, use it.", "toString"].join("\n"));

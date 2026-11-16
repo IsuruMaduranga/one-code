@@ -49,7 +49,7 @@ import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-
 import { answerText, branchMessages, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
-import { releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
@@ -129,11 +129,12 @@ function btwExtension(pi: ExtensionAPI) {
 		inFlight?.abort();
 		inFlight = undefined;
 	});
+	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).
 	pi.on("session_shutdown", (_event, ctx) => {
 		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
-		releaseSideCalls(ctx.sessionManager.getSessionId());
+		releaseSideCall(ctx.sessionManager.getSessionId(), "btw");
 	});
 	// A /tree keeps the side exchanges asked from a point the selected branch
 	// holds; the others were answered from the abandoned branch's conversation.
@@ -168,9 +169,6 @@ function btwExtension(pi: ExtensionAPI) {
 		if (replayed !== undefined) return replayed;
 
 		// No replay for this model, or it failed: the standalone call.
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-		// pi's own reason (an OAuth refresh that failed, a missing key) is the cause the user can act on.
-		if (!auth.ok) throw new Error(`No usable credentials for ${model.provider}/${model.id}: ${auth.error}. Log in with /login or set the provider's API key.`);
 		const tools = toolStubs(pi.getActiveTools(), btwResultText.stubReason);
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
@@ -199,6 +197,7 @@ function btwExtension(pi: ExtensionAPI) {
 		// reply instead of throwing; its empty text is not an answer.
 		if (signal.aborted) return "";
 		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);
+		// A credential refusal's message names the model, the cause and the fix (completeThreadless).
 		if (result.stopReason === "error") throw new Error(result.errorMessage || "The model returned an error.");
 		return answerText(result.content);
 	}

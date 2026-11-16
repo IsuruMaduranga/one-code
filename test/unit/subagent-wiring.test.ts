@@ -173,7 +173,9 @@ describe("subagent shutdown during launch", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		await h.fake.fire("session_shutdown", {}, h.ctx);
 		release(runtime.runner as unknown as SubagentRuntime);
-		await launching;
+		const result = (await launching) as { content: Array<{ text: string }> };
+		// The refusal for a runtime that finished building in a dead session does not invite a retry either.
+		if (tool === "Agent") expect(result.content[0].text).toBe(subagentResultText().refused({ kind: "sessionEnding", lines: [subagentResultText().runtimeProblem({ kind: "sessionEnded" })] }));
 		expect(runtime.handle.send).not.toHaveBeenCalled();
 		expect(runtime.runner.run).not.toHaveBeenCalled();
 		expect(h.tasks.size).toBe(0);
@@ -220,9 +222,8 @@ describe("subagent shutdown during launch", () => {
 		const result = (await launching) as { content: Array<{ text: string }>; isError?: boolean };
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toBe(subagentResultText().refused({
-			kind: "noneLaunched",
+			kind: "sessionEnding",
 			lines: [subagentResultText().launchLine({ kind: "sessionEnded", name: "general-purpose-1" })],
-			sessionEnded: true,
 		}));
 		expect(result.content[0].text).toContain("Do not call Agent again");
 		expect(build).not.toHaveBeenCalled();

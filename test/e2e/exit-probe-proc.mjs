@@ -18,6 +18,7 @@
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { holdOn } from "./stubborn.mjs";
 
 const [mode, label] = process.argv.slice(2);
 if (!label?.includes(":")) {
@@ -26,8 +27,7 @@ if (!label?.includes(":")) {
 }
 
 if (mode === "sleep" || mode === "sleep-noterm") {
-	for (const signal of ["SIGINT", "SIGHUP", ...(mode === "sleep-noterm" ? ["SIGTERM"] : [])]) process.on(signal, () => {});
-	setInterval(() => {}, 60_000);
+	holdOn(["SIGINT", "SIGHUP", ...(mode === "sleep-noterm" ? ["SIGTERM"] : [])]);
 } else if (mode === "fork" || mode === "fork-noterm") {
 	const worker = mode === "fork" ? "sleep" : "sleep-noterm";
 	// On Windows a worker attached to the launching shell's console is ended when that console

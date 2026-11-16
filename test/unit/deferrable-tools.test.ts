@@ -1,10 +1,13 @@
 /**
  * `DEFERRABLE_TOOLS` (lib/request/deferrable-tools.ts) is the one list of the
  * base tools that sit behind tool_search, and a profile's listing hints are
- * keyed by it. The typecheck keeps the hints to the list; this test keeps the
- * list to what the extensions actually announce on the deferral channel, so a
- * tool the base renames or stops deferring cannot linger in it.
+ * keyed by it. The typecheck keeps every deferral of a base tool (`deferBaseTool`)
+ * and every hint to the list; this test keeps the list to what the extensions
+ * actually announce, so a tool the base renames or stops deferring cannot
+ * linger in it.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DEFERRABLE_TOOLS, MCP_RESOURCE_TOOLS } from "../../extensions/lib/request/deferrable-tools.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
@@ -21,6 +24,9 @@ import tasksExtension from "../../extensions/tools/tasks/index.ts";
 import webExtension from "../../extensions/tools/web/index.ts";
 import webFetchExtension from "../../extensions/tools/web-fetch/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { sourceFiles } from "./helpers/import-graph.ts";
+
+const ROOT = join(import.meta.dirname, "..", "..");
 
 /** What `load` announces on the deferral channel; with a `model`, the session is started on it (url_context is announced for a Gemini model only). */
 async function announcedBy(load: (pi: never) => void, model?: unknown): Promise<string[]> {
@@ -32,28 +38,36 @@ async function announcedBy(load: (pi: never) => void, model?: unknown): Promise<
 	return names;
 }
 
+/** The extensions that defer a base tool, by source file, and how to load each. The MCP resource tools are announced once a server connects (tools/mcp), from the typed list that extension loops over. */
+const gemini = { provider: "google", api: "google-generative-ai", id: "gemini-test" };
+const LOADS: Record<string, [load: (pi: never) => void, model?: unknown]> = {
+	"extensions/tools/artifacts/index.ts": [artifactsExtension as never],
+	"extensions/tools/background/index.ts": [backgroundExtension as never],
+	"extensions/tools/lsp/index.ts": [lspExtension as never],
+	"extensions/tools/notebook/index.ts": [notebookExtension as never],
+	"extensions/safety/plan-mode/index.ts": [planModeExtension as never],
+	"extensions/agents/subagents/index.ts": [subagentsExtension as never],
+	"extensions/tools/tasks/index.ts": [tasksExtension as never],
+	"extensions/tools/web/index.ts": [webExtension as never, gemini],
+	"extensions/tools/web-fetch/index.ts": [webFetchExtension as never],
+	"extensions/safety/worktree/index.ts": [worktreeExtension as never],
+	"extensions/agents/subagents/fork-cache.ts": [forkCacheExtension({} as never) as never],
+	"extensions/lib/agents/subagent-handback.ts": [subagentHandbackExtension(oneTurnHandbackSlot(), { deferred: true }) as never],
+};
+const MCP_MODULE = "extensions/tools/mcp/index.ts";
+
 describe("DEFERRABLE_TOOLS", () => {
 	it("is what the base's extensions announce, so a renamed or undeferred tool is caught", async () => {
-		const gemini = { provider: "google", api: "google-generative-ai", id: "gemini-test" };
-		const loads: Array<[(pi: never) => void, unknown?]> = [
-			[artifactsExtension as never],
-			[backgroundExtension as never],
-			[lspExtension as never],
-			[notebookExtension as never],
-			[planModeExtension as never],
-			[subagentsExtension as never],
-			[tasksExtension as never],
-			[webExtension as never, gemini],
-			[webFetchExtension as never],
-			[worktreeExtension as never],
-			[forkCacheExtension({} as never) as never],
-			[subagentHandbackExtension(oneTurnHandbackSlot(), { deferred: true }) as never],
-		];
 		const announced = new Set<string>();
-		for (const [load, model] of loads) for (const name of await announcedBy(load, model)) announced.add(name);
-		// The MCP resource tools are announced once a server connects (tools/mcp), from the typed list the extension loops over.
+		for (const [load, model] of Object.values(LOADS)) for (const name of await announcedBy(load, model)) announced.add(name);
 		for (const name of MCP_RESOURCE_TOOLS) announced.add(name);
+		// deferBaseTool's name is typed, so what is announced is on the list; the list may hold no name nobody defers.
 		expect([...announced].sort()).toEqual([...DEFERRABLE_TOOLS].sort());
+	});
+
+	it("is announced by loading every module that defers a base tool", () => {
+		const deferring = sourceFiles(join(ROOT, "extensions"), ROOT).filter((file) => /\bdeferBaseTool\(/.test(readFileSync(join(ROOT, file), "utf8")) && !file.endsWith("deferred-channel.ts"));
+		expect(deferring.sort()).toEqual([...Object.keys(LOADS), MCP_MODULE].sort());
 	});
 
 	it("names each tool once", () => {

@@ -19,7 +19,7 @@
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
 import { desktopNotificationText } from "../../lib/notify/desktop.ts";
-import { openGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
@@ -56,7 +56,7 @@ import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../../lib/rules/settings-cha
 import { readSuggestNewerModels, SETTINGS_DISPLAY } from "../../lib/profile/product-settings.ts";
 import { auditPermissionAllow, autoModeSetupText, renderProposal, settingsPatch } from "./auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "./auto-mode/setup-run.ts";
-import { releaseSideCalls, sideCallKey } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCalls } from "../../lib/side-calls/side-call-run.ts";
 import { buildRuleset, defaultEnvironment } from "./auto-mode/classifier-prompt.ts";
 import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
@@ -1156,7 +1156,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Children screen through this session's key too (evaluateChildToolCall
 		// uses lastReviewCtx), so one release covers their calls.
 		releaseClassifierResources(ctx.sessionManager.getSessionId());
-		// The setup draft's key (any side-call kind's, harmlessly).
+		// Every side-call kind's key, whichever extension sent on it: this extension
+		// is required (lib/profile/features.ts), so it always runs to release them.
+		// It may run before an owner aborts its call, so btw, recap and the title
+		// release their own kind again after aborting (releaseSideCalls).
 		releaseSideCalls(ctx.sessionManager.getSessionId());
 	});
 
@@ -1278,20 +1281,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const permissionAttention = (toolName: string) => desktopNotificationText.permission(brand.name, ccToolName(toolName));
 
 	/**
-	 * Open one gate prompt now (`lib/consent/gate-prompt.ts`): skipped when
-	 * `signal` has aborted or `ctx` has no UI, its description (`attention`)
-	 * announced right before it opens. Call it from inside the prompt queue.
-	 */
-	const openPrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
-		openGatePrompt({ events: pi.events, attention, signal, hasUI: () => ctx.hasUI, open });
-
-	/**
 	 * A gate prompt in its turn in the prompt queue: one whose signal aborts
 	 * while it waits (a cancelled turn, a stopped child) is skipped when its turn
 	 * comes, so a dead caller's dialog never holds the queue.
 	 */
 	const gatePrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
-		serializePrompt(() => openPrompt(ctx, attention, signal, open), signal);
+		serializePrompt(() => bindGatePrompt(pi.events, ctx)(attention, signal, open), signal);
 
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
@@ -1364,7 +1359,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(productSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			const choice = await openPrompt(ctx, desktopNotificationText.outsideRead(brand.name), signal, () =>
+			const choice = await bindGatePrompt(pi.events, ctx)(desktopNotificationText.outsideRead(brand.name), signal, () =>
 				ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal }),
 			);
 			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
@@ -1643,7 +1638,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			home: os.homedir(),
 		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
-			openPrompt(ctx, permissionAttention(event.toolName), ctx.signal, () => ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout })),
+			bindGatePrompt(pi.events, ctx)(permissionAttention(event.toolName), ctx.signal, () => ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout })),
 		);
 		if (ctx.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
@@ -1825,12 +1820,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const title = askTitle(`${who} ${toolName}`, preview, result.cause, pausedResume);
 		// The child's turn signal dismisses the dialog (as a denial) when the child
 		// is stopped mid-prompt; a prompt whose child is already gone by the time
-		// its turn in the chain comes is skipped outright (openPrompt). Otherwise a
+		// its turn in the chain comes is skipped outright (bindGatePrompt). Otherwise a
 		// dead agent's dialog stays on screen and every later prompt waits behind
 		// it (M5).
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, call.signal), (text, timeout) =>
-			openPrompt(ctx, permissionAttention(toolName), call.signal, () => ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout })),
+			bindGatePrompt(pi.events, ctx)(permissionAttention(toolName), call.signal, () => ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout })),
 		);
 		if (call.signal?.aborted) return { block: true, reason: refusalText({ kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
@@ -2419,7 +2414,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			draft = await draftSetup(facts, {
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
-				cacheKey: sideCallKey(ctx.sessionManager.getSessionId(), "setup"),
+				sessionId: ctx.sessionManager.getSessionId(),
 				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
 				defaultEnvironment: defaultEnvironment(),
 				signal: ctx.signal,

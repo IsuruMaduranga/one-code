@@ -21,7 +21,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
 import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
-import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
 import { toolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
@@ -121,7 +121,7 @@ function tasksExtension(pi: ExtensionAPI) {
 		withheld = !enabled;
 		for (const name of TASK_TOOLS) {
 			if (withheld) pi.events.emit(WITHHOLD_CHANNEL, { name });
-			else pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
+			else deferBaseTool(pi.events, name, text.searchKeywords);
 		}
 	};
 
@@ -249,7 +249,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	});
 
 	for (const name of TASK_TOOLS) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords: text.searchKeywords });
+		deferBaseTool(pi.events, name, text.searchKeywords);
 	}
 
 	// `/tasks` is Claude Code's Background dialog (the subagents extension, findings

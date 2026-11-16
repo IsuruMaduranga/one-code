@@ -22,13 +22,13 @@
 import { feature } from "../../lib/profile/feature.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { desktopNotificationText } from "../../lib/notify/desktop.ts";
-import { openGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
@@ -388,8 +388,9 @@ function planModeExtension(pi: ExtensionAPI) {
 			let selected: PlanChoice = initialPlanChoice(options);
 			// Through the gate-prompt helper: an aborted turn skips the dialog (a
 			// rejection), and the approval is described just before it opens.
+			const gatePrompt = bindGatePrompt(pi.events, ctx);
 			const showDialog = async (): Promise<PlanChoice | null> =>
-				(await openGatePrompt({ events: pi.events, attention: desktopNotificationText.planApproval(brand.name), signal, hasUI: () => ctx.hasUI, open: openDialog })) ?? null;
+				(await gatePrompt(desktopNotificationText.planApproval(brand.name), signal, openDialog)) ?? null;
 			const openDialog = (): Promise<PlanChoice | null> => !canShowCustomUi(ctx) ? selectPlanChoice(ctx.ui, plan, path, choices, signal) : panelUi(pi.events, ctx.ui, PAGING_PANEL).custom<PlanChoice | null>((tui, theme, _keybindings, close) => {
 				// An aborted turn closes the dialog as a cancel; a choice or a cancel
 				// drops the abort listener. Either way the dialog settles once.
@@ -451,7 +452,7 @@ function planModeExtension(pi: ExtensionAPI) {
 			const decision = await runPlanApproval(
 				options,
 				showDialog,
-				() => openGatePrompt({ events: pi.events, attention: undefined, signal, hasUI: () => ctx.hasUI, open: () => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal }) }),
+				() => gatePrompt(undefined, signal, () => ctx.ui.input(KEEP_PLANNING_QUESTION, undefined, { signal })),
 				signal,
 			);
 
@@ -491,14 +492,8 @@ function planModeExtension(pi: ExtensionAPI) {
 	// to instruction-eager third-party models, which then entered plan mode for
 	// trivial tasks. User-initiated plan mode (mode cycling, defaultMode) is
 	// unaffected — that flows over MODE_CHANNEL, not through these tools.
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "enter_plan_mode",
-		keywords: ["plan", "planning", "design", "approach", "architecture", "investigate", "read-only"],
-	});
-	pi.events.emit(DEFER_CHANNEL, {
-		name: "exit_plan_mode",
-		keywords: ["plan", "approve", "approval", "present", "finish planning"],
-	});
+	deferBaseTool(pi.events, "enter_plan_mode", ["plan", "planning", "design", "approach", "architecture", "investigate", "read-only"]);
+	deferBaseTool(pi.events, "exit_plan_mode", ["plan", "approve", "approval", "present", "finish planning"]);
 }
 
 export default feature("plan-mode", planModeExtension);

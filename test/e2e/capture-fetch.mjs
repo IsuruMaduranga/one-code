@@ -1,9 +1,11 @@
 /**
  * Node preload that records every request made through `globalThis.fetch`:
  * host, path, status and the request body, one JSON line each, to the file
- * named by FETCH_CAPTURE. It sees what dump-requests.ts cannot, the side calls
- * (classifier, reader, recap, title, catalog and update fetches), because it
- * hooks fetch for the whole process instead of one extension's view of it.
+ * named by FETCH_CAPTURE. dump-requests.ts records model requests only (side
+ * calls included: WIRE_DUMP_META marks them `session:false`), as bodies alone;
+ * this preload also records the fetches that are not model calls (catalog and
+ * update checks, web fetches), with each call's status, host and path, and
+ * needs no extension: it loads in every Node process of the run.
  *
  *   FETCH_CAPTURE=/tmp/fetch.jsonl node --import ./test/e2e/capture-fetch.mjs <script>
  *   FETCH_CAPTURE=/tmp/fetch.jsonl NODE_OPTIONS="--import $PWD/test/e2e/capture-fetch.mjs" pi -p "..."
@@ -13,7 +15,8 @@
  * run starts, and each appends to the same file. Each line is
  * `{ts, pid, method, host, path, status, bytes, body}`. `path` has no query
  * string (some APIs carry a key there). `status` is the response status, or
- * "error" when the call threw. `body` is the parsed JSON, the text for a
+ * "error" when the call threw. `bytes` is the size of the body's text as sent
+ * (decoded, for a zstd body). `body` is the parsed JSON, the text for a
  * non-JSON string, null when the call had no body, and `{"unreadable": kind}`
  * for a body that cannot be read without consuming it (a stream). A zstd body
  * (pi-ai compresses OpenAI Codex requests) is decoded for the record only.
@@ -34,10 +37,14 @@ import { zstdDecompressSync } from "node:zlib";
 const OUT = process.env.FETCH_CAPTURE;
 const MARK = Symbol.for("one-code.capture-fetch");
 
-/** The part of a request's body worth recording, as parsed JSON, text, null or an `unreadable` note. */
+/**
+ * The part of a request's body worth recording, as `{ body, text }`: `body` is
+ * the parsed JSON, the text, null or an `unreadable` note; `text` the body's
+ * text as sent, when it could be read.
+ */
 function readBody(input, init) {
 	const raw = init?.body;
-	if (raw === undefined || raw === null) return typeof input === "object" && input && "body" in input && input.body ? { unreadable: "request-object" } : null;
+	if (raw === undefined || raw === null) return { body: typeof input === "object" && input && "body" in input && input.body ? { unreadable: "request-object" } : null };
 	let text;
 	if (typeof raw === "string") text = raw;
 	else if (raw instanceof URLSearchParams) text = raw.toString();
@@ -47,22 +54,28 @@ function readBody(input, init) {
 		try {
 			text = Buffer.from(encoding === "zstd" ? zstdDecompressSync(bytes) : bytes).toString("utf8");
 		} catch {
-			return { unreadable: "binary" };
+			return { body: { unreadable: "binary" } };
 		}
-	} else return { unreadable: raw?.constructor?.name ?? typeof raw };
+	} else return { body: { unreadable: raw?.constructor?.name ?? typeof raw } };
 	try {
-		return JSON.parse(text);
+		return { body: JSON.parse(text), text };
 	} catch {
-		return text;
+		return { body: text, text };
 	}
 }
 
+/** The base a relative target parses against, so its query, fragment and userinfo drop out as an absolute one's do. */
+const RELATIVE = "http://relative.invalid";
+
 function target(input) {
+	// A Request carries `url`; anything else fetch accepts is stringified, as fetch does.
+	const href = typeof input === "string" ? input : (input?.url ?? String(input));
+	// A relative URL makes the call itself fail; whatever still does not parse is never written raw.
 	try {
-		const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
-		return { host: url.host, path: url.pathname };
+		const url = new URL(href, RELATIVE);
+		return { host: url.origin === RELATIVE ? "" : url.host, path: url.pathname };
 	} catch {
-		return { host: "", path: String(input) };
+		return { host: "", path: "(unparseable)" };
 	}
 }
 
@@ -77,8 +90,9 @@ function wrap(fn) {
 		let body = null;
 		let bytes = 0;
 		try {
-			body = readBody(input, init);
-			bytes = body === null ? 0 : Buffer.byteLength(typeof body === "string" ? body : JSON.stringify(body));
+			const read = readBody(input, init);
+			body = read.body;
+			bytes = read.text === undefined ? 0 : Buffer.byteLength(read.text);
 		} catch {
 			body = { unreadable: "error" };
 		}

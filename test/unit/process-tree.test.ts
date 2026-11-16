@@ -12,12 +12,12 @@
  * is what every task and hook waits on (findings §22, 2026-09-19 addendum).
  */
 import { execFile, spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, KILL_GRACE_MS, killProcessTree, rememberedGroupAlive, spawnOwnedTree, waitForChildExit } from "../../extensions/lib/shell-run/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-run/shell-spawn.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, startOwner, until } from "./helpers/process-alive.ts";
 
 const win32 = process.platform === "win32";
 
@@ -28,6 +28,11 @@ const shell = win32 ? bash.shell : process.env.SHELL || bash.shell;
 
 function spawnShell(command: string) {
 	return spawn(shell, ["-c", command], { ...detachedSpawnOptions(), stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+}
+
+/** `command` under the shell as an owned tree. */
+function ownedShell(command: string, options?: Parameters<typeof spawnOwnedTree>[1]) {
+	return spawnOwnedTree((detached) => spawn(shell, ["-c", command], { ...detached, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }), options);
 }
 
 /** Resolves with the wall time to `close`, or rejects after `limitMs`. */
@@ -162,19 +167,9 @@ describe("killProcessTree", () => {
 	});
 });
 
-describe("stopProcessTree", () => {
+describe("an owned tree's stop", () => {
 	// Windows has no SIGTERM to ignore: taskkill /F is the first and only signal,
 	// so the grace period does not exist there (lib/shell-run/process-tree.ts).
-	it.skipIf(win32)("SIGKILLs after the grace period when the tree ignores SIGTERM", async () => {
-		// The shell ignores TERM and the disposition is inherited by sleep.
-		const child = spawnShell("trap '' TERM; sleep 30");
-		await new Promise((r) => setTimeout(r, 150));
-		const closed = closeWithin(child, 4000);
-		stopProcessTree(child, 300);
-		const elapsed = await closed;
-		expect(elapsed).toBeGreaterThanOrEqual(250);
-		expect(elapsed).toBeLessThan(4000);
-	});
 
 	/** Whether any process is left in the group `pgid`. */
 	const groupAlive = (pgid: number) => {
@@ -196,23 +191,29 @@ describe("stopProcessTree", () => {
 		// A pid no system hands out, so the group kill fails with ESRCH and falls
 		// back to each fake child's own kill(): nothing real is signalled.
 		const pid = 2_147_483_000;
-		const fake = () => ({ pid, kill: vi.fn() }) as unknown as ReturnType<typeof spawn>;
-		const first = fake();
-		const second = fake();
-		stopProcessTree(first, 30);
-		stopProcessTree(second, 30);
+		const fake = () => Object.assign(new EventEmitter(), { pid, kill: vi.fn(), exitCode: null as number | null, signalCode: null }) as unknown as ReturnType<typeof spawn>;
+		const first = spawnOwnedTree(fake);
+		const second = spawnOwnedTree(fake);
+		first.stop(30);
+		second.stop(30);
 		await new Promise((r) => setTimeout(r, 120));
-		expect(first.kill).toHaveBeenCalledWith("SIGKILL");
-		expect(second.kill).toHaveBeenCalledWith("SIGKILL");
+		expect(first.child.kill).toHaveBeenCalledWith("SIGKILL");
+		expect(second.child.kill).toHaveBeenCalledWith("SIGKILL");
+		// Let the fakes "exit", so they are forgotten.
+		for (const { child } of [first, second]) {
+			(child as { exitCode: number | null }).exitCode = 0;
+			child.emit("exit", 0, null);
+		}
 	});
 
 	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
-		const child = spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detachedSpawnOptions(), stdio: "ignore" });
+		const tree = spawnOwnedTree((detached) => spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detached, stdio: "ignore" }));
+		const child = tree.child;
 		const pgid = child.pid!;
 		try {
 			await new Promise((r) => setTimeout(r, 200)); // let the member start and set its trap
 			const exited = new Promise((r) => child.once("exit", r));
-			stopProcessTree(child, 300);
+			tree.stop(300);
 			await exited; // the leader goes at once
 			expect(await waitUntilGone(pgid, 3000)).toBe(true);
 		} finally {
@@ -224,17 +225,17 @@ describe("stopProcessTree", () => {
 		}
 	});
 
-	it.skipIf(win32)("force-kills a stopped tree at process exit, before its grace timer could fire (A3-M1, the quit path)", async () => {
+	it.skipIf(win32)("ends a stopped tree after the exit watchdog's grace when the process exits before its grace timer could fire (A3-M1, the quit path)", async () => {
 		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
 		// later, as pi's quit does (dispose, then process.exit).
 		const moduleUrl = new URL(`file://${resolve("extensions/lib/shell-run/process-tree.ts")}`).href;
 		const script = [
 			`import { spawn } from "node:child_process";`,
-			`import { detachedSpawnOptions, stopProcessTree } from ${JSON.stringify(moduleUrl)};`,
-			`const child = spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detachedSpawnOptions(), stdio: "ignore" });`,
-			`child.unref();`,
-			`process.stdout.write(String(child.pid));`,
-			`setTimeout(() => { stopProcessTree(child, 2000); setTimeout(() => process.exit(0), 50); }, 200);`,
+			`import { spawnOwnedTree } from ${JSON.stringify(moduleUrl)};`,
+			`const tree = spawnOwnedTree((detached) => spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detached, stdio: "ignore" }));`,
+			`tree.child.unref();`,
+			`process.stdout.write(String(tree.child.pid));`,
+			`setTimeout(() => { tree.stop(2000); setTimeout(() => process.exit(0), 50); }, 200);`,
 		].join("\n");
 		const stdout = await new Promise<string>((done, fail) =>
 			execFile(process.execPath, ["--input-type=module", "-e", script], (error, out) => (error ? fail(error) : done(out))),
@@ -242,8 +243,9 @@ describe("stopProcessTree", () => {
 		const pgid = Number(stdout.trim());
 		expect(pgid).toBeGreaterThan(0);
 		try {
-			// Well inside the 2 s grace: only the exit hook can have killed it.
-			expect(await waitUntilGone(pgid, 1000)).toBe(true);
+			// The stop's timer died with the process; the exit watchdog SIGKILLs the
+			// member that outlasts the grace (process-group-exit.test.ts checks the grace).
+			expect(await waitUntilGone(pgid, KILL_GRACE_MS + 2000)).toBe(true);
 		} finally {
 			try {
 				process.kill(-pgid, "SIGKILL");
@@ -254,10 +256,10 @@ describe("stopProcessTree", () => {
 	});
 
 	it("ends the tree at once where there is no gentler signal to grace (Windows)", async () => {
-		const child = spawnShell("sleep 30");
+		const tree = ownedShell("sleep 30");
 		await new Promise((r) => setTimeout(r, 150));
-		const settled = settledWithin(child, 4000);
-		stopProcessTree(child, 300);
+		const settled = settledWithin(tree.child, 4000);
+		tree.stop(300);
 		expect(await settled).toBeLessThan(4000);
 	});
 });
@@ -270,7 +272,7 @@ describe("spawnOwnedTree", () => {
 
 	/** Start `command` as an owned tree; resolves once the leader has printed its first line. */
 	const startTree = async (command: string, options?: Parameters<typeof spawnOwnedTree>[1]) => {
-		const tree = spawnOwnedTree((detached) => spawn(shell, ["-c", command], { ...detached, stdio: ["ignore", "pipe", "pipe"], windowsHide: true }), options);
+		const tree = ownedShell(command, options);
 		let out = "";
 		tree.child.stdout?.on("data", (chunk) => (out += chunk));
 		while (!out.includes("\n")) await new Promise((r) => setTimeout(r, 5));
@@ -332,6 +334,9 @@ describe("spawnOwnedTree", () => {
 
 	it("kill ends the whole tree at once", async () => {
 		const { tree } = await startTree("echo ready; sleep 30 | cat");
+		// Let the shell fork the pipeline: a member still being forked when the group
+		// signal goes out is missed, and holds the pipe open for its 30 s.
+		await new Promise((r) => setTimeout(r, 100));
 		const settled = settledWithin(tree.child, 3000);
 		tree.kill("SIGKILL");
 		expect(await settled).toBeLessThan(3000);
@@ -360,4 +365,50 @@ describe("rememberedGroupAlive", () => {
 			expect(rememberedGroupAlive(child(null, null))).toBe(true);
 		});
 	});
+});
+
+// On Windows a tree is ended by `taskkill /T` from the exit hook. Started async as the
+// process left, it ended the launcher but not the server under it, on every exit and crash
+// (16 of 16 runs on the Windows runner); the hook now waits for it.
+describe.runIf(win32)("an owned tree on Windows when its owner leaves without stopping it", () => {
+	it.each([
+		["exits", "process.exit(0);"],
+		["crashes", 'setTimeout(() => { throw new Error("crash"); }, 0);'],
+	])("is ended when the owner %s", async (_, leave) => {
+		const { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } = await import("node:fs");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { createRequire } = await import("node:module");
+		const dir = mkdtempSync(join(tmpdir(), "owned-tree-exit-"));
+		const pidFile = join(dir, "server.pid");
+		const jitiPath = createRequire(resolve("node_modules/@earendil-works/pi-coding-agent/dist/index.js")).resolve("jiti");
+		const serverFile = join(dir, "server.cjs");
+		writeFileSync(serverFile, `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`);
+		// The launcher is cmd.exe waiting on a node server, the shape of a .cmd-shimmed language server.
+		const line = `""${process.execPath}" "${serverFile}""`;
+		const script = [
+			`import { createRequire } from "node:module";`,
+			`import { spawn } from "node:child_process";`,
+			`const { createJiti } = createRequire(import.meta.url)(${JSON.stringify(jitiPath)});`,
+			`const { spawnOwnedTree } = await createJiti(import.meta.url).import(${JSON.stringify(resolve("extensions/lib/shell-run/process-tree.ts"))});`,
+			`spawnOwnedTree((d) => spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", ${JSON.stringify(line)}], { ...d, stdio: "ignore", windowsHide: true, windowsVerbatimArguments: true }));`,
+			`setInterval(() => {}, 1000);`,
+			`process.stdout.write("ready\\n");`,
+			`process.stdin.once("data", () => { ${leave} });`,
+		].join("\n");
+		const run = await startOwner(script);
+		let pid: number | undefined;
+		try {
+			expect(await until(() => existsSync(pidFile), 200)).toBe(true);
+			pid = Number(readFileSync(pidFile, "utf8"));
+			expect(alive(pid)).toBe(true);
+			run.owner.stdin.write("go\n");
+			await run.exited;
+			expect(await until(() => !alive(pid!), 100)).toBe(true);
+		} finally {
+			run.kill();
+			if (pid && alive(pid)) process.kill(pid);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });

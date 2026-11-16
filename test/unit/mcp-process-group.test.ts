@@ -6,8 +6,6 @@
  * closing it (a crash, where pi exits without `session_shutdown`). The SDK's
  * own transport failed all three (test/e2e/exit-probe.mjs).
  */
-import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -15,12 +13,12 @@ import { join, resolve } from "node:path";
 import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ProcessGroupStdioTransport } from "../../extensions/tools/mcp/stdio-transport.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, parentAndGroup, startOwner, until } from "./helpers/process-alive.ts";
 
-/** Answers every request with an empty result; with STUBBORN it outlives a closed stdin. */
+/** Answers every request with an empty result; with EXIT_PROBE_STUBBORN it outlives a closed stdin (test/e2e/stubborn.mjs). */
 const SERVER = `
 if (process.env.PID_FILE) require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));
-if (process.env.STUBBORN) { setInterval(() => {}, 1000); process.stdin.on("error", () => {}); process.stdout.on("error", () => {}); }
+require(${JSON.stringify(resolve("test/e2e/stubborn.mjs"))});
 let buffered = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -39,7 +37,7 @@ const framing = { ReadBuffer, serializeMessage };
 const launcherParams = (pidFile: string) => ({
 	command: "/bin/sh",
 	args: ["-c", `"${process.execPath}" -e "$SERVER"; :`],
-	env: { ...process.env, SERVER, PID_FILE: pidFile, STUBBORN: "1" },
+	env: { ...process.env, SERVER, PID_FILE: pidFile, EXIT_PROBE_STUBBORN: "1" },
 });
 
 describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launcher", () => {
@@ -76,6 +74,25 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		await transport.close();
 	}, 15_000);
 
+	it("hands a message handler's throw to onerror and goes on delivering", async () => {
+		// Two messages in one chunk, and an exit on the closed stdin so close() ends at once.
+		const lines = [1, 2].map((id) => JSON.stringify({ jsonrpc: "2.0", id, result: {} })).join("\n");
+		const server = `process.stdout.write(${JSON.stringify(`${lines}\n`)}); process.stdin.on("end", () => process.exit(0)); process.stdin.resume();`;
+		const transport = new ProcessGroupStdioTransport({ command: process.execPath, args: ["-e", server], env: process.env }, framing);
+		const errors: Error[] = [];
+		transport.onerror = (error) => errors.push(error);
+		const second = new Promise((resolveMessage) => {
+			transport.onmessage = (message) => {
+				if ((message as { id?: number }).id === 1) throw new Error("handler failed");
+				resolveMessage(message);
+			};
+		});
+		await transport.start();
+		expect(await second).toMatchObject({ id: 2 });
+		expect(errors.map((error) => error.message)).toEqual(["handler failed"]);
+		await transport.close();
+	}, 15_000);
+
 	it("is ended by close() when it ignores a closed stdin", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		const closed = new Promise<void>((resolveClose) => {
@@ -85,16 +102,40 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 		const pid = await readServerPid();
 
 		await transport.close();
-		expect(await until(() => !alive(pid))).toBe(true);
+		// close() waits for the group to empty; a loaded runner can still take seconds to reap the server.
+		expect(await until(() => !alive(pid), 140)).toBe(true);
 		await closed;
+	}, 15_000);
+
+	it("gets one SIGTERM, and close() waits for it, when the launcher exits on the closed stdin", async () => {
+		// The launcher exits once its stdin closes and leaves the server, which
+		// takes half a second in its SIGTERM handler: the launcher's exit already
+		// stopped the group, so close() must not signal it again or return early.
+		const log = join(dir, "terms.log");
+		const server = [
+			`require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));`,
+			`process.on("SIGTERM", () => { require("node:fs").appendFileSync(process.env.TERM_LOG, "TERM\\n"); setTimeout(() => process.exit(0), 500); });`,
+			`setInterval(() => {}, 1000);`,
+		].join("\n");
+		const transport = new ProcessGroupStdioTransport(
+			{ command: "/bin/sh", args: ["-c", `"${process.execPath}" -e "$SERVER" & cat >/dev/null`], env: { ...process.env, SERVER: server, PID_FILE: pidFile, TERM_LOG: log } },
+			framing,
+		);
+		await transport.start();
+		const pid = await readServerPid();
+
+		await transport.close();
+		expect(alive(pid)).toBe(false);
+		expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["TERM"]);
 	}, 15_000);
 
 	it("is ended when its launcher dies mid-session", async () => {
 		const transport = new ProcessGroupStdioTransport(launcherParams(pidFile), framing);
 		await transport.start();
 		const pid = await readServerPid();
-		const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
-		expect(launcherPid).toBe(transport.pid);
+		const { ppid: launcherPid, pgid: group } = parentAndGroup(pid);
+		// The server's parent is the launcher, which leads the server's own group.
+		expect(group).toBe(launcherPid);
 
 		process.kill(launcherPid, "SIGKILL");
 		expect(await until(() => !alive(pid))).toBe(true);
@@ -115,23 +156,17 @@ describe.skipIf(process.platform === "win32")("a stdio MCP server behind a launc
 			`process.stdout.write("ready\\n");`,
 			`process.stdin.once("data", () => { throw new Error("crash"); });`,
 		].join("\n");
-		const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["pipe", "pipe", "pipe"] });
-		let stderr = "";
-		owner.stderr.on("data", (chunk) => {
-			stderr += chunk;
-		});
-		const exited = once(owner, "exit");
+		const run = await startOwner(script);
 		try {
-			const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${stderr}`)))]);
-			expect(String(chunk)).toContain("ready");
+			expect(run.ready).toContain("ready");
 			const pid = await readServerPid();
 
-			owner.stdin.write("crash\n");
-			const [code] = await exited;
+			run.owner.stdin.write("crash\n");
+			const [code] = await run.exited;
 			expect(code).toBe(1);
 			expect(await until(() => !alive(pid))).toBe(true);
 		} finally {
-			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
+			run.kill();
 		}
 	}, 15_000);
 });

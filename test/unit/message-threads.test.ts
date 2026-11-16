@@ -91,7 +91,9 @@ describe("side calls", () => {
 	});
 
 	it("the side calls reach pi through completeThreadless", () => {
+		// Its definition, runSideCall (btw, recap, the reader, the title, the setup
+		// draft), the replay, compaction and the classifier.
 		const callers = sourceFiles(join(repo, "extensions")).filter((file) => /\bcompleteThreadless\(/.test(readFileSync(file, "utf8")));
-		expect(callers.length).toBeGreaterThanOrEqual(6);
+		expect(callers.length).toBeGreaterThanOrEqual(5);
 	});
 });

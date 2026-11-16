@@ -70,4 +70,5 @@ for (const file of files) {
 		);
 	}
 }
-process.exit(failed);
+// Not process.exit: output still queued for a pipe its reader has not drained would be lost.
+process.exitCode = failed;

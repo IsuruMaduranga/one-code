@@ -14,9 +14,9 @@ import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import planModeExtension from "../../extensions/safety/plan-mode/index.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { userDenialText } from "../../extensions/lib/consent/user-denial.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, recordPromptDescriptions } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
-import { desktopNotificationText, PROMPT_ATTENTION_CHANNEL } from "../../extensions/lib/notify/desktop.ts";
+import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 import { planModeResultText } from "../../extensions/safety/plan-mode/text.ts";
 
 const planMode = requireText("planMode");
@@ -383,8 +383,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 
 	// Described, so the desktop notifier names it, and only when it opens.
 	it("describes the approval to the desktop notifier just before it opens", async () => {
-		const events: string[] = [];
-		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const events = recordPromptDescriptions(fake.events);
 		const confirm = confirmPreselected([]);
 		const custom = vi.fn(async (factory: ViewerFactory) => {
 			events.push("opened");
@@ -398,8 +397,7 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 	});
 
 	it("a turn already aborted neither describes nor opens the approval, and rejects the plan", async () => {
-		const events: string[] = [];
-		fake.events.on(PROMPT_ATTENTION_CHANNEL, (data) => events.push(`described: ${(data as { message: string }).message}`));
+		const events = recordPromptDescriptions(fake.events);
 		const custom = vi.fn(async () => 0);
 		const controller = new AbortController();
 		const ctx = createFakeCtx({ cwd: stateDir, sessionManager: { getBranch: () => fake.branch }, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });

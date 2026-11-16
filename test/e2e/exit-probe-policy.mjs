@@ -61,8 +61,8 @@ export function expectation(spawner, ending, platform = process.platform) {
 	if (spawner === "unknown") return { verdict: "gone", reason: "a tagged process no fixture names: something One Code started" };
 	if (spawner === "hook") {
 		return {
-			verdict: "open",
-			reason: "a hook's leftovers are neither remembered nor ended once the hook exits (safety/hooks/executor.ts); no decision covers them",
+			verdict: "may survive",
+			reason: "a hook may start a long-lived process on purpose (a SessionStart dev server), as Claude Code allows; only a timeout, abort or output overflow ends its group (safety/hooks/executor.ts, decisions/hooks.md)",
 		};
 	}
 	if (DAEMONS.has(spawner) && platform === "win32") {
@@ -105,10 +105,11 @@ export function parsePs(output, tag) {
 
 /**
  * A cell where pi keeps running and nothing may be ended: `before` the old
- * session's processes of this spawner, `after` those still alive.
+ * session's processes of this spawner, `after` those still alive. A spawner
+ * seen earlier but with nothing alive at the signal was not exercised.
  */
 export function keptOutcome({ seen, before, after }) {
-	if (!seen) return { status: "NOT STARTED", fails: true };
+	if (!seen || before.length === 0) return { status: "NOT STARTED", fails: true };
 	const ended = before.filter((p) => !after.some((q) => q.pid === p.pid));
 	return ended.length > 0 ? { status: "ENDED (pi lives)", fails: true, ended } : { status: "kept", fails: false };
 }

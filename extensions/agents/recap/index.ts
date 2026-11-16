@@ -37,7 +37,7 @@ import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
-import { releaseSideCalls, runSideCall } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { unrefTimers } from "../../lib/core/timer-ops.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
@@ -92,8 +92,6 @@ function recapExtension(pi: ExtensionAPI) {
 	async function standaloneRecap(ctx: ExtensionContext, model: Model<Api>, messages: AgentMessage[], signal: AbortSignal): Promise<string> {
 		const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
 		if (!choice) return "";
-		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-		if (!auth.ok) return "";
 		// Name-only stubs of the active tools, so a history carrying tool_use
 		// blocks stays valid on strict providers (see the header note) without
 		// shipping every full schema (~6k tokens) to a call that must answer
@@ -199,10 +197,11 @@ function recapExtension(pi: ExtensionAPI) {
 		scheduler.turnEnded();
 	});
 
+	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).
 	pi.on("session_shutdown", (_event, ctx) => {
 		scheduler.reset();
 		abortInFlight();
-		releaseSideCalls(ctx.sessionManager.getSessionId());
+		releaseSideCall(ctx.sessionManager.getSessionId(), "recap");
 	});
 }
 

@@ -5,9 +5,10 @@ import {
 	anthropicBetas,
 	clearThinkingApplies,
 	clearThinkingEnabled,
-	looksLikeAnthropicRequest,
+	sessionRequestHeaders,
 	withClearThinking,
-} from "../../extensions/request/context-management/index.ts";
+} from "../../extensions/lib/request/context-management.ts";
+import { looksLikeAnthropicRequest } from "../../extensions/lib/request/anthropic-payload.ts";
 
 describe("clearThinkingEnabled", () => {
 	const firstParty = { api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com" };
@@ -126,5 +127,17 @@ describe("looksLikeAnthropicRequest", () => {
 	it("matches a messages+claude payload and rejects OpenAI input shape", () => {
 		expect(looksLikeAnthropicRequest({ model: "claude-haiku-4-5", messages: [] })).toBe(true);
 		expect(looksLikeAnthropicRequest({ model: "gpt-5.5", input: [], messages: [] })).toBe(false);
+	});
+});
+
+describe("sessionRequestHeaders", () => {
+	it("gives a side call on first-party Anthropic the session's beta header, context management included", () => {
+		const headers = sessionRequestHeaders({ api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com" });
+		expect(headers?.["anthropic-beta"]).toContain("context-management-2025-06-27");
+	});
+
+	it("adds nothing where clear_thinking is off", () => {
+		expect(sessionRequestHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1" })).toBeUndefined();
+		expect(sessionRequestHeaders(undefined)).toBeUndefined();
 	});
 });

@@ -61,7 +61,7 @@ import { scanSkills } from "../../lib/plugins/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../../lib/plugins/mcp-status.ts";
 
-import { DEFER_CHANNEL, queryDeferred } from "../../lib/request/deferred.ts";
+import { deferBaseTool, queryDeferred } from "../../lib/request/deferred.ts";
 import { requestSystemPrompt } from "../../lib/ui/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../../lib/side-calls/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../../lib/side-calls/btw-fork.ts";
@@ -281,6 +281,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const words = subagentWords();
 	/** A refused Agent call (the nested Agent tool's too). */
 	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: subagentResultText().refused(r) }], details: {}, isError: true });
+	/**
+	 * A launch that started nothing: `refusal` normally, but in an ending session
+	 * a retry cannot help, whichever step failed, so `lines` (what to show) say so.
+	 */
+	const refuseLaunch = (lines: string[], refusal: SubagentRefusal) => refuseCall(shuttingDown ? { kind: "sessionEnding", lines } : refusal);
 	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
@@ -1832,7 +1837,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
-	): Promise<{ launched: boolean; line: string; logPath?: string; sessionEnded?: boolean }> => {
+	): Promise<{ launched: boolean; line: string; logPath?: string }> => {
 		// A run that did not launch is forgotten here, on every failure path, so
 		// neither list_agents nor SendMessage ever offers it, and no call stays
 		// mapped to it.
@@ -1841,7 +1846,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			mainCallFor.delete(p.record.taskId);
 			return { launched: false, line };
 		};
-		const ended = () => ({ ...failed(launchLine({ kind: "sessionEnded", name: p.record.name })), sessionEnded: true });
+		const ended = () => failed(launchLine({ kind: "sessionEnded", name: p.record.name }));
 		if (shuttingDown) return ended();
 		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
 		// Captured as a string: onExit runs from a `.finally` long after this
@@ -2389,22 +2394,19 @@ function subagentsExtension(pi: ExtensionAPI) {
 			if (typeof runtime === "string") {
 				// Nothing launched.
 				forgetRuns(prepared);
-				return refuseCall({ kind: "couldNotStart", problem: runtime });
+				return refuseLaunch([...lines, runtime], { kind: "couldNotStart", problem: runtime });
 			}
 			let outputFile = false;
 			const launchedRecords: AgentRunRecord[] = [];
-			let sessionEnded = true;
 			for (const p of prepared) {
-				const launch = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
-				lines.push(launch.line);
-				if (launch.launched) launchedRecords.push(p.record);
-				if (!launch.sessionEnded) sessionEnded = false;
-				if (launch.logPath) outputFile = true;
+				const { launched, line, logPath } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
+				lines.push(line);
+				if (launched) launchedRecords.push(p.record);
+				if (logPath) outputFile = true;
 			}
 			// Nothing runs, so no notification will come: fail the call rather
 			// than tell the model to wait (launchResident already forgot the runs).
-			// When the session is ending every run says so, and a retry cannot help.
-			if (launchedRecords.length === 0) return refuseCall({ kind: "noneLaunched", lines, sessionEnded });
+			if (launchedRecords.length === 0) return refuseLaunch(lines, { kind: "noneLaunched", lines });
 			return {
 				content: [
 					{
@@ -2919,7 +2921,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		description: "List background tasks: shells, running agents, and the agents you viewed",
 		handler: async (_args, ctx) => openTasksDialog(ctx as ExtensionContext),
 	});
-	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
+	deferBaseTool(pi.events, "SendMessage", ["message", "agent", "resume", "continue", "teammate"]);
 
 	// Same precedence as SendMessage's own dispatch (a live resident is reachable
 	// even while a blocking run of the same name is in flight): resident-live

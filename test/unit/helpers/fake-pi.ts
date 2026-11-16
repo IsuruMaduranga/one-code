@@ -14,6 +14,7 @@ import { createEventBus, type EventBus } from "@earendil-works/pi-coding-agent";
 import { vi } from "vitest";
 import { toldOf } from "../../../extensions/lib/request/ledger/fold.ts";
 import type { ToldFact } from "../../../extensions/lib/request/ledger/records.ts";
+import { PROMPT_ATTENTION_CHANNEL, type PromptAttention } from "../../../extensions/lib/notify/desktop.ts";
 import { RENDER_CHANNEL, type RenderedBlock, type RenderRequest } from "../../../extensions/lib/request/reminders.ts";
 
 export type FakeHandler = (event: unknown, ctx: unknown) => unknown;
@@ -70,6 +71,16 @@ export interface FakePi {
 	fire<R = unknown>(event: string, payload: unknown, ctx?: unknown): Promise<R[]>;
 	/** Run every handler for `event` and return the first non-undefined result. */
 	fireOne<R = unknown>(event: string, payload: unknown, ctx?: unknown): Promise<R | undefined>;
+}
+
+/**
+ * Record what each gate prompt is described as on the bus, as `described: <message>`.
+ * The returned log is live: a test pushes `opened` into it to check the order.
+ */
+export function recordPromptDescriptions(events: EventBus): string[] {
+	const log: string[] = [];
+	events.on(PROMPT_ATTENTION_CHANNEL, (data) => log.push(`described: ${(data as PromptAttention).message}`));
+	return log;
 }
 
 export function createFakePi(): FakePi {

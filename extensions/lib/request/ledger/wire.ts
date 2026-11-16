@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { type RequestIdentity, type RequestRecordData, sameIdentity } from "./records.ts";
 import { isPlainObject } from "../../core/plain-object.ts";
+import { isCachePoint } from "../../side-calls/side-call-cache.ts";
 
 /** A provider request body as pi-ai built it. */
 export type WirePayload = Record<string, unknown>;
@@ -31,9 +32,6 @@ export function listKey(api: string): "messages" | "input" | "contents" {
 	if (api.startsWith("google-")) return "contents";
 	return "messages";
 }
-
-/** A Bedrock Converse `{ cachePoint }` block: a marker that is a whole list element. */
-const isCachePoint = (value: unknown): boolean => isPlainObject(value) && Object.keys(value).length === 1 && "cachePoint" in value;
 
 /**
  * Fields that hold the model's or a tool author's data, never a cache marker:

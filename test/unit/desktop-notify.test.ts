@@ -53,7 +53,7 @@ describe("AttentionNotifier: a prompt that waits", () => {
 	it("notifies once, after 6 s with no keypress, with the message the prompt's owner gave", () => {
 		const h = harness();
 		h.notifier.turnStarted();
-		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", {});
 		h.notifier.promptOpened();
 		h.advance(INTERACTION_THRESHOLD_MS - 1);
 		expect(h.sent).toEqual([]);
@@ -98,7 +98,7 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		h.notifier.turnStarted();
 		h.notifier.turnSettled();
 		h.advance(10_000);
-		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", {});
 		h.notifier.promptOpened();
 		h.advance(INTERACTION_THRESHOLD_MS);
 		expect(h.sent).toEqual([{ message: "Prod needs your permission to use Bash", notificationType: "permission_prompt" }]);
@@ -114,7 +114,7 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		h.notifier.turnSettled();
 		h.advance(10_000);
 		// A background agent's question, cancelled when the agent hits its time limit.
-		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", {});
 		h.notifier.promptOpened();
 		h.advance(INTERACTION_THRESHOLD_MS - 1000);
 		h.notifier.promptClosed();
@@ -159,7 +159,7 @@ describe("AttentionNotifier: a prompt that waits", () => {
 		h.notifier.turnStarted();
 		h.notifier.interacted();
 		h.advance(30_000);
-		h.notifier.describeNextPrompt("Prod needs your permission to use Bash");
+		h.notifier.describeNextPrompt("Prod needs your permission to use Bash", {});
 		h.notifier.promptOpened();
 		h.advance(INTERACTION_THRESHOLD_MS - 1);
 		expect(h.sent).toEqual([]);

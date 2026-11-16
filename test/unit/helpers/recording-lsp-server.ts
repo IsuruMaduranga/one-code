@@ -10,10 +10,16 @@
  * makes it ignore `exit` and a closed stdin, as a JVM server behind a
  * launcher script does; `STUBBORN=launcher` also kills its parent on `exit`,
  * as a launcher that exits while the server it started lives on.
+ * `SLOW_TERM=1` makes it ignore SIGTERM, as a server whose graceful shutdown
+ * runs past the stop's grace.
  */
 export const RECORDING_SERVER = `
 if (process.env.PID_FILE) require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));
 if (process.env.STUBBORN) { setInterval(() => {}, 1000); process.stdin.on("error", () => {}); }
+// The launcher, read once at start: a server whose launcher already died is adopted by
+// another process (a subreaper, init), which the exit message must never signal.
+const launcherPid = process.ppid;
+if (process.env.SLOW_TERM) process.on("SIGTERM", () => {});
 let buffer = Buffer.alloc(0);
 let received = [];
 let init;
@@ -34,7 +40,7 @@ process.stdin.on("data", (chunk) => {
 		else if (message.method === "test/received") { send({ id: message.id, result: { received, capabilities: init.capabilities } }); received = []; }
 		else if (message.method === "test/refuse") send({ id: message.id, error: { code: -32601, message: "Internal error.", data: { detail: "Unsupported request: test/refuse" } } });
 		else if (message.method === "shutdown") send({ id: message.id, result: null });
-		else if (message.method === "exit") { if (process.env.STUBBORN === "launcher") process.kill(process.ppid); else if (!process.env.STUBBORN) process.exit(0); }
+		else if (message.method === "exit") { if (process.env.STUBBORN === "launcher") { if (process.ppid === launcherPid) process.kill(launcherPid); } else if (!process.env.STUBBORN) process.exit(0); }
 		else if (message.id === undefined && message.method !== "initialized") {
 			received.push({ method: message.method, params: message.params });
 			const text = message.params?.textDocument?.text ?? message.params?.contentChanges?.[0]?.text;

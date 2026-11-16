@@ -253,6 +253,50 @@ describe("mcp wiring", () => {
 		expect(state.closeCalls).toEqual(["demo"]);
 	});
 
+	it("closes the connection a second connect replaces, so its server does not outlive the session", async () => {
+		// A Reconnect while the startup connect is still answering: both connects
+		// finish, and the later one replaces the earlier in the live map.
+		writeUserServers({ demo: { command: "demo-server" } });
+		let release!: () => void;
+		state.fixtures.set("demo", { tools: [{ name: "foo" }], connectGate: new Promise<void>((resolve) => { release = resolve; }) });
+		let component: { handleInput: (data: string) => void } | undefined;
+		const ctx = createFakeCtx({
+			cwd,
+			hasUI: true,
+			ui: {
+				custom: vi.fn(
+					(factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: unknown) => void) => unknown) =>
+						new Promise((resolve) => {
+							const tui = { requestRender: () => {}, terminal: { rows: 40 } };
+							Promise.resolve(factory(tui, {}, {}, (result: unknown) => resolve(result))).then((built) => {
+								component = built as typeof component;
+							});
+						}),
+				),
+			},
+		});
+		mcpExtension(fake.pi as never);
+		const starting = fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
+		await vi.waitFor(() => expect(state.connectCalls).toEqual(["demo"]));
+
+		const panelDone = fake.commands.get("mcp")!.handler("", ctx);
+		await vi.waitFor(() => expect(component).toBeDefined());
+		component!.handleInput("\r"); // the (only) entry's detail view
+		component!.handleInput("\r"); // action 0 = Reconnect
+		await vi.waitFor(() => expect(state.connectCalls).toEqual(["demo", "demo"]));
+		expect(state.closeCalls).toEqual([]); // nothing was live yet
+
+		release();
+		await starting;
+		await vi.waitFor(() => expect(state.closeCalls).toEqual(["demo"]));
+		component!.handleInput("\x03");
+		await panelDone;
+
+		// Shutdown closes the one live connection: two connects, two closes.
+		await fake.fire("session_shutdown", {}, createFakeCtx({ cwd, hasUI: false }));
+		expect(state.closeCalls).toEqual(["demo", "demo"]);
+	});
+
 	it("a resumed epoch that told a server whose configuration was removed hears it dropped at the tail", async () => {
 		await boot(); // no config is deliberately written
 		const notices = renderInEpoch(fake.events, { connected: [{ name: "gone", instructions: "Use the old server." }], failed: [] });

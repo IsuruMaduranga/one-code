@@ -7,7 +7,7 @@
  * request with no wrapper. The last cases cover what only the runtime knows:
  * a missing credential, an extension provider's own stream, a virtual model.
  */
-import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -65,7 +65,7 @@ const context = { systemPrompt: "Be brief.", messages: [{ role: "user" as const,
 async function send(rt: ModelRuntime, model: Model<Api>): Promise<{ session: Sent; side: Sent }> {
 	const { sent, fetch } = recorder();
 	await rt.streamSimple(model, context, { fetch, maxRetries: 0 } as never).result();
-	await completeThreadless(rt, model, context, { fetch, maxRetries: 0 } as never);
+	await completeThreadless(new ModelRegistry(rt), model, context, { fetch, maxRetries: 0 } as never);
 	expect(sent).toHaveLength(2);
 	return { session: sent[0], side: sent[1] };
 }
@@ -103,7 +103,6 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		expect(before.session).toMatchObject({ auth: null, key: "sk-ant-api-KEY" });
 		expect(after.session.headers).toEqual(before.session.headers);
 		expect(after.side.headers).toEqual(before.session.headers);
-		expect(after.session.thread).toBe(false);
 	});
 
 	it("a login (bearer) only: Authorization alone, as pi sends it", async () => {
@@ -142,11 +141,27 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		expect(after.side.headers).toEqual(before.session.headers);
 	});
 
+	it("the wrapper keeps a session request's message threads off, which pi turns on with a session id", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		// pi-ai asks for a thread only with a session id: without one, `thread: false` would hold whatever the wrapper did.
+		const sessionThread = async (wrap: boolean) => {
+			const rt = await runtime();
+			if (wrap) rt.registerProvider("anthropic", threadlessAnthropicRegistration()!);
+			const { sent, fetch } = recorder();
+			await rt.streamSimple(anthropicModel(rt), context, { fetch, maxRetries: 0, sessionId: "session-thread" } as never).result();
+			expect(sent).toHaveLength(1);
+			return sent[0].thread;
+		};
+		expect(await sessionThread(false)).toBe(true);
+		expect(await sessionThread(true)).toBe(false);
+	});
+
 	it("a side call keeps message threads off on a provider that does not go through the wrapper", async () => {
 		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
 		const rt = await runtime();
 		const { sent, fetch } = recorder();
-		await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		// pi-ai asks for a thread only with a session id: without one, `thread: false` would hold whatever the side call did.
+		await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0, sessionId: "thread-suppression" } as never);
 		expect(sent).toHaveLength(1);
 		expect(sent[0].thread).toBe(false);
 	});
@@ -156,10 +171,13 @@ describe("side calls go through pi's model runtime", () => {
 	it("no credential pi would use: an error reply naming the provider, nothing sent", async () => {
 		const rt = await runtime();
 		const { sent, fetch } = recorder();
-		const reply = await completeThreadless(rt, anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
 		expect(sent).toHaveLength(0);
 		expect(reply.stopReason).toBe("error");
 		expect(reply.errorMessage).toMatch(/anthropic/);
+		// The refusal names the model, the cause and the fix, not pi's bare "Provider is not configured".
+		expect(reply.credentialError).toBe("Provider is not configured: anthropic");
+		expect(reply.errorMessage).toBe(`No usable credentials for anthropic/${anthropicModel(rt).id}: Provider is not configured: anthropic. Log in with /login or set the provider's API key.`);
 	});
 
 	it("an extension provider with its own api and stream is reached (compat had no API for it)", async () => {
@@ -175,7 +193,7 @@ describe("side calls go through pi's model runtime", () => {
 				return replyStream(model, "from the extension");
 			},
 		} as never);
-		const reply = await completeThreadless(rt, rt.getModel("my-ext", "ext-1")!, context, { maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), rt.getModel("my-ext", "ext-1")!, context, { maxRetries: 0 } as never);
 		expect(reply.stopReason).toBe("stop");
 		expect(seen).toEqual([{ model: "ext-1", apiKey: "ext-own-key" }]);
 	});
@@ -187,10 +205,27 @@ describe("side calls go through pi's model runtime", () => {
 		await rt.refresh({ allowNetwork: false });
 		rt.registerVirtualModel({ provider: "router", id: "auto", name: "Auto", route: () => ({ model: physical, thinkingLevel: "off" }) });
 		const { sent, fetch } = recorder();
-		const reply = await completeThreadless(rt, rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
+		const reply = await completeThreadless(new ModelRegistry(rt), rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
 		expect(reply.errorMessage ?? "").toMatch(/stub/);
 		expect(sent).toHaveLength(1);
-		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY", thread: false });
+		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY" });
+	});
+
+	// completeThreadless turns threads off on the model it is given, which for a
+	// virtual model is not the one the router picks: a routed Anthropic model
+	// keeps them off through the `anthropic` registration (request/ledger/wire.ts).
+	it("a virtual model routed to Anthropic keeps message threads off through the provider registration", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		const rt = await runtime();
+		const registration = threadlessAnthropicRegistration()!;
+		rt.registerProvider("anthropic", { api: registration.api, streamSimple: registration.streamSimple });
+		const physical = anthropicModel(rt);
+		await rt.refresh({ allowNetwork: false });
+		rt.registerVirtualModel({ provider: "router", id: "auto", name: "Auto", route: () => ({ model: physical, thinkingLevel: "off" }) });
+		const { sent, fetch } = recorder();
+		await completeThreadless(new ModelRegistry(rt), rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0, sessionId: "thread-suppression" } as never);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].thread).toBe(false);
 	});
 });
 

@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
@@ -80,7 +80,7 @@ function notebookExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.events.emit(DEFER_CHANNEL, { name: "notebook_edit", keywords: text.searchKeywords });
+	deferBaseTool(pi.events, "notebook_edit", text.searchKeywords);
 }
 
 export default feature("notebook", notebookExtension);

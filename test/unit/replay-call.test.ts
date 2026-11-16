@@ -70,6 +70,16 @@ describe("replaySideCall", () => {
 		expect(sent.map((m) => m.content[0].text)).toEqual(["q1", "a1", "q2"]);
 	});
 
+	it("throws on a credential refusal with its cause, so the caller does not ask the same provider again", async () => {
+		const getApiKeyAndHeaders = vi.fn(async () => ({ ok: false, error: "No API key found for \"my-proxy\"" }));
+		const refusing = { ...(ctx as object), modelRegistry: { getApiKeyAndHeaders, streamSimple: registryStream(completeSimple) } } as never;
+		completeSimple.mockResolvedValue({ ...reply("error"), errorMessage: "Provider is not configured: my-proxy" });
+		await expect(replaySideCall(refusing, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).rejects.toThrow(
+			'No usable credentials for my-proxy/claude-sonnet-5: No API key found for "my-proxy". Log in with /login',
+		);
+		expect(getApiKeyAndHeaders).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not call the model without a capture for it", async () => {
 		const other = { ...(model as object), id: "claude-opus-5-5" } as never;
 		expect(await replaySideCall(ctx, other, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();

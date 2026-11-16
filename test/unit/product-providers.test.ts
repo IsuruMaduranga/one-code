@@ -16,7 +16,7 @@ import { classifyModelTier, taskToolsEnabled } from "../../extensions/lib/models
 import { PROVIDER_VENDORS, type ProductProvider, WIRE_FEATURES } from "../../extensions/lib/profile/product-providers.ts";
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { supportsToolReferences } from "../../extensions/lib/request/deferred.ts";
-import { clearThinkingEnabled } from "../../extensions/request/context-management/index.ts";
+import { clearThinkingEnabled } from "../../extensions/lib/request/context-management.ts";
 import { supportsToolAdditions } from "../../extensions/request/tool-search/tool-additions.ts";
 
 const use = (providers: Record<string, ProductProvider>) => useProfile({ providers });

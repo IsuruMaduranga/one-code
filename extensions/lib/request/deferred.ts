@@ -20,10 +20,10 @@ import { leadingToolsItem, toolsItemFor } from "./ledger/wire.ts";
 import { RESPONSES_APIS } from "./system-role.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
 
-import { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
+import { deferTool, type DeferRequest } from "./deferred-channel.ts";
 import { LOADED_SENTENCE, toolSearchResultText } from "./tool-search-text.ts";
 
-export { DEFER_CHANNEL, type DeferRequest } from "./deferred-channel.ts";
+export { DEFER_CHANNEL, deferBaseTool, deferTool, type DeferRequest } from "./deferred-channel.ts";
 
 /**
  * Take a deferred tool out of this session's surface (`{ name }`): it leaves the
@@ -74,7 +74,7 @@ export function injectedByParent(extra: readonly { name: string }[]): (name: str
  */
 export function deferLikeParentExtension(parentDeferred: readonly DeferRequest[], injected: (name: string) => boolean) {
 	return (pi: { events: { emit(channel: string, data: unknown): void } }) => {
-		for (const request of parentDeferred) if (injected(request.name)) pi.events.emit(DEFER_CHANNEL, request);
+		for (const request of parentDeferred) if (injected(request.name)) deferTool(pi.events, request);
 	};
 }
 

@@ -54,7 +54,7 @@ export const PROMPT_ATTENTION_CHANNEL = brandedId("prompt-attention");
 export interface PromptAttention {
 	message: string;
 	/** Identifies this description to its withdrawal (`PromptAttentionWithdrawn`). */
-	id?: object;
+	id: object;
 }
 
 /** A description whose prompt settled, sent by its owner (`PromptAttentionWithdrawn`). */
@@ -63,6 +63,9 @@ export const PROMPT_ATTENTION_WITHDRAWN_CHANNEL = brandedId("prompt-attention-wi
 export interface PromptAttentionWithdrawn {
 	id: object;
 }
+
+/** Whether a bus payload's `id` is the object `announcePrompt` makes. */
+export const isPromptId = (id: unknown): id is object => typeof id === "object" && id !== null;
 
 /**
  * Say what the next prompt waits for, on `PROMPT_ATTENTION_CHANNEL`, just
@@ -109,7 +112,7 @@ export class AttentionNotifier {
 	private submitted = false;
 	private prompts = 0;
 	/** The next prompt's description and the id its withdrawal names. */
-	private attention: { message: string; id?: object } | undefined;
+	private attention: PromptAttention | undefined;
 	private cancelPrompt: (() => void) | undefined;
 	private cancelIdle: (() => void) | undefined;
 	private stopped = false;
@@ -133,7 +136,7 @@ export class AttentionNotifier {
 	}
 
 	/** The owner of the next prompt says what it waits for. */
-	describeNextPrompt(message: string, id?: object): void {
+	describeNextPrompt(message: string, id: object): void {
 		this.attention = { message, id };
 	}
 

@@ -115,15 +115,18 @@ describe("a product profile's brand", () => {
 		const id = productBrand.profiles![0];
 		const module = fileURLToPath(new URL("../../extensions/lib/profile/brand.mjs", import.meta.url));
 		const launch = fileURLToPath(new URL("../../extensions/lib/app/app-launch.mjs", import.meta.url)).replaceAll("\\", "/");
-		const script = `const m = await import(${JSON.stringify(`file://${module.replaceAll("\\", "/")}`)}); const l = await import(${JSON.stringify(`file://${launch}`)}); const env = {}; const agent = l.applyLauncherEnv(env, { home: "/h", appVersion: "1", installMethod: "npm" }); console.log(JSON.stringify([m.brand.stateDir, m.productBrand.stateDir, m.profileDirName, m.profileSelection, agent, env[l.SESSION_DIR_VAR]]));`;
+		const script = `const m = await import(${JSON.stringify(`file://${module.replaceAll("\\", "/")}`)}); const l = await import(${JSON.stringify(`file://${launch}`)}); const env = {}; const agent = l.applyLauncherEnv(env, { home: "/h", appVersion: "1", installMethod: "npm" }); console.log(JSON.stringify([m.brand.stateDir, m.productBrand.stateDir, m.profileDirName, m.profileSelection, agent, env[l.SESSION_DIR_VAR], m.sharedStateDir({}, "/h"), m.sharedStateDir({ [m.productBrand.envPrefix + "_STATE_DIR"]: "/run" }, "/h")]));`;
 		const env: NodeJS.ProcessEnv = { ...process.env, [`${productBrand.envPrefix}_PROFILE`]: id.toLowerCase() };
 		// The test run's own state folder override would name both folders alike.
 		delete env[`${productBrand.envPrefix}_STATE_DIR`];
 		delete env[`${productBrand.envPrefix}_AGENT_DIR`];
 		const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" });
-		const [stateDir, shared, dir, selection, agentDir, sessionDir] = JSON.parse(run.stdout) as [string, string, string, unknown, string, string];
+		const [stateDir, shared, dir, selection, agentDir, sessionDir, sharedDir, sharedOverride] = JSON.parse(run.stdout) as [string, string, string, unknown, string, string, string, string];
 		// One sign-in for the product, and the profile's own transcripts.
 		expect(agentDir).toBe(join("/h", shared, "agent"));
+		// The folder the SDK gives a profile's declarations is the product's, not the profile's.
+		expect(sharedDir).toBe(join("/h", shared));
+		expect(sharedOverride).toBe("/run");
 		expect(sessionDir).toBe(join("/h", stateDir, "sessions"));
 		expect(shared).toBe(productBrand.stateDir);
 		expect(stateDir).not.toBe(shared);

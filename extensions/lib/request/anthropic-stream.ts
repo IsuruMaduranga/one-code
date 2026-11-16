@@ -23,14 +23,13 @@
 import * as compat from "@earendil-works/pi-ai/compat";
 import type { Api, AssistantMessage, AssistantMessageEventStream, Context, Model, SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { credentialCause, credentialRefusalMessage, isCredentialRefusal } from "./credential-refusal.ts";
 import { type ThreadlessProviderConfig, threadlessAnthropicProvider, withoutMessageThreads } from "./message-threads.ts";
 
 type Stream = (model: Model<Api>, context: TranscriptContext, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 
-/** pi-ai's exports, read as optional: a name the running pi-ai lacks is undefined. */
-const piAi = compat as unknown as {
-	anthropicMessagesApi?: () => { streamSimple: Stream };
-};
+/** pi-ai's `anthropicMessagesApi`, read as optional: undefined when the running pi-ai lacks it. */
+const piAi = compat as { anthropicMessagesApi?: () => { streamSimple: Stream } };
 
 /**
  * The `pi.registerProvider("anthropic", …)` config that keeps message threads
@@ -43,8 +42,8 @@ export function threadlessAnthropicRegistration(): ThreadlessProviderConfig<Mode
 	return threadlessAnthropicProvider(piAi.anthropicMessagesApi().streamSimple);
 }
 
-/** The slice of pi's model registry a side call sends through. */
-export type SideCallRegistry = Pick<ModelRegistry, "streamSimple">;
+/** The slice of pi's model registry a side call sends through, and asks why a credential did not resolve. */
+export type SideCallRegistry = Pick<ModelRegistry, "streamSimple" | "getApiKeyAndHeaders">;
 
 /**
  * A side call's options. No `apiKey` or `env`: pi resolves the model's
@@ -53,12 +52,21 @@ export type SideCallRegistry = Pick<ModelRegistry, "streamSimple">;
  */
 export type SideCallOptions = Omit<SimpleStreamOptions, "apiKey" | "env">;
 
+/** A side call's reply; `credentialError` is set, with the cause, when pi refused the model's credential. */
+export type SideCallReply = AssistantMessage & { credentialError?: string };
+
 /**
  * A side call: one request through pi's model runtime with message threads
  * off. A failure (no credentials, a provider error, an unknown api) comes back
  * as a reply with `stopReason: "error"` and pi's message, never as a throw.
- * Every side call goes through here (message-threads.test.ts).
+ * A credential refusal comes back with its cause in `credentialError` and an
+ * `errorMessage` that names the model, the cause and the fix
+ * (credential-refusal.ts). Every side call goes through here
+ * (message-threads.test.ts).
  */
-export async function completeThreadless(registry: SideCallRegistry, model: Model<Api>, context: Context, options: SideCallOptions): Promise<AssistantMessage> {
-	return registry.streamSimple(withoutMessageThreads(model), context, options).result();
+export async function completeThreadless(registry: SideCallRegistry, model: Model<Api>, context: Context, options: SideCallOptions): Promise<SideCallReply> {
+	const reply = await registry.streamSimple(withoutMessageThreads(model), context, options).result();
+	if (reply.stopReason !== "error" || !isCredentialRefusal(reply.errorMessage)) return reply;
+	const cause = await credentialCause(registry, model, reply.errorMessage!, options.signal);
+	return { ...reply, errorMessage: credentialRefusalMessage(model, cause), credentialError: cause };
 }

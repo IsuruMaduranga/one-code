@@ -25,7 +25,7 @@
  * filled the window.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DEFER_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 
@@ -41,7 +41,7 @@ export function forkCacheExtension(capture: RequestCapture) {
 		// tool_search load reaches it: on a model without tool references the load
 		// appends it, and elsewhere the parent's compatible schema (to: "main")
 		// already declares it. Inline extensions load after tool-search.
-		pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "main", "report", "progress"] });
+		deferBaseTool(pi.events, "SendMessage", ["message", "main", "report", "progress"]);
 		/** Set by the context step for the request it shaped; the payload step splices only then. */
 		let shaped = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */

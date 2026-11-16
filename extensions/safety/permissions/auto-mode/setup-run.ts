@@ -16,9 +16,8 @@ import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { completeThreadless } from "../../../lib/request/anthropic-stream.ts";
+import { runSideCall } from "../../../lib/side-calls/side-call-run.ts";
 import { readSettingsFile } from "../../../lib/profile/settings-files.ts";
-import { withReasoningFallback } from "../../../lib/models/model-policy.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { type AutoModeConfig, autoModeSettingsFiles } from "../../../lib/rules/auto-mode-config.ts";
 import { isBorrowedUserFile } from "../../../lib/profile/settings-files.ts";
@@ -178,8 +177,8 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 export interface DraftDeps {
 	registry: ModelRegistry;
 	sessionModel: Model<Api> | undefined;
-	/** The session's side-call key for drafting (`<session>:setup`), sent as pi-ai's `sessionId`. */
-	cacheKey?: string;
+	/** The session's id; the drafting call's key is `<sessionId>:setup` (`runSideCall`). */
+	sessionId: string;
 	config: AutoModeConfig;
 	defaultEnvironment: string[];
 	signal?: AbortSignal;
@@ -212,30 +211,23 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 	const { system, user } = buildSetupPrompt(facts, deps.defaultEnvironment);
 	let lastError = "";
 	for (const model of models) {
-		const auth = await deps.registry.getApiKeyAndHeaders(model);
-		if (!auth.ok) {
-			lastError = auth.error;
-			continue;
-		}
-		// Thinking stays off unless the model cannot disable it (withReasoningFallback
-		// sends a level up front for catalog-marked models and retries on the 400 for
-		// the rest). A rare one-off, so no cross-run memo.
-		const reply = await withReasoningFallback(model, (reasoning) => {
-			const timeout = AbortSignal.timeout(DRAFT_TIMEOUT_MS);
-			return completeThreadless(
-				deps.registry,
-				model,
-				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
-				{
-					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
-					maxTokens: DRAFT_MAX_TOKENS,
-					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(reasoning ? { reasoning } : {}),
-				},
-			);
-		}, undefined, deps.onUsage);
+		// Thinking stays off unless the model cannot disable it (runSideCall sends a
+		// level up front for catalog-marked models and retries on the 400 for the
+		// rest). A rare one-off, so no cross-run memo.
+		const reply = await runSideCall({
+			kind: "setup",
+			model,
+			registry: deps.registry,
+			sessionId: deps.sessionId,
+			context: { systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
+			signal: deps.signal,
+			timeoutMs: DRAFT_TIMEOUT_MS,
+			maxTokens: DRAFT_MAX_TOKENS,
+			onUsage: (usage) => deps.onUsage?.(usage),
+		});
 		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 			if (deps.signal?.aborted) throw new Error("setup drafting was cancelled");
+			// A credential refusal's message names its cause (completeThreadless).
 			lastError = reply.errorMessage ?? reply.stopReason;
 			continue; // a dead model steps to the next candidate; a bad draft does not
 		}

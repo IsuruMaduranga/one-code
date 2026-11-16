@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +31,7 @@ await fetch(base + "/v1/messages?key=" + key, {
 // pi installs its own fetch at startup: a replacement that wraps the previous one.
 const previous = globalThis.fetch;
 globalThis.fetch = (input, init) => previous(input, init);
-await fetch(base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }) });
+await fetch(base + "/v1/chat/completions", { method: "POST", body: JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }, null, 2) });
 // A replacement that does not call the previous one (the golden fixture's shape).
 globalThis.fetch = async () => new Response("{}", { status: 503 });
 await fetch("https://example.invalid/catalog", { headers: { authorization: "Bearer " + key } });
@@ -72,6 +73,11 @@ describe("capture-fetch preload and summary", () => {
 			["example.invalid", "/down", "error"],
 		]);
 		expect(rows[0].body).toMatchObject({ model: "m-1", messages: [] });
+		// The size of the body as sent, not of the record's re-serialized copy.
+		expect(rows[0].bytes).toBe(Buffer.byteLength(JSON.stringify({ model: "m-1", cache_control: { type: "ephemeral" }, system: [{ type: "text", text: "s", cache_control: { type: "ephemeral" } }], messages: [] })));
+		// A pretty-printed body: its size is its own, larger than the record's compact copy.
+		expect(rows[1].bytes).toBe(Buffer.byteLength(JSON.stringify({ model: "m-2", prompt_cache_key: "abcdefghijklmnopqrstuvwxyz", prompt_cache_retention: "24h", input: [] }, null, 2)));
+		expect(rows[3].bytes).toBe(0);
 		expect(rows[3].body).toEqual({ unreadable: "ReadableStream" });
 		expect(rows[4].body).toEqual({ model: "m-3", input: [] });
 		expect(rows[5].body).toBeNull();
@@ -79,6 +85,17 @@ describe("capture-fetch preload and summary", () => {
 		const text = readFileSync(out, "utf8");
 		expect(text).not.toContain("SECRET-KEY-VALUE");
 		expect(text).not.toMatch(/authorization|x-api-key/i);
+	});
+
+	it("keeps the query and userinfo out of a relative target", () => {
+		writeFileSync(join(dir, "relative.mjs"), "await fetch('/v1/messages?key=SECRET-KEY-VALUE#frag').catch(() => {}); await fetch('//user:SECRET-KEY-VALUE@gw.example/p').catch(() => {});");
+		execFileSync(process.execPath, ["--import", preload, join(dir, "relative.mjs")], { env: { ...process.env, FETCH_CAPTURE: out }, stdio: "pipe" });
+		const rows = readFileSync(out, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+		expect(rows.map((r) => [r.host, r.path, r.status])).toEqual([
+			["", "/v1/messages", "error"],
+			["gw.example", "/p", "error"],
+		]);
+		expect(readFileSync(out, "utf8")).not.toContain("SECRET-KEY-VALUE");
 	});
 
 	it("does nothing without FETCH_CAPTURE", () => {
@@ -95,6 +112,24 @@ describe("capture-fetch preload and summary", () => {
 		expect(lines[1]).toMatch(/\/v1\/chat\/completions {2}200 {2}model=m-2 .* cache key=abcdefghijkl ret=24h$/);
 		expect(lines[2]).toMatch(/GET example\.invalid\/catalog {2}503 {2}model=- {2}0 B {2}cache -$/);
 		expect(lines[6]).toMatch(/\/down {2}error /);
+	});
+
+	// Guards only where Node writes stdout to a pipe asynchronously (macOS): on Linux and Windows the
+	// write is synchronous, so the old `process.exit` passed there too. CI runs it on macOS.
+	it("prints every row to a reader slower than the pipe before it exits", async () => {
+		const row = JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", method: "POST", host: "h", path: "/p", status: 200, bytes: 1, body: { model: "m" } });
+		writeFileSync(out, `${row}\n`.repeat(5000));
+		const child = spawn(process.execPath, [summary, out], { stdio: ["ignore", "pipe", "ignore"] });
+		const closed = once(child, "close");
+		// Not reading yet: the pipe fills and the rest of the output waits in the child.
+		child.stdout.pause();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const chunks: Buffer[] = [];
+		child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+		child.stdout.resume();
+		const [code] = await closed;
+		expect(code).toBe(0);
+		expect(Buffer.concat(chunks).toString().trim().split("\n")).toHaveLength(5000);
 	});
 
 	it("exits with status 2 without a file and 1 for one it cannot read", () => {

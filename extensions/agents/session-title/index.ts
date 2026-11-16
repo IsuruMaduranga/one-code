@@ -22,10 +22,8 @@
  */
 
 import { feature } from "../../lib/profile/feature.ts";
-import { completeThreadless } from "../../lib/request/anthropic-stream.ts";
-import { releaseSideCalls, sideCallKey } from "../../lib/side-calls/side-call-run.ts";
+import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { withReasoningFallback } from "../../lib/models/model-policy.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
 import { isUserRun } from "../../lib/ui/prompt-options.ts";
@@ -51,9 +49,10 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 	// A new session (startup, /clear, a resume, a /tree switch) is a new
 	// naming opportunity; an in-flight request belonged to the old one.
 	pi.on("session_start", reset);
+	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).
 	pi.on("session_shutdown", (_event, ctx) => {
 		reset();
-		releaseSideCalls(ctx.sessionManager.getSessionId());
+		releaseSideCall(ctx.sessionManager.getSessionId(), "title");
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
@@ -84,33 +83,22 @@ function sessionTitleExtension(pi: ExtensionAPI) {
 			if (!model) return;
 			const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
 			if (!choice) return;
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-			if (!auth.ok) return;
-			const result = await withReasoningFallback(
-				choice.model,
-				(reasoning) => {
-					const timeout = AbortSignal.timeout(TITLE_TIMEOUT_MS);
-					return completeThreadless(
-						ctx.modelRegistry,
-						choice.model,
-						{
-							systemPrompt: words.system,
-							messages: [{ role: "user", content: sessionTitleInput(words, text), timestamp: Date.now() }],
-							tools: [],
-						},
-						{
-							signal: AbortSignal.any([controller.signal, timeout]),
-							maxTokens: TITLE_MAX_TOKENS,
-							// Keyed to the session like every side call, so a provider that
-							// routes or caches on it (prompt_cache_key, affinity headers) can.
-							sessionId: sideCallKey(ctx.sessionManager.getSessionId(), "title"),
-							...(reasoning ? { reasoning } : {}),
-						},
-					);
+			// A model pi cannot send to comes back as an error reply with no text: no title.
+			const result = await runSideCall({
+				kind: "title",
+				model: choice.model,
+				registry: ctx.modelRegistry,
+				sessionId: ctx.sessionManager.getSessionId(),
+				context: {
+					systemPrompt: words.system,
+					messages: [{ role: "user", content: sessionTitleInput(words, text), timestamp: Date.now() }],
+					tools: [],
 				},
-				undefined,
-				(usage) => recordUsage(pi, "session-title", usage),
-			);
+				signal: controller.signal,
+				timeoutMs: TITLE_TIMEOUT_MS,
+				maxTokens: TITLE_MAX_TOKENS,
+				onUsage: (usage) => recordUsage(pi, "session-title", usage),
+			});
 			if (controller.signal.aborted) return;
 			const reply = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")

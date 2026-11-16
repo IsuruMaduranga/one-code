@@ -7,15 +7,13 @@
  * process exits without stopping it (a crash, where pi calls `process.exit`
  * without a `session_shutdown`).
  */
-import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LspClient } from "../../extensions/tools/lsp/client.ts";
-import { alive, until } from "./helpers/process-alive.ts";
+import { alive, parentAndGroup, startOwner, until } from "./helpers/process-alive.ts";
 import { RECORDING_SERVER } from "./helpers/recording-lsp-server.ts";
 
 /** `; :` keeps the shell from replacing itself with node: the server is the script's child. */
@@ -64,12 +62,33 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		const client = new LspClient(config, dir, { env });
 		await client.start();
 		const pid = await readServerPid();
-		const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+		const launcherPid = parentAndGroup(pid).ppid;
 
 		process.kill(launcherPid, "SIGKILL");
 		expect(await until(() => !alive(pid))).toBe(true);
 		expect(client.isRunning).toBe(false);
 		await client.stop();
+	});
+
+	// The next server for the workspace starts once stop() resolves (the
+	// respawn in lsp/index.ts): the launcher's exit is not the server's, and a
+	// server still in its TERM grace would run beside its replacement.
+	it.each([
+		["on stop()", false],
+		["after its launcher died", true],
+	] as const)("is gone when stop() resolves, though it ignores SIGTERM, %s", async (_, launcherDies) => {
+		const { config, env } = launcher(pidFile, "launcher");
+		const client = new LspClient(config, dir, { env: { ...env, SLOW_TERM: "1" } });
+		await client.start();
+		const pid = await readServerPid();
+		if (launcherDies) {
+			const launcherPid = parentAndGroup(pid).ppid;
+			process.kill(launcherPid, "SIGKILL");
+			expect(await until(() => !client.isRunning)).toBe(true);
+		}
+
+		await client.stop();
+		expect(alive(pid)).toBe(false);
 	});
 
 	it("is ended when its owner crashes without stopping it", async () => {
@@ -88,23 +107,17 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 			`process.stdout.write("ready\\n");`,
 			`process.stdin.once("data", () => { throw new Error("crash"); });`,
 		].join("\n");
-		const owner = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["pipe", "pipe", "pipe"] });
-		let stderr = "";
-		owner.stderr.on("data", (chunk) => {
-			stderr += chunk;
-		});
-		const exited = once(owner, "exit");
+		const run = await startOwner(script);
 		try {
-			const [chunk] = await Promise.race([once(owner.stdout, "data"), exited.then(() => Promise.reject(new Error(`owner exited before ready: ${stderr}`)))]);
-			expect(String(chunk)).toContain("ready");
+			expect(run.ready).toContain("ready");
 			const pid = await readServerPid();
 
-			owner.stdin.write("crash\n");
-			const [code] = await exited;
+			run.owner.stdin.write("crash\n");
+			const [code] = await run.exited;
 			expect(code).toBe(1);
 			expect(await until(() => !alive(pid))).toBe(true);
 		} finally {
-			if (owner.exitCode === null && owner.signalCode === null) owner.kill("SIGKILL");
+			run.kill();
 		}
 	});
 });

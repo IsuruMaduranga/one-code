@@ -56,7 +56,7 @@ import {
 	clearThinkingEnabled,
 	sessionRequestHeaders,
 	withClearThinking,
-} from "../../request/context-management/index.ts";
+} from "../../lib/request/context-management.ts";
 import { PRECOMPACT_INSTRUCTIONS_CHANNEL, type PreCompactInstructions } from "../../lib/request/precompact-instructions.ts";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../../lib/models/model-policy.ts";
@@ -194,9 +194,6 @@ function compactionExtension(pi: ExtensionAPI) {
 		};
 
 		try {
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-			if (!auth.ok) return fallBack({ kind: "credentials", detail: auth.error });
-
 			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
 
 			// Prefer the captured request prefix — it is cache-aligned and already
@@ -240,7 +237,7 @@ function compactionExtension(pi: ExtensionAPI) {
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
 			const clearThinking = clearThinkingEnabled(knobValue("CLEAR_THINKING"), cmModel);
-			const headers = sessionRequestHeaders(cmModel, undefined);
+			const headers = sessionRequestHeaders(cmModel);
 
 			// A replay sends the captured body (which already carries the
 			// clear_thinking edit) with the tail pi-ai just built appended.
@@ -289,8 +286,9 @@ function compactionExtension(pi: ExtensionAPI) {
 			// A failed or capped stream can carry partial text. Never replace the
 			// conversation with that incomplete checkpoint; let pi retry its summary.
 			if (result.stopReason === "error" || result.stopReason === "aborted" || result.stopReason === "length") {
-				const fallback = replyFallback(result, event.signal.aborted, COMPACTION_TIMEOUT_MS);
-				return fallback ? fallBack(fallback) : undefined;
+				if (event.signal.aborted) return undefined;
+				// A credential refusal carries its cause (completeThreadless).
+				return fallBack(result.credentialError ? { kind: "credentials", detail: result.credentialError } : replyFallback(result, COMPACTION_TIMEOUT_MS));
 			}
 
 			const text = result.content

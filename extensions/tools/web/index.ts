@@ -41,7 +41,7 @@ import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type Thinki
 import { DeadlineError } from "../../lib/side-calls/operation-deadline.ts";
 import { readJsonFile } from "../../lib/core/atomic-write.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
-import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
+import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
@@ -227,7 +227,7 @@ function webExtension(pi: ExtensionAPI) {
 		if (details?.error) return { isError: true };
 	});
 
-	pi.events.emit(DEFER_CHANNEL, { name: "web_search", keywords: text.searchKeywords });
+	deferBaseTool(pi.events, "web_search", text.searchKeywords);
 
 	// url_context only works on a Gemini-compatible provider — pi-web-search's
 	// own gate (getProviderKind === "google") deactivates the tool on anything
@@ -247,7 +247,7 @@ function webExtension(pi: ExtensionAPI) {
 		if (available === urlContextDeferred) return;
 		urlContextDeferred = available;
 		if (available) {
-			pi.events.emit(DEFER_CHANNEL, { name: "url_context", keywords: ["url", "analyze page", "gemini"] });
+			deferBaseTool(pi.events, "url_context", ["url", "analyze page", "gemini"]);
 		} else {
 			pi.events.emit(WITHHOLD_CHANNEL, { name: "url_context" });
 		}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/safety/file-tracker/tracker.ts";
-import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/request/context-management/index.ts";
+import { looksLikeAnthropicRequest } from "../../extensions/lib/request/anthropic-payload.ts";
+import { withClearThinking } from "../../extensions/lib/request/context-management.ts";
 
 describe("FileTracker.status", () => {
 	it("reports absent for a file that does not exist", () => {
