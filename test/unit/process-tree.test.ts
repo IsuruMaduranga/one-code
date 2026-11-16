@@ -334,6 +334,9 @@ describe("spawnOwnedTree", () => {
 
 	it("kill ends the whole tree at once", async () => {
 		const { tree } = await startTree("echo ready; sleep 30 | cat");
+		// Let the shell fork the pipeline: a member still being forked when the group
+		// signal goes out is missed, and holds the pipe open for its 30 s.
+		await new Promise((r) => setTimeout(r, 100));
 		const settled = settledWithin(tree.child, 3000);
 		tree.kill("SIGKILL");
 		expect(await settled).toBeLessThan(3000);
