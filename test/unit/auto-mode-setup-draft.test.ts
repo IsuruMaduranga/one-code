@@ -24,7 +24,7 @@ describe("draftSetup", () => {
 			draftSetup(facts, {
 				registry: registry as never,
 				sessionModel: model,
-				cacheKey: "session-1:setup",
+				sessionId: "session-1",
 				config: loadAutoModeConfig("/nonexistent-home-for-tests"),
 				defaultEnvironment: [],
 			}),

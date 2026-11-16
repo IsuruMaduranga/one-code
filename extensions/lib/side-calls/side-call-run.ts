@@ -1,8 +1,8 @@
 /**
  * One standalone side call: a single request through pi's model runtime
  * (`completeThreadless`) outside the main agent loop, shared by `/btw`, the
- * recap and the web_fetch reader. The auto-mode classifier has its own
- * transport and stays out of this.
+ * recap, the web_fetch reader, the session title and the auto-mode setup
+ * draft. The auto-mode classifier has its own transport and stays out of this.
  *
  * Every side call takes the same steps: let pi resolve the model's credential
  * and base URL, combine the caller's abort signal with a per-attempt timeout, key the request to the session (`<session id>:<kind>`,
