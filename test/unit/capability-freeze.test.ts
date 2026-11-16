@@ -7,16 +7,20 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { toolsInUse } from "../../extensions/lib/request/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
-import { REMINDER_CHANNEL, type RenderRequest } from "../../extensions/lib/request/reminders.ts";
+import { REMINDER_CHANNEL, type RenderRequest, toldBlockFact as toldFact } from "../../extensions/lib/request/reminders.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/tools/skill/announce.ts";
 import skillExtension from "../../extensions/tools/skill/index.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
+import { subagentWords } from "../../extensions/agents/subagents/words.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, type ResolvedProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { profile as shippedProfile } from "../../profile/index.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -120,15 +124,90 @@ describe("subagent blocks", () => {
 	const main = { provider: "openai", id: "main", name: "main", input: ["text"], cost: { input: 2, output: 8 } };
 	const other = { provider: "openai", id: "other", name: "other", input: ["text"], cost: { input: 1, output: 4 } };
 
-	async function mount() {
+	// One profile without flags for the whole block: a test that spies on its words must find the same copy.
+	let plain: ResolvedProfile;
+	beforeAll(() => void (plain = activeProfile()));
+	afterEach(() => setActiveProfileForTest(plain));
+	afterAll(() => setActiveProfileForTest(undefined));
+
+	/**
+	 * `unregistered`: tools pi left out of its registry (its --exclude-tools),
+	 * so getAllTools does not list them and the live tool set leaves them out;
+	 * `workflow`: the workflow tool is registered too.
+	 */
+	async function mount({ unregistered = [], workflow = false }: { unregistered?: string[]; workflow?: boolean } = {}) {
+		// The fake registers no workflow tool unless asked: the flags leave it out with the rest.
+		const excluded = [...unregistered, ...(workflow ? [] : ["workflow"])];
+		setActiveProfileForTest(unregistered.length > 0 ? resolveProfile(shippedProfile, process.env, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", excluded.join(",")])) : plain);
 		const fake = createFakePi();
 		const reminders: Array<Reminder & { facts?: ToldFact[] }> = [];
 		fake.events.on(REMINDER_CHANNEL, (r) => reminders.push(r as Reminder));
 		subagentsExtension(fake.pi as never);
+		// pi drops such a tool from every registration, the Agent tool's re-registration by tier included.
+		const listed = fake.pi.getAllTools as () => Array<{ name: string }>;
+		fake.pi.getAllTools = () => listed().filter((tool) => !unregistered.includes(tool.name));
+		if (workflow) fake.tools.set("workflow", { name: "workflow", execute: async () => undefined });
 		const ctx = createFakeCtx({ model: main, modelRegistry: { getAvailable: () => [main, other] }, sessionManager: { getSessionId: () => "s", getBranch: () => fake.branch } });
 		await fake.fire("session_start", {}, ctx);
 		return { fake, reminders, ctx };
 	}
+	/** The block's live first-prepend text, or undefined when its last word was a removal. */
+	const liveText = (reminders: Array<Reminder & { facts?: ToldFact[] }>, key: string) => {
+		const last = reminders.filter((r) => r.key === key).at(-1) as (Reminder & { remove?: boolean }) | undefined;
+		return last?.remove ? undefined : last?.text;
+	};
+	const told = (reminders: Array<Reminder & { facts?: ToldFact[] }>) => ["subagent-models", "subagent-agents", "subagent-delegation"].flatMap((key) => liveFacts(reminders, key));
+
+	describe("follow the tools the session can have, under pi's tool flags", () => {
+		beforeAll(() => vi.stubEnv(envName("PROMPT_TIER"), "tiny"));
+		afterAll(() => vi.unstubAllEnvs());
+
+		it("publish the catalog and the delegation steer only while Agent is registered", async () => {
+			const on = await mount();
+			expect(liveText(on.reminders, "subagent-agents")).toContain("Available agent types");
+			expect(liveText(on.reminders, "subagent-delegation")).toBe(subagentWords().delegationSteer);
+			const off = await mount({ unregistered: ["Agent"] });
+			expect(liveText(off.reminders, "subagent-agents")).toBeUndefined();
+			expect(liveText(off.reminders, "subagent-delegation")).toBeUndefined();
+			// A run of the agent turn checks again, and still finds no Agent.
+			await off.fake.fire("before_agent_start", { prompt: "go", systemPromptOptions: {} }, off.ctx);
+			expect(liveText(off.reminders, "subagent-agents")).toBeUndefined();
+		});
+
+		it("keep the model menu while Agent or workflow is registered", async () => {
+			expect(liveText((await mount({ unregistered: ["Agent"] })).reminders, "subagent-models")).toBeUndefined();
+			expect(liveText((await mount({ unregistered: ["Agent"], workflow: true })).reminders, "subagent-models")).toContain("main");
+			expect(liveText((await mount()).reminders, "subagent-models")).toContain("main");
+		});
+
+		it("withdraw on the tail what the epoch told when a resumed session has no Agent, and tell the catalog when it is back", async () => {
+			const before = await mount({ workflow: true });
+			const gone = await mount({ unregistered: ["Agent"], workflow: true });
+			// The menu stays (workflow), the catalog and the steer are withdrawn.
+			expect(render(gone.fake, told(before.reminders))).toEqual([
+				{ text: subagentWords().catalogWithdrawn, facts: [toldFact("subagent-agents", "")] },
+				{ text: subagentWords().delegationWithdrawn, facts: [toldFact("subagent-delegation", "")] },
+			]);
+			const back = await mount({ workflow: true });
+			const catalog = liveText(back.reminders, "subagent-agents");
+			expect(render(back.fake, told(gone.reminders))).toEqual([
+				{ text: catalog, facts: liveFacts(back.reminders, "subagent-agents") },
+				{ text: subagentWords().delegationSteer, facts: liveFacts(back.reminders, "subagent-delegation") },
+			]);
+		});
+
+		it("withdraw each block with its own sentence when a resumed session has neither Agent nor workflow", async () => {
+			const before = await mount({ workflow: true });
+			const gone = await mount({ unregistered: ["Agent"] });
+			const words = subagentWords();
+			expect(render(gone.fake, told(before.reminders))).toEqual([
+				{ text: words.modelsWithdrawn, facts: [toldFact("subagent-models", "")] },
+				{ text: words.catalogWithdrawn, facts: [toldFact("subagent-agents", "")] },
+				{ text: words.delegationWithdrawn, facts: [toldFact("subagent-delegation", "")] },
+			]);
+			expect(new Set([words.modelsWithdrawn, words.catalogWithdrawn, words.delegationWithdrawn]).size).toBe(3);
+		});
+	});
 
 	it("announces a changed menu once, on the tail, after the epoch told the old one", async () => {
 		const { fake, reminders, ctx } = await mount();

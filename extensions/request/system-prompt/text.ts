@@ -10,14 +10,32 @@
 
 import { brandedId } from "../../lib/profile/brand.mjs";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
+import type { LiveTools } from "../../lib/profile/live-tools.ts";
 
 /** What a section may depend on: all of it fixed for the session (or until the model changes). */
 export interface SystemPromptSession {
 	tier: PromptTier;
 	/** False when the session model runs without the task tools (lib/models/model-tier.ts taskToolsEnabled). */
 	taskTools: boolean;
-	/** The session's active tools, as pi selects them; undefined before pi reports them. */
+	/**
+	 * The session's active tools, as pi selects them; undefined before pi
+	 * reports them. Active now: the list grows when a deferred tool loads
+	 * through tool_search, so text keyed on a deferrable tool here changes the
+	 * prompt mid-session (a cache miss). Key a passage on a tool the session
+	 * can have through `live` instead.
+	 */
 	tools: readonly string[] | undefined;
+}
+
+/**
+ * What a section another extension adds may depend on: the session, and the
+ * tools it can have (`live`, the profile's answer: fixed for the process, a
+ * deferred tool included before it loads). Cut a passage naming a tool that
+ * is off with `withoutOff(text, live, passages)`, as the profile's own
+ * sections do.
+ */
+export interface SectionSession extends SystemPromptSession {
+	live: LiveTools;
 }
 
 export interface SystemPromptText {
@@ -46,7 +64,7 @@ export const scratchpadMoved = ({ dir }: { dir: string }): string =>
 /**
  * A section another extension adds (a product's domain section, for one),
  * announced on SYSTEM_PROMPT_SECTION_CHANNEL while extensions load. `render`
- * must be pure in the session; an undefined result leaves the section out
+ * must be pure in the session (`SectionSession`); an undefined result leaves the section out
  * for that session (a tier it does not serve).
  */
 export interface SystemPromptSection {
@@ -54,7 +72,7 @@ export interface SystemPromptSection {
 	id: string;
 	/** `lead`: after the profile's lead sections, before the tool list; `tail`: at the very end of the tail. */
 	place: "lead" | "tail";
-	render(session: SystemPromptSession): string | undefined;
+	render(session: SectionSession): string | undefined;
 }
 
 export const SYSTEM_PROMPT_SECTION_CHANNEL = brandedId("system-prompt-section");

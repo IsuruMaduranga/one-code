@@ -37,6 +37,7 @@ import { languageServerProblems, type ResolvedLanguageServer, resolveLanguageSer
 import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
+import { parseToolFlags, type PiToolFilter, piRegisters, piToolFilter, piToolFilterKey } from "./pi-tool-flags.ts";
 
 /** The product's folder: the default profile, and what every profile of the product shares (`extensions/`, `themes/`). */
 export const PRODUCT_DIR = join(PACKAGE_ROOT, "profile");
@@ -190,8 +191,17 @@ export interface ResolvedProfile {
 	tools: ReadonlyMap<string, ToolSwitch>;
 	/** The tools the profile turns off: `enabled: false`, or a pi built-in whose overriding feature is off. */
 	disabledTools: ReadonlySet<string>;
-	/** Which tools the session can have: the switch is not off and the feature registering it (TOOL_FEATURES) is on. */
+	/** Which tools the session can have: the switch is not off, the feature registering it (TOOL_FEATURES) is on, and pi's launch flags keep it registered (`launchTools`). */
 	live: LiveTools;
+	/**
+	 * `live` before pi's launch flags: what the profile's switches and
+	 * features leave on. An in-process child starts from it, since the base
+	 * chooses a child's tools itself and pi's flags never reach it
+	 * (lib/agents/child-extensions.ts, lib/agents/agent-catalog.ts agentToolOptions).
+	 */
+	profileLive: LiveTools;
+	/** The registry filter pi's `--tools`, `--exclude-tools` and `--no-tools` make for this process (lib/profile/pi-tool-flags.ts); absent when they filter nothing. */
+	launchTools?: PiToolFilter;
 	/** Absolute entry files child sessions load after the base's own. */
 	childExtensionPaths: readonly string[];
 	/** The profile's model-facing text, built for `live`. */
@@ -252,9 +262,11 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * `extensionsRoot` is the folder child extension entries are relative to: the
  * product's, which every product profile shares (default: `profileDir`).
  * `user` is the user's own profile over it: its switches join the
- * environment's, under the same limits.
+ * environment's, under the same limits. `launchTools` is the filter pi's
+ * tool flags make (`launchToolFilter`): it narrows `live` and the text built
+ * for it, and is never checked, since pi applies it whatever the profile needs.
  */
-export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile): ResolvedProfile {
+export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile, launchTools?: PiToolFilter): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
@@ -305,12 +317,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		}
 	}
 	if (toolProblems.length > 0) throw new Error(`Invalid profile: ${toolProblems.join("; ")}.`);
-	const live: LiveTools = {
+	const profileLive: LiveTools = {
 		has: (name) => {
 			const feature = TOOL_FEATURES[name];
 			return !disabledTools.has(name) && (feature === undefined || features.has(feature));
 		},
 	};
+	const live: LiveTools = launchTools ? { has: (name) => profileLive.has(name) && piRegisters(launchTools, name) } : profileLive;
 	const text = profile.text({ live });
 	const textProblems = missingTextProblems(text, features);
 	// An empty refusal would reach the model as an error with no reason.
@@ -321,6 +334,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		tools,
 		disabledTools,
 		live,
+		profileLive,
+		...(launchTools ? { launchTools } : {}),
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,
 		textFor: (other) => profile.text({ live: other }),
@@ -348,7 +363,7 @@ function chosenUserProfile(): UserProfile | undefined {
 /**
  * What a session records of the launch choices that shape its system prompt
  * and tools: the product profile's id, the user's profile with its content
- * hash, and the environment's off-switches. Undefined when the launch chose
+ * hash, the environment's off-switches, and pi's tool flags. Undefined when the launch chose
  * none of them. A session resumed under other choices renders its system
  * prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch);
  * without that it would go on sending the recorded ones.
@@ -356,7 +371,7 @@ function chosenUserProfile(): UserProfile | undefined {
 export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const user = activeProfile().user;
 	const off = [envName("FEATURES_OFF"), envName("TOOLS_OFF")].map((name) => envList(env, name).sort().join(","));
-	const parts = [profileSelection.productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : ""];
+	const parts = [profileSelection.productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : "", piToolFilterKey(activeProfile().launchTools) ?? ""];
 	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
 }
 
@@ -397,10 +412,31 @@ export function shareShippedProfileForTest(profile: Profile): void {
 
 let active: ResolvedProfile | undefined;
 
-/** The shipped profile, resolved against this process's environment on first use. Throws when it is invalid. */
+/** The shipped profile, resolved against this process's environment and pi's tool flags on first use. Throws when it is invalid. */
 export function activeProfile(): ResolvedProfile {
-	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile());
+	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile(), launchToolFilter());
 	return active;
+}
+
+/** The arguments pi was launched with, fixed for the process; a test runner's own are not pi's (test/setup.ts sets them empty). */
+let launchArgs: readonly string[] = process.argv.slice(2);
+
+/** Test seam: the arguments `launchToolFilter` reads in place of the process's. */
+export function setLaunchArgsForTest(args: readonly string[]): void {
+	launchArgs = args;
+}
+
+/**
+ * The registry filter pi's tool flags make for this process, read from the
+ * arguments as `--profile` is (lib/profile/brand.mjs). pi gives an extension
+ * no other way to see them while it loads, when the text is built
+ * (`pi.getAllTools()` throws then). The bundled app takes the profile flags
+ * out before pi parses them; they take no value that starts with "-", so
+ * reading them here changes no tool flag. An SDK caller that passes `tools`
+ * or `excludeTools` itself is not seen.
+ */
+export function launchToolFilter(args: readonly string[] = launchArgs): PiToolFilter | undefined {
+	return piToolFilter(parseToolFlags(args));
 }
 
 /** The slot key a profile module is shared under (lib/profile/shared-module.ts), by its absolute path. */

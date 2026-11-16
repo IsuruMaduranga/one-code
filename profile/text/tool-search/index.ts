@@ -47,6 +47,16 @@ const LISTING_HINTS: Readonly<Partial<Record<DeferrableTool, string>>> = {
 	web_search: "When you are about to answer from memory on something recent or past your knowledge cutoff, use it and not memory alone.",
 };
 
+/**
+ * Hints for a session whose model is not Claude-family, in place of the ones
+ * above. Claude reads the plan-mode hint as advice; other models (GPT-6.1 Sol,
+ * seen in a real session) obey it literally and enter plan mode unasked on an
+ * ordinary task, so they are told to enter it only when asked.
+ */
+const LISTING_HINTS_OTHER_MODELS: Readonly<Partial<Record<DeferrableTool, string>>> = {
+	enter_plan_mode: "When the user asks for a plan before any change, or asks to enter plan mode, use it; do not enter plan mode on your own initiative.",
+};
+
 /** Per tool, the clauses of other tools' hints that name it. */
 const HINT_PASSAGES: ToolPassages = {
 	monitor: ["; to catch a change as it happens, use monitor"],
@@ -60,6 +70,10 @@ const HINT_PASSAGES: ToolPassages = {
 const LISTING_CLOSE =
 	"When the step in front of you is one that an entry in this list is made for, and that tool is not loaded yet, load it as your next step. That holds even if you could do the step another way, with a general tool or in a plain-text reply. Loading runs nothing: it brings the tool's definition into the conversation, and you choose how to do the step once you have read it.";
 
+/** A hint table with the clauses naming a tool that is off cut. The entries come from a typed table, so its keys are the base's deferrable tools. */
+const hintsFor = (table: Readonly<Partial<Record<DeferrableTool, string>>>, live: LiveTools) =>
+	Object.fromEntries(Object.entries(table).map(([tool, hint]) => [tool, withoutOff(hint, live, HINT_PASSAGES)])) as Partial<Record<DeferrableTool, string>>;
+
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const toolSearchText = (live: LiveTools): ToolSearchText => ({
 	description: withoutOff(DESCRIPTION, live, DESCRIPTION_PASSAGES),
@@ -68,7 +82,7 @@ export const toolSearchText = (live: LiveTools): ToolSearchText => ({
 		query: "Tool names (`select:a,b`) or keywords describing the capability needed",
 		maxResults: "Maximum tools to load (default 5)",
 	},
-	// The entries come from the typed table above, so its keys are the base's deferrable tools.
-	listingHints: Object.fromEntries(Object.entries(LISTING_HINTS).map(([tool, hint]) => [tool, withoutOff(hint, live, HINT_PASSAGES)])) as Partial<Record<DeferrableTool, string>>,
+	listingHints: hintsFor(LISTING_HINTS, live),
+	listingHintsOtherModels: hintsFor(LISTING_HINTS_OTHER_MODELS, live),
 	listingClose: LISTING_CLOSE,
 });

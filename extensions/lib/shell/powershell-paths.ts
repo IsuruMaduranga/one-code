@@ -98,9 +98,9 @@ type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boo
  * matcher that matches a superset of what PowerShell does, or undefined.
  * Matched without a regex over the whole name: the model writes the pattern,
  * and `*a*a*a…z` would backtrack polynomially against every directory entry
- * on the permission-gate path.
+ * on the permission-gate path. Exported for its scaling test.
  */
-function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefined {
+export function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefined {
 	const parts: WildcardPart[] = [];
 	for (let i = 0; i < pattern.length; i++) {
 		const ch = pattern[i];

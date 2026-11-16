@@ -6,12 +6,14 @@ import { envName } from "../extensions/lib/profile/brand.mjs";
 import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib/models/model-catalog-data.ts";
 import { setModelTierOverridesForTest } from "../extensions/lib/models/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/shell/bash-parser.ts";
-import { shareShippedProfileForTest } from "../extensions/lib/profile/profile.ts";
+import { setLaunchArgsForTest, shareShippedProfileForTest } from "../extensions/lib/profile/profile.ts";
 import { profile } from "../profile/index.ts";
 
 // The shipped profile through the test run's own module graph (lib/profile/profile.ts
 // loads it on demand under jiti, where vitest's import is not the one used).
 shareShippedProfileForTest(profile);
+// The test runner's arguments are not pi's: `vitest -t <name>` would read as `--tools <name>`.
+setLaunchArgsForTest([]);
 // What the profile in force needs besides this (One Code's source provider and
 // config mode) is in its own profile/test/setup.ts, which vitest.config.ts adds
 // when the profile has one.

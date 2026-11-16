@@ -256,9 +256,11 @@ describe("permissions session state", () => {
 			expect(prompts).toHaveLength(0);
 			const denied = await wrapped("rm -rf dist", "w3");
 			expect(denied?.block).toBe(true);
-			// An unwrapped call with the same wrapper text (no original published) is still judged as written.
-			const raw = await call("bash", { command: wrap("git status") }, "w4");
-			expect(raw?.block).toBe(true);
+			// An unwrapped call with the same wrapper text (no original published) is still judged as
+			// written: the `cd` wrapper is not provably read-only, so it is put to the user.
+			expect(await call("bash", { command: wrap("git status") }, "w4")).toBeUndefined();
+			expect(prompts).toHaveLength(1);
+			expect(prompts[0].title).toContain("in plan mode");
 		});
 
 		it("a worktree-wrapped monitor is judged and shown as the model wrote it too", async () => {

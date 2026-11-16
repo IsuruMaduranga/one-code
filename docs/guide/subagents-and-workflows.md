@@ -120,7 +120,8 @@ them is set somewhere you'd rather not touch, `/subagent auto` puts the
 automatic choice back.
 
 An agent definition's own `model` field overrides the default for that
-agent.
+agent. Write `model: inherit` to run that agent on the main session's model,
+whatever the default is.
 
 ### Follow agents live
 

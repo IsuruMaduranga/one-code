@@ -176,7 +176,7 @@ describe("auditPermissionAllow", () => {
 				"Bash(git status)",
 				"Bash(git log:*)",
 				"Bash(npm run test:*)", // a named script is narrow
-				"Bash(sh scripts/*)", // path-scoped, judged narrow by the gate
+				"Bash(sh scripts/build.sh)", // an exact script is narrow; `sh scripts/*` is broad (the model can write a script there)
 				"Read(~/notes/**)",
 				"WebFetch(domain:example.com)",
 			]),

@@ -63,9 +63,12 @@ describe("the modules a child session loads", () => {
 			const rel = posix(relative(EXTENSIONS_DIR, file));
 			// The profile's own modules and the view itself are where the two sets are told apart.
 			if (rel.startsWith("lib/profile/") || rel === "lib/agents/child-extensions.ts") continue;
-			for (const call of new Set(readFileSync(file, "utf8").match(reads) ?? [])) {
+			const code = readFileSync(file, "utf8");
+			for (const call of new Set(code.match(reads) ?? [])) {
 				if (!(call in ALLOWED) && !(`${rel} ${call}` in ALLOWED)) offenders.push(`${rel}: ${call}`);
 			}
+			// The main session's answer handed on as a value (`searchToolsEnabled(tier, toolLive)`).
+			if (/[(,]\s*toolLive\s*[),]/.test(code)) offenders.push(`${rel}: toolLive`);
 		}
 		expect(offenders).toEqual([]);
 	});

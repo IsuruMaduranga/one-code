@@ -19,7 +19,8 @@
  *   node test/e2e/golden-requests.mjs --jobs 2  runs at once (default: half the CPUs)
  *   node test/e2e/golden-requests.mjs --sweep   one turn per optional feature
  *       turned off (ONECODE_FEATURES_OFF), plus a tool-switch check
- *       (ONECODE_TOOLS_OFF): each run must finish and send a request, the
+ *       (ONECODE_TOOLS_OFF) and a run under pi's `--exclude-tools Agent`:
+ *       each run must finish and send a request, the
  *       turned-off tools and a turned-off feature's own tools
  *       (TOOL_FEATURES) must be missing from it, and no text may name one
  *       (lib/profile/live-tools.ts); a guard feature (hooks,
@@ -275,7 +276,7 @@ async function runConfig(config) {
 /** One `-p` turn in JSON mode. Resolves with `{ problem }` or `{ dialogs: [] }`. */
 function runPrint(config, { cwd, env }) {
 	return new Promise((resolveRun) => {
-		const child = spawn(process.execPath, [piCli, "--mode", "json", "--model", config.model, "-e", fixture, "-p", PROMPTS[config.mode]], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(process.execPath, [piCli, "--mode", "json", "--model", config.model, "-e", fixture, ...(config.args ?? []), "-p", PROMPTS[config.mode]], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (chunk) => {
@@ -560,6 +561,8 @@ const ENGLISH = {
 	monitor: [/monitor for regressions/g],
 	skill: [/a skill or slash command/g, /re-enters the skill/g, /with a skill, agent/g],
 	workflow: [/repo-specific workflow/g, /git workflow/g],
+	// An agent's name or id, not the tool (SendMessage's recipient, a task's owner).
+	Agent: [/Agent name \(or task id\)/g, /Agent ID if assigned/g],
 };
 
 /** Whether a request's text names `tool` (a hyphenated word such as a skill name is not the tool). */
@@ -581,6 +584,9 @@ async function sweep() {
 	}));
 	const toolsOff = ["notebook_edit", "edit", "web_fetch"];
 	runs.push({ label: `tools ${toolsOff.join(", ")} off`, toolsOff, config: { name: "sweep-tools", model: ANTHROPIC, tier: "frontier", mode: "print", env: { ONECODE_TOOLS_OFF: toolsOff.join(",") } } });
+	// pi's own flag leaves Agent out of the registry; the text built for the live tool set follows it (lib/profile/pi-tool-flags.ts).
+	// Workhorse: its register has the system prompt's Agent passages, which frontier's lacks.
+	runs.push({ label: "pi --exclude-tools Agent", toolsOff: ["Agent"], config: { name: "sweep-exclude-agent", model: ANTHROPIC, tier: "workhorse", mode: "print", args: ["--exclude-tools", "Agent"] } });
 	// The all-on baseline runs in the same pool; the tools a run loses against
 	// it, and which of them the request's text still names (a whole-word match,
 	// so a plain English word like "edit" can be a false hit), are text that

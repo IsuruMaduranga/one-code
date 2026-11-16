@@ -51,6 +51,7 @@ export const FEATURES = {
 	skill: { entries: ["tools/skill/index.ts"] },
 	background: { entries: ["tools/background/index.ts"] },
 	bash: { entries: ["tools/bash/index.ts", "tools/bash/child.ts"] },
+	"bash-turn": { entries: ["tools/bash-turn/index.ts"] },
 	powershell: { entries: ["tools/powershell/index.ts", "tools/powershell/child.ts"] },
 	subagents: { entries: ["agents/subagents/index.ts"] },
 	workflow: { entries: ["agents/workflow/index.ts"] },

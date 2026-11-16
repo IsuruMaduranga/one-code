@@ -27,7 +27,7 @@ import { readdirSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, touchesGuardedPath } from "./paths.ts";
-import { isGuardedWritePath, removalLoses } from "./shell-analysis.ts";
+import { isGuardedWritePath, isMutationCommand, programName, removalLoses } from "./shell-analysis.ts";
 import type { PowerShellAstNode, PowerShellParse } from "./powershell-parser.ts";
 import {
 	applicationArgument,
@@ -530,6 +530,104 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
 			});
 		}
 		requireAllApproved(tree);
+	});
+}
+
+/**
+ * Cmdlets that write, move or remove files: Claude Code's acceptEdits cmdlets
+ * and the other common provider writes. Only `powershellTreeNamesWrite` reads
+ * it; a cmdlet missing here only means plan mode asks the user about the line
+ * instead of refusing it.
+ */
+const FILE_WRITE_CMDLETS = new Set([
+	...Object.keys(WRITE_CMDLETS),
+	"new-item",
+	"copy-item",
+	"move-item",
+	"rename-item",
+	"set-item",
+	"clear-item",
+	"out-file",
+	"tee-object",
+	"export-csv",
+	"export-clixml",
+]);
+
+/**
+ * Whether the line names a write: a redirection to a file (anything but
+ * `$null` or a stream merge), a file-writing cmdlet, or a native program the
+ * bash gate counts as filesystem-mutating (`rm`, `cp`, `tar`, … resolved to
+ * an application, as on macOS and Linux). PowerShell's counterpart of the bash
+ * gate's recorded writes (shell-analysis.ts `namesWrite`), read by plan mode
+ * only, to refuse such a line rather than ask about it. Not a verdict that a
+ * line is safe: a line this misses is still one no read-only check cleared.
+ */
+export function powershellTreeNamesWrite(parse: PowerShellParse): boolean {
+	const tree = buildTree(parse);
+	return tree.nodes.some((node, i) => {
+		if (node.type === "FileRedirectionAst") return !redirectsToNull(tree, i);
+		if (node.type !== "CommandAst") return false;
+		const spelled = (node.resolvedName || node.name || "").toLowerCase();
+		return FILE_WRITE_CMDLETS.has(spelled) || isMutationCommand(programName(spelled));
+	});
+}
+
+/** Whether the file redirection at `i` sends its stream to `$null`, which writes no file. */
+function redirectsToNull({ nodes, children }: Tree, i: number): boolean {
+	const [location] = children[i];
+	return children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null";
+}
+
+/** The node kinds a plain native-program line is made of: pipelines, statements, literal words, single-dash flags and stream merges. */
+const PLAIN_LINE_NODES = new Set([
+	"ScriptBlockAst",
+	"NamedBlockAst",
+	"PipelineAst",
+	"PipelineChainAst",
+	"CommandAst",
+	"CommandParameterAst",
+	"StringConstantExpressionAst",
+	"ConstantExpressionAst",
+	"MergingRedirectionAst",
+]);
+
+/**
+ * Whether the line is only native programs `unlisted` accepts (by program
+ * name), called by name with literal arguments: no cmdlet, function or alias
+ * (`Set-Location`, `Invoke-WebRequest`, `iex`), no `&` or `.` invocation, no
+ * program fed by a pipe, no variable, subexpression, script block, member call or background job, no
+ * redirection but to `$null`, and no argument naming a credential path.
+ * PowerShell's counterpart of the bash gate's `unlistedOnly`, read by plan
+ * mode only, to decide whether a user's allow rule may cover the line; when
+ * in doubt it says no, and the line is put to the user.
+ */
+export function powershellTreeUnlistedOnly(parse: PowerShellParse, opts: PowerShellTreeOptions, unlisted: (program: string) => boolean): boolean {
+	if (parse.errors.length > 0) return false;
+	const tree = buildTree(parse);
+	const { nodes } = tree;
+	return nodes.every((node, i) => {
+		if (node.type === "FileRedirectionAst") return redirectsToNull(tree, i);
+		if (node.type === "VariableExpressionAst") return node.parent >= 0 && nodes[node.parent].type === "FileRedirectionAst" && redirectsToNull(tree, node.parent);
+		if (!PLAIN_LINE_NODES.has(node.type) || node.background) return false;
+		if (node.type === "CommandAst") {
+			// A later pipeline stage reads the stage before it and may run what it
+			// reads; only a cmdlet could be proved not to, and none is accepted here.
+			if (node.parent >= 0 && nodes[node.parent].type === "PipelineAst" && tree.children[node.parent].find((child) => nodes[child].type === "CommandAst") !== i) return false;
+			const spelled = node.resolvedName || node.name;
+			if (!spelled || (node.operator && node.operator !== "Unknown")) return false;
+			if (node.commandType !== undefined && node.commandType !== "Application") return false;
+			return unlisted(programName(spelled));
+		}
+		if (node.type === "StringConstantExpressionAst") {
+			const value = node.value ?? "";
+			const absolute = value ? powershellPathAbsolute(value, opts) : undefined;
+			return !isSensitivePath(value) && !(absolute !== undefined && isSensitivePath(absolute));
+		}
+		// A plain flag (`-R`, `-v`); a `-name:value` argument is its own node and
+		// checked as one. A name with a path in it (`-k~/`, `-foo/etc/x`) is not
+		// judged here, so it asks.
+		if (node.type === "CommandParameterAst") return /^[A-Za-z0-9_-]+$/.test(node.name ?? "");
+		return true;
 	});
 }
 

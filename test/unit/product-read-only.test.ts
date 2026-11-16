@@ -70,11 +70,11 @@ describe("a profile's read-only commands", () => {
 		}
 	});
 
-	it("run in plan mode, where an undeclared subcommand is still refused", () => {
+	it("run in plan mode, where an undeclared subcommand is put to the user", () => {
 		use(SAMPLE);
 		const plan = (subject: string) => decide({ toolName: "bash", subject, cwd, mode: "plan", deny: [], ask: [], allow: [] });
 		expect(plan("samplectl discover acme/queue client")).toEqual({ decision: "allow", cause: "plan-readonly" });
-		expect(plan("samplectl run").decision).toBe("deny");
+		expect(plan("samplectl run")).toEqual({ decision: "ask", cause: "plan-unproven" });
 	});
 
 	it("refuses an entry that could weaken the base's own judgement, or that names no subcommand", () => {

@@ -34,6 +34,7 @@ import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
 import { shellResultText } from "../../lib/shell-run/shell-text.ts";
 import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
+import { turnAfterBashAllowed, USER_BASH_CHANNEL, type UserBashTurnRequest, withTurnAfterRun } from "../../lib/shell-run/user-bash-turn.ts";
 
 /** The tool's parameters, described in the profile's words. */
 const bashParams = (d: ShellParams) =>
@@ -112,12 +113,20 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	});
 
 	// The user's own `!` commands, under the bundled app only: pi runs them with
-	// its full process environment, so they get the same restore. Outside the app
-	// pi's default path runs untouched. They run in the session's bash, the one
-	// the bash tool uses.
-	pi.on("user_bash", () => {
-		if (process.env[LAUNCHER_ENV_VAR] === undefined) return undefined;
-		return { operations: withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin"))) };
+	// its full process environment, so they get the same restore, in the
+	// session's bash, the one the bash tool uses. Outside the app this handler
+	// returns nothing, so pi's default path, or another extension's `user_bash`
+	// handler, runs them. In the app's terminal a listener on USER_BASH_CHANNEL
+	// (the bash-turn feature) may ask to hear when a run settled, to start a turn
+	// (lib/shell-run/user-bash-turn.ts).
+	pi.on("user_bash", (event, ctx) => {
+		const app = process.env[LAUNCHER_ENV_VAR] !== undefined;
+		if (!app) return undefined;
+		const operations = withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin")));
+		if (!turnAfterBashAllowed({ app, mode: ctx.mode })) return { operations };
+		const request: UserBashTurnRequest = { command: event.command, excludeFromContext: event.excludeFromContext };
+		pi.events.emit(USER_BASH_CHANNEL, request);
+		return { operations: request.onSettled ? withTurnAfterRun(operations, request.onSettled) : operations };
 	});
 }
 

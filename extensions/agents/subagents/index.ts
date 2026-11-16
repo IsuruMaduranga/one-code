@@ -25,7 +25,7 @@ import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-wri
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../../lib/agents/agent-cron.ts";
-import { profileText, toolLive } from "../../lib/profile/profile.ts";
+import { activeProfile, profileText, toolLive } from "../../lib/profile/profile.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { isPathAtOrUnder } from "../../lib/profile/paths.ts";
@@ -646,6 +646,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// /model or a /subagent change rides the request's tail, decided at render
 	// time from the text the epoch last told, never a rewrite of the menu that
 	// would re-cache the conversation and drop its earlier thinking (findings §46).
+	/** The words each block is withdrawn with on the tail. */
+	const WITHDRAWN = { "subagent-models": "modelsWithdrawn", "subagent-agents": "catalogWithdrawn", "subagent-delegation": "delegationWithdrawn" } as const satisfies Record<SubagentBlockKey, keyof SubagentsText>;
 	/** The live text of each block; null when the block is absent. */
 	const liveBlocks: Record<SubagentBlockKey, string | null> = { "subagent-models": null, "subagent-agents": null, "subagent-delegation": null };
 	/** A model the account refused since the menu was last told: its narrow correction stands in for the whole menu. */
@@ -668,7 +670,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			const fact = toldBlockFact(key, text ?? "");
 			if (told === fact.hash || (text === null && told === undefined)) continue;
 			const facts = [fact];
-			if (text === null) request.blocks.push({ text: words.delegationWithdrawn, facts });
+			if (text === null) request.blocks.push({ text: words[WITHDRAWN[key]], facts });
 			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });
 			else request.blocks.push({ text, facts });
 		}
@@ -703,7 +705,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// Every refusal since the menu was last told, each named, with the default as it is now.
 		if (refused !== undefined) refusal = { refused: [...(refusal?.refused ?? []).filter((model) => model !== refused), refused], replacement: resolution.model };
 		else if (refusal) refusal = { ...refusal, replacement: resolution.model };
-		publishBlock("subagent-models", text);
+		// The menu serves the Agent tool's and workflow agents' `model` field.
+		publishBlock("subagent-models", toolLive("Agent") || toolLive("workflow") ? text : null);
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
@@ -729,9 +732,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return catalogMemo.text;
 	};
-	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", agentCatalog(ctx));
+	// The blocks follow the tools the session can have (`toolLive`), the answer
+	// every text naming a tool takes: registered, not active, so deferral or a
+	// tier's withdrawal never flips a block, and pi's `--tools`/`--exclude-tools`
+	// take a tool and its blocks out together (lib/profile/pi-tool-flags.ts). A
+	// session resumed under other flags announces the change on the tail.
+	const emitAgentCatalog = (ctx: ExtensionContext) => publishBlock("subagent-agents", toolLive("Agent") ? agentCatalog(ctx) : null);
 
-	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" ? words.delegationSteer : null);
+	const emitDelegationSteer = () => publishBlock("subagent-delegation", requestTier() === "tiny" && toolLive("Agent") ? words.delegationSteer : null);
 
 	let shuttingDown = false;
 
@@ -1681,9 +1689,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
 		// The child's cron tools reach this session's store (lib/agents/agent-cron.ts);
-		// none when the background feature is off (no store answers them).
-		const cronText = toolLive("cron_create") ? profileText().background?.cron : undefined;
-		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]) : [];
+		// none when the background feature is off (no store answers them). pi's
+		// tool flags filter this session's registry, not a child's, so they count
+		// only for a fork, whose tools must match this session's to read its cache.
+		// Each tool is asked on its own: the flags can take out one of the three.
+		const cronLive = record.agent === FORK_AGENT ? toolLive : (name: string) => activeProfile().profileLive.has(name);
+		const cronText = profileText().background?.cron;
+		const cron = cronText
+			? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]).filter((tool) => cronLive(tool.name))
+			: [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
 

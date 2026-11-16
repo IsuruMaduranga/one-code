@@ -35,7 +35,7 @@ import { contentHash } from "../../lib/request/ledger/wire.ts";
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { claudeFamily } from "../../lib/models/model-tier.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
-import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact } from "../../lib/request/reminders.ts";
+import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact, withoutSilentMessages } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../../lib/request/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "./turn-budget-layout.ts";
@@ -172,7 +172,8 @@ function systemReminderExtension(pi: ExtensionAPI) {
 			const fact = stickyFact(entry);
 			return { ...entry, fact, delivered: toldBlocks.get(fact.key) === fact.hash };
 		});
-		const rendered = renderReminders(event.messages, { epoch, layout: layout !== undefined, stack, sticky, oneShots });
+		// A message that sends nothing (the empty opener of a turn a `!` run started) is left out, so it carries nothing.
+		const rendered = renderReminders(withoutSilentMessages(event.messages), { epoch, layout: layout !== undefined, stack, sticky, oneShots });
 		const stickyFacts = sticky.filter((entry) => !entry.delivered && rendered.stickyPlaced.includes(entry.key)).map((entry) => entry.fact);
 
 		const consumed = rendered.placed.flatMap((shot) => (shot.id ? [shot.id] : []));

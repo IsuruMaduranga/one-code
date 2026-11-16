@@ -12,7 +12,8 @@
  * the label says exactly what it covers, and there is no grant at all where a
  * rule could not matter (a protected path, checked before allow rules) or
  * where the classifier is the boundary (auto mode: session allows are never
- * applied there, and its safety floor blocks rather than prompts).
+ * applied there, and its safety floor blocks rather than prompts), and none in
+ * plan mode, which never applies them either.
  */
 
 import { dirname, resolve } from "node:path";
@@ -48,13 +49,22 @@ function absoluteDirPattern(dir: string): string {
 	return `/${toPosixPath(resolve(dir)).replace(/\/+$/, "")}/**`;
 }
 
+/**
+ * Whether the session's allows apply in `mode`. Not in auto mode (the
+ * classifier is the boundary and its only prompt is the resume prompt, not a
+ * per-action approval), nor in plan mode (a rule minted before planning must
+ * not let a write past it, and its prompts offer allow-once and deny only).
+ */
+export function sessionAllowsApply(mode: PermissionMode): boolean {
+	return mode !== "auto" && mode !== "plan";
+}
+
 export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined {
 	const { subject, cwd, mode, cause, home } = input;
-	// Auto mode never applies session allows (the classifier is the boundary and
-	// its only prompt is the resume prompt, not a per-action approval); protected
-	// paths are judged before allow rules, so a rule minted here could never
-	// cover them.
-	if (mode === "auto" || cause === "protected-path") return undefined;
+	// No grant where session allows never apply (`sessionAllowsApply`), so
+	// nothing approved there is remembered; protected paths are judged before
+	// allow rules, so a rule minted here could never cover them.
+	if (!sessionAllowsApply(mode) || cause === "protected-path") return undefined;
 
 	const tool = normalizeToolName(input.toolName);
 	const mint = (raw: string, label: string): SessionGrant | undefined => {

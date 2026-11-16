@@ -89,6 +89,68 @@ describe("tool-search listing and render-time addenda", () => {
 		}
 	});
 
+	describe("hints for a model outside the Claude family", () => {
+		const claude = { provider: "anthropic", api: "anthropic-messages", id: "claude-sonnet-5-5" };
+		const gpt = { provider: "openai", api: "openai-responses", id: "gpt-6.1-sol" };
+		const hints = { enter_plan_mode: "When the task is not simple, use it.", web_fetch: "When you fetch, use it." };
+		const soft = "Only when asked, use it.";
+		const close = "Load a tool before calling it.";
+		/** Run `body` on a profile whose words give enter_plan_mode a hint for other models and web_fetch none, and close the listing with `close`. */
+		const withWords = (body: () => void) => {
+			const active = activeProfile();
+			const toolSearch = { ...active.text.toolSearch!, listingHints: hints, listingHintsOtherModels: { enter_plan_mode: soft }, listingClose: close };
+			setActiveProfileForTest({ ...active, text: { ...active.text, toolSearch } });
+			try {
+				body();
+			} finally {
+				setActiveProfileForTest(active);
+			}
+		};
+		const start = (model: object) => {
+			const fake = makeFakePi();
+			toolSearchExtension(fake.pi as never);
+			fake.addDeferred("web_fetch");
+			fake.addDeferred("enter_plan_mode");
+			fake.pi.fire("session_start", {}, { model });
+			return fake;
+		};
+		const listed = (fake: ReturnType<typeof makeFakePi>) => listings(fake.reminders).at(-1)?.text?.split("\n") ?? [];
+
+		it("keeps the profile's hint byte for byte on a Claude-family model, in the listing and the addendum", () =>
+			withWords(() => {
+				const fake = start(claude);
+				expect(listed(fake)).toEqual([toolSearchResultText.listingHead, `web_fetch: ${hints.web_fetch}`, `enter_plan_mode: ${hints.enter_plan_mode}`, "", close]);
+				expect(fake.render({ told: { tools: ["web_fetch"] }, model: claude })).toEqual([
+					{ text: [toolSearchResultText.addendumHead, `enter_plan_mode: ${hints.enter_plan_mode}`].join("\n"), facts: [{ kind: "tools", names: ["enter_plan_mode"] }] },
+				]);
+			}));
+
+		it("gives another model the override in the listing and the addendum; a tool with none keeps its hint", () =>
+			withWords(() => {
+				const fake = start(gpt);
+				expect(listed(fake)).toContain(`enter_plan_mode: ${soft}`);
+				expect(listed(fake)).toContain(`web_fetch: ${hints.web_fetch}`);
+				expect(fake.render({ told: { tools: [] }, model: gpt })).toEqual([
+					{ text: [toolSearchResultText.addendumHead, `web_fetch: ${hints.web_fetch}`, `enter_plan_mode: ${soft}`].join("\n"), facts: [{ kind: "tools", names: ["web_fetch", "enter_plan_mode"] }] },
+				]);
+			}));
+
+		it("follows a model switch, so the epoch the switch opens renders its own model's words", () =>
+			withWords(() => {
+				const fake = start(claude);
+				const before = listings(fake.reminders).at(-1)?.text;
+				// A turn on the same model republishes the same text: the epoch's record holds either way.
+				fake.pi.fire("turn_start", {}, { model: claude });
+				expect(listings(fake.reminders).at(-1)?.text).toBe(before);
+				fake.pi.fire("model_select", { model: gpt });
+				fake.pi.fire("turn_start", {}, { model: gpt });
+				expect(listed(fake)).toContain(`enter_plan_mode: ${soft}`);
+				fake.pi.fire("model_select", { model: claude });
+				fake.pi.fire("turn_start", {}, { model: claude });
+				expect(listings(fake.reminders).at(-1)?.text).toBe(before);
+			}));
+	});
+
 	it("lists the cache probe's late-tool fixture by its own hint, so the live probe sends a hinted line", () => {
 		vi.useFakeTimers();
 		try {

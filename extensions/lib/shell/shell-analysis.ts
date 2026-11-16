@@ -114,6 +114,27 @@ export interface ShellEvidence {
 	 * qualifies an escalation.
 	 */
 	containedNonNetwork: boolean;
+	/**
+	 * True when every reason this escalated is a command this check knows
+	 * nothing about: a program with no option table, no git or find branch and
+	 * no product read-only entry (`gh`, `jq`-like tools it has never listed).
+	 * No write, network, path, wrapper, assignment, substitution, `cd` or
+	 * unmodelled syntax, and no known command that failed its table. A fact
+	 * for plan mode, which lets a user's allow rule cover only such a line
+	 * (lib/rules/matcher.ts `decide`); it never changes the verdict. Never true
+	 * for a "safe" verdict.
+	 */
+	unlistedOnly: boolean;
+	/**
+	 * True when no command on the line reads a file: each one only filters its
+	 * stdin (`head`, `grep pat`, `jq .`, `wc -l`: a `PIPE_FILTERS` command
+	 * with no file operand, no option naming a file and no recursion) or takes
+	 * no file at all (`NO_FILE_OPERANDS`), and no input redirect opens one. A
+	 * fact independent of what is on disk, so it stays true however an earlier
+	 * command on the line changed the filesystem; the read-only verdict does not
+	 * (lib/rules/matcher.ts `findBashAllowRule`).
+	 */
+	readsNoFile: boolean;
 }
 
 /**
@@ -155,6 +176,24 @@ export const NO_FILE_OPERANDS = new Set([
  * reads a project `.ackrc` this check never sees.
  */
 export const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg"]);
+
+/**
+ * Read-only commands that read their stdin when they name no file. With no
+ * file operand and none of `PIPE_FILTER_FILE_OPTIONS`, one only filters what
+ * it is piped (`readsNoFile`).
+ */
+const PIPE_FILTERS = new Set([
+	"cat", "cksum", "column", "cut", "fold", "head", "jq", "md5sum", "nl", "od", "paste", "rev", "sha1sum", "sha256sum", "shasum", "sort", "tail",
+	"uniq", "wc", "grep", "egrep", "fgrep", "rg",
+]);
+
+/** Options with which a `PIPE_FILTERS` command reads the working directory instead of its stdin (`grep -r pat`, `rg --files`). */
+const PIPE_FILTER_FILE_OPTIONS: Readonly<Record<string, readonly string[]>> = {
+	grep: ["-r", "--recursive", "-d", "--directories"],
+	egrep: ["-r", "--recursive", "-d", "--directories"],
+	fgrep: ["-r", "--recursive", "-d", "--directories"],
+	rg: ["--files"],
+};
 
 interface WrapperSpec {
 	/** Options whose next word is a harmless value, skipped in both readings. */
@@ -257,6 +296,42 @@ const MUTATION_COMMANDS = new Set([
 	"unzip",
 	"zip",
 ]);
+
+/** Whether `name` (a command word, basename, lowercased) is one of the filesystem-mutating commands above. */
+export function isMutationCommand(name: string): boolean {
+	return MUTATION_COMMANDS.has(name);
+}
+
+/**
+ * Whether this check knows the command `name` (a basename, lowercased): it has
+ * an option table, a git or find branch or a product read-only entry for it,
+ * or lists it as mutating, network-capable or a script interpreter. The
+ * PowerShell side of `unlistedOnly`: a native program the bash check knows is
+ * one plan mode will not let an allow rule cover unexamined.
+ */
+export function gateKnowsCommand(name: string): boolean {
+	return (
+		READ_ONLY_COMMANDS.has(name) ||
+		name === "git" ||
+		name === "find" ||
+		name === "cd" ||
+		MUTATION_COMMANDS.has(name) ||
+		NETWORK_COMMANDS.has(name) ||
+		SCRIPT_INTERPRETERS.has(name) ||
+		productReadOnlySubcommands(name) !== undefined
+	);
+}
+
+/**
+ * Whether the line writes by what this check saw: a write target it recorded
+ * (a redirect, a mutating command's operand, `sort -o`), or a mutating command
+ * whose targets it could not list (`rm *`). Plan mode refuses such a line
+ * outright (lib/rules/matcher.ts `decide`); a line this misses is one the
+ * pre-gate could not prove read-only either, which plan mode puts to the user.
+ */
+export function namesWrite(evidence: ShellEvidence): boolean {
+	return evidence.writes.length > 0 || evidence.commands.some(isMutationCommand);
+}
 
 /** The delete/truncate commands whose targets are every positional, bare names included. */
 const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
@@ -516,6 +591,16 @@ export function gitSubcommand(args: Token[]): { sub?: string; rest: Token[] } {
 		i += GIT_LOCATOR_VALUE_FLAGS.has(value) ? 2 : 1;
 	}
 	return { rest: [] };
+}
+
+/**
+ * A command word's program name: its basename, lowercased, without a Windows
+ * executable extension (`.exe`, `.cmd`, `.bat`, `.com`). Plan mode's runner
+ * check and the PowerShell tree read it; the bash gate's own `commandName`
+ * below strips `.exe` only.
+ */
+export function programName(word: string): string {
+	return (word.split(/[\\/]/).at(-1) ?? "").toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 /** Basename of a command token, `.exe` stripped, lowercased. */
@@ -843,7 +928,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		readOnlyOutside: false,
 		readsOnly: false,
 		containedNonNetwork: false,
+		unlistedOnly: false,
+		readsNoFile: false,
 	};
+	/** Cleared by any word read-checked and by any command that is not a pipe filter given no file (see readsNoFile). */
+	let readsNoFile = true;
 	/**
 	 * Set by any escalation reason that is NOT a bare in-project mutation — i.e.
 	 * anything meaning the command reaches outside the project or cannot be fully
@@ -855,8 +944,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	let escalatedBeyondReads = false;
 	/** Set by any escalation that is neither an outside-cwd read nor a read naming a guarded path (see readsOnly). */
 	let escalatedBeyondNamedReads = false;
-	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean; namedRead?: boolean }) => {
+	/** Set by any escalation that is not a command this check knows nothing about (see unlistedOnly). */
+	let escalatedBeyondUnlisted = false;
+	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean; namedRead?: boolean; unlisted?: boolean }) => {
 		evidence.verdict = "escalate";
+		if (!opts?.unlisted) escalatedBeyondUnlisted = true;
 		if (!opts?.contained) uncontained = true;
 		if (!opts?.outsideRead) escalatedBeyondReads = true;
 		if (!opts?.outsideRead && !opts?.namedRead) escalatedBeyondNamedReads = true;
@@ -952,6 +1044,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	const checkRead = (word: { value: string; glob?: boolean }, base = effectiveCwd) => {
 		const value = word.value;
 		if (!value) return;
+		readsNoFile = false;
 		if (isUnknownTilde(value)) {
 			escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
 			return;
@@ -1025,6 +1118,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
+		if (!PIPE_FILTERS.has(name) && !NO_FILE_OPERANDS.has(name)) readsNoFile = false;
 		if (dynamicKinds.has("substitution") && !PURE_OUTPUT.has(name)) {
 			escalate(`passes a command substitution's output to ${name || "the shell"}, and its words are unknown here`);
 		}
@@ -1176,6 +1270,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				if (patternFirst || spec.programFirst) operands.shift();
 				const reads = NO_FILE_OPERANDS.has(name) ? check.parsed.fileValues : [...operands, ...check.parsed.fileValues];
 				for (const word of reads) checkRead(word);
+				if (PIPE_FILTER_FILE_OPTIONS[name]?.some((option) => check.parsed.seen.has(option))) readsNoFile = false;
 				// A command that dereferences the entries of a directory operand
 				// (`diff dir1 dir2`) reads through any symlink one level inside it,
 				// which the operand's own containment check never sees (A1).
@@ -1209,7 +1304,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				else if (!rest.every((word) => !word.dynamic && isNameOperand(word.value))) escalate(`runs ${name} ${subcommand.value} with an argument that is not a short name, and the command may send it over the network`);
 			}
 		} else if (!isMutation) {
-			escalate(`runs ${name}, which is not on the read-only allowlist`);
+			escalate(`runs ${name}, which is not on the read-only allowlist`, { unlisted: true });
 		}
 
 		// The positional destinations of writing commands are the paths that get
@@ -1307,6 +1402,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 	evidence.readsOnly = evidence.verdict === "escalate" && !escalatedBeyondNamedReads;
+	evidence.unlistedOnly = evidence.verdict === "escalate" && !escalatedBeyondUnlisted;
+	evidence.readsNoFile = readsNoFile && evidence.commands.length > 0;
 
 	return evidence;
 }

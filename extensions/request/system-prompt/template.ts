@@ -14,9 +14,9 @@
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
-import { profileText } from "../../lib/profile/profile.ts";
+import { activeProfile, profileText } from "../../lib/profile/profile.ts";
 import type { EnvironmentInfo } from "./environment.ts";
-import { cwdLine, type SystemPromptSection, type SystemPromptSession, toolList } from "./text.ts";
+import { cwdLine, type SectionSession, type SystemPromptSection, type SystemPromptSession, toolList } from "./text.ts";
 
 /** The active tools with a snippet, in registration order, and the tools' guidelines, deduplicated. */
 function toolListInputs(options: BuildSystemPromptOptions): { tools: { name: string; snippet: string }[]; guidelines: string[] } {
@@ -63,8 +63,10 @@ export function buildClaudeCodeSystemPrompt(
 ): string {
 	const text = profileText().systemPrompt;
 	const session: SystemPromptSession = { tier, taskTools, tools: options.selectedTools };
+	// Other extensions' sections also get the tools the session can have, to cut passages by.
+	const sectionSession: SectionSession = { ...session, live: activeProfile().live };
 	const extra = (place: SystemPromptSection["place"]) =>
-		extraSections.filter((section) => section.place === place).flatMap((section) => section.render(session) ?? []);
+		extraSections.filter((section) => section.place === place).flatMap((section) => section.render(sectionSession) ?? []);
 	const { tools, guidelines } = toolListInputs(options);
 	const sections = [
 		...text.lead(session),

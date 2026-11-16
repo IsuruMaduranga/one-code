@@ -152,6 +152,18 @@ function parseAllowlist(raw: unknown): string[] | undefined {
 	return tools?.includes("*") ? undefined : tools;
 }
 
+/**
+ * An agent file's `model`. `inherit` (any case, any surrounding space) stays as
+ * the word: Claude Code's "run on the session model", which the resolver
+ * (lib/models/subagent-model.ts) reads as an explicit choice, ending the chain
+ * on the session model. Dropped here it read as "no model given", and the
+ * configured default or the automatic cheaper same-provider pick served instead.
+ */
+function agentModel(raw: unknown): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	return raw.trim().toLowerCase() === "inherit" ? "inherit" : raw;
+}
+
 export function parseAgentFile(path: string, content: string): AgentDefinition | undefined {
 	const { frontmatter, body } = parseFrontmatterLoosely(content);
 	const fm = frontmatter;
@@ -166,8 +178,7 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 		description: typeof fm.description === "string" ? fm.description : "",
 		tools: parseAllowlist(fm.tools),
 		excludeTools: disallowed.length > 0 ? [...new Set(disallowed)] : undefined,
-		// "inherit" is Claude Code's way of saying "use the session model".
-		model: typeof fm.model === "string" && fm.model !== "inherit" ? fm.model : undefined,
+		model: agentModel(fm.model),
 		systemPrompt: body.trim(),
 		source: path,
 	};

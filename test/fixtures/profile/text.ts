@@ -443,6 +443,8 @@ export const subagents: NonNullable<ProfileText["subagents"]> = {
 	forkTask: (p) => mark("subagents.forkTask", p),
 	delegationSteer: "[subagents.delegationSteer]",
 	delegationWithdrawn: "[subagents.delegationWithdrawn]",
+	catalogWithdrawn: "[subagents.catalogWithdrawn]",
+	modelsWithdrawn: "[subagents.modelsWithdrawn]",
 };
 
 export const subagentModels: NonNullable<ProfileText["subagentModels"]> = {

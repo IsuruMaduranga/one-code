@@ -197,9 +197,14 @@ You audit error handling.`,
 		expect(agent?.systemPrompt).toBe("You audit error handling.");
 	});
 
-	it("treats model: inherit as no override", () => {
-		const agent = parseAgentFile("/x/a.md", "---\nname: a\nmodel: inherit\n---\nbody");
-		expect(agent?.model).toBeUndefined();
+	it("keeps model: inherit as the word, for the resolver to read as the session model", () => {
+		expect(parseAgentFile("/x/a.md", "---\nname: a\nmodel: inherit\n---\nbody")?.model).toBe("inherit");
+		expect(parseAgentFile("/x/b.md", "---\nname: b\nmodel: Inherit\n---\nbody")?.model).toBe("inherit");
+		expect(parseAgentFile("/x/c.md", '---\nname: c\nmodel: "  INHERIT "\n---\nbody')?.model).toBe("inherit");
+	});
+
+	it("gives no model for an agent file without a model field", () => {
+		expect(parseAgentFile("/x/a.md", "---\nname: a\n---\nbody")?.model).toBeUndefined();
 	});
 
 	it("keeps a real model id", () => {

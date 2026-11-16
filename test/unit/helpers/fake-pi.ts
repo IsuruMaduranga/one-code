@@ -144,7 +144,8 @@ export function createFakePi(): FakePi {
 		setLabel: vi.fn(),
 		exec: vi.fn(async () => ({ stdout: "", stderr: "", exitCode: 0 })),
 		getActiveTools: () => activeTools,
-		getAllTools: () => [],
+		// Registered tools, as pi lists them.
+		getAllTools: () => [...tools.values()].map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters })),
 		setActiveTools: (names: string[]) => {
 			activeTools = names;
 		},
