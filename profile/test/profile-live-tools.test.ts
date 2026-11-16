@@ -13,7 +13,7 @@ import type { DescriptionForm } from "../../extensions/lib/profile/tool-variants
 import type { FixPromptInput } from "../../extensions/commands/doctor/text.ts";
 import { profile } from "../index.ts";
 import { PROMPT_TIERS, searchToolsEnabled } from "../../extensions/lib/models/model-tier.ts";
-import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
+import { deferralChanges, type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "../../test/unit/helpers/tool-mentions.ts";
 
 /** Phrases where a tool's name is an English word, not the tool. */
 const ENGLISH: EnglishPhrases = {
@@ -116,6 +116,12 @@ describe("text naming another tool", () => {
 			expect(text, off).toContain("When running `find`, search from `.`");
 			for (const gone of ["ls tools", "search tools", "dedicated tools, not this shell", "the grep tool", "the find tool", "the ls tool"]) expect(text, `${off}: ${gone}`).not.toContain(gone);
 		}
+	});
+
+	it("keeps the system prompt's sections in place when a deferred tool loads", () => {
+		// The sections key on the tools the session can have, never on the active list a loaded tool joins.
+		const { systemPrompt } = profile.text({ live: { has: () => true } });
+		expect(deferralChanges((session) => [...systemPrompt.lead(session), ...systemPrompt.tail(session), systemPrompt.memory("/m", session)].join("\n\n"))).toEqual([]);
 	});
 
 	it("is unchanged when every tool is on", () => {

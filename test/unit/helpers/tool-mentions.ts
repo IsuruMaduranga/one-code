@@ -1,11 +1,15 @@
 /**
  * Shared by the tests that check text naming another tool follows the live
  * tool set: the cases (each optional feature's tools off, and edit) and the
- * search for a tool's name outside the English phrases that share it.
+ * search for a tool's name outside the English phrases that share it; and
+ * the check that a system-prompt section stays put when a deferred tool loads.
  */
 import { FEATURE_IDS, TOOL_FEATURES, toolSetProblems } from "../../../extensions/lib/profile/features.ts";
 import { PINNED_TOOLS } from "../../../extensions/lib/profile/profile.ts";
 import type { LiveTools } from "../../../extensions/lib/profile/live-tools.ts";
+import { PROMPT_TIERS } from "../../../extensions/lib/models/model-tier.ts";
+import { DEFERRABLE_TOOLS } from "../../../extensions/lib/request/deferrable-tools.ts";
+import type { SectionSession } from "../../../extensions/request/system-prompt/text.ts";
 
 /**
  * A text that may name another tool: its label, the feature that owns it
@@ -71,4 +75,31 @@ export function stalePassages(texts: (live: LiveTools) => NamedText[]): string[]
 	texts({ has: () => true, watch });
 	texts({ has: () => false, watch });
 	return [...seen].filter(([, found]) => !found).map(([passage]) => passage);
+}
+
+/** The tools a session starts with: every base tool that is never deferred. */
+const EAGER_TOOLS: readonly string[] = [...new Set(["read", "bash", "edit", "write", ...Object.keys(TOOL_FEATURES)])].filter(
+	(tool) => !(DEFERRABLE_TOOLS as readonly string[]).includes(tool),
+);
+
+/**
+ * Where a system-prompt section changes when a deferred tool loads, on every
+ * tier, with and without the task tools: rendered with the session's
+ * starting tools, then with each deferrable tool added (and all of them at
+ * once), the bytes must be the same. A loaded tool joins pi's active list
+ * (`tools`), and a prompt that follows it misses the cache from the top;
+ * passages keyed on `live` never move. Empty when the section is stable.
+ */
+export function deferralChanges(render: (session: SectionSession) => string | undefined, live: LiveTools = { has: () => true }): string[] {
+	const changes: string[] = [];
+	for (const tier of PROMPT_TIERS) {
+		for (const taskTools of [true, false]) {
+			const at = (tools: readonly string[]) => render({ tier, taskTools, tools, live });
+			const start = at(EAGER_TOOLS);
+			for (const loaded of [...DEFERRABLE_TOOLS.map((tool) => [tool]), [...DEFERRABLE_TOOLS]]) {
+				if (at([...EAGER_TOOLS, ...loaded]) !== start) changes.push(`${tier}${taskTools ? "" : " without task tools"}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
+			}
+		}
+	}
+	return changes;
 }

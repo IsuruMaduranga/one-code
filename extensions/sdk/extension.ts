@@ -12,7 +12,15 @@
  * through pi, and reaches the request only through these channels:
  *
  * - `SYSTEM_PROMPT_SECTION_CHANNEL`: a section of the system prompt, announced
- *   while the extension loads. A child session ignores it.
+ *   while the extension loads. A child session ignores it. Its `render` gets
+ *   a `SectionSession`: the tier, whether the task tools run, `tools` (the
+ *   active tools now, which change when a deferred tool loads, so a passage
+ *   keyed on them can change the prompt mid-session and miss the cache) and
+ *   `live` (the tools the session can have, fixed for the process). Key
+ *   passages on `live`: list them per tool as `ToolPassages` and cut them
+ *   with `withoutOff` (both from `extensions/sdk/profile.ts`), and test the
+ *   section with `stalePassages`, `toolLeaks` and `deferralChanges` from
+ *   `test/unit/helpers/tool-mentions.ts`.
  * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
  * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
  * - `lspRequest`: a request on a language server the profile declares, on the
@@ -47,7 +55,7 @@
  */
 export { DEFER_CHANNEL, type DeferRequest } from "../lib/request/deferred-channel.ts";
 export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "../lib/request/reminders.ts";
-export { SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
+export { type SectionSession, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";
 export { MIN_SECRET_LENGTH, type SecretValue, setSecretValues } from "../lib/profile/secrets.ts";
 export { type LspFileChange, type LspFilesChanged, lspFilesChanged, type LspRequest, lspRequest } from "../tools/lsp/request-channel.ts";
 export { isMethodNotFound, type LspErrorDetail, lspErrorDetail } from "../tools/lsp/failure.ts";

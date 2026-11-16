@@ -18,6 +18,7 @@ import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
 import { LSP_FILES_CHANGED_CHANNEL, type LspFilesChangedEvent } from "../../extensions/tools/lsp/request-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { deferralChanges } from "./helpers/tool-mentions.ts";
 
 const root = join(PROFILE_DIR, PRODUCT_EXTENSIONS_DIR);
 const folders = existsSync(root) ? readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name) : [];
@@ -39,7 +40,7 @@ describe("a product's own extensions", () => {
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reaches the request through the SDK's channels", async () => {
-		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_REMINDER: string; PROBE_SECRET: string };
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_SECTION_TOOL: string; PROBE_REMINDER: string; PROBE_SECRET: string };
 		const fake = createFakePi();
 		const seen = { deferred: [] as unknown[], sections: [] as SystemPromptSection[], reminders: [] as unknown[] };
 		fake.events.on(DEFER_CHANNEL, (data) => seen.deferred.push(data));
@@ -50,7 +51,11 @@ describe("a product's own extensions", () => {
 		// The base's rows in the terminal, through the SDK.
 		expect(fake.tools.get(module.PROBE_TOOL)?.renderShell).toBe("self");
 		expect(seen.deferred).toEqual([{ name: module.PROBE_TOOL }]);
-		expect(seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: undefined })])).toEqual([["tail", module.PROBE_SECTION]]);
+		// The section cuts the passage naming its tool when the session cannot have it, whatever the active list says.
+		const rendered = (has: boolean) => seen.sections.map((section) => [section.place, section.render({ tier: "cheap", taskTools: false, tools: [], live: { has: () => has } })]);
+		expect(rendered(true)).toEqual([["tail", `${module.PROBE_SECTION}${module.PROBE_SECTION_TOOL}`]]);
+		expect(rendered(false)).toEqual([["tail", module.PROBE_SECTION]]);
+		expect(deferralChanges((session) => seen.sections[0].render(session))).toEqual([]);
 		expect(redactSecretValues(`out: ${module.PROBE_SECRET}`)).toBe("out: [secret:fixture]");
 		// The reminder waits for the session: nothing is queued while extensions load.
 		expect(seen.reminders).toEqual([]);
