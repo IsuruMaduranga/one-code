@@ -1,4 +1,5 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -107,6 +108,22 @@ describe("capture-fetch preload and summary", () => {
 		expect(lines[1]).toMatch(/\/v1\/chat\/completions {2}200 {2}model=m-2 .* cache key=abcdefghijkl ret=24h$/);
 		expect(lines[2]).toMatch(/GET example\.invalid\/catalog {2}503 {2}model=- {2}0 B {2}cache -$/);
 		expect(lines[6]).toMatch(/\/down {2}error /);
+	});
+
+	it("prints every row to a reader slower than the pipe before it exits", async () => {
+		const row = JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", method: "POST", host: "h", path: "/p", status: 200, bytes: 1, body: { model: "m" } });
+		writeFileSync(out, `${row}\n`.repeat(5000));
+		const child = spawn(process.execPath, [summary, out], { stdio: ["ignore", "pipe", "ignore"] });
+		const closed = once(child, "close");
+		// Not reading yet: the pipe fills and the rest of the output waits in the child.
+		child.stdout.pause();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		const chunks: Buffer[] = [];
+		child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+		child.stdout.resume();
+		const [code] = await closed;
+		expect(code).toBe(0);
+		expect(Buffer.concat(chunks).toString().trim().split("\n")).toHaveLength(5000);
 	});
 
 	it("exits with status 2 without a file and 1 for one it cannot read", () => {
