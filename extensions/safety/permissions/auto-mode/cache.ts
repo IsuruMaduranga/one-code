@@ -1,6 +1,6 @@
 /** Classifier cache breakpoints on the wire. Never changes classifier text or verdict behavior. */
 
-import { isCacheMarker, MAX_SIDE_CALL_CACHE_MARKERS } from "../../../lib/side-calls/side-call-cache.ts";
+import { isCachePoint, MAX_SIDE_CALL_CACHE_MARKERS, payloadMarkers } from "../../../lib/side-calls/side-call-cache.ts";
 import { isPlainObject } from "../../../lib/core/plain-object.ts";
 
 type WireRecord = Record<string, unknown>;
@@ -79,8 +79,9 @@ export function cacheClassifierHistory(payload: unknown, parts: readonly string[
 	const marker = anthropicMarker(content, text);
 	const point = marker === undefined ? bedrockCachePoint(content, text, parts) : undefined;
 	if (marker === undefined && point === undefined) return undefined;
-	// The user message's own marker is replaced, so its slot is ours to reuse.
-	const free = MAX_SIDE_CALL_CACHE_MARKERS - markersOutside(payload, message);
+	// The user message's own marker is replaced, so its slot is ours to reuse;
+	// the rest (the tools, the system prompt, any instruction message) stay.
+	const free = MAX_SIDE_CALL_CACHE_MARKERS - payloadMarkers(payload).filter((other) => other.message !== message).length;
 	if (free < 1) return undefined;
 	const markPrevious = free >= 2 && previousEnd !== undefined && previousEnd < historyEnd;
 	const marked = (i: number) => i === historyEnd || (markPrevious && i === previousEnd);
@@ -147,14 +148,6 @@ function anthropicMarker(content: WireRecord[], text: string): unknown {
 function bedrockCachePoint(content: WireRecord[], text: string, parts: readonly string[]): unknown {
 	if (content.length !== 2 || parts.some((part) => part.trim() === "")) return undefined;
 	const [block, point] = content;
-	return Object.keys(block).length === 1 && block.text === text && Object.keys(point).length === 1 ? point.cachePoint : undefined;
-}
-
-/** Breakpoints elsewhere in the request: the tools, the system prompt and any instruction message. */
-function markersOutside(payload: WireRecord, message: WireRecord): number {
-	const count = (value: unknown) => (Array.isArray(value) ? value.filter(isCacheMarker).length : 0);
-	const toolConfig = isPlainObject(payload.toolConfig) ? payload.toolConfig.tools : undefined;
-	const others = (payload.messages as unknown[]).filter((entry) => entry !== message);
-	return count(payload.tools) + count(toolConfig) + count(payload.system) + others.reduce<number>((sum, entry) => sum + (isPlainObject(entry) ? count(entry.content) : 0), 0);
+	return Object.keys(block).length === 1 && block.text === text && isCachePoint(point) ? point.cachePoint : undefined;
 }
 
