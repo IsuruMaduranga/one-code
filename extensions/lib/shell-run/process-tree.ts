@@ -28,6 +28,9 @@
  *   SIGKILL is still pending when the process exits (pi's quit calls
  *   `process.exit`, and the grace timer is unref'd) is SIGKILLed from a
  *   `process.on("exit")` hook.
+ * - `end` (`endProcessTree`): `stop`, then wait (bounded) until the group is
+ *   empty; for a caller that starts a replacement next (a language server's
+ *   respawn, an MCP server's close), since the leader's exit is not its tree's.
  * - `kill` (`killProcessTree`): one signal to the whole group (falling back to
  *   the child alone when the group is already gone); `taskkill /T /F` on
  *   Windows, which has no groups.
@@ -410,11 +413,33 @@ function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	timer.unref?.();
 }
 
+/** How often `endProcessTree` checks whether the stopped group has emptied. */
+const GROUP_POLL_MS = 50;
+/** How long `endProcessTree` waits past the TERM grace for the SIGKILLed group to empty. */
+export const KILL_SETTLE_MS = 250;
+
+/**
+ * Stop the tree (`stopProcessTree`) and resolve once it has no member left,
+ * at most `graceMs` plus the SIGKILL's settling. A leader's exit is not its
+ * tree's: a launcher's server lives on through its TERM grace (or a whole
+ * grace, if it ignores TERM), and what replaces it must not start beside it.
+ * On Windows the tree is its leader (`rememberedGroupAlive`).
+ */
+async function endProcessTree(child: ChildProcess, graceMs: number): Promise<void> {
+	if (!rememberedGroupAlive(child)) return;
+	stopProcessTree(child, graceMs);
+	for (let waited = 0; rememberedGroupAlive(child) && waited < graceMs + KILL_SETTLE_MS; waited += GROUP_POLL_MS) {
+		await new Promise<void>((resolve) => setTimeout(resolve, GROUP_POLL_MS).unref());
+	}
+}
+
 /** A long-lived child in its own process group, owned until this process exits, and how to end its tree. */
 export interface OwnedTree {
 	readonly child: ChildProcess;
 	/** SIGTERM the tree now and SIGKILL its group after `graceMs`; a tree already stopping is left to that stop (`stopProcessTree`). */
 	stop(graceMs: number): void;
+	/** `stop`, then resolve once no member is left, at most `graceMs` plus `KILL_SETTLE_MS` (`endProcessTree`). */
+	end(graceMs: number): Promise<void>;
 	/** Send one signal to the whole tree, with no grace (`killProcessTree`). */
 	kill(signal: NodeJS.Signals): void;
 	/** Whether the tree still has a member to end (`rememberedGroupAlive`). */
@@ -452,6 +477,7 @@ export function spawnOwnedTree(start: (detached: { detached: boolean }) => Child
 	return {
 		child,
 		stop: (graceMs) => stopProcessTree(child, graceMs),
+		end: (graceMs) => endProcessTree(child, graceMs),
 		kill: (signal) => killProcessTree(child, signal),
 		alive: () => rememberedGroupAlive(child),
 	};

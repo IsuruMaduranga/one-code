@@ -28,7 +28,7 @@ import { PassThrough } from "node:stream";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
+import { KILL_GRACE_MS, KILL_SETTLE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
 
 export interface StdioServerParams {
 	command: string;
@@ -43,10 +43,6 @@ export interface StdioFraming {
 	serializeMessage(message: JSONRPCMessage): string;
 }
 
-/** How often `close()` checks whether the stopped group has emptied. */
-const GROUP_POLL_MS = 50;
-/** How long `close()` waits past the TERM grace for the SIGKILLed group to empty. */
-const KILL_SETTLE_MS = 250;
 /** The longest `close()` takes: the stdin grace, then the TERM grace and the SIGKILL's settling. */
 export const STDIO_CLOSE_MAX_MS = 2 * KILL_GRACE_MS + KILL_SETTLE_MS;
 
@@ -148,12 +144,7 @@ export class ProcessGroupStdioTransport implements Transport {
 			// The leader still running, or a group it left behind: TERM the group now, KILL it after the
 			// grace. A launcher that exited during the wait already started that stop (endGroupWithLauncher),
 			// which `stop` leaves alone. Either way, wait for the group itself, not the leader's exit.
-			if (tree.alive()) {
-				tree.stop(KILL_GRACE_MS);
-				for (let waited = 0; tree.alive() && waited < KILL_GRACE_MS + KILL_SETTLE_MS; waited += GROUP_POLL_MS) {
-					await new Promise<void>((resolve) => setTimeout(resolve, GROUP_POLL_MS).unref());
-				}
-			}
+			await tree.end(KILL_GRACE_MS);
 		}
 		this.readBuffer.clear();
 	}

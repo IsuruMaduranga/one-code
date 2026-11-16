@@ -10,10 +10,13 @@
  * makes it ignore `exit` and a closed stdin, as a JVM server behind a
  * launcher script does; `STUBBORN=launcher` also kills its parent on `exit`,
  * as a launcher that exits while the server it started lives on.
+ * `SLOW_TERM=1` makes it ignore SIGTERM, as a server whose graceful shutdown
+ * runs past the stop's grace.
  */
 export const RECORDING_SERVER = `
 if (process.env.PID_FILE) require("node:fs").writeFileSync(process.env.PID_FILE, String(process.pid));
 if (process.env.STUBBORN) { setInterval(() => {}, 1000); process.stdin.on("error", () => {}); }
+if (process.env.SLOW_TERM) process.on("SIGTERM", () => {});
 let buffer = Buffer.alloc(0);
 let received = [];
 let init;

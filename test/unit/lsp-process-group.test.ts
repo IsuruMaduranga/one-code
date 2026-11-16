@@ -71,6 +71,27 @@ describe.skipIf(process.platform === "win32")("a language server behind a launch
 		await client.stop();
 	});
 
+	// The next server for the workspace starts once stop() resolves (the
+	// respawn in lsp/index.ts): the launcher's exit is not the server's, and a
+	// server still in its TERM grace would run beside its replacement.
+	it.each([
+		["on stop()", false],
+		["after its launcher died", true],
+	] as const)("is gone when stop() resolves, though it ignores SIGTERM, %s", async (_, launcherDies) => {
+		const { config, env } = launcher(pidFile, "launcher");
+		const client = new LspClient(config, dir, { env: { ...env, SLOW_TERM: "1" } });
+		await client.start();
+		const pid = await readServerPid();
+		if (launcherDies) {
+			const launcherPid = Number(execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8" }).trim());
+			process.kill(launcherPid, "SIGKILL");
+			expect(await until(() => !client.isRunning)).toBe(true);
+		}
+
+		await client.stop();
+		expect(alive(pid)).toBe(false);
+	});
+
 	it("is ended when its owner crashes without stopping it", async () => {
 		const { config, env } = launcher(pidFile);
 		// Loaded through jiti, as pi loads an extension: Node's own type

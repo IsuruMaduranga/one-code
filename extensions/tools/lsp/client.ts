@@ -31,7 +31,7 @@ import type { LspDiagnostic } from "./format.ts";
 import type { LspFailure } from "./text.ts";
 import { childProcessEnv } from "../../lib/app/app-launch.mjs";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { type OwnedTree, spawnOwnedTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
+import { KILL_GRACE_MS, type OwnedTree, spawnOwnedTree, unrefHandle } from "../../lib/shell-run/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -440,23 +440,29 @@ export class LspClient {
 			// Server may already be gone.
 		}
 		this.tree = undefined;
-		// Already gone (a crash the session is respawning after): its exit
-		// handler has ended the group, and no exit event is left to wait for.
-		if (child.exitCode !== null || child.signalCode !== null) return;
-		await new Promise<void>((resolve) => {
-			const timer = setTimeout(() => {
-				// The tree, not the leader: a launcher script's real server is a
-				// child of it, and on Windows a .cmd-shimmed server runs under the
-				// cmd.exe `commandLaunch` started; killing the leader alone would
-				// orphan the server on the inherited pipes.
-				tree.kill("SIGKILL");
-				resolve();
-			}, 1000);
-			timer.unref?.();
-			child.once("exit", () => {
-				clearTimeout(timer);
-				resolve();
+		// A leader already gone (a crash the session is respawning after) has no
+		// exit event left to wait for.
+		if (child.exitCode === null && child.signalCode === null) {
+			await new Promise<void>((resolve) => {
+				const timer = setTimeout(() => {
+					// The tree, not the leader: a launcher script's real server is a
+					// child of it, and on Windows a .cmd-shimmed server runs under the
+					// cmd.exe `commandLaunch` started; killing the leader alone would
+					// orphan the server on the inherited pipes.
+					tree.kill("SIGKILL");
+					resolve();
+				}, 1000);
+				timer.unref?.();
+				child.once("exit", () => {
+					clearTimeout(timer);
+					resolve();
+				});
 			});
-		});
+		}
+		// The launcher's exit is not the server's: the server it leaves is still
+		// in the TERM grace its exit started (endGroupWithLauncher), and the next
+		// server for this workspace starts once this resolves (the respawn in
+		// index.ts), so wait for the group itself.
+		await tree.end(KILL_GRACE_MS);
 	}
 }
