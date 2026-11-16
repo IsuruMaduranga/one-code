@@ -40,9 +40,11 @@
  * what a successfully exited leader left behind; session replacement must not
  * kill those intentionally launched daemons. Each module instance keeps its
  * own groups through process listeners (never through a session context or
- * cross-extension module state), reaps empty groups, and on process exit or a
- * termination signal sends TERM synchronously and leaves a watchdog to SIGKILL
- * what outlasts the grace, so nothing One Code owns outlives the process.
+ * cross-extension module state), forgets a group once it is empty (probed when
+ * its leader exits, then polled while the leader's leftovers live), and on
+ * process exit or a termination signal sends TERM synchronously and leaves a
+ * watchdog to SIGKILL what outlasts the grace, so nothing One Code owns
+ * outlives the process.
  *
  * `waitForChildExit` is the counterpart on the waiting side: it settles on
  * `exit` plus a short stdio grace, never on `close` alone: a descendant the
@@ -190,7 +192,8 @@ function signalHandledElsewhere(signal: NodeJS.Signals): boolean {
 
 /** Groups owned by this producer, retained by process listeners across session replacement. */
 const rememberedGroups = new Set<ChildProcess>();
-let groupReaper: NodeJS.Timeout | undefined;
+/** Polls the remembered groups while one is a live orphan (its leader exited, members still running). */
+let orphanReaper: NodeJS.Timeout | undefined;
 const terminationSignals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const groupSignalHandlers = new Map<NodeJS.Signals, () => void>();
 
@@ -199,9 +202,9 @@ const groupSignalHandlers = new Map<NodeJS.Signals, () => void>();
  * process groups, so only a live leader is worth a `taskkill /T`; it is judged
  * by the child's own exit state, because once the leader exits Windows may
  * hand its pid to an unrelated process that a pid probe would then find. On
- * POSIX a group id stays reserved while any member lives, and the reaper
- * forgets an emptied group within a second, far sooner than sequential pid
- * allocation wraps around to it.
+ * POSIX a group id stays reserved while any member lives, and an emptied group
+ * is forgotten when its leader exits or within a second of its last member
+ * (`reapGroups`), far sooner than sequential pid allocation wraps around to it.
  */
 export function rememberedGroupAlive(child: ChildProcess): boolean {
 	if (child.pid == null) return false;
@@ -214,9 +217,40 @@ export function rememberedGroupAlive(child: ChildProcess): boolean {
 	}
 }
 
+/** Whether this process has seen the leader exit (Node reaped it: it is no zombie holding the group). */
+function leaderExited(child: ChildProcess): boolean {
+	return child.exitCode !== null || child.signalCode !== null;
+}
+
+/**
+ * Forget every remembered group whose leader has exited and that is now
+ * empty, and drop the process listeners once none is left. Runs when a
+ * leader exits; while a group outlives its leader (a finished shell's
+ * daemon, a launcher's server until its stop lands) an unref'd one-second
+ * poll keeps running, and only then: a group with a live leader is probed
+ * again when that leader exits.
+ */
+function reapGroups(): void {
+	for (const child of rememberedGroups) {
+		if (leaderExited(child) && !rememberedGroupAlive(child)) rememberedGroups.delete(child);
+	}
+	if (rememberedGroups.size === 0) {
+		releaseGroupListeners();
+		return;
+	}
+	const orphans = [...rememberedGroups].some(leaderExited);
+	if (orphans && !orphanReaper) {
+		orphanReaper = setInterval(reapGroups, 1_000);
+		orphanReaper.unref?.();
+	} else if (!orphans && orphanReaper) {
+		clearInterval(orphanReaper);
+		orphanReaper = undefined;
+	}
+}
+
 function releaseGroupListeners(): void {
-	if (groupReaper) clearInterval(groupReaper);
-	groupReaper = undefined;
+	if (orphanReaper) clearInterval(orphanReaper);
+	orphanReaper = undefined;
 	process.removeListener("exit", terminateRememberedGroups);
 	for (const [signal, handler] of groupSignalHandlers) process.removeListener(signal, handler);
 	groupSignalHandlers.clear();
@@ -277,15 +311,16 @@ function terminateRememberedGroups(): void {
  * Remember a detached tree from spawn until its group becomes empty
  * (`spawnOwnedTree` calls it; a long-lived child is never remembered alone).
  * Register before awaiting its leader, so even immediate process exit covers
- * running work. The unref'd reaper cannot keep a print run alive. No session
- * shutdown handler touches this set; the process listeners keep this module
- * instance alive, and reach its set, even after pi evaluates the module again
- * (a /reload, a /resume into another directory: findings §8).
+ * running work. The unref'd orphan poll cannot keep a print run alive. No
+ * session shutdown handler touches this set; the process listeners keep this
+ * module instance alive, and reach its set, even after pi evaluates the module
+ * again (a /reload, a /resume into another directory: findings §8).
  */
 export function rememberProcessGroup(child: ChildProcess): void {
 	if (child.pid == null || rememberedGroups.has(child)) return;
 	rememberedGroups.add(child);
-	if (groupReaper) return;
+	child.once("exit", reapGroups);
+	if (groupSignalHandlers.size > 0) return;
 	process.on("exit", terminateRememberedGroups);
 	for (const signal of terminationSignals) {
 		const handler = Object.assign(
@@ -313,13 +348,6 @@ export function rememberProcessGroup(child: ChildProcess): void {
 		// still see the original listener count and preserve default termination.
 		process.prependOnceListener(signal, handler);
 	}
-	groupReaper = setInterval(() => {
-		for (const child of rememberedGroups) {
-			if (!rememberedGroupAlive(child)) rememberedGroups.delete(child);
-		}
-		if (rememberedGroups.size === 0) releaseGroupListeners();
-	}, 1_000);
-	groupReaper.unref?.();
 }
 
 /**
