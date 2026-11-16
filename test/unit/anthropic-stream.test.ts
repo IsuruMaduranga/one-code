@@ -146,7 +146,8 @@ describe("threadless Anthropic streams send pi's credentials, nothing more", () 
 		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
 		const rt = await runtime();
 		const { sent, fetch } = recorder();
-		await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0 } as never);
+		// pi-ai asks for a thread only with a session id: without one, `thread: false` would hold whatever the side call did.
+		await completeThreadless(new ModelRegistry(rt), anthropicModel(rt), context, { fetch, maxRetries: 0, sessionId: "thread-suppression" } as never);
 		expect(sent).toHaveLength(1);
 		expect(sent[0].thread).toBe(false);
 	});
@@ -193,7 +194,24 @@ describe("side calls go through pi's model runtime", () => {
 		const reply = await completeThreadless(new ModelRegistry(rt), rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0 } as never);
 		expect(reply.errorMessage ?? "").toMatch(/stub/);
 		expect(sent).toHaveLength(1);
-		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY", thread: false });
+		expect(sent[0]).toMatchObject({ key: "sk-ant-api-KEY" });
+	});
+
+	// completeThreadless turns threads off on the model it is given, which for a
+	// virtual model is not the one the router picks: a routed Anthropic model
+	// keeps them off through the `anthropic` registration (request/ledger/wire.ts).
+	it("a virtual model routed to Anthropic keeps message threads off through the provider registration", async () => {
+		process.env.ANTHROPIC_API_KEY = "sk-ant-api-KEY";
+		const rt = await runtime();
+		const registration = threadlessAnthropicRegistration()!;
+		rt.registerProvider("anthropic", { api: registration.api, streamSimple: registration.streamSimple });
+		const physical = anthropicModel(rt);
+		await rt.refresh({ allowNetwork: false });
+		rt.registerVirtualModel({ provider: "router", id: "auto", name: "Auto", route: () => ({ model: physical, thinkingLevel: "off" }) });
+		const { sent, fetch } = recorder();
+		await completeThreadless(new ModelRegistry(rt), rt.getModel("router", "auto")!, context, { fetch, maxRetries: 0, sessionId: "thread-suppression" } as never);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].thread).toBe(false);
 	});
 });
 
