@@ -1692,9 +1692,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// none when the background feature is off (no store answers them). pi's
 		// tool flags filter this session's registry, not a child's, so they count
 		// only for a fork, whose tools must match this session's to read its cache.
-		const cronLive = record.agent === FORK_AGENT ? toolLive("cron_create") : activeProfile().profileLive.has("cron_create");
-		const cronText = cronLive ? profileText().background?.cron : undefined;
-		const cron = cronText ? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]) : [];
+		// Each tool is asked on its own: the flags can take out one of the three.
+		const cronLive = record.agent === FORK_AGENT ? toolLive : (name: string) => activeProfile().profileLive.has(name);
+		const cronText = profileText().background?.cron;
+		const cron = cronText
+			? (agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }, cronWords(cronText)) as unknown as ToolDefinition[]).filter((tool) => cronLive(tool.name))
+			: [];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
 

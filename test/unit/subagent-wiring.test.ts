@@ -680,6 +680,26 @@ describe("fork runs in a one-shot session", () => {
 		}
 	});
 
+	// Each cron tool on its own: a fork has exactly the ones the parent kept.
+	it("gives a fork only the cron tools pi's flags left the parent, tool by tool", async () => {
+		for (const [excluded, kept] of [
+			["cron_delete", ["cron_create", "cron_list"]],
+			["cron_create", ["cron_list", "cron_delete"]],
+		] as const) {
+			setActiveProfileForTest(resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", excluded])));
+			try {
+				const { h, run } = await mountFork();
+				await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
+				await h.call("Agent", { subagent_type: "general-purpose", name: "reader", task: "Read the README" });
+				const cron = (call: number) => ((run.mock.calls[call][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? []).map((tool) => tool.name).filter((name) => name.startsWith("cron_"));
+				expect(cron(0), excluded).toEqual(kept);
+				expect(cron(1), excluded).toEqual(["cron_create", "cron_list", "cron_delete"]);
+			} finally {
+				setActiveProfileForTest(undefined);
+			}
+		}
+	});
+
 	it("shares the parent's MCP tools with a fork as the parent's own definitions", async () => {
 		const run = vi.fn(() => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
 		let getMcpTools: (() => unknown[] | Promise<unknown[]>) | undefined;
