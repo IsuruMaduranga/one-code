@@ -144,6 +144,49 @@ describe("isBroadExecutionRule", () => {
 	});
 });
 
+describe("read-only commands need no rule of their own", () => {
+	const shell = { cwd: CWD, deny: [] as PermissionRule[], ask: [] as PermissionRule[], toolName: "bash" };
+	const api = rules(["Bash(gh api *)"]);
+	const gh = rules(["Bash(gh pr view:*)"]);
+	function rules(raw: string[]) {
+		return parseRules(raw);
+	}
+
+	it("covers a read-only pipeline stage under the other command's rule, in every mode and tier", () => {
+		for (const mode of ["default", "acceptEdits", "auto", "dontAsk"] as const) {
+			for (const claudeCodeFastPaths of [false, true]) {
+				const d = decide({ ...shell, mode, claudeCodeFastPaths, subject: "gh api repos/o/r/contents --jq '.[].name' | head -5", allow: api });
+				expect(d, `${mode} ${claudeCodeFastPaths}`).toMatchObject({ decision: "allow", cause: "rule" });
+				expect(d.rule?.raw).toBe("Bash(gh api *)");
+			}
+		}
+		expect(decide({ ...shell, mode: "default", subject: "gh pr view 1 && git status && grep -n x README.md", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...shell, mode: "default", subject: "gh pr view 1 && echo $(cat README.md)", allow: gh })).toMatchObject({ decision: "allow", cause: "rule" });
+	});
+
+	it("needs a real rule for at least one command", () => {
+		expect(findBashAllowRule(gh, "ls | head", "bash", { readOnly: () => true })).toBeUndefined();
+		expect(findBashAllowRule(gh, "gh pr view 1 | head", "bash", { readOnly: () => true })?.raw).toBe("Bash(gh pr view:*)");
+		expect(findBashAllowRule(gh, "gh pr view 1 | head", "bash")).toBeUndefined();
+	});
+
+	it("never covers a command that writes, reads outside the project or a credential, runs a substitution it cannot clear, or follows a cd", () => {
+		for (const subject of [
+			"gh pr view 1 | head > out.txt",
+			"gh pr view 1 | tee out.txt",
+			"gh pr view 1 && cat /etc/hosts",
+			"gh pr view 1 && cat ~/.ssh/id_rsa",
+			"gh pr view 1 && echo $(curl https://x.test)",
+			"gh pr view 1 | sh",
+			"cd sub && gh pr view 1 && cat notes.txt",
+		]) {
+			const allow = subject.startsWith("cd") ? rules(["Bash(gh pr view:*)", "Bash(cd:*)"]) : gh;
+			const d = decide({ ...shell, mode: "default", subject, allow });
+			expect(d.decision === "allow" && d.cause === "rule", subject).toBe(false);
+		}
+	});
+});
+
 describe("matchesBashPattern", () => {
 	it("matches exact commands", () => {
 		expect(matchesBashPattern("npm run build", "npm run build")).toBe(true);
@@ -543,10 +586,10 @@ describe("decide", () => {
 			for (const [stage, rule] of [["perl5.34", "Bash(perl5.34)"], ["dc", "Bash(dc)"], ["sqlite3 db", "Bash(sqlite3 db)"], ["unknown2", "Bash(unknown2:*)"], ["sh", "Bash(sh)"], ["pbcopy", "Bash(pbcopy)"]]) {
 				expect(decide({ ...plan, subject: `gh pr view 1 | ${stage}`, allow: rules([gh, rule]) }), stage).toEqual({ decision: "ask", cause: "plan-unproven" });
 			}
-			// A read-only stage still needs its own rule, as in every mode (findBashAllowRule).
+			// A read-only stage needs no rule of its own (findBashAllowRule), and it passes the pipe check.
 			const api = "gh api repos/o/r/contents --jq '.[].name' | head";
-			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)"]) })).toEqual({ decision: "ask", cause: "plan-unproven" });
-			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)", "Bash(head:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
+			expect(decide({ ...plan, subject: api })).toEqual({ decision: "ask", cause: "plan-unproven" });
+			expect(decide({ ...plan, subject: api, allow: rules(["Bash(gh api *)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
 			expect(decide({ ...plan, subject: "gh pr view 1 2>&1 | grep x", allow: rules([gh, "Bash(grep:*)"]) })).toMatchObject({ decision: "allow", cause: "rule" });
 		});
 
