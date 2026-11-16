@@ -77,10 +77,8 @@ export function stalePassages(texts: (live: LiveTools) => NamedText[]): string[]
 	return [...seen].filter(([, found]) => !found).map(([passage]) => passage);
 }
 
-/** The tools a session starts with: every base tool that is never deferred. */
-const EAGER_TOOLS: readonly string[] = [...new Set(["read", "bash", "edit", "write", ...Object.keys(TOOL_FEATURES)])].filter(
-	(tool) => !(DEFERRABLE_TOOLS as readonly string[]).includes(tool),
-);
+/** Every base tool; a session starts with the ones nobody defers. */
+const BASE_TOOLS: readonly string[] = [...new Set(["read", "bash", "edit", "write", ...Object.keys(TOOL_FEATURES)])];
 
 /**
  * Where a system-prompt section changes when a deferred tool loads, on every
@@ -98,12 +96,14 @@ export function deferralChanges(
 ): string[] {
 	const changes: string[] = [];
 	const deferrable = [...new Set([...DEFERRABLE_TOOLS, ...deferred])];
+	// A base tool the caller defers starts unloaded too.
+	const eager = BASE_TOOLS.filter((tool) => !deferrable.includes(tool));
 	for (const tier of PROMPT_TIERS) {
 		for (const taskTools of [true, false]) {
 			const at = (tools: readonly string[]) => render({ tier, taskTools, tools, live });
-			const start = at(EAGER_TOOLS);
+			const start = at(eager);
 			for (const loaded of [...deferrable.map((tool) => [tool]), deferrable]) {
-				if (at([...EAGER_TOOLS, ...loaded]) !== start) changes.push(`${tier}${taskTools ? "" : " without task tools"}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
+				if (at([...eager, ...loaded]) !== start) changes.push(`${tier}${taskTools ? "" : " without task tools"}: ${loaded.length === 1 ? loaded[0] : "every deferrable tool"} loaded`);
 			}
 		}
 	}

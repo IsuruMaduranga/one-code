@@ -97,6 +97,10 @@ describe("system prompt from the profile", () => {
 		const keyedOnActive = ({ tools }: SectionSession) => (tools?.includes("product_tool") ? "Call product_tool." : "");
 		expect(deferralChanges(keyedOnActive)).toEqual([]);
 		expect(deferralChanges(keyedOnActive, { deferred: ["product_tool"] })).toHaveLength(PROMPT_TIERS.length * 4);
+		// A base tool the caller defers is not among the starting tools either.
+		const keyedOnBash = ({ tools }: SectionSession) => (tools?.includes("bash") ? "Run it with bash." : "");
+		expect(deferralChanges(keyedOnBash)).toEqual([]);
+		expect(deferralChanges(keyedOnBash, { deferred: ["bash"] })).toHaveLength(PROMPT_TIERS.length * 4);
 	});
 
 	it("the shipped profile renders the same prompt twice (byte-stable), opening with its lead", () => {
