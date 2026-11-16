@@ -578,8 +578,18 @@ function redirectsToNull({ nodes, children }: Tree, i: number): boolean {
 	return children[i].length === 1 && nodes[location].type === "VariableExpressionAst" && (nodes[location].name ?? "").toLowerCase() === "null";
 }
 
-/** The node kinds a plain native-program line is made of: pipelines, statements, literal words and stream merges. */
-const PLAIN_LINE_NODES = new Set(["ScriptBlockAst", "NamedBlockAst", "PipelineAst", "PipelineChainAst", "CommandAst", "StringConstantExpressionAst", "ConstantExpressionAst", "MergingRedirectionAst"]);
+/** The node kinds a plain native-program line is made of: pipelines, statements, literal words, single-dash flags and stream merges. */
+const PLAIN_LINE_NODES = new Set([
+	"ScriptBlockAst",
+	"NamedBlockAst",
+	"PipelineAst",
+	"PipelineChainAst",
+	"CommandAst",
+	"CommandParameterAst",
+	"StringConstantExpressionAst",
+	"ConstantExpressionAst",
+	"MergingRedirectionAst",
+]);
 
 /**
  * Whether the line is only native programs `unlisted` accepts (by program
@@ -613,6 +623,10 @@ export function powershellTreeUnlistedOnly(parse: PowerShellParse, opts: PowerSh
 			const absolute = value ? powershellPathAbsolute(value, opts) : undefined;
 			return !isSensitivePath(value) && !(absolute !== undefined && isSensitivePath(absolute));
 		}
+		// A plain flag (`-R`, `-v`); a `-name:value` argument is its own node and
+		// checked as one. A name with a path in it (`-k~/`, `-foo/etc/x`) is not
+		// judged here, so it asks.
+		if (node.type === "CommandParameterAst") return /^[A-Za-z0-9_-]+$/.test(node.name ?? "");
 		return true;
 	});
 }
