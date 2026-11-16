@@ -30,7 +30,14 @@ if (mode === "sleep" || mode === "sleep-noterm") {
 	holdOn(["SIGINT", "SIGHUP", ...(mode === "sleep-noterm" ? ["SIGTERM"] : [])]);
 } else if (mode === "fork" || mode === "fork-noterm") {
 	const worker = mode === "fork" ? "sleep" : "sleep-noterm";
-	const child = spawn(process.execPath, [fileURLToPath(import.meta.url), worker, label], { stdio: "ignore", windowsHide: true });
+	// On Windows a worker attached to the launching shell's console is ended when that console
+	// closes, before the probe's process scan can see it; a daemon detaches from it. Elsewhere it
+	// stays in this process group, which is what the probe checks One Code ends.
+	const child = spawn(process.execPath, [fileURLToPath(import.meta.url), worker, label], {
+		stdio: "ignore",
+		windowsHide: true,
+		detached: process.platform === "win32",
+	});
 	child.unref();
 	process.stdout.write(`started ${child.pid}\n`);
 } else {
