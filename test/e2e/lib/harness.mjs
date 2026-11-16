@@ -71,6 +71,8 @@ export function rpcClient(child, onDialog = () => undefined) {
 	let buffer = "";
 	let next = 0;
 	const write = (command) => child.stdin.write(`${JSON.stringify(command)}\n`);
+	// Decode as a stream: a UTF-8 character split across two chunks stays whole.
+	child.stdout.setEncoding("utf8");
 	child.stdout.on("data", (chunk) => {
 		buffer += chunk;
 		let at;
