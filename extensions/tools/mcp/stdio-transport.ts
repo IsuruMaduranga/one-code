@@ -28,7 +28,7 @@ import { PassThrough } from "node:stream";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { commandLaunch } from "../../lib/shell-run/command-launch.ts";
-import { KILL_GRACE_MS, KILL_SETTLE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
+import { endTreeMaxMs, KILL_GRACE_MS, type OwnedTree, spawnOwnedTree } from "../../lib/shell-run/process-tree.ts";
 
 export interface StdioServerParams {
 	command: string;
@@ -44,7 +44,7 @@ export interface StdioFraming {
 }
 
 /** The longest `close()` takes: the stdin grace, then the TERM grace and the SIGKILL's settling. */
-export const STDIO_CLOSE_MAX_MS = 2 * KILL_GRACE_MS + KILL_SETTLE_MS;
+export const STDIO_CLOSE_MAX_MS = endTreeMaxMs(KILL_GRACE_MS, KILL_GRACE_MS);
 
 export class ProcessGroupStdioTransport implements Transport {
 	onclose?: () => void;
@@ -129,22 +129,15 @@ export class ProcessGroupStdioTransport implements Transport {
 		const tree = this.tree;
 		this.tree = undefined;
 		if (tree) {
-			const child = tree.child;
-			const exited = new Promise<void>((resolve) => {
-				if (child.exitCode !== null || child.signalCode !== null) resolve();
-				else child.once("exit", () => resolve());
-			});
-			const within = (ms: number) => Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, ms).unref())]);
 			try {
-				child.stdin?.end();
+				tree.child.stdin?.end();
 			} catch {
 				// Already closed.
 			}
-			await within(KILL_GRACE_MS);
-			// The leader still running, or a group it left behind: TERM the group now, KILL it after the
-			// grace. A launcher that exited during the wait already started that stop (endGroupWithLauncher),
-			// which `stop` leaves alone. Either way, wait for the group itself, not the leader's exit.
-			await tree.end(KILL_GRACE_MS);
+			// A server that exits on the closed stdin within the grace ends politely; then the group
+			// is TERMed, KILLed after the grace, and waited for, not only the leader. A launcher that
+			// exited during the wait already started that stop (endGroupWithLauncher), which is kept.
+			await tree.end(KILL_GRACE_MS, KILL_GRACE_MS);
 		}
 		this.readBuffer.clear();
 	}

@@ -430,7 +430,6 @@ export class LspClient {
 	async stop(): Promise<void> {
 		const tree = this.tree;
 		if (!tree) return;
-		const child = tree.child;
 		this.ready = false;
 		try {
 			// Send while this.tree is still set: send() writes through it.
@@ -440,29 +439,10 @@ export class LspClient {
 			// Server may already be gone.
 		}
 		this.tree = undefined;
-		// A leader already gone (a crash the session is respawning after) has no
-		// exit event left to wait for.
-		if (child.exitCode === null && child.signalCode === null) {
-			await new Promise<void>((resolve) => {
-				const timer = setTimeout(() => {
-					// The tree, not the leader: a launcher script's real server is a
-					// child of it, and on Windows a .cmd-shimmed server runs under the
-					// cmd.exe `commandLaunch` started; killing the leader alone would
-					// orphan the server on the inherited pipes.
-					tree.kill("SIGKILL");
-					resolve();
-				}, 1000);
-				timer.unref?.();
-				child.once("exit", () => {
-					clearTimeout(timer);
-					resolve();
-				});
-			});
-		}
-		// The launcher's exit is not the server's: the server it leaves is still
-		// in the TERM grace its exit started (endGroupWithLauncher), and the next
-		// server for this workspace starts once this resolves (the respawn in
-		// index.ts), so wait for the group itself.
-		await tree.end(KILL_GRACE_MS);
+		// A second to exit on `exit`, then end the whole tree and wait for it: a
+		// launcher's exit is not the server's, and the next server for this
+		// workspace starts once this resolves (the crash respawn in index.ts, a
+		// session switch).
+		await tree.end(KILL_GRACE_MS, 1000);
 	}
 }
