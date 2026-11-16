@@ -42,6 +42,17 @@ export interface ShownDiagnostic {
 export interface LspText {
 	description: string;
 	params: Record<"path" | "severity", string>;
+	/**
+	 * The trailer that shows the fix hints a profile declares for its own
+	 * language server (`ProductLanguageServer.fixHints`): a heading, then one
+	 * line per hint, `key` being the diagnostic's code or the message
+	 * substring that matched. Required when a server declares hints; One
+	 * Code declares none and leaves it out.
+	 */
+	fixHints?: {
+		heading: string;
+		line(p: { key: string; hint: string }): string;
+	};
 }
 
 /** The group's results, refusals and notes, which the base words (`lspResultText`). */

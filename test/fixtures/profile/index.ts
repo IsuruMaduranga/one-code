@@ -24,7 +24,14 @@ export const profile: Profile = {
 	providers: { "fixture-llm": { serves: "anthropic", wire: ["tool-references"] } },
 	secretFiles: ["Fixture.secret"],
 	readOnlyCommands: { fixturectl: { show: { none: "--all", required: "--name" } } },
-	languageServers: { fixture: { command: "fixture-language-server", extensions: { ".fixturelang": "fixture" } } },
+	languageServers: {
+		fixture: {
+			command: "fixture-language-server",
+			extensions: { ".fixturelang": "fixture" },
+			// A hint by code, and one by message for a diagnostic that carries no code.
+			fixHints: { byCode: { F100: "[fixture:hint F100]" }, byMessage: [["fixture: unknown name", "[fixture:hint unknown name]"]] },
+		},
+	},
 	// The probe extension's switch for its tier notice (extensions/probe, PROBE_TIER_SETTING).
 	settings: { fixtureTierNotice: { type: "boolean", project: true, description: "[fixture:setting.fixtureTierNotice]" } },
 	text: () => allGroups,

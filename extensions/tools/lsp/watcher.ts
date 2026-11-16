@@ -20,7 +20,8 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type LspDiagnostic, shownDiagnostic } from "./format.ts";
-import { lspResultText } from "./text.ts";
+import { fixHintTrailer } from "./fix-hints.ts";
+import { type LspText, lspResultText } from "./text.ts";
 
 export const MAX_PER_FILE = 10;
 export const MAX_TOTAL = 30;
@@ -108,7 +109,7 @@ function displayPath(uri: string, cwd: string): string {
  * opening tag runs straight into the preamble, one blank line before the
  * first file section and between sections, entries two-space indented.
  */
-export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string): string | undefined {
+export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: string, hintWords?: LspText["fixHints"]): string | undefined {
 	const text = lspResultText.newDiagnostics;
 	if (delta.size === 0) return undefined;
 
@@ -133,12 +134,14 @@ export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: s
 	sections.sort((a, b) => a.worst - b.worst || a.path.localeCompare(b.path));
 
 	const parts: string[] = [];
+	const shown: LspDiagnostic[] = [];
 	let included = 0;
 	for (const section of sections) {
 		if (included >= MAX_TOTAL) break;
 		const room = MAX_TOTAL - included;
 		const kept = section.diagnostics.slice(0, room);
 		included += kept.length;
+		shown.push(...kept);
 		parts.push(text.section({ path: section.path, entries: kept.map((d) => text.entry(shownDiagnostic(d))) }));
 	}
 	const omitted = total - included;
@@ -146,6 +149,9 @@ export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: s
 
 	let body = parts.join("\n\n");
 	if (body.length > MAX_CHARS) body = text.cut(body.slice(0, MAX_CHARS));
+	// After the cut: the caps bound the diagnostics as Claude Code does, and a hint is never cut (fix-hints.ts bounds the trailer).
+	const hints = fixHintTrailer(shown, hintWords);
+	if (hints) body = `${body}\n\n${hints}`;
 
 	return text.block(body);
 }

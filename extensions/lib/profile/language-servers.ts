@@ -7,7 +7,29 @@
  *
  * `${PROFILE_DIR}` in the command, an argument or an environment value is the
  * profile's folder, so a product can ship its server next to its profile.
+ *
+ * A server may carry fix hints: one line of advice per diagnostic code, or
+ * per plain message substring for diagnostics without a code, shown after
+ * that server's diagnostics (tools/lsp/fix-hints.ts) in the words of the
+ * profile's `text.lsp.fixHints`.
  */
+
+/** The longest fix hint, in characters: a hint is one line of advice. */
+export const MAX_FIX_HINT_LENGTH = 200;
+
+/** A server's fix hints as the profile declares them. */
+export interface ProductFixHints {
+	/** By the diagnostic's code (`"BCE2066"`; a numeric code by its decimal spelling). */
+	byCode?: Readonly<Record<string, string>>;
+	/** By a plain substring of the message, in order, first match wins: for diagnostics with no code, or no hint for theirs. Never a pattern. */
+	byMessage?: readonly (readonly [string, string])[];
+}
+
+/** A server's fix hints as the base looks them up. */
+export interface ResolvedFixHints {
+	byCode: ReadonlyMap<string, string>;
+	byMessage: readonly (readonly [string, string])[];
+}
 
 export interface ProductLanguageServer {
 	command: string;
@@ -21,6 +43,8 @@ export interface ProductLanguageServer {
 	/** Sent in the `initialize` request. */
 	initializationOptions?: unknown;
 	startupTimeoutMs?: number;
+	/** Advice shown after this server's diagnostics, by code or message substring. */
+	fixHints?: ProductFixHints;
 }
 
 export interface ResolvedLanguageServer {
@@ -33,6 +57,7 @@ export interface ResolvedLanguageServer {
 	env: Record<string, string>;
 	initializationOptions?: unknown;
 	startupTimeoutMs?: number;
+	fixHints?: ResolvedFixHints;
 }
 
 const NAME = /^[a-z][a-z0-9_-]*$/;
@@ -55,8 +80,31 @@ export function languageServerProblems(servers: Readonly<Record<string, ProductL
 			if (other && other !== name) problems.push(`language servers "${other}" and "${name}" both claim ${key}`);
 			owner.set(key, name);
 		}
+		problems.push(...fixHintProblems(name, server.fixHints));
 	}
 	return problems;
+}
+
+/** What is wrong with a server's fix hints: an empty key, or a hint that is empty, longer than a line or spans lines. */
+function fixHintProblems(name: string, hints: ProductFixHints | undefined): string[] {
+	if (!hints) return [];
+	const problems: string[] = [];
+	const check = (where: string, key: unknown, hint: unknown) => {
+		if (typeof key !== "string" || key.trim() === "") problems.push(`language server "${name}" has a fix hint ${where} with an empty key`);
+		if (typeof hint !== "string" || hint.trim() === "") problems.push(`language server "${name}" has an empty fix hint ${where} for ${JSON.stringify(key)}`);
+		else if (/[\r\n]/.test(hint)) problems.push(`language server "${name}" has a fix hint ${where} for ${JSON.stringify(key)} on more than one line`);
+		else if (hint.length > MAX_FIX_HINT_LENGTH) problems.push(`language server "${name}" has a fix hint ${where} for ${JSON.stringify(key)} longer than ${MAX_FIX_HINT_LENGTH} characters`);
+	};
+	for (const [code, hint] of Object.entries(hints.byCode ?? {})) check("by code", code, hint);
+	for (const entry of hints.byMessage ?? []) check("by message", entry?.[0], entry?.[1]);
+	return problems;
+}
+
+/** Whether any server declares a fix hint: the profile's text must then word the trailer. */
+export function declaresFixHints(servers: Readonly<Record<string, ProductLanguageServer>>): string[] {
+	return Object.entries(servers)
+		.filter(([, server]) => Object.keys(server.fixHints?.byCode ?? {}).length > 0 || (server.fixHints?.byMessage ?? []).length > 0)
+		.map(([name]) => name);
 }
 
 /** Each server with `${PROFILE_DIR}` filled in and its extensions normalized. */
@@ -71,5 +119,8 @@ export function resolveLanguageServers(servers: Readonly<Record<string, ProductL
 		env: Object.fromEntries(Object.entries(server.env ?? {}).map(([key, value]) => [key, fill(value)])),
 		initializationOptions: server.initializationOptions,
 		startupTimeoutMs: server.startupTimeoutMs,
+		...(declaresFixHints({ [name]: server }).length > 0
+			? { fixHints: { byCode: new Map(Object.entries(server.fixHints?.byCode ?? {})), byMessage: (server.fixHints?.byMessage ?? []).map(([substring, hint]) => [substring, hint] as const) } }
+			: {}),
 	}));
 }
