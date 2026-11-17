@@ -186,12 +186,21 @@ the system prompt to match:
 | Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding. |
 
 Frontier is a fixed list, decided by model version. These models count as
-frontier when you reach them through the lab itself (Anthropic, OpenAI,
-Google or Google Vertex) or through OpenRouter, Vercel AI Gateway or
-Cloudflare AI Gateway, which forward to the lab. On any other provider they
-keep their catalog tier, and so do a gateway's batch endpoints and
-`~...-latest` aliases, which don't name a fixed model. Gemini 4 Argon and
-the Flash models aren't frontier. Haiku 5 and later get
+frontier when you reach them through the lab itself or through a gateway
+that forwards to the lab:
+
+- Anthropic's models through Anthropic, OpenRouter, Vercel AI Gateway or
+  Cloudflare AI Gateway.
+- OpenAI's models through OpenAI, OpenAI Codex, Azure, OpenRouter, Vercel
+  AI Gateway or Cloudflare AI Gateway.
+- Google's models through Google, Google Vertex, OpenRouter or Vercel AI
+  Gateway.
+
+On any other provider they keep their catalog tier, and so do a gateway's
+batch endpoints and `~...-latest` aliases, which don't name a fixed model.
+A smaller variant of a frontier line, with `nano`, `mini`, `lite` or
+`flash` in its name or a size under 40 billion parameters, is never
+frontier. Neither is Gemini 4 Argon. Haiku 5 and later get
 the frontier prompt only: when One Code picks a model for subagents or the
 classifier, or decides how strict the permission gate is, a Haiku counts at
 its catalog tier, so it never stands in for Opus. Everything else
