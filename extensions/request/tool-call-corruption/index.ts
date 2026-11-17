@@ -1,4 +1,7 @@
-/** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
+/**
+ * Reject damaged OpenRouter streams before tool execution, without changing the request prefix.
+ * It also publishes the host that served each main-session reply, which it reads from the stream anyway, for /doctor.
+ */
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
@@ -17,6 +20,7 @@ import {
 	trailingPadding,
 } from "./tool-call-corruption.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
+import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/request/openrouter-host.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
@@ -205,6 +209,11 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			// before it was judged whole and stays blocked.
 			const last = event.message.stopReason === "length" ? event.message.content.at(-1) : undefined;
 			if (last?.type === "toolCall") flagged.delete(last.id);
+			// The main session's host, for /doctor (lib/request/openrouter-host.ts); a child has its own bus and no report.
+			if (announce && (streamProvider || responseId)) {
+				const model = ctx.model!;
+				pi.events.emit(OPENROUTER_HOST_CHANNEL, { model: `${model.provider}/${model.id}`, host: streamProvider, responseId } satisfies OpenRouterHostEvent);
+			}
 		}
 	});
 	pi.on("tool_call", (event, ctx) => {

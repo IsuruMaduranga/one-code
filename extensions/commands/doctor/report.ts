@@ -20,6 +20,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { PromptTier } from "../../lib/models/model-tier.ts";
 import { tildify } from "../../lib/profile/paths.ts";
 import type { McpStatusEvent } from "../../lib/plugins/mcp-status.ts";
+import type { ServedHost } from "../../lib/request/openrouter-host.ts";
 import type { ReplacedBuiltinsView } from "./builtins.ts";
 import type { CompactionKeepView } from "../../lib/app/compaction-keep.mjs";
 import type { RegisteredServer } from "../../tools/mcp/config.ts";
@@ -113,6 +114,8 @@ export interface SessionView {
 	thinkingLevel?: string;
 	permission?: { mode: string; classifier?: string; pinned?: boolean; source?: string };
 	mcp?: McpStatusEvent;
+	/** The OpenRouter host that served the main session's last reply, when known (lib/request/openrouter-host.ts). */
+	openRouterHost?: ServedHost;
 }
 
 export const REPORT_TITLE = `${brand.name} doctor`;

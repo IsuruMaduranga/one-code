@@ -36,6 +36,7 @@ import {
 import { applicableSubagentDefault, loadSubagentDefault, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
 import { knobLimit } from "../../lib/profile/knobs.ts";
 import { resolveSubagentModel, type SubagentModelResolution } from "../../lib/models/subagent-model.ts";
+import { servedHostLabel } from "../../lib/request/openrouter-host.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
 
 export interface ModelFacts {
@@ -179,6 +180,11 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		});
 	}
 	if (session.thinkingLevel) lines.push({ text: `Effort: ${session.thinkingLevel} (/effort or shift+tab to change)`, indent: 1, level: "dim" });
+	const served = session.openRouterHost;
+	if (served) {
+		const other = served.model !== modelSpec(main) ? ` on ${served.model}` : "";
+		lines.push({ text: `OpenRouter host of the last reply${other}: ${servedHostLabel(served)}`, indent: 1, level: "dim" });
+	}
 
 	const sub = facts.subagent;
 	if (sub.model) {
