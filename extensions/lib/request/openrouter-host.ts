@@ -6,7 +6,10 @@
  * `provider_stream_event`, main session only) and publishes it on
  * `OPENROUTER_HOST_CHANNEL` at the end of each assistant message, with the
  * message's generation id for the `/generation` lookup when no chunk named a
- * host. Nothing here enters a request.
+ * host. Nothing here changes what a session sends: the host line is part of
+ * /doctor's output, which reaches the model only the way any command's output
+ * does (appended after the command, and inside a bare /doctor's checkup
+ * message).
  *
  * The precision comes from OpenRouter's public endpoints listing for the model
  * (no key is sent): the generation record names the host but not the endpoint's

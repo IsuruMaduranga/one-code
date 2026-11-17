@@ -275,9 +275,11 @@ so. Web fetch works on every provider; it never depends on a search API.
 OpenRouter serves an open model through many hosting companies, and some of
 the cheapest run it at reduced precision (fp4), which can make the model
 weaker. On DeepSeek and Qwen models, One Code asks OpenRouter to use only
-hosts that run the model at fp8 or better, or that don't state a precision.
-Your session still stays with the host that served its first request, so the
-prompt cache keeps working. Claude models on OpenRouter aren't affected.
+hosts that run the model at fp8, bf16, fp16 or fp32, or that don't state a
+precision. Hosts at fp4, fp6, int4 or int8 are left out. Your session still
+stays with the host that served its first request, so the prompt cache keeps
+working. Claude models on OpenRouter aren't affected. If no host is left for a
+model, the error you see says so and names the ways around it below.
 
 Your own routing wins. If you set `quantizations`, `only` or `order` for a
 model in pi's `models.json`, One Code adds nothing to that model's requests:
