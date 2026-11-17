@@ -35,7 +35,7 @@
 
 import { knobValue } from "../profile/knobs.ts";
 import type { CacheMarksModel } from "./openrouter-cache-marks.ts";
-import { OPENROUTER_CACHE_MARKS_API, OPENROUTER_PROVIDER } from "./openrouter-cache-marks.ts";
+import { modelVendor, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
 /**
  * A host that defeats the prompt cache: OpenRouter's slug (what
@@ -61,7 +61,7 @@ export const CACHE_DEFEATING_HOSTS: readonly IgnoredHost[] = [{ slug: "open-infe
 
 /** The hosts whose scope holds `modelId`'s vendor. */
 export function hostsFor(modelId: string, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): IgnoredHost[] {
-	const vendor = modelId.replace(/^~/, "").split("/")[0];
+	const vendor = modelVendor(modelId);
 	return hosts.filter((host) => host.vendors.includes(vendor));
 }
 
@@ -72,8 +72,6 @@ export const OPENROUTER_IGNORE_HOSTS_KNOB = "OPENROUTER_IGNORE_HOSTS";
 export function openRouterIgnoreHostsEnabled(vars: Readonly<Record<string, unknown>> = process.env): boolean {
 	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) !== "0";
 }
-
-type Routing = Record<string, unknown>;
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
 
@@ -88,7 +86,7 @@ function names(entry: string, host: IgnoredHost): boolean {
  * a host the routing already names in `order`, `only` or `ignore` is left out.
  * Returns `routing` itself when nothing is added.
  */
-export function withIgnoredHosts(routing: Routing | undefined, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): Routing | undefined {
+export function withIgnoredHosts(routing: OpenRouterRouting | undefined, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): OpenRouterRouting | undefined {
 	const named = [...strings(routing?.order), ...strings(routing?.only), ...strings(routing?.ignore)];
 	const added = hosts.filter((host) => !named.some((entry) => names(entry, host))).map((host) => host.slug);
 	if (added.length === 0) return routing;
@@ -97,12 +95,8 @@ export function withIgnoredHosts(routing: Routing | undefined, hosts: readonly I
 
 /** `model` with the hosts in its vendor's scope skipped, as a copy; the model itself when it is not an OpenRouter Chat Completions model, no host's scope holds it, or nothing changes. */
 export function withOpenRouterIgnoredHosts<M extends CacheMarksModel>(model: M): M {
-	if (model.provider !== OPENROUTER_PROVIDER || model.api !== OPENROUTER_CACHE_MARKS_API) return model;
-	const compat = (model.compat ?? {}) as Record<string, unknown>;
-	const hosts = hostsFor(model.id);
-	if (hosts.length === 0) return model;
-	const routing = compat.openRouterRouting as Routing | undefined;
-	const next = withIgnoredHosts(routing, hosts);
-	if (next === routing) return model;
-	return { ...model, compat: { ...compat, openRouterRouting: next } };
+	return withOpenRouterRouting(model, (routing) => {
+		const hosts = hostsFor(model.id);
+		return hosts.length === 0 ? routing : withIgnoredHosts(routing, hosts);
+	});
 }

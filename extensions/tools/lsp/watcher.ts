@@ -20,6 +20,7 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type LspDiagnostic, shownDiagnostic } from "./format.ts";
+import { FIX_HINT, fixHintTrailer } from "./fix-hints.ts";
 import { lspResultText } from "./text.ts";
 
 export const MAX_PER_FILE = 10;
@@ -133,19 +134,30 @@ export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: s
 	sections.sort((a, b) => a.worst - b.worst || a.path.localeCompare(b.path));
 
 	const parts: string[] = [];
+	/** The hinted diagnostics whose whole entry survives the cut below: only their hints are shown. */
+	const hinted: LspDiagnostic[] = [];
 	let included = 0;
 	for (const section of sections) {
 		if (included >= MAX_TOTAL) break;
 		const room = MAX_TOTAL - included;
 		const kept = section.diagnostics.slice(0, room);
 		included += kept.length;
-		parts.push(text.section({ path: section.path, entries: kept.map((d) => text.entry(shownDiagnostic(d))) }));
+		const entries = kept.map((d) => text.entry(shownDiagnostic(d)));
+		kept.forEach((d, index) => {
+			if (!d[FIX_HINT]) return;
+			const upToEntry = [...parts, text.section({ path: section.path, entries: entries.slice(0, index + 1) })].join("\n\n");
+			if (upToEntry.length <= MAX_CHARS) hinted.push(d);
+		});
+		parts.push(text.section({ path: section.path, entries }));
 	}
 	const omitted = total - included;
 	if (omitted > 0) parts.push(text.more(omitted));
 
 	let body = parts.join("\n\n");
 	if (body.length > MAX_CHARS) body = text.cut(body.slice(0, MAX_CHARS));
+	// After the cut: the caps bound the diagnostics as Claude Code does, and a hint is never cut (fix-hints.ts bounds the trailer).
+	const hints = fixHintTrailer(hinted);
+	if (hints) body = `${body}\n\n${hints}`;
 
 	return text.block(body);
 }

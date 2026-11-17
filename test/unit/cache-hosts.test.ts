@@ -21,6 +21,17 @@ describe("allowance", () => {
 		expect(allowance({ host: "Morph" }, 28_639)).toBe(DEFAULT_BLOCK);
 	});
 
+	it("allows a 256-token block plus the unread tail on Relace for whole blocks", () => {
+		expect(MEASURED_HOSTS.Relace).toEqual({ block: 256, offsets: [0], tail: 262 });
+		// Matrix reads: 31,744 of a 32,193-token prompt (short 449) and 7,424 of 7,734 (short 310); pinned 2,048 of 2,564 (short 516).
+		for (const [prompt, read] of [[32_193, 31_744], [7_734, 7_424], [2_564, 2_048]]) {
+			const allowed = allowance({ host: "Relace" }, read);
+			expect(allowed, String(read)).toBe(518);
+			expect(prompt - read, String(read)).toBeLessThanOrEqual(allowed);
+		}
+		expect(allowance({ host: "Relace" }, 7_425)).toBe(DEFAULT_BLOCK);
+	});
+
 	it("keeps the default on OpenInference for a read that is not whole blocks, or nothing", () => {
 		expect(allowance({ host: "OpenInference" }, 28_640)).toBe(DEFAULT_BLOCK);
 		expect(allowance({ host: "OpenInference" }, 0)).toBe(DEFAULT_BLOCK);
@@ -84,6 +95,34 @@ describe("lookupHosts", () => {
 		expect(hosts.get("gen-a")).toEqual({ error: "generation lookup returned 404 after 40 s of retries" });
 		// The second id shares the bounded wait: it stops once 60 s have passed in all.
 		expect(hosts.get("gen-b")).toEqual({ error: "generation lookup returned 404 after 58 s of retries" });
+		vi.useRealTimers();
+	});
+
+	it("counts request time against the wait, caps each request by what is left and skips the ids after the deadline", async () => {
+		vi.useFakeTimers();
+		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+		const timeouts: number[] = [];
+		const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+		vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+			timeouts.push(ms);
+			return realTimeout(ms);
+		});
+		// Each request takes 25 s before it answers 404.
+		const fetch = vi.fn(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 25_000));
+			return new Response("not yet", { status: 404 });
+		});
+		vi.stubGlobal("fetch", fetch);
+		const pending = lookupHosts(["gen-a", "gen-b"]);
+		await vi.runAllTimersAsync();
+		const hosts = await pending;
+		// Requests at 0 s, 27 s and 55 s (the sleeps of 2 s and 3 s between); the third ends at 80 s, past the 60 s deadline.
+		expect(fetch).toHaveBeenCalledTimes(3);
+		expect(timeouts).toEqual([10_000, 10_000, 5_000]);
+		expect(hosts.get("gen-a")).toEqual({ error: "generation lookup returned 404 after 80 s of retries" });
+		expect(hosts.get("gen-b")?.host).toBeUndefined();
+		expect(hosts.get("gen-b")?.error).toMatch(/no time left/);
+		vi.restoreAllMocks();
 		vi.useRealTimers();
 	});
 

@@ -57,7 +57,8 @@ import { singleFlight } from "../../lib/core/single-flight.ts";
 import { findProjectRoot as findRepoRoot } from "../../lib/context/git.ts";
 import { createLspTrustGate, PROJECT_CODE_SERVERS } from "./trust.ts";
 import { activeProfile, requireText } from "../../lib/profile/profile.ts";
-import type { ResolvedLanguageServer } from "../../lib/profile/language-servers.ts";
+import type { ResolvedFixHints, ResolvedLanguageServer } from "../../lib/profile/language-servers.ts";
+import { withFixHints } from "./fix-hints.ts";
 import { LSP_FILES_CHANGED_CHANNEL, LSP_REQUEST_CHANNEL, type LspFilesChangedEvent, type LspRequestEvent } from "./request-channel.ts";
 import { failureOf } from "./failure.ts";
 import type { LspFailure } from "./text.ts";
@@ -75,6 +76,8 @@ interface ResolvedTarget {
 	plugin?: ResolvedPluginServer;
 	/** Set when the profile declared the server: trusted product configuration, so it starts without the project-trust prompt whatever its command. */
 	fromProfile?: true;
+	/** The profile's fix hints for this server's diagnostics (fix-hints.ts). */
+	fixHints?: ResolvedFixHints;
 }
 
 interface PluginRouting {
@@ -86,6 +89,8 @@ interface PluginRouting {
 function lspExtension(pi: ExtensionAPI) {
 	const text = requireText("lsp");
 	const clients = new Map<string, LspClient>();
+	/** The fix hints of the client under each key, when its server declares some. */
+	const clientHints = new Map<string, ResolvedFixHints>();
 	const startFailures = new Map<string, LspFailure>();
 	const warned = new Set<string>();
 	const tracker = new DeliveredTracker();
@@ -127,6 +132,7 @@ function lspExtension(pi: ExtensionAPI) {
 			args: server.args,
 			options: { env: server.env, initializationOptions: server.initializationOptions, startupTimeoutMs: server.startupTimeoutMs },
 			fromProfile: true,
+			...(server.fixHints ? { fixHints: server.fixHints } : {}),
 		};
 	};
 
@@ -228,6 +234,7 @@ function lspExtension(pi: ExtensionAPI) {
 
 		const client = new LspClient({ command: target.command, args: target.args }, target.root, target.options);
 		clients.set(key, client);
+		if (target.fixHints) clientHints.set(key, target.fixHints);
 		try {
 			await client.start();
 			return client;
@@ -293,8 +300,11 @@ function lspExtension(pi: ExtensionAPI) {
 	/** All servers' current diagnostics, merged per document uri. */
 	const mergedDiagnostics = (): Map<string, LspDiagnostic[]> => {
 		const merged = new Map<string, LspDiagnostic[]>();
-		for (const client of clients.values()) {
-			for (const [uri, list] of client.allDiagnostics()) {
+		for (const [key, client] of clients) {
+			const hints = clientHints.get(key);
+			for (const [uri, served] of client.allDiagnostics()) {
+				// Tagged with the server's hint here, where which server sent it is still known.
+				const list = withFixHints(served, hints);
 				const existing = merged.get(uri);
 				merged.set(uri, existing ? [...existing, ...list] : list);
 			}
@@ -447,7 +457,7 @@ function lspExtension(pi: ExtensionAPI) {
 			const filtered = filterDiagnostics(all, (params.severity ?? "all") as SeverityFilter);
 			const relPath = relative(ctx.cwd, path) || path;
 			return {
-				content: [{ type: "text", text: formatDiagnostics(relPath, filtered) }],
+				content: [{ type: "text", text: formatDiagnostics(relPath, withFixHints(filtered, target.fixHints)) }],
 				details: { count: filtered.length, languageId: target.languageId },
 			};
 		},

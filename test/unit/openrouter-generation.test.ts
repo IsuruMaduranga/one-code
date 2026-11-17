@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { generationEndpoint, isOpenRouter, openRouterProviderName, toolCallCorruptionNotice } from "../../extensions/request/tool-call-corruption/openrouter-generation.ts";
+import { generationEndpoint, openRouterProviderName } from "../../extensions/lib/request/openrouter-generation.ts";
+import { isOpenRouter, toolCallCorruptionNotice } from "../../extensions/request/tool-call-corruption/openrouter-generation.ts";
 
 const direct = { apiKey: "key", baseUrl: "https://openrouter.ai/api/v1" };
 const response = (provider: unknown = "Morph") => ({ ok: true, status: 200, json: async () => ({ data: { provider_name: provider } }) });

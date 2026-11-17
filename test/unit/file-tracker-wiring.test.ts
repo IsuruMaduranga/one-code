@@ -9,7 +9,8 @@
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { useProfile } from "./helpers/profile.ts";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -154,6 +155,89 @@ describe("file-tracker wiring", () => {
 			ctx(),
 		);
 		expect(result).toBeUndefined();
+	});
+
+	describe("an unread empty file", () => {
+		type Verdict = { block?: boolean; reason?: string } | undefined;
+		const call = (toolName: string, file: string) => fake.fireOne<Verdict>("tool_call", { toolName, input: { path: file } }, ctx());
+
+		it("accepts a write, which then counts as the model's own: a following edit needs no read", async () => {
+			const file = path("scaffold.bal");
+			writeFileSync(file, "");
+			expect(await call("write", file)).toBeUndefined();
+			writeFileSync(file, "written by the model\n");
+			await fake.fireOne("tool_result", { toolName: "write", input: { path: file }, isError: false }, ctx());
+			expect(await call("edit", file)).toBeUndefined();
+		});
+
+		it("still refuses a write over an unread file with any content, with the unread text", async () => {
+			const file = path("one-byte.txt");
+			writeFileSync(file, "\n");
+			const result = await call("write", file);
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toBe(words.unread({ path: file, tool: "write" }));
+		});
+
+		it("still refuses an edit, with the unread text", async () => {
+			const file = path("empty.ts");
+			writeFileSync(file, "");
+			const result = await call("edit", file);
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toBe(words.unread({ path: file, tool: "edit" }));
+		});
+
+		it.skipIf(process.platform === "win32")("still refuses a write through a symlink to it", async () => {
+			const target = path("real-empty.txt");
+			writeFileSync(target, "");
+			const link = path("link.txt");
+			symlinkSync(target, link);
+			const result = await call("write", link);
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toBe(words.unread({ path: link, tool: "write" }));
+		});
+	});
+
+	// A read of a FIFO never ends, and readFileSync would block the whole test
+	// worker past any timeout: a child opens the FIFO for writing after two
+	// seconds, so a regression returns late and fails instead of hanging.
+	it.skipIf(process.platform === "win32")("refuses a write or edit at a FIFO without reading it, also through a symlink", async () => {
+		const fifo = path("pipe");
+		execFileSync("mkfifo", [fifo]);
+		const link = path("pipe-link");
+		symlinkSync(fifo, link);
+		const unblocker = spawn(process.execPath, ["-e", `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(fifo)}, ""), 2000)`], { stdio: "ignore" });
+		try {
+			for (const target of [fifo, link]) {
+				for (const toolName of ["write", "edit"]) {
+					const started = Date.now();
+					const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: target } }, ctx());
+					expect(Date.now() - started, `${toolName} ${target}`).toBeLessThan(1000);
+					expect(result?.block, `${toolName} ${target}`).toBe(true);
+					expect(result?.reason, `${toolName} ${target}`).toBe(words.notRegularFile({ path: target, tool: toolName }));
+				}
+			}
+		} finally {
+			unblocker.kill("SIGKILL");
+		}
+	});
+
+	it("lets a directory target through to the tool, which fails on it", async () => {
+		expect(await fake.fireOne("tool_call", { toolName: "write", input: { path: dir } }, ctx())).toBeUndefined();
+	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("refuses a write over a file that exists but cannot be read", async () => {
+		const file = path("write-only.txt");
+		writeFileSync(file, "content the model cannot see");
+		chmodSync(file, 0o200);
+		try {
+			for (const toolName of ["write", "edit"]) {
+				const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: file } }, ctx());
+				expect(result?.block, toolName).toBe(true);
+				expect(result?.reason, toolName).toBe(words.unreadable({ path: file, tool: toolName }));
+			}
+		} finally {
+			chmodSync(file, 0o600);
+		}
 	});
 
 	it("reports external changes as a system-reminder on agent_start, without marking the file read", async () => {

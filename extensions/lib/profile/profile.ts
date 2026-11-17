@@ -38,7 +38,10 @@ import { languageServerProblems, type ResolvedLanguageServer, resolveLanguageSer
 import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
+import { type OpenRouterRoutingDefault, openRouterRoutingProblems } from "./openrouter-routing.ts";
 import { parseToolFlags, type PiToolFilter, piRegisters, piToolFilter, piToolFilterKey } from "./pi-tool-flags.ts";
+import { launchSetsThinking, parseThinkingFlags } from "./pi-thinking-flags.ts";
+import { type ThinkingDefaults, thinkingDefaultProblems } from "./thinking-defaults.ts";
 
 /** The product's folder: the default profile, and what every profile of the product shares (`extensions/`, `themes/`). */
 export const PRODUCT_DIR = join(PACKAGE_ROOT, "profile");
@@ -171,6 +174,8 @@ const PROFILE_FIELDS: Readonly<Record<keyof Profile, true>> = {
 	readOnlyCommands: true,
 	languageServers: true,
 	settings: true,
+	defaultThinkingLevels: true,
+	openRouterRouting: true,
 	sources: true,
 	globalAgentsFiles: true,
 };
@@ -217,6 +222,10 @@ export interface ResolvedProfile {
 	languageServers: readonly ResolvedLanguageServer[];
 	/** The settings the profile declares for its own extensions (lib/profile/declared-settings.ts). */
 	settings: ReadonlyMap<string, ProductSetting>;
+	/** The thinking level each model tier starts at (lib/profile/thinking-defaults.ts); empty when the profile declares none. */
+	defaultThinkingLevels: ThinkingDefaults;
+	/** The OpenRouter routing defaults by model-id vendor (lib/request/openrouter-routing-defaults.ts). */
+	openRouterRouting: ReadonlyMap<string, OpenRouterRoutingDefault>;
 	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
 	user?: UserProfile;
 }
@@ -255,8 +264,11 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * off or defers a pinned tool, names a child extension that is missing or
  * outside the profile's extensions folder, declares a provider entry the
  * base cannot read, declares a setting the base reads itself (or one
- * without a type or description), turns off a tool its feature or another live tool
- * cannot do without, or leaves out a text group a feature that is on reads.
+ * without a type or description), declares a thinking level for something
+ * that is not a tier (or a level pi lacks, or with the effort feature off),
+ * declares an OpenRouter routing default OpenRouter would not take, turns
+ * off a tool its feature or another live tool cannot do without, or leaves
+ * out a text group a feature that is on reads.
  * `extensionsRoot` is the folder child extension entries are relative to: the
  * product's, which every product profile shares (default: `profileDir`).
  * `user` is the user's own profile over it: its switches join the
@@ -297,6 +309,10 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
 	problems.push(...languageServerProblems(profile.languageServers ?? {}));
 	problems.push(...productSettingProblems(profile.settings ?? {}));
+	problems.push(...thinkingDefaultProblems(profile.defaultThinkingLevels ?? {}));
+	// The effort feature applies the levels: declared with it off, they would never take effect.
+	if (profile.features.effort === false && Object.keys(profile.defaultThinkingLevels ?? {}).length > 0) problems.push(`it declares defaultThinkingLevels but turns off "effort", the feature that applies them`);
+	problems.push(...openRouterRoutingProblems(profile.openRouterRouting ?? {}));
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -344,6 +360,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		readOnlyCommands: readOnlyCommandSpecs(profile.readOnlyCommands ?? {}),
 		languageServers: resolveLanguageServers(profile.languageServers ?? {}, profileDir),
 		settings: new Map(Object.entries(profile.settings ?? {})),
+		defaultThinkingLevels: { ...profile.defaultThinkingLevels },
+		openRouterRouting: new Map(Object.entries(profile.openRouterRouting ?? {})),
 		...(user ? { user } : {}),
 	};
 }
@@ -420,7 +438,7 @@ export function activeProfile(): ResolvedProfile {
 /** The arguments pi was launched with, fixed for the process; a test runner's own are not pi's (test/setup.ts sets them empty). */
 let launchArgs: readonly string[] = process.argv.slice(2);
 
-/** Test seam: the arguments `launchToolFilter` reads in place of the process's. */
+/** Test seam: the arguments `launchToolFilter` and `launchThinkingFlag` read in place of the process's. */
 export function setLaunchArgsForTest(args: readonly string[]): void {
 	launchArgs = args;
 }
@@ -436,6 +454,17 @@ export function setLaunchArgsForTest(args: readonly string[]): void {
  */
 export function launchToolFilter(args: readonly string[] = launchArgs): PiToolFilter | undefined {
 	return piToolFilter(parseToolFlags(args));
+}
+
+/**
+ * Whether pi's launch flags set the session's thinking level (`--thinking`,
+ * `--model <pattern>:<level>`, a `--models` entry with a level), read from
+ * the arguments as `launchToolFilter` reads the tool flags: pi gives an
+ * extension no other way to see them. A level the launch set wins over the
+ * profile's tier default (lib/models/tier-thinking.ts).
+ */
+export function launchThinkingFlag(args: readonly string[] = launchArgs): boolean {
+	return launchSetsThinking(parseThinkingFlags(args));
 }
 
 /** The slot key a profile module is shared under (lib/profile/shared-module.ts), by its absolute path. */

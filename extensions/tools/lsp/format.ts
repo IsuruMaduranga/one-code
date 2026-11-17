@@ -3,6 +3,7 @@
  * (`lspResultText`).
  */
 
+import { FIX_HINT, type FixHint, fixHintTrailer } from "./fix-hints.ts";
 import { lspResultText, type ShownDiagnostic } from "./text.ts";
 
 export interface LspDiagnostic {
@@ -11,6 +12,8 @@ export interface LspDiagnostic {
 	code?: string | number;
 	source?: string;
 	message: string;
+	/** The profile's hint for it (fix-hints.ts), tagged where the servers' diagnostics merge, under a symbol a server cannot set. */
+	[FIX_HINT]?: FixHint;
 }
 
 export type SeverityFilter = "error" | "warning" | "all";
@@ -40,16 +43,18 @@ export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: Severity
 	return diagnostics.filter((d) => (d.severity ?? 1) <= max);
 }
 
-/** The tool's result: a summary line, then up to `limit` diagnostics. */
+/** The tool's result: a summary line, then up to `limit` diagnostics, then the fix hints of those shown. */
 export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], limit = 20): string {
 	const text = lspResultText.diagnostics;
 	if (diagnostics.length === 0) return text.none;
-	const shown = diagnostics.slice(0, limit).map((d) => text.line({ path: relPath, diagnostic: shownDiagnostic(d) }));
+	const kept = diagnostics.slice(0, limit);
+	const shown = kept.map((d) => text.line({ path: relPath, diagnostic: shownDiagnostic(d) }));
 	if (diagnostics.length > limit) shown.push(text.more(diagnostics.length - limit));
 	const summary = text.summary({
 		errors: diagnostics.filter((d) => (d.severity ?? 1) === 1).length,
 		warnings: diagnostics.filter((d) => d.severity === 2).length,
 		total: diagnostics.length,
 	});
-	return `${summary}\n\n${shown.join("\n")}`;
+	const hints = fixHintTrailer(kept);
+	return `${summary}\n\n${shown.join("\n")}${hints ? `\n\n${hints}` : ""}`;
 }

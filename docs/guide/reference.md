@@ -213,6 +213,7 @@ mode. When both spellings are set, One Code's wins.
 | `ONECODE_DISABLE_AUTO_MEMORY=1` | Turn auto-memory off, overriding the setting in `/memory`. `0` turns it on. |
 | `ONECODE_ENABLE_TODO_TOOLS=1` | Give the model the task tools, which every model runs without by default. |
 | `ONECODE_LOOP_KEEPALIVE=0` | Turn off the fallback wake-up of a self-paced `/loop`. |
+| `ONECODE_OPENROUTER_ROUTING_DEFAULTS=0` | Let OpenRouter pick any host for DeepSeek and Qwen models, including hosts at fp4, fp6, int4 or int8. See [OpenRouter hosts and precision](providers-and-models.md#openrouter-hosts-and-precision). |
 | `ONECODE_TICKLISH_WHISPER_TIMEOUT_MS` | How long an unanswered auto-mode prompt waits before it denies the action, in milliseconds (default 120000). |
 
 ### pi and Claude Code variables honored

@@ -19,15 +19,23 @@
  * one turn (see `extensions/agents/workflow`); this mode arms every turn until it is
  * switched off, via an `every-turn` reminder keyed so it can be withdrawn — the
  * same shape the permissions extension uses for plan mode.
+ *
+ * It also applies the profile's per-tier starting level
+ * (`Profile.defaultThinkingLevels`; lib/models/tier-thinking.ts decides when):
+ * at `session_start` for a new session, which every mode awaits before its
+ * first request, and at `model_select`, where pi has just set its own level
+ * and a switch opens an epoch anyway. It is set quietly, with no effort note,
+ * since the user changed nothing.
  */
 
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
+import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
-import { requireText, toolLive } from "../../lib/profile/profile.ts";
+import { activeProfile, requireText, toolLive } from "../../lib/profile/profile.ts";
+import { autoThinkingAction, branchHasMessages, declaredLevel, type LevelSource, levelOwnership, TIER_THINKING_STATE, tierThinkingAt, type TierThinkingState } from "../../lib/models/tier-thinking.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../../lib/request/reminders.ts";
 import { readState, recordState } from "../../lib/request/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
@@ -126,6 +134,70 @@ function effortExtension(pi: ExtensionAPI) {
 	};
 	pi.on("session_start", cancelEffortNote);
 	pi.on("session_shutdown", cancelEffortNote);
+	const hideEffortNote = (ctx: ExtensionContext) => {
+		cancelEffortNote();
+		if (ctx.hasUI) ctx.ui.setWidget(NOTE_KEY, undefined);
+	};
+
+	/**
+	 * The level the tier default is setting: its `thinking_level_select` shows
+	 * no note. Set before `setThinkingLevel`, since pi may call this handler
+	 * inside that call, and consumed by the matching event.
+	 */
+	let quietLevel: ThinkingLevel | undefined;
+	/** Whether the profile declares any tier level: without one, nothing here runs or records. */
+	const declaresLevels = () => Object.keys(activeProfile().defaultThinkingLevels).length > 0;
+	/** Record who owns the live level, so a later switch, a resume or a /tree move reads it from the branch. */
+	const recordSource = (source: LevelSource, auto = false) => {
+		if (declaresLevels()) recordState(pi, TIER_THINKING_STATE, { source, level: pi.getThinkingLevel(), ...(auto ? { auto: true } : {}) } satisfies TierThinkingState);
+	};
+	/** Set `level` and record who owns it. `quiet`: no effort note for it. `auto`: `/effort auto` set it. */
+	const setRecorded = (ctx: ExtensionContext, level: string, source: LevelSource, { quiet = false, auto = false } = {}) => {
+		// pi fits the level to the model; the note is skipped for the level it will settle on.
+		const settles = ctx.model ? (clampThinkingLevel(ctx.model, level as ThinkingLevel) as ThinkingLevel) : (level as ThinkingLevel);
+		if (quiet) quietLevel = settles !== pi.getThinkingLevel() ? settles : undefined;
+		pi.setThinkingLevel(level as ThinkingLevel);
+		recordSource(source, auto);
+	};
+	/**
+	 * The tier default at a boundary, unless the user chose a level. Applied
+	 * as declared: pi fits it to the model, so the level that runs can be
+	 * higher than the profile's (`medium` runs as `high` on DeepSeek V4.1
+	 * Flash, which has no `medium`). A switch always records who owns the
+	 * level after it, so a pick right after the switch reads as the user's.
+	 */
+	const applyTierDefault = (ctx: ExtensionContext, boundary: "start" | "switch", model: ExtensionContext["model"]) => {
+		// getSettings arrived in pi 1.0.1: without it a saved level cannot be seen, so the user's level stays.
+		const settings = pi.getSettings?.();
+		if (!model || !settings || !declaresLevels()) return;
+		// Ultracode's level is the user's: the default never replaces it, and a switch says so.
+		if (ultracodeActive) {
+			if (boundary === "switch") recordSource("user");
+			return;
+		}
+		const action = tierThinkingAt(boundary, model, settings, levelOwnership(ctx.sessionManager.getBranch()));
+		if (action.level !== undefined) {
+			setRecorded(ctx, action.level, action.source, { quiet: true });
+			// A switch may already show pi's carried level; the default replaced it.
+			if (boundary === "switch") hideEffortNote(ctx);
+		} else if (boundary === "switch") {
+			recordSource(action.source);
+		}
+	};
+	// A new session only: a resumed, forked or reloaded one runs at the level its branch recorded.
+	pi.on("session_start", (event, ctx) => {
+		if ((event.reason === "startup" || event.reason === "new") && !branchHasMessages(ctx.sessionManager.getBranch())) applyTierDefault(ctx, "start", ctx.model);
+	});
+	pi.on("model_select", (event, ctx) => {
+		if (event.source !== "restore") applyTierDefault(ctx, "switch", event.model);
+	});
+	// pi keeps the live level across a /tree move: its owner is the one the branch left behind, not the new branch's.
+	// Registered before ultracode's own /tree handler (below), which may then set the branch's level as the user's.
+	pi.on("session_tree", (event, ctx) => {
+		const left = levelOwnership(event.oldLeafId ? ctx.sessionManager.getBranch(event.oldLeafId) : []);
+		// An /effort auto on the branch left behind still released the launch level.
+		recordSource(left.source, left.launchReleased);
+	});
 
 	/** Whether workflows are on for this session, read with workflow's own settings at session start. */
 	let workflowsOn = true;
@@ -200,7 +272,10 @@ function effortExtension(pi: ExtensionAPI) {
 		const ar = levelRank(actual);
 		const cappedDown = ar >= 0 && wr >= 0 && ar < wr;
 		const note = cappedDown ? ` (${modelLabel(ctx)} tops out at ${actual})` : "";
+		// The user's pick, even one equal to the level before (pi records no change then): the tier default leaves it alone.
+		const markPicked = () => recordSource("user");
 		if (choice === ULTRACODE) {
+			markPicked();
 			return report(ctx, `Effort: ultracode — ${actual} reasoning, workflows armed every turn${note}`);
 		}
 		const saved = asDefault && canPersist(ctx) && isPersistedEffort(choice) && actual === wanted;
@@ -215,6 +290,7 @@ function effortExtension(pi: ExtensionAPI) {
 				return report(ctx, error, true);
 			}
 		}
+		markPicked();
 		if (isPersistedEffort(actual) || actual === "max") return report(ctx, `${effortSetMessage(actual, saved)}${wasUltracode ? " · Ultracode off" : ""}`);
 		return report(ctx, `Effort: ${actual}${note}`);
 	};
@@ -279,8 +355,9 @@ function effortExtension(pi: ExtensionAPI) {
 						const error = await persist(ctx, undefined);
 						if (error) return report(ctx, error, true);
 					}
-					// getSettings arrived in pi 1.0.1; a 1.0.0 install falls back to pi's default.
-					pi.setThinkingLevel(pi.getSettings?.().defaultThinkingLevel ?? "medium");
+					// pi's global default, else the tier's, else pi's own. getSettings arrived in pi 1.0.1; a 1.0.0 install has no global default to read.
+					const auto = autoThinkingAction({ declared: ctx.model ? declaredLevel(ctx.model) : undefined, globalDefault: pi.getSettings?.().defaultThinkingLevel });
+					setRecorded(ctx, auto.level, auto.source, { auto: true });
 					setUltracode(false);
 					applyStatus(ctx);
 					showEffortNote(ctx, pi.getThinkingLevel());
@@ -322,12 +399,17 @@ function effortExtension(pi: ExtensionAPI) {
 	// Cycling thinking with shift+tab away from ultracode's level makes the
 	// footer indicator a lie, so drop the mode instead of letting the two drift.
 	pi.on("thinking_level_select", (event, ctx) => {
+		if (event.level === quietLevel) {
+			quietLevel = undefined;
+			return;
+		}
 		if (ultracodeActive && ultracodeLevel !== undefined && event.level !== ultracodeLevel) {
 			setUltracode(false);
 			applyStatus(ctx);
 			ctx.ui.notify(`Ultracode off — reasoning is now ${event.level}`, "info");
 		}
-		showEffortNote(ctx, event.level);
+		// pi emits without waiting: a level the session has since left (a switch the tier default followed) is not news.
+		if (event.level === pi.getThinkingLevel()) showEffortNote(ctx, event.level);
 	});
 
 	/**
@@ -345,6 +427,8 @@ function effortExtension(pi: ExtensionAPI) {
 		const on = storedOn && (tree || stored.level === pi.getThinkingLevel());
 		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, { record: false });
 		if (on && tree && pi.getThinkingLevel() !== stored?.level) pi.setThinkingLevel(stored?.level as ThinkingLevel);
+		// Back on a branch that runs ultracode: its level is the user's again, even at the level the old branch's owner left.
+		if (on && tree) recordSource("user");
 		applyStatus(ctx);
 	};
 	pi.on("session_start", (_event, ctx) => {

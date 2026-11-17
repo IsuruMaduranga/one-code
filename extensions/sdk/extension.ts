@@ -25,6 +25,24 @@
  *   `toolLeaks` and `deferralChanges` from `test/unit/helpers/tool-mentions.ts`
  *   (the last fails when its bytes move inside a session).
  * - `REMINDER_CHANNEL`: a reminder, placed by the kind of fact it states.
+ * - `publishContextBlock(pi, ctx, key, text)`: project facts the model starts
+ *   every epoch with (the project's layout, its running services), a block
+ *   in the first message's context stack after the base's own. The base
+ *   renders it into the first message when an epoch opens (the first
+ *   request, a compaction, a model switch) and, inside an epoch, puts a
+ *   changed text on the next request's tail: at most one per request, the
+ *   latest text winning; the same text again adds nothing; `null`, or an
+ *   empty or whitespace-only text, withdraws it. Publish at `session_start`
+ *   and on a real change only: every change inside an epoch costs a block on
+ *   the tail, so a text that changes on each file write would add one to
+ *   every request. Keep it short and stable (sorted, no timestamps); past
+ *   25,000 UTF-8 bytes it is saved to the session's folder and the block
+ *   points there, under a name that changes only with the text. `ctx` is the
+ *   session's context (required), for that folder. The key is the
+ *   product's own: lowercase, and never one of the base's blocks (a clash,
+ *   or a key another extension already publishes, throws). A child session
+ *   sees the block only when the child loads the extension that publishes
+ *   it (`Profile.childExtensions`).
  * - `DEFER_CHANNEL`: put one of its own tools behind `tool_search`.
  * - `lspRequest`: a request on a language server the profile declares, on the
  *   connection the base already keeps for diagnostics. When the server
@@ -100,6 +118,7 @@
  */
 export { DEFER_CHANNEL, type DeferRequest } from "../lib/request/deferred-channel.ts";
 export { REMINDER_CHANNEL, type ReminderPayload, type ReminderPlacement } from "../lib/request/reminders.ts";
+export { publishContextBlock } from "../lib/request/context-block.ts";
 export type { LiveFeatures } from "../lib/profile/live-tools.ts";
 export type { FeatureId } from "../lib/profile/features.ts";
 export { type SectionSession, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection, type SystemPromptSession } from "../request/system-prompt/text.ts";

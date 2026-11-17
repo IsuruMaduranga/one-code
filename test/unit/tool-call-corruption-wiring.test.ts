@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
+import { OPENROUTER_HOST_CHANNEL } from "../../extensions/lib/request/openrouter-host.ts";
 import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { toolCallCorruptionText } from "../../extensions/request/tool-call-corruption/text.ts";
@@ -411,6 +412,37 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		await flush();
 		expect(ctx.abort).toHaveBeenCalledTimes(1);
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/provider Novita stopped streaming.*"ignore": \["Novita"\]/), "error");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("publishes the host the stream named, with the generation id, when a reply ends", async () => {
+		const seen: unknown[] = [];
+		fake.events.on(OPENROUTER_HOST_CHANNEL, (data) => seen.push(data));
+		await start();
+		await fake.fire("provider_stream_event", { type: "provider_stream_event", provider: "openrouter", api: "openai-completions", model: model.id, data: { id: "gen-123", provider: "InferenceNet" } }, ctx);
+		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-123", stopReason: "stop", content: [] } }, ctx);
+		// A reply no chunk named still carries its generation id, for /doctor's lookup.
+		await start();
+		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-456", stopReason: "stop", content: [] } }, ctx);
+		expect(seen).toEqual([
+			{ model: "openrouter/z-ai/glm-5.3", host: "InferenceNet", responseId: "gen-123" },
+			{ model: "openrouter/z-ai/glm-5.3", host: undefined, responseId: "gen-456" },
+		]);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("explains a refusal the quantization floor caused, without a lookup or a retry", async () => {
+		// Qwen carries a floor in both One Code's profile and the fixture profile.
+		const qwen = createFakeCtx({ model: { provider: "openrouter", id: "qwen/qwen3.8-27b", api: "openai-completions", baseUrl: "https://openrouter.ai/api/v1" }, mode: "tui", hasUI: true, modelRegistry: { getApiKeyAndHeaders: getAuth } }) as typeof ctx;
+		const refusal = "404 No allowed providers are available for the selected model.";
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: refusal, content: [] } }, qwen);
+		expect(qwen.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/no host that serves qwen\/qwen3\.8-27b.*OPENROUTER_ROUTING_DEFAULTS=0.*models\.json/), "error");
+		// Another error, or a model with no floor, adds nothing.
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "429 rate limited", content: [] } }, qwen);
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: refusal, content: [] } }, ctx);
+		expect(qwen.ui.notify).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).not.toHaveBeenCalled();
+		expect(qwen.abort).not.toHaveBeenCalled();
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 

@@ -2,8 +2,8 @@
  * The language-server tool's words. The extension decides what happened.
  * The profile words the tool itself (`LspText`: description, parameters);
  * the diagnostics, the failures and the new-diagnostics block's framing,
- * entries and cut label are here (`lspResultText`), with the block's caps
- * in the extension.
+ * entries and cut label, and the frame of a profile's fix hints are here
+ * (`lspResultText`), with the block's caps in the extension.
  */
 
 /** Why a language server is not available, or stopped. */
@@ -69,6 +69,13 @@ export interface LspResultText {
 		cut(head: string): string;
 		block(body: string): string;
 	};
+	/**
+	 * The trailer after the diagnostics shown, for the fix hints a profile
+	 * declares for its own language server (`ProductLanguageServer.fixHints`):
+	 * one line per hint, `key` being the diagnostic's code or the message
+	 * substring that matched. The hints are the profile's; the frame is here.
+	 */
+	fixHints(hints: readonly { key: string; hint: string }[]): string;
 }
 
 const PROJECT_CODE_REASON: Record<string, string> = {
@@ -141,4 +148,5 @@ export const lspResultText: LspResultText = {
 		cut: (head) => `${head}…[truncated]`,
 		block: (body) => `<new-diagnostics>The following new diagnostic issues were detected:\n\n${body}\n</new-diagnostics>`,
 	},
+	fixHints: (hints) => `Fix hints:\n${hints.map(({ key, hint }) => `${key}: ${hint}`).join("\n")}`,
 };

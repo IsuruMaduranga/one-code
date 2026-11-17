@@ -1,7 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/safety/file-tracker/tracker.ts";
+import { describeChanges, FileTracker, type GuardFacts, type GuardOutcome, guardDecision, RACY_STAMP_MS, writeDiscardsNothing } from "../../extensions/safety/file-tracker/tracker.ts";
 import { looksLikeAnthropicRequest } from "../../extensions/lib/request/anthropic-payload.ts";
 import { withClearThinking } from "../../extensions/lib/request/context-management.ts";
+
+describe("writeDiscardsNothing", () => {
+	it("lets a write replace an unread regular file only when it is exactly empty", () => {
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "" })).toBe(true);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "x" })).toBe(false);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\n" })).toBe(false);
+	});
+
+	it("never for a symlink or other non-regular target, an edit or the notebook tool", () => {
+		expect(writeDiscardsNothing("write", { plainFile: false, content: "" })).toBe(false);
+		expect(writeDiscardsNothing("edit", { plainFile: true, content: "" })).toBe(false);
+		expect(writeDiscardsNothing("notebook_edit", { plainFile: true, content: "" })).toBe(false);
+	});
+});
+
+describe("guardDecision", () => {
+	const base: GuardFacts = { tool: "write", kind: "file", ownKind: "file", content: "x", status: "fresh" };
+	const cases: Array<[string, Partial<GuardFacts>, GuardOutcome]> = [
+		["a FIFO, device or socket, even through a symlink", { kind: "other", ownKind: "other", content: undefined, status: "absent" }, "notRegularFile"],
+		["a FIFO itself, for an edit", { tool: "edit", kind: "other", ownKind: "other", content: undefined, status: "absent" }, "notRegularFile"],
+		["a regular file that could not be read", { content: undefined, status: "absent" }, "unreadable"],
+		["a directory goes through to the tool", { kind: "directory", ownKind: "directory", content: undefined, status: "absent" }, "allow"],
+		["a missing file", { kind: "absent", ownKind: "absent", content: undefined, status: "absent" }, "allow"],
+		["a fresh file", {}, "allow"],
+		["an unread file with content", { status: "unread" }, "unread"],
+		["an unread empty regular file, for a write", { content: "", status: "unread" }, "allow"],
+		["an unread empty file, for an edit", { tool: "edit", content: "", status: "unread" }, "unread"],
+		["an unread empty file, for the notebook tool", { tool: "notebook_edit", content: "", status: "unread" }, "unread"],
+		["an unread empty file reached through a symlink", { ownKind: "other", content: "", status: "unread" }, "unread"],
+		["a stale file, also when empty now", { content: "", status: "stale" }, "stale"],
+	];
+	it.each(cases)("%s", (_name, facts, expected) => {
+		expect(guardDecision({ ...base, ...facts })).toBe(expected);
+	});
+});
 
 describe("FileTracker.status", () => {
 	it("reports absent for a file that does not exist", () => {

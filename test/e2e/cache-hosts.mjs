@@ -32,13 +32,20 @@ export const DEFAULT_BLOCK = 256;
  * Morph, 2026-11-16: classifier prompts that grew read 31,232, 30,720 and
  * 30,208 of 31,607, 31,084 and 30,610 (61, 60 and 59 blocks of 512), where
  * 1,024-token blocks would have read 30,720, 30,720 and 29,696.
+ * Relace, 2026-11-17: reads are whole 256-token blocks, but the last `tail`
+ * tokens of the prompt it reads from are never read: 20 pinned requests of
+ * 1,527 to 4,320 tokens (prefixes, a repeat and a growing prompt) each read
+ * 256 x floor((prompt - k) / 256) with k 261 or 262 (a repeat of 2,990 read
+ * 2,560), and so did the matrix reads of 31,744 and 7,424. So a read falls
+ * 261 to 517 tokens short, past one block.
  */
-export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] } };
+export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] }, Relace: { block: 256, offsets: [0], tail: 262 } };
 
 /**
  * Waits before each retry of a lookup that 404'd (OpenRouter records a
  * generation some seconds after the reply, at times past 12 s), and the most
- * one `lookupHosts` call waits in all; past it the remaining ids fail fast.
+ * one `lookupHosts` call takes in all, requests included; past it the
+ * remaining ids fail fast without a request.
  */
 const RETRY_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 12000];
 const TOTAL_WAIT_MS = 60_000;
@@ -67,27 +74,33 @@ export async function lookupHosts(ids) {
 	const wanted = [...new Set(ids.filter(isGenerationId))];
 	if (wanted.length === 0) return out;
 	const key = openRouterKey();
-	let waited = 0;
+	const started = Date.now();
+	const deadline = started + TOTAL_WAIT_MS;
 	for (const id of wanted) {
 		if (!key) {
 			out.set(id, { error: "no OpenRouter key to look the host up" });
 			continue;
 		}
+		if (Date.now() >= deadline) {
+			out.set(id, { error: `no time left to look the host up (${Math.round(TOTAL_WAIT_MS / 1000)} s spent)` });
+			continue;
+		}
 		let result;
 		for (let attempt = 0; !result; attempt++) {
-			const last = attempt === RETRY_DELAYS_MS.length || waited + (RETRY_DELAYS_MS[attempt] ?? 0) > TOTAL_WAIT_MS;
+			const remaining = Math.max(1, deadline - Date.now());
+			// Decided once the request has answered: no retry when the next wait would pass the deadline.
+			const isLast = () => attempt === RETRY_DELAYS_MS.length || RETRY_DELAYS_MS[attempt] > deadline - Date.now();
 			try {
-				const res = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
+				const res = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(Math.min(10_000, remaining)) });
 				if (res.ok) {
 					const host = (await res.json())?.data?.provider_name;
 					result = host ? { host } : { error: "the generation names no host" };
-				} else if (res.status !== 404 || last) result = { error: `generation lookup returned ${res.status}${res.status === 404 ? ` after ${Math.round(waited / 1000)} s of retries` : ""}` };
+				} else if (res.status !== 404 || isLast()) result = { error: `generation lookup returned ${res.status}${res.status === 404 ? ` after ${Math.round((Date.now() - started) / 1000)} s of retries` : ""}` };
 			} catch (error) {
-				if (last) result = { error: `generation lookup failed: ${error?.message ?? error}` };
+				if (isLast()) result = { error: `generation lookup failed: ${error?.message ?? error}` };
 			}
 			if (!result) {
-				await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
-				waited += RETRY_DELAYS_MS[attempt];
+				await new Promise((resolve) => setTimeout(resolve, Math.min(RETRY_DELAYS_MS[attempt], Math.max(0, deadline - Date.now()))));
 			}
 		}
 		out.set(id, result);
@@ -97,13 +110,13 @@ export async function lookupHosts(ids) {
 
 /**
  * The shortfall a read may have under the host that served it: the host's
- * block when the host is measured and `read` is a whole number of its blocks
- * after one of its offsets, else `DEFAULT_BLOCK`.
+ * block plus its unread tail when the host is measured and `read` is a whole
+ * number of its blocks after one of its offsets, else `DEFAULT_BLOCK`.
  */
 export function allowance(lookup, read) {
 	const measured = lookup?.host ? MEASURED_HOSTS[lookup.host] : undefined;
 	if (!measured || read <= 0) return DEFAULT_BLOCK;
-	return measured.offsets.some((offset) => (read + offset) % measured.block === 0) ? Math.max(DEFAULT_BLOCK, measured.block) : DEFAULT_BLOCK;
+	return measured.offsets.some((offset) => (read + offset) % measured.block === 0) ? Math.max(DEFAULT_BLOCK, measured.block + (measured.tail ?? 0)) : DEFAULT_BLOCK;
 }
 
 /** The note a line carries: the host, or why it is unknown; empty for a request that did not go through OpenRouter. */

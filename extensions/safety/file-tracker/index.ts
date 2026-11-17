@@ -2,7 +2,10 @@
  * file-tracker extension — Claude Code's read-before-write discipline.
  *
  * - `edit`/`write`/`notebook_edit` on a file that exists but was never read is
- *   blocked with an instruction to read it first.
+ *   blocked with an instruction to read it first, except a `write` over an
+ *   empty regular file, which has nothing to lose (`writeDiscardsNothing`).
+ *   A file that exists but cannot be read is refused the same way, and a
+ *   device, FIFO or socket is refused outright (opening one can block).
  * - An edit to a file that changed since we last saw it is blocked, so the model
  *   cannot overwrite someone else's change.
  * - Files that change out of band are reported in a `<system-reminder>` with the
@@ -20,7 +23,7 @@ import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
@@ -43,7 +46,8 @@ import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.t
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
-import { describeChanges, type FileStamp, FileTracker } from "./tracker.ts";
+import { describeChanges, type FileStamp, FileTracker, guardDecision } from "./tracker.ts";
+import { fileKind, readIfPresent } from "./files.ts";
 import { fileTrackerText } from "./text.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -55,24 +59,6 @@ const READ_TOOLS = new Set(["read", "notebook_edit"]);
  */
 const DETAILED_CHANGE_REMINDERS_PER_TURN = 5;
 
-function readIfPresent(path: string): string | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		return readFileSync(path, "utf-8");
-	} catch {
-		// Binary or unreadable: not something we can reason about, so don't guard it.
-		return undefined;
-	}
-}
-
-/** Whether `path` is a regular file (symlinks followed): never a device, FIFO or directory. */
-function isRegularFile(path: string): boolean {
-	try {
-		return statSync(path).isFile();
-	} catch {
-		return false;
-	}
-}
 
 /** The file's disk stamp, or undefined when it is gone (or not a plain file we could stat). */
 function statIfPresent(path: string): FileStamp | undefined {
@@ -122,7 +108,7 @@ function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	for (const path of shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir))) {
 		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
 		// and a read of it never ends (found by a GPT-6 Astra review).
-		if (!isRegularFile(path)) continue;
+		if (fileKind(path) !== "file") continue;
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
 		const version = versionOf(path);
@@ -142,7 +128,7 @@ function observeShellReads(tracker: FileTracker, before: Map<string, string>, ou
 	if (!output) return observed;
 	for (const [path, version] of before) {
 		const stamp = statIfPresent(path);
-		if (!stamp || !isRegularFile(path) || versionOf(path) !== version) continue;
+		if (!stamp || fileKind(path) !== "file" || versionOf(path) !== version) continue;
 		const content = readIfPresent(path);
 		if (content === undefined || versionOf(path) !== version) continue;
 		if (!shownInFull(output, content)) continue;
@@ -370,13 +356,24 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		if (!path) return undefined;
 		if (event.toolName === "write") writeTargetExisted.set(event.toolCallId, existsSync(path));
 
-		const current = readIfPresent(path);
-		const status = tracker.status(path, current);
-
-		// Creating a new file needs no prior read.
-		if (status === "absent" || status === "fresh") return undefined;
-		if (status === "unread") return { block: true, reason: fileTrackerText.unread({ path, tool: event.toolName }) };
-		return { block: true, reason: fileTrackerText.stale({ path }) };
+		// Read regular files only, as for the shell snapshot: a read of a FIFO
+		// never ends. The decision is `guardDecision`'s.
+		const tool = event.toolName;
+		const kind = fileKind(path);
+		const content = kind === "file" ? readIfPresent(path) : undefined;
+		const outcome = guardDecision({ tool, kind, ownKind: fileKind(path, false), content, status: tracker.status(path, content) });
+		switch (outcome) {
+			case "allow":
+				return undefined;
+			case "notRegularFile":
+				return { block: true, reason: fileTrackerText.notRegularFile({ path, tool }) };
+			case "unreadable":
+				return { block: true, reason: fileTrackerText.unreadable({ path, tool }) };
+			case "unread":
+				return { block: true, reason: fileTrackerText.unread({ path, tool }) };
+			case "stale":
+				return { block: true, reason: fileTrackerText.stale({ path }) };
+		}
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

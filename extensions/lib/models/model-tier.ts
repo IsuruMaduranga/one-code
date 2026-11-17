@@ -42,19 +42,9 @@ import {
 } from "./model-policy.ts";
 import { productSettingsPath } from "../profile/product-settings.ts";
 import { isPlainObject } from "../core/plain-object.ts";
+import { isPromptTier, PROMPT_TIERS, type PromptTier, TIER_RANK } from "./prompt-tiers.ts";
 
-export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
-
-/** More-scaffolded = higher rank. */
-const TIER_RANK: Record<PromptTier, number> = { frontier: 0, workhorse: 1, cheap: 2, tiny: 3 };
-
-/** Every prompt tier, most capable first. */
-export const PROMPT_TIERS = Object.keys(TIER_RANK) as readonly PromptTier[];
-
-/** Whether `value` names one of the four tiers. */
-export function isPromptTier(value: unknown): value is PromptTier {
-	return typeof value === "string" && Object.hasOwn(TIER_RANK, value);
-}
+export { isPromptTier, PROMPT_TIERS, type PromptTier };
 
 /** How many tiers `tier` sits below `reference` (negative when above). */
 export function tiersBelow(tier: PromptTier, reference: PromptTier): number {

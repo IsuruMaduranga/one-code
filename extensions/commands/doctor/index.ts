@@ -64,6 +64,8 @@ import { sourceSwitchStatus, sourcesOff } from "../../lib/profile/sources.ts";
 import { promptCommandText } from "../../lib/plugins/skill-invoke.ts";
 import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
+import { fetchEndpointQuantizations, OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent, type ServedHost } from "../../lib/request/openrouter-host.ts";
+import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -126,7 +128,16 @@ function doctorExtension(pi: ExtensionAPI) {
 			}
 		}
 	};
+	// The OpenRouter host of the main session's last reply (lib/request/openrouter-host.ts),
+	// and each model's endpoints listing once fetched, for this session only.
+	let lastReply: OpenRouterHostEvent | undefined;
+	let listings = new Map<string, Map<string, string[]>>();
+	pi.events.on(OPENROUTER_HOST_CHANNEL, (data) => {
+		lastReply = data as OpenRouterHostEvent;
+	});
 	pi.on("session_start", (_event, ctx) => {
+		lastReply = undefined;
+		listings = new Map();
 		if (refreshAbort.signal.aborted) refreshAbort = new AbortController();
 		const home = os.homedir();
 		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(productSettingsPath(home))) return;
@@ -138,9 +149,37 @@ function doctorExtension(pi: ExtensionAPI) {
 		refreshAbort.abort(new Error("the session ended"));
 	});
 
+	/**
+	 * The host of the last reply. With `network`, a host no chunk named is looked
+	 * up by generation id and the model's endpoints listing is read once per
+	 * session for its precision; without it, only what is already known.
+	 */
+	const servedHost = async (ctx: ExtensionContext, network: boolean): Promise<ServedHost | undefined> => {
+		const reply = lastReply;
+		if (!reply) return undefined;
+		const slash = reply.model.indexOf("/");
+		const model = ctx.modelRegistry.find(reply.model.slice(0, slash), reply.model.slice(slash + 1));
+		let host = reply.host;
+		if (!host && network && model) {
+			host = await openRouterProviderName(reply.responseId, async () => {
+				const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+				return auth.ok ? { apiKey: auth.apiKey, baseUrl: auth.baseUrl ?? model.baseUrl } : undefined;
+			}, refreshAbort.signal);
+			if (host && lastReply === reply) lastReply = { ...reply, host };
+		}
+		if (!host) return undefined;
+		let listing = listings.get(reply.model);
+		if (!listing && network && model) {
+			listing = await fetchEndpointQuantizations(model.baseUrl, model.id, refreshAbort.signal);
+			if (listing) listings.set(reply.model, listing);
+		}
+		return { model: reply.model, host, quantizations: listing?.get(host.toLowerCase()) };
+	};
+
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
 		const home = os.homedir();
 		const version = productVersion();
+		const served = servedHost(ctx, options.network);
 		// Unrelated endpoints (npm registry, the model catalogs): overlap them.
 		// The catalog refresh is a no-op when fresh or turned off, bounded by its fetch timeout.
 		const [latest] = options.network
@@ -187,6 +226,7 @@ function doctorExtension(pi: ExtensionAPI) {
 					? { mode: permission.mode, classifier: permission.classifier, pinned: permission.pinned, source: permission.mode === "auto" ? undefined : "set for this session" }
 					: undefined,
 				mcp: mcpSnapshot(),
+				openRouterHost: await served,
 			},
 		});
 	};

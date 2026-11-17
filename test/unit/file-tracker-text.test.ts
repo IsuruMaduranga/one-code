@@ -27,6 +27,13 @@ describe("One Code's file-tracker text", () => {
 		expect(fileTracker.changedByAgent({ path: "/p/a.ts", excerpt })).toContain("was changed by an agent you started");
 	});
 
+	it("refuses a special file or an unreadable one with the reason and what to do instead", () => {
+		expect(fileTracker.notRegularFile({ path: "/p/pipe", tool: "write" })).toContain("Cannot use write on /p/pipe: it is not a regular file");
+		expect(fileTracker.notRegularFile({ path: "/p/pipe", tool: "write" })).toContain("Use the shell for devices and pipes.");
+		expect(fileTracker.unreadable({ path: "/p/a.ts", tool: "edit" })).toContain("Cannot use edit on /p/a.ts: the file exists but could not be read");
+		expect(fileTracker.unreadable({ path: "/p/a.ts", tool: "edit" })).toContain("read it first");
+	});
+
 	it("adds the count of left-out lines only when the excerpt left some out", () => {
 		expect(fileTracker.changedOnDisk({ path: "/p/a.ts", excerpt }).endsWith("re-read the file before editing it:\n1\tnew")).toBe(true);
 		expect(fileTracker.changedOnDisk({ path: "/p/a.ts", excerpt: { ...excerpt, moreLines: 3 } }).endsWith("1\tnew\n… 3 more changed lines")).toBe(true);

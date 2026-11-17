@@ -19,6 +19,7 @@ import { PROFILE_DIR } from "../../extensions/lib/profile/profile.ts";
 import { redactSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import * as sdk from "../../extensions/sdk/extension.ts";
 import { DEFER_CHANNEL, REMINDER_CHANNEL, SYSTEM_PROMPT_SECTION_CHANNEL, type SystemPromptSection } from "../../extensions/sdk/extension.ts";
+import { CONTEXT_ORDER } from "../../extensions/lib/request/reminders.ts";
 import { sessionModelTier } from "../../extensions/lib/models/session-model-tier.ts";
 import { modelCapability, resolveModelTier as sessionTier, tiersBelow } from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
@@ -61,7 +62,7 @@ describe("a product's own extensions", () => {
 	});
 
 	it.skipIf(!existsSync(probe))("the fixture's probe reaches the request through the SDK's channels", async () => {
-		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_SECTION_TOOL: string; PROBE_SECTION_DIAGNOSTICS: string; PROBE_REMINDER: string; PROBE_SECRET: string };
+		const module = (await import(pathToFileURL(probe).href)) as { default: (pi: never) => void; PROBE_TOOL: string; PROBE_SECTION: string; PROBE_SECTION_TOOL: string; PROBE_SECTION_DIAGNOSTICS: string; PROBE_REMINDER: string; PROBE_SECRET: string; PROBE_CONTEXT: string; PROBE_CONTEXT_KEY: string };
 		const fake = createFakePi();
 		const seen = { deferred: [] as unknown[], sections: [] as SystemPromptSection[], reminders: [] as unknown[] };
 		fake.events.on(DEFER_CHANNEL, (data) => seen.deferred.push(data));
@@ -87,7 +88,10 @@ describe("a product's own extensions", () => {
 		expect(seen.reminders).toEqual([]);
 		// A model at the probe's capability floor: no notice joins the session_start handlers' work.
 		for (const handler of fake.handlers.get("session_start") ?? []) await handler({}, createFakeCtx({ model: OPUS }));
-		expect(seen.reminders).toEqual([expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" })]);
+		expect(seen.reminders).toEqual([
+			expect.objectContaining({ text: module.PROBE_CONTEXT, key: `product:${module.PROBE_CONTEXT_KEY}`, placement: "first-prepend", order: CONTEXT_ORDER.productContext }),
+			expect.objectContaining({ text: module.PROBE_REMINDER, placement: "last-append" }),
+		]);
 	});
 
 	it("offer the session's tier, the notice helpers and the settings reader the base itself uses", () => {

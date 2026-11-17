@@ -270,6 +270,39 @@ environment variables, put the keys in `~/.onecode/settings.json`:
 `order` is optional. A backend that fails is skipped and the result says
 so. Web fetch works on every provider; it never depends on a search API.
 
+## OpenRouter hosts and precision
+
+OpenRouter serves an open model through many hosting companies, and some of
+the cheapest run it at reduced precision (fp4), which can make the model
+weaker. On DeepSeek and Qwen models, One Code asks OpenRouter to use only
+hosts that run the model at fp8, bf16, fp16 or fp32, or that don't state a
+precision. Hosts at fp4, fp6, int4 or int8 are left out. Your session still
+stays with the host that served its first request, so the prompt cache keeps
+working. Claude models on OpenRouter aren't affected. If no host is left for a
+model, the error you see says so and names the ways around it below.
+
+Your own routing wins. If you set `quantizations`, `only` or `order` for a
+model in pi's `models.json`, One Code adds nothing to that model's requests:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "modelOverrides": {
+        "qwen/qwen3.8-27b": { "compat": { "openRouterRouting": { "only": ["deepinfra"] } } }
+      }
+    }
+  }
+}
+```
+
+A `compat.openRouterRouting` set on the `openrouter` provider itself counts
+for every model. To turn the default off everywhere, set
+`ONECODE_OPENROUTER_ROUTING_DEFAULTS=0`.
+
+`/doctor report` shows which host served your last reply and, when
+OpenRouter lists it, the precision that host runs the model at.
+
 ## Provider notes
 
 - Verification has focused on Anthropic, OpenAI, and OpenRouter. Other

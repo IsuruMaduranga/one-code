@@ -65,8 +65,8 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 			state.instances.push(this);
 		}
 		async start() {}
-		async getDiagnostics() {
-			return [];
+		async getDiagnostics(path: string) {
+			return this.diagnostics.get(actual.pathToUri(path)) ?? [];
 		}
 		allDiagnostics() {
 			return this.diagnostics;
@@ -89,6 +89,7 @@ vi.mock("../../extensions/tools/lsp/client.ts", async (importOriginal) => {
 	}
 	return { ...actual, LspClient: FakeLspClient };
 });
+
 
 const SERVERS = {
 	sample: {
@@ -147,6 +148,63 @@ describe("a profile's language server", () => {
 		expect(state.instances[0].config).toEqual({ command: "/profile/ls/start", args: ["--jar", "/profile/ls/server.jar"] });
 		expect(state.instances[0].root).toBe(join(dir, "pkg"));
 		expect(state.instances[0].options).toEqual({ env: { LS_HOME: "/profile/ls" }, initializationOptions: { mode: "full" }, startupTimeoutMs: undefined });
+	});
+
+	it("never shows a fixHint field the server sends, in the block or the lsp_diagnostics result", async () => {
+		writeFileSync(join(dir, "Sample.project"), "");
+		const file = join(dir, "main.smp");
+		writeFileSync(file, "");
+		const ctx = createFakeCtx({ cwd: dir });
+		await run("tool_result", { toolName: "edit", input: { path: file }, isError: false, content: [], toolCallId: "c" }, ctx);
+		const client = state.instances[0];
+		client.diagnostics.set(pathToUri(file), [{ message: "x undefined", severity: 1, code: "S1", range: { start: { line: 0, character: 0 } }, fixHint: { key: "S1", hint: "From the server." } }]);
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => blocks.push((data as { text: string }).text));
+		client.publishCount++;
+		await run("tool_result", { toolName: "read", input: {}, isError: false, content: [], toolCallId: "d" }, ctx);
+		expect(blocks.at(-1)).toContain("x undefined");
+		expect(blocks.at(-1)).not.toContain("From the server.");
+		const result = await fake.tools.get("lsp_diagnostics")!.execute("t", { path: file }, undefined, undefined, ctx);
+		const text = (result as { content: Array<{ text: string }> }).content[0].text;
+		expect(text).toContain("x undefined");
+		expect(text).not.toContain("From the server.");
+	});
+
+	describe("with fix hints", () => {
+		const DIAGNOSTICS = [
+			{ message: "x undefined", severity: 1, code: "S1", range: { start: { line: 0, character: 0 } } },
+			{ message: "no module named io", severity: 1, range: { start: { line: 1, character: 0 } } },
+			{ message: "unrelated", severity: 2, range: { start: { line: 2, character: 0 } } },
+		];
+		const TRAILER = "\n\nFix hints:\nS1: Declare it first.\nno module: Import the module.";
+		let file: string;
+		let ctx: ReturnType<typeof createFakeCtx>;
+
+		beforeEach(async () => {
+			useProfile({ languageServers: { sample: { ...SERVERS.sample, fixHints: { byCode: { S1: "Declare it first." }, byMessage: [["no module", "Import the module."]] } } } }, "/profile");
+			fake = createFakePi();
+			lspExtension(fake.pi as never);
+			writeFileSync(join(dir, "Sample.project"), "");
+			file = join(dir, "main.smp");
+			writeFileSync(file, "");
+			ctx = createFakeCtx({ cwd: dir });
+			await run("tool_result", { toolName: "edit", input: { path: file }, isError: false, content: [], toolCallId: "c" }, ctx);
+			state.instances[0].diagnostics.set(pathToUri(file), DIAGNOSTICS);
+		});
+
+		it("ends the new-diagnostics block with the hints the server declares, in the base's frame", async () => {
+			const blocks: string[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => blocks.push((data as { text: string }).text));
+			state.instances[0].publishCount++;
+			await run("tool_result", { toolName: "read", input: {}, isError: false, content: [], toolCallId: "d" }, ctx);
+			expect(blocks.at(-1)).toMatch(new RegExp(`${TRAILER.replaceAll(".", "\\.")}\n</new-diagnostics>$`));
+		});
+
+		it("ends the lsp_diagnostics result with them too", async () => {
+			const result = await fake.tools.get("lsp_diagnostics")!.execute("t", { path: file }, undefined, undefined, ctx);
+			const text = (result as { content: Array<{ text: string }> }).content[0].text;
+			expect(text.endsWith(TRAILER)).toBe(true);
+		});
 	});
 
 	it("starts without the project-trust prompt even when its command is one the base asks about", async () => {

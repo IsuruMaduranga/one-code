@@ -121,6 +121,8 @@ describe("a subagent under pi's tool flags", () => {
 	it("starts with none of its tools under --no-tools, keeping its report channels", async () => {
 		launch(["--no-tools"]);
 		const { tools, output } = await subagent({ agent: "flags-reader" });
+		// A launch that failed before the first prompt records no tools: the filter below would then pass on nothing.
+		expect(tools).toContain("SubagentHandback");
 		expect(tools.filter((name) => !CHILD_REPORT_CHANNELS.includes(name))).toEqual([]);
 		expect(output).toContain(subagentResultText().toolsLeftOut({ name: "flags-reader", tools: ["read", "bash", "web_fetch"] }));
 	});
@@ -133,7 +135,9 @@ describe("a subagent under pi's tool flags", () => {
 		expect(has(tools, "read", "bash", "web_fetch")).toEqual({ read: true, bash: true, web_fetch: false });
 		expect(tools.filter((name) => name.includes("_"))).toEqual([]);
 		// A fork, whose tools would otherwise be undefined and nothing excluded, too.
-		expect((await subagent({ fork: true })).tools.filter((name) => name.includes("_"))).toEqual([]);
+		const fork = (await subagent({ fork: true })).tools;
+		expect(fork).toContain("read");
+		expect(fork.filter((name) => name.includes("_"))).toEqual([]);
 	});
 
 	it("keeps a report channel an --exclude-tools entry names exactly", async () => {
@@ -144,14 +148,20 @@ describe("a subagent under pi's tool flags", () => {
 
 	it("drops the shared MCP tools an allowlist with an mcp__ entry leaves out", async () => {
 		launch(["--tools", "read,mcp__other__*"]);
-		expect((await subagent({})).tools).not.toContain(MCP.name);
+		const allowlisted = (await subagent({})).tools;
+		expect(allowlisted).toContain("read");
+		expect(allowlisted).not.toContain(MCP.name);
 		launch(["--exclude-tools", "mcp__flags__*"]);
-		expect((await subagent({})).tools).not.toContain(MCP.name);
+		const excluded = (await subagent({})).tools;
+		expect(excluded).toContain("read");
+		expect(excluded).not.toContain(MCP.name);
 	});
 
 	it("hands a nested agent no Agent tool once the flags removed it", async () => {
 		launch(["--exclude-tools", "Agent"]);
-		expect((await subagent({ extraTools: [tool("Agent")] })).tools).not.toContain("Agent");
+		const { tools } = await subagent({ extraTools: [tool("Agent")] });
+		expect(tools).toContain("read");
+		expect(tools).not.toContain("Agent");
 	});
 
 	// A fork's requests carry the parent's tools; its own registry follows the
@@ -159,6 +169,7 @@ describe("a subagent under pi's tool flags", () => {
 	it("gives a fork no tool the flags removed from the parent, and no note", async () => {
 		launch(["--exclude-tools", "web_fetch"]);
 		const flagged = await subagent({ fork: true });
+		expect(flagged.tools).toContain("read");
 		expect(flagged.tools).not.toContain("web_fetch");
 		expect(flagged.output).not.toContain("tool flags");
 		setActiveProfileForTest(undefined);
@@ -197,6 +208,7 @@ describe("a workflow agent under pi's tool flags", () => {
 	it("starts with none of its tools under --no-tools, keeping its hand-back", async () => {
 		launch(["--no-tools"]);
 		const { tools } = await workflowAgent("flags-reader");
+		expect(tools).toContain("SubagentHandback");
 		expect(tools.filter((name) => !CHILD_REPORT_CHANNELS.includes(name))).toEqual([]);
 		expect(tools).not.toContain(MCP.name);
 	});

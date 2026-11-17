@@ -264,3 +264,19 @@ more than usual. `low`, `medium`, `high` and `xhigh` are saved for the
 current model, so a new session on that model starts there; `max` and
 `ultracode` last for this session only. `/effort auto` clears the saved
 level, and `--thinking <level>` at launch overrides it.
+
+If you haven't chosen a level, the effort you start at depends on the size
+of the model. Small models tend to overthink, so cheap and tiny models
+start at `low` and workhorse models at `medium`. Frontier models keep the
+usual default, `medium`. Switch models and the effort follows the new one.
+A subagent started without a level gets the default for its own model,
+unless you picked the session's level yourself. Some models skip a level,
+so the effort that runs can be a step higher than the default: a model
+without `low` runs at the next level it has.
+
+Your own choice always wins. A level you saved for the model, a
+`defaultThinkingLevel` in your settings, a launch flag (`--thinking high`,
+or a level on the model like `--model openrouter/deepseek/deepseek-v4.1-flash:high`),
+or a level you pick in the session with `/effort` or **shift+tab** keeps
+the default out of the way, and a level you pick stays when you switch
+models. `/effort auto` hands the choice back to the default.

@@ -113,6 +113,8 @@ export const CONTEXT_ORDER = {
 	productMd: 52,
 	/** The user's email and the git snapshot. */
 	context: 54,
+	/** A product's own context blocks (context-block.ts `publishContextBlock`); not Claude Code's. */
+	productContext: 55,
 	date: 56,
 } as const;
 
@@ -179,6 +181,19 @@ export interface ReminderPayload {
 /** The fact that the whole-text block `key` told `value` (a text, or a snapshot such as a git status). */
 export function toldBlockFact(key: string, value: unknown): BlockFact {
 	return { kind: "block", key, hash: contentHash(value) };
+}
+
+/**
+ * Inside an epoch, the fact a live whole-text block still has to tell on the
+ * request's tail: its live text minus what the epoch told, or undefined when
+ * the epoch told it already. A null text is an absent block, told as its
+ * empty text; one never told needs no withdrawal.
+ */
+export function untoldBlockFact(request: Pick<RenderRequest, "toldBlocks">, key: string, text: string | null): BlockFact | undefined {
+	const fact = toldBlockFact(key, text ?? "");
+	const told = request.toldBlocks.get(key);
+	if (told === fact.hash || (text === null && told === undefined)) return undefined;
+	return fact;
 }
 
 /** A live `first-prepend` block. */

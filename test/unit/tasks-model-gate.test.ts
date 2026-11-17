@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
+import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import tasksExtension from "../../extensions/tools/tasks/index.ts";
+import { profile as shipped } from "../../profile/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**
@@ -30,7 +32,10 @@ function setup() {
 	return { fake, withheld, deferred, reminders, run };
 }
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+	vi.unstubAllEnvs();
+	setActiveProfileForTest(undefined);
+});
 
 describe("tasks: off unless the ENABLE_TODO_TOOLS knob is on", () => {
 	for (const model of [opus, deepseek, small]) {
@@ -73,7 +78,18 @@ describe("tasks: off unless the ENABLE_TODO_TOOLS knob is on", () => {
 		expect(t.reminders).toHaveLength(1);
 	});
 
-	it("keeps a list restored from the branch off screen while the tools are withheld", async () => {
+	it("sends no task reminder when pi's --exclude-tools removed the task tools, knob on", async () => {
+		vi.stubEnv(knob, "1");
+		setActiveProfileForTest(resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", TASK_TOOLS.join(",")])));
+		const t = setup();
+		await t.fake.fire("session_start", {}, createFakeCtx({ model: deepseek }));
+		// A list can still exist (restored from a branch that had the tools), so the reminder must check the live tools, not only the knob.
+		await t.run("task_create", { subject: "A", description: "" });
+		for (let i = 0; i < 25; i++) await t.fake.fire("turn_end", {});
+		expect(t.reminders).toEqual([]);
+	});
+
+	it("keeps a list restored from the branch off screen while the tools are withheld or not live", async () => {
 		vi.stubEnv(knob, "1");
 		const source = setup();
 		const created = (await source.run("task_create", { subject: "Old task", description: "" })) as { details: unknown };
@@ -93,5 +109,8 @@ describe("tasks: off unless the ENABLE_TODO_TOOLS knob is on", () => {
 		};
 		expect(await shown("")).toEqual(["cc-tasks", undefined]);
 		expect((await shown("1"))?.[1]).toBeTypeOf("function");
+		// Knob on, but pi's --exclude-tools removed the tools: nothing can update the list, so it stays off screen.
+		setActiveProfileForTest(resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", TASK_TOOLS.join(",")])));
+		expect(await shown("1")).toEqual(["cc-tasks", undefined]);
 	});
 });
