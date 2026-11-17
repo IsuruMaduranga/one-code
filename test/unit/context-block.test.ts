@@ -124,7 +124,12 @@ describe("a product's context block", () => {
 
 	describe(`past ${CONTEXT_BLOCK_MAX_BYTES} UTF-8 bytes`, () => {
 		const big = (fill: string) => `${fill.repeat(CONTEXT_BLOCK_MAX_BYTES)} tail`;
-		const pointerFile = (text: string) => text.match(/(\S+context-layout-[0-9a-f]+\.txt)/)?.[1];
+		/** The file a pointer names, found by its name under the session's tool-results folder (a temp path may hold spaces). */
+		const pointerFile = (text: string, dir: string) => {
+			const name = text.match(/context-layout-[0-9a-f]+\.txt/)?.[0];
+			const file = name && join(dir, "tool-results", name);
+			return file && text.includes(file) ? file : undefined;
+		};
 
 		it("is persisted to the session's folder and the block carries the pointer, never a slice", () => {
 			const { home } = tempHome("context-block-");
@@ -132,7 +137,7 @@ describe("a product's context block", () => {
 			s.publish("layout", big("x"));
 			const text = s.live.stackEntries()[0].text;
 			expect(text).toContain("<persisted-output>");
-			const file = pointerFile(text);
+			const file = pointerFile(text, home);
 			expect(file?.startsWith(home)).toBe(true);
 			expect(readFileSync(file!, "utf8")).toBe(big("x"));
 		});
@@ -171,7 +176,7 @@ describe("a product's context block", () => {
 			const told = s.epochFacts();
 			s.publish("layout", big("y"));
 			const pointer = s.live.stackEntries()[0].text;
-			expect(pointerFile(pointer)).toBeDefined();
+			expect(pointerFile(pointer, home)).toBeDefined();
 			expect(renderRequest(s.fake.events, { facts: told })).toEqual([{ text: pointer, facts: [toldBlockFact("product:layout", pointer)] }]);
 		});
 	});
