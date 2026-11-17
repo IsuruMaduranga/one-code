@@ -1,8 +1,9 @@
 /**
  * When the profile's per-tier thinking level (`Profile.defaultThinkingLevels`,
  * lib/profile/thinking-defaults.ts) applies, and when the user's choice wins.
- * Pure: no pi imports; the effort feature (ui/effort) and the subagent runner
- * act on the answers.
+ * The decisions are pure; `tierThinkingAt` gathers their inputs (the
+ * profile's levels, the model's tier, the launch flags) for the effort
+ * feature (ui/effort) and the subagent runner, which act on the answers.
  *
  * The level is part of every request (Anthropic's effort, OpenAI's and
  * OpenRouter's `reasoning.effort`), so it is set only where an epoch opens
@@ -17,15 +18,19 @@
  * (lib/profile/pi-thinking-flags.ts), and a level picked in the session
  * (shift+tab, `/effort`, an RPC client's `set_thinking_level`). The last is
  * read from the branch (`levelSource`): pi records every level change as a
- * `thinking_level_change` entry, and the default (and `/effort`) records a
- * `one-code:state` entry right after its own, so resume, `/fork` and `/tree`
+ * `thinking_level_change` entry, and a `one-code:state` entry records who
+ * owns the live level after the default sets one, after `/effort`, after
+ * every model switch and after a `/tree` move, so resume, `/fork` and `/tree`
  * see who set the level without any process state.
  */
 
 import { type EntryLike, readRecord } from "../request/ledger/records.ts";
 import type { ThinkingLevelName } from "../profile/thinking-defaults.ts";
+import { activeProfile, launchThinkingFlag } from "../profile/profile.ts";
+import { modelCapability } from "./model-tier.ts";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
-/** The `one-code:state` key the default records under: `{ source, level }` after each level it sets. */
+/** The `one-code:state` key recording who owns the live level: `{ source, level }`. */
 export const TIER_THINKING_STATE = "tier-thinking";
 
 /** pi's level when nothing else sets one (pi-coding-agent `core/defaults.js` DEFAULT_THINKING_LEVEL). */
@@ -37,36 +42,44 @@ export const PI_DEFAULT_THINKING_LEVEL: ThinkingLevelName = "medium";
  */
 export type LevelSource = "pi" | "default" | "user";
 
-/** What is recorded after a level is set: who the level now belongs to (`/effort` records `user` even for the level already in force). */
+/** Who owns the live level, and the level then live (`/effort` records `user` even for the level already in force). */
 export interface TierThinkingState {
 	source: LevelSource;
 	level: string;
 }
 
-function recordedSource(entry: EntryLike): LevelSource | undefined {
+function recordedState(entry: EntryLike): TierThinkingState | undefined {
 	const record = readRecord(entry);
 	if (record?.kind !== "state" || record.data.key !== TIER_THINKING_STATE) return undefined;
 	const value = record.data.value as Partial<TierThinkingState> | undefined;
-	return value?.source === "default" || value?.source === "pi" || value?.source === "user" ? value.source : undefined;
+	const source = value?.source;
+	if (source !== "default" && source !== "pi" && source !== "user") return undefined;
+	return { source, level: typeof value?.level === "string" ? value.level : "" };
 }
 
 /**
- * Who set the level the branch runs at. A `thinking_level_change` right
- * after a `model_change` (or first on the branch) is pi's own: the level a
- * new session resolves, or a model switch carrying or fitting the level, so
- * it keeps the source it had. Any other change is the user's, unless a
- * state entry follows it and names another source. A level pi itself records on a `/tree`
- * switch reads as the user's too: the safe side, since the default then
- * stays out.
+ * Who set the level the branch runs at. A state entry says who owns the
+ * live level. A `thinking_level_change` right after a `model_change` (or
+ * first on the branch) is pi's own: the level a new session resolves, or a
+ * model switch carrying or fitting the level, so it keeps the source. A
+ * change to the level already known is no change: pi records the live
+ * level again at the next prompt after a `/tree` move. Any other change is
+ * the user's (shift+tab, an RPC client), unless a state entry follows it.
+ * The model switch handler records a state entry after every switch, so a
+ * pick right after a switch never sits next to the `model_change`.
  */
 export function levelSource(branch: readonly unknown[]): LevelSource {
 	let source: LevelSource = "pi";
+	let level: string | undefined;
 	let previous: EntryLike | undefined;
-	for (const item of branch as EntryLike[]) {
+	for (const item of branch as Array<EntryLike & { thinkingLevel?: string }>) {
 		if (item.type === "thinking_level_change") {
-			if (previous !== undefined && previous.type !== "model_change") source = "user";
+			const pis = previous === undefined || previous.type === "model_change";
+			if (!pis && item.thinkingLevel !== level) source = "user";
+			level = item.thinkingLevel;
 		} else {
-			source = recordedSource(item) ?? source;
+			const state = recordedState(item);
+			if (state) ({ source, level } = state);
 		}
 		previous = item;
 	}
@@ -104,10 +117,10 @@ export function levelChoices(settings: unknown, model: { provider: string; id: s
 	};
 }
 
-/** A level to set, and who it belongs to afterwards (recorded as `TierThinkingState`). */
+/** A level to set (none: leave pi's), and who owns the live level afterwards (recorded as `TierThinkingState`). */
 export interface TierThinkingAction {
-	level: ThinkingLevelName;
-	source: Exclude<LevelSource, "user">;
+	level?: ThinkingLevelName;
+	source: LevelSource;
 }
 
 /**
@@ -116,21 +129,37 @@ export interface TierThinkingAction {
  * `child`, a subagent whose runner passed no level. `declared` is the
  * level the profile declares for the (new) model's tier; `source` is
  * `levelSource` of the branch (pi's own switch entries keep it, so it is
- * who set the level before the switch). Undefined: leave pi's level.
+ * who set the level before the switch; for a child, the parent's).
  *
  * A level the user chose in the session survives a switch (pi carries it,
- * and the default stays out). A switch from a tier with a default to one
- * without, while the level is still the default's, gives the level back
- * to pi: what pi would have used without the default, its own `medium`
- * (a saved or global level would have stopped the default before).
+ * and the default stays out), and a named subagent of such a session keeps
+ * pi's own level. A saved, global or launch level is pi's to apply. A
+ * switch from a tier with a default to one without, while the level is
+ * still the default's, gives the level back to pi: what pi would have used
+ * without the default, its own `medium` (a saved or global level would
+ * have stopped the default before).
  */
-export function tierThinkingAction(input: { boundary: "start" | "switch" | "child"; declared: ThinkingLevelName | undefined; choices: LevelChoices; source: LevelSource }): TierThinkingAction | undefined {
+export function tierThinkingAction(input: { boundary: "start" | "switch" | "child"; declared: ThinkingLevelName | undefined; choices: LevelChoices; source: LevelSource }): TierThinkingAction {
 	const { boundary, declared, choices, source } = input;
-	if (choices.launchFlag || choices.saved !== undefined || choices.globalDefault !== undefined) return undefined;
-	if (source === "user") return undefined;
+	if (source === "user") return { source };
+	if (choices.launchFlag || choices.saved !== undefined || choices.globalDefault !== undefined) return { source: "pi" };
 	if (declared !== undefined) return { level: declared, source: "default" };
 	if (boundary === "switch" && source === "default") return { level: PI_DEFAULT_THINKING_LEVEL, source: "pi" };
-	return undefined;
+	return { source };
+}
+
+/** The level the profile declares for `model`'s capability tier, if any. */
+export function declaredLevel(model: Model<Api>): ThinkingLevelName | undefined {
+	return activeProfile().defaultThinkingLevels[modelCapability(model).tier];
+}
+
+/**
+ * `tierThinkingAction` for `model` at a boundary, its inputs gathered: the
+ * profile's level for the model's tier, the user's choices in `settings`
+ * (pi's effective settings) and the launch flags.
+ */
+export function tierThinkingAt(boundary: "start" | "switch" | "child", model: Model<Api>, settings: unknown, source: LevelSource): TierThinkingAction {
+	return tierThinkingAction({ boundary, declared: declaredLevel(model), choices: levelChoices(settings, model, launchThinkingFlag()), source });
 }
 
 /**

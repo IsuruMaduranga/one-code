@@ -22,11 +22,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import effortExtension from "../../extensions/ui/effort/index.ts";
 import { applyChildTierDefault } from "../../extensions/agents/subagents/runner.ts";
 import { setModelTierOverridesForTest } from "../../extensions/lib/models/model-tier.ts";
-import { TIER_THINKING_STATE } from "../../extensions/lib/models/tier-thinking.ts";
+import { type LevelSource, TIER_THINKING_STATE } from "../../extensions/lib/models/tier-thinking.ts";
 import { activeProfile, setActiveProfileForTest, setLaunchArgsForTest } from "../../extensions/lib/profile/profile.ts";
 import type { ThinkingDefaults } from "../../extensions/lib/profile/thinking-defaults.ts";
 import { readRecord, type EntryLike } from "../../extensions/lib/request/ledger/records.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
 const PROVIDER = "tier-provider";
@@ -38,6 +37,7 @@ const model = (id: string) =>
 const CHEAP = model("cheap-model");
 const WORKHORSE = model("workhorse-model");
 const FRONTIER = model("frontier-model");
+const FRONTIER2 = model("frontier2-model");
 const DECLARED: ThinkingDefaults = { workhorse: "medium", cheap: "low", tiny: "low" };
 
 const sessions: AgentSession[] = [];
@@ -46,7 +46,7 @@ let dir: string;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "tier-thinking-wiring-"));
 	stubHome(dir);
-	setModelTierOverridesForTest({ [`${PROVIDER}/cheap-model`]: "cheap", [`${PROVIDER}/workhorse-model`]: "workhorse", [`${PROVIDER}/frontier-model`]: "frontier" });
+	setModelTierOverridesForTest({ [`${PROVIDER}/cheap-model`]: "cheap", [`${PROVIDER}/workhorse-model`]: "workhorse", [`${PROVIDER}/frontier-model`]: "frontier", [`${PROVIDER}/frontier2-model`]: "frontier" });
 	declare(DECLARED);
 });
 afterEach(async () => {
@@ -73,10 +73,18 @@ interface Setup {
 	settings?: Record<string, unknown>;
 	thinkingLevel?: "high";
 	sessionManager?: SessionManager;
+	/** Bind in the TUI's mode with a UI that records the effort note. */
+	ui?: boolean;
 }
 
-/** A session with the effort feature bound in print mode, as `pi -p` runs it; `reasoning` lists each request's level. */
-async function start({ model: initial = CHEAP, settings = {}, thinkingLevel, sessionManager = SessionManager.inMemory(dir) }: Setup = {}) {
+const UI_METHODS = "select confirm input notify onTerminalInput setStatus setWorkingMessage setWorkingVisible setWorkingIndicator setHiddenThinkingLabel setFooter setHeader setTitle custom pasteToEditor setEditorText getEditorText addAutocompleteProvider setEditorComponent getEditorComponent getAllThemes getTheme setTheme getToolsExpanded setToolsExpanded";
+
+/**
+ * A session with the effort feature bound, in print mode as `pi -p` runs it
+ * or with a UI; `reasoning` lists each request's level, `notes()` counts the
+ * effort notes shown.
+ */
+async function start({ model: initial = CHEAP, settings = {}, thinkingLevel, sessionManager = SessionManager.inMemory(dir), ui = false }: Setup = {}) {
 	const settingsManager = SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false }, ...settings });
 	const loader = new DefaultResourceLoader({
 		cwd: dir, agentDir: dir, settingsManager,
@@ -101,9 +109,17 @@ async function start({ model: initial = CHEAP, settings = {}, thinkingLevel, ses
 		return { async *[Symbol.asyncIterator]() { yield { type: "done", reason: "stop", message }; }, result: async () => message } as never;
 	};
 	const errors: string[] = [];
-	await session.bindExtensions({ mode: "print", onError: (error) => errors.push(`${error.event}: ${error.error}`) });
-	return { session, reasoning, errors };
+	const widgets: Array<[string, unknown]> = [];
+	const uiContext: Record<string, unknown> = Object.fromEntries(UI_METHODS.split(" ").map((name) => [name, () => undefined]));
+	uiContext.setWidget = (key: string, widget: unknown) => widgets.push([key, widget]);
+	uiContext.theme = { fg: (_color: string, text: string) => text, dim: (text: string) => text };
+	await session.bindExtensions({ mode: ui ? "tui" : "print", ...(ui ? { uiContext: uiContext as never } : {}), onError: (error) => errors.push(`${error.event}: ${error.error}`) });
+	const notes = () => widgets.filter(([key, widget]) => key === "effort-note" && widget !== undefined).length;
+	return { session, reasoning, errors, notes };
 }
+
+/** Let pi's unawaited extension events settle. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 /** The sources the default recorded on the session's branch, in order. */
 const recorded = (session: AgentSession) =>
@@ -187,6 +203,15 @@ describe("a model switch follows the tier unless the user picked the level", () 
 		expect(reasoning).toEqual(["high"]);
 	});
 
+	it("keeps a level picked right after a switch that left the level alone", async () => {
+		const { session } = await start({ model: FRONTIER });
+		// Frontier to frontier: pi carries the level and records no level change.
+		await session.setModel(FRONTIER2 as never);
+		session.setThinkingLevel("high");
+		await session.setModel(CHEAP as never);
+		expect(session.thinkingLevel).toBe("high");
+	});
+
 	it("keeps a level picked with /effort, even the one already in force", async () => {
 		const { session } = await start();
 		const ctx = session.extensionRunner!.createCommandContext();
@@ -236,37 +261,61 @@ describe("a resumed session runs at the level its branch recorded", () => {
 });
 
 describe("the default is set quietly", () => {
-	it("shows no effort note for its level, and does for the user's", async () => {
-		const fake = createFakePi();
-		let level = "medium";
-		fake.pi.getThinkingLevel = vi.fn(() => level);
-		const selects: Array<{ level: string }> = [];
-		fake.pi.setThinkingLevel = vi.fn((wanted: string) => {
-			if (wanted === level) return;
-			level = wanted;
-			fake.branch.push({ type: "thinking_level_change", id: `t${fake.branch.length}`, parentId: null, thinkingLevel: wanted } as never);
-			selects.push({ level: wanted });
-		});
-		fake.pi.getSettings = () => ({});
-		effortExtension(fake.pi as never);
-		const ctx = createFakeCtx({ model: CHEAP, mode: "tui", hasUI: true, cwd: dir, sessionManager: { getBranch: () => fake.branch } });
-		await fake.fire("session_start", { reason: "startup" }, ctx);
-		expect(level).toBe("low");
-		for (const event of selects.splice(0)) await fake.fire("thinking_level_select", event, ctx);
-		const ui = ctx.ui as { setWidget: ReturnType<typeof vi.fn> };
-		const notes = () => ui.setWidget.mock.calls.filter(([key, widget]) => key === "effort-note" && widget !== undefined);
-		expect(notes()).toEqual([]);
-		// The user's own change still shows the note.
-		level = "high";
-		await fake.fire("thinking_level_select", { level: "high" }, ctx);
-		expect(notes()).toHaveLength(1);
+	it("shows no effort note for its level, at a start and at a switch", async () => {
+		const { session, notes, errors } = await start({ ui: true });
+		expect(session.thinkingLevel).toBe("low");
+		await settle();
+		expect(notes()).toBe(0);
+		await session.setModel(WORKHORSE as never);
+		await settle();
+		expect(session.thinkingLevel).toBe("medium");
+		expect(notes()).toBe(0);
+		expect(errors).toEqual([]);
+	});
+
+	it("still shows the note for the user's change, back to the default's level too", async () => {
+		const { session, notes } = await start({ ui: true });
+		session.setThinkingLevel("high");
+		await settle();
+		expect(notes()).toBe(1);
+		session.setThinkingLevel("low");
+		await settle();
+		expect(notes()).toBe(2);
+	});
+});
+
+describe("a /tree move keeps the owner of the live level", () => {
+	it("gives a default level back to pi on a later switch to a frontier model", async () => {
+		const { session } = await start({ model: FRONTIER });
+		await session.prompt("one");
+		const early = session.sessionManager.getLeafId()!;
+		await session.setModel(CHEAP as never);
+		expect(session.thinkingLevel).toBe("low");
+		await session.prompt("two");
+		// Back to a node from before the cheap model: pi keeps the live level and records it at the next prompt.
+		await session.navigateTree(early);
+		await session.prompt("three");
+		await session.setModel(FRONTIER as never);
+		expect(session.thinkingLevel).toBe("medium");
+	});
+
+	it("keeps a level the user picked", async () => {
+		const { session } = await start({ model: FRONTIER });
+		await session.prompt("one");
+		const early = session.sessionManager.getLeafId()!;
+		session.setThinkingLevel("high");
+		await session.prompt("two");
+		await session.navigateTree(early);
+		await session.prompt("three");
+		await session.setModel(CHEAP as never);
+		expect(session.thinkingLevel).toBe("high");
 	});
 });
 
 describe("a subagent the call gave no thinking level", () => {
-	const child = (childModel: ReturnType<typeof model> | undefined, settings: Record<string, unknown> = {}) => {
+	const child = (childModel: ReturnType<typeof model> | undefined, settings: Record<string, unknown> = {}, parentSource: LevelSource = "pi") => {
 		const session = { model: childModel, settingsManager: { getSettings: () => settings }, setThinkingLevel: vi.fn() };
-		applyChildTierDefault(session as never);
+		applyChildTierDefault(session as never, parentSource);
 		return session.setThinkingLevel.mock.calls.map(([level]) => level);
 	};
 
@@ -275,6 +324,13 @@ describe("a subagent the call gave no thinking level", () => {
 		expect(child(WORKHORSE)).toEqual(["medium"]);
 		expect(child(FRONTIER)).toEqual([]);
 		expect(child(undefined)).toEqual([]);
+		// The parent's level was the default's: the child still takes its own tier's.
+		expect(child(CHEAP, {}, "default")).toEqual(["low"]);
+	});
+
+	it("keeps pi's level when the user picked the parent's level", () => {
+		expect(child(CHEAP, {}, "user")).toEqual([]);
+		expect(child(WORKHORSE, {}, "user")).toEqual([]);
 	});
 
 	it("keeps pi's level under a saved or global level, or a launch flag", () => {

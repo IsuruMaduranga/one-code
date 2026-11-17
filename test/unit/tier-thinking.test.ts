@@ -63,6 +63,20 @@ describe("levelSource reads who set the level from the branch", () => {
 		expect(levelSource([...opening(), levelChange("high"), levelChange("medium"), marker("pi", "medium")])).toBe("pi");
 	});
 
+	it("reads a pick right after a switch as the user's, once the switch recorded its owner", () => {
+		// pi records no level change for a switch that keeps the level; the switch handler's entry sits between.
+		const branch = [...opening(), modelChange(), marker("pi", "medium"), levelChange("high")];
+		expect(levelSource(branch)).toBe("user");
+	});
+
+	it("keeps the owner when pi records the live level again (the next prompt after a /tree move)", () => {
+		// The /tree handler recorded the live level's owner on the new branch; pi then records that level.
+		const moved = [...opening(), marker("default", "low"), levelChange("low")];
+		expect(levelSource(moved)).toBe("default");
+		// A different level is a change.
+		expect(levelSource([...opening(), marker("default", "low"), levelChange("high")])).toBe("user");
+	});
+
 	it("ignores a malformed state entry and other keys", () => {
 		expect(levelSource([...opening(), levelChange("high"), stateEntry(TIER_THINKING_STATE, { source: "someone" })])).toBe("user");
 		expect(levelSource([...opening(), levelChange("high"), stateEntry("ultracode", { on: true, level: "high" })])).toBe("user");
@@ -95,24 +109,26 @@ describe("levelChoices reads pi's effective settings", () => {
 describe("tierThinkingAction", () => {
 	it.each(PROMPT_TIERS)("a new session on a %s model starts at the tier's declared level, or pi's when none", (tier) => {
 		const action = tierThinkingAction({ boundary: "start", declared: declared[tier], choices: none, source: "pi" });
-		expect(action).toEqual(declared[tier] === undefined ? undefined : { level: declared[tier], source: "default" });
+		expect(action).toEqual(declared[tier] === undefined ? { source: "pi" } : { level: declared[tier], source: "default" });
 	});
 
 	it.each([
 		["a level saved for the model", { ...none, saved: "high" }],
 		["pi's global default", { ...none, globalDefault: "high" }],
 		["a launch flag", { launchFlag: true }],
-	] as const)("leaves the level alone under %s, at every boundary", (_label, choices) => {
+	] as const)("leaves the level to pi under %s, at every boundary", (_label, choices) => {
 		for (const boundary of ["start", "switch", "child"] as const) {
-			for (const source of ["pi", "default"] as const) expect(tierThinkingAction({ boundary, declared: "low", choices, source })).toBeUndefined();
+			for (const source of ["pi", "default"] as const) expect(tierThinkingAction({ boundary, declared: "low", choices, source })).toEqual({ source: "pi" });
+			// A level the user picked stays theirs.
+			expect(tierThinkingAction({ boundary, declared: "low", choices, source: "user" })).toEqual({ source: "user" });
 		}
 	});
 
 	it("leaves a level the user picked in the session, at a start and at a switch", () => {
-		expect(tierThinkingAction({ boundary: "start", declared: "low", choices: none, source: "user" })).toBeUndefined();
+		expect(tierThinkingAction({ boundary: "start", declared: "low", choices: none, source: "user" })).toEqual({ source: "user" });
 		// The hand-picked level survives a switch to a model with a default, and to one without.
-		expect(tierThinkingAction({ boundary: "switch", declared: "low", choices: none, source: "user" })).toBeUndefined();
-		expect(tierThinkingAction({ boundary: "switch", declared: undefined, choices: none, source: "user" })).toBeUndefined();
+		expect(tierThinkingAction({ boundary: "switch", declared: "low", choices: none, source: "user" })).toEqual({ source: "user" });
+		expect(tierThinkingAction({ boundary: "switch", declared: undefined, choices: none, source: "user" })).toEqual({ source: "user" });
 	});
 
 	it("follows a switch between tiers that declare a level", () => {
@@ -127,14 +143,16 @@ describe("tierThinkingAction", () => {
 		expect(tierThinkingAction({ boundary: "switch", declared: undefined, choices: none, source: "default" })).toEqual({ level: PI_DEFAULT_THINKING_LEVEL, source: "pi" });
 		expect(PI_DEFAULT_THINKING_LEVEL).toBe("medium");
 		// pi's own level on both sides: nothing to give back.
-		expect(tierThinkingAction({ boundary: "switch", declared: undefined, choices: none, source: "pi" })).toBeUndefined();
+		expect(tierThinkingAction({ boundary: "switch", declared: undefined, choices: none, source: "pi" })).toEqual({ source: "pi" });
 		// A start on such a tier leaves pi's level.
-		expect(tierThinkingAction({ boundary: "start", declared: undefined, choices: none, source: "pi" })).toBeUndefined();
+		expect(tierThinkingAction({ boundary: "start", declared: undefined, choices: none, source: "pi" })).toEqual({ source: "pi" });
 	});
 
-	it("starts a subagent at its own model's tier level", () => {
+	it("starts a subagent at its own model's tier level unless the user picked the parent's", () => {
 		expect(tierThinkingAction({ boundary: "child", declared: "low", choices: none, source: "pi" })).toEqual({ level: "low", source: "default" });
-		expect(tierThinkingAction({ boundary: "child", declared: undefined, choices: none, source: "pi" })).toBeUndefined();
+		expect(tierThinkingAction({ boundary: "child", declared: "low", choices: none, source: "default" })).toEqual({ level: "low", source: "default" });
+		expect(tierThinkingAction({ boundary: "child", declared: "low", choices: none, source: "user" })).toEqual({ source: "user" });
+		expect(tierThinkingAction({ boundary: "child", declared: undefined, choices: none, source: "pi" })).toEqual({ source: "pi" });
 	});
 });
 

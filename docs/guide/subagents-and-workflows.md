@@ -268,11 +268,11 @@ level, and `--thinking <level>` at launch overrides it.
 If you haven't chosen a level, the effort you start at depends on the size
 of the model. Small models tend to overthink, so cheap and tiny models
 start at `low` and workhorse models at `medium`. Frontier models keep the
-usual default, `medium`. Switch models and the effort follows the new one,
-and a subagent you start without a level gets the default for its own
-model. Some models skip a level, so the effort that runs can be a step
-higher than the default: a model without `low` runs at the next level it
-has.
+usual default, `medium`. Switch models and the effort follows the new one.
+A subagent started without a level gets the default for its own model,
+unless you picked the session's level yourself. Some models skip a level,
+so the effort that runs can be a step higher than the default: a model
+without `low` runs at the next level it has.
 
 Your own choice always wins. A level you saved for the model, a
 `defaultThinkingLevel` in your settings, a launch flag (`--thinking high`,

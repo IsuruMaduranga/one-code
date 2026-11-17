@@ -24,9 +24,8 @@ import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
 import { findConfigured, modelSpec } from "../../lib/models/model-policy.ts";
 import { isModelUnavailableError } from "../../lib/models/classifier-model.ts";
-import { activeProfile, launchThinkingFlag, toolLive } from "../../lib/profile/profile.ts";
-import { modelCapability } from "../../lib/models/model-tier.ts";
-import { levelChoices, tierThinkingAction } from "../../lib/models/tier-thinking.ts";
+import { toolLive } from "../../lib/profile/profile.ts";
+import { type LevelSource, tierThinkingAt } from "../../lib/models/tier-thinking.ts";
 import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFlags, unusableAllowlistError } from "../../lib/agents/agent-catalog.ts";
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
@@ -156,21 +155,18 @@ export function newChildSessionManager(spec: Pick<ChildSessionSpec, "cwd" | "for
 /**
  * A fresh named agent whose call passed no `thinking` starts at the profile's
  * level for its own model's tier, under the main session's rules
- * (lib/models/tier-thinking.ts): a level saved for that model, pi's global
- * default or a launch flag keeps pi's own. Set before the first prompt, and
- * fitted by pi to the model, so the level that runs can be higher than the
- * one declared. A fork runs at the parent's level, a resume at its branch's.
+ * (lib/models/tier-thinking.ts): a level the user picked in the parent
+ * session (`parentSource` "user"), a level saved for the child's model,
+ * pi's global default or a launch flag keeps pi's own, as before tier levels
+ * existed. Set before the first prompt, and fitted by pi to the model, so
+ * the level that runs can be higher than the one declared. A fork runs at
+ * the parent's level, a resume at its branch's.
  */
-export function applyChildTierDefault(session: Pick<AgentSession, "model" | "settingsManager" | "setThinkingLevel">): void {
+export function applyChildTierDefault(session: Pick<AgentSession, "model" | "settingsManager" | "setThinkingLevel">, parentSource: LevelSource): void {
 	const model = session.model;
 	if (!model) return;
-	const action = tierThinkingAction({
-		boundary: "child",
-		declared: activeProfile().defaultThinkingLevels[modelCapability(model).tier],
-		choices: levelChoices(session.settingsManager.getSettings(), model, launchThinkingFlag()),
-		source: "pi",
-	});
-	if (action) session.setThinkingLevel(action.level);
+	const { level } = tierThinkingAt("child", model, session.settingsManager.getSettings(), parentSource);
+	if (level !== undefined) session.setThinkingLevel(level);
 }
 
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
@@ -192,6 +188,8 @@ export class SubagentRuntime {
 	private readonly getParentDeferred: () => DeferRequest[];
 	/** The main session's live permission mode, for a fork: told to it when it differs from what it was told (parent-mode.ts). */
 	private readonly getParentMode: (() => string) | undefined;
+	/** Who set the main session's thinking level (lib/models/tier-thinking.ts levelSource); unknown counts as the user's. */
+	private readonly getParentLevelSource: () => LevelSource;
 	/**
 	 * The parent's permission decision closure (undefined until permissions
 	 * publishes it), wrapped so every call carries the asking run's name: the
@@ -232,10 +230,12 @@ export class SubagentRuntime {
 		onChildWrite: (path: string, runName: string | undefined) => void,
 		getParentDeferred: () => DeferRequest[],
 		getParentMode: (() => string) | undefined,
+		getParentLevelSource: () => LevelSource,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.getParentDeferred = getParentDeferred;
 		this.getParentMode = getParentMode;
+		this.getParentLevelSource = getParentLevelSource;
 		this.onChildWrite = onChildWrite;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
@@ -267,11 +267,12 @@ export class SubagentRuntime {
 		onChildWrite: (path: string, runName: string | undefined) => void = () => {},
 		getParentDeferred: () => DeferRequest[] = () => [],
 		getParentMode?: () => string,
+		getParentLevelSource: () => LevelSource = () => "user",
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite, getParentDeferred, getParentMode);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable, onChildWrite, getParentDeferred, getParentMode, getParentLevelSource);
 	}
 
 	/**
@@ -472,7 +473,7 @@ export class SubagentRuntime {
 				this.discard(session);
 				throw new Error(unusable);
 			}
-			if (agent && !spec.sessionFile && spec.thinking === undefined) applyChildTierDefault(session);
+			if (agent && !spec.sessionFile && spec.thinking === undefined) applyChildTierDefault(session, this.getParentLevelSource());
 			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
 			if (spec.agent) this.agentTypes.set(session.sessionManager.getSessionId(), spec.agent.name);
 			if (spec.mainToolCallId) this.mainToolCalls.set(session.sessionManager.getSessionId(), spec.mainToolCallId);

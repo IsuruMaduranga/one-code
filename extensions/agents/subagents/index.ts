@@ -67,6 +67,7 @@ import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../..
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../../lib/side-calls/btw-fork.ts";
 import { watchMcpTools } from "../../lib/plugins/mcp-share.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
+import { levelSource } from "../../lib/models/tier-thinking.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../../lib/profile/tool-variants.ts";
 import { prepareAgentArguments } from "./agent-args.ts";
 import { projectConfigDirName } from "../../lib/profile/sources.ts";
@@ -465,6 +466,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 			() => queryDeferred(pi.events),
 			// The mode a fork's calls are checked in, read live at each of its requests (parent-mode.ts).
 			() => permissionMode,
+			// Whether a named agent may take its tier's thinking level: not when the user picked the session's level.
+			() => (lastCtx ? levelSource(lastCtx.sessionManager.getBranch()) : "user"),
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
