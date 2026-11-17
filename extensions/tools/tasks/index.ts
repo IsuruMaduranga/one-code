@@ -25,7 +25,7 @@ import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
 import { toolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { requireText, toolLive } from "../../lib/profile/profile.ts";
 import {
 	FINISHED_LIST_CLEAR_MS,
 	formatHiddenTaskWidget,
@@ -147,10 +147,12 @@ function tasksExtension(pi: ExtensionAPI) {
 	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
 
 	pi.on("turn_end", () => {
-		// Claude Code's reminder needs TaskUpdate in the tool list. It also
-		// waits for a list to exist: without one it would push a list onto
+		// Claude Code's reminder needs TaskUpdate in the tool list; this one
+		// names task_create too, so both must be live (pi's --exclude-tools can
+		// remove them while a list restored from the branch still exists). It
+		// also waits for a list to exist: without one it would push a list onto
 		// ordinary work, which the task tools are not for.
-		if (withheld || store.list().length === 0) return;
+		if (withheld || !toolLive("task_create") || !toolLive("task_update") || store.list().length === 0) return;
 		turnsSinceTaskUse++;
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
