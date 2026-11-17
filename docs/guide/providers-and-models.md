@@ -180,12 +180,18 @@ the system prompt to match:
 
 | Tier | Models | Prompt |
 |---|---|---|
-| Frontier | Opus and Fable, current generation, Sonnet 5.5 and later, Haiku 5 and later, and OpenAI's GPT-6 Astra and Sol, served by Anthropic and OpenAI themselves. | A short, terse prompt. |
+| Frontier | Opus 4.8 and later, Sonnet 5.5 and later, every Fable, Haiku 5 and later, OpenAI's GPT-6 Astra and Sol and later, and Google's Gemini 4 Carbon and Hydrogen and later. | A short, terse prompt. |
 | Workhorse | A vendor's large current models. | A full, detailed prompt. |
 | Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The full prompt, with longer, more explicit tool descriptions. |
 | Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding. |
 
-Frontier is a fixed list, decided by model version. Haiku 5 and later get
+Frontier is a fixed list, decided by model version. These models count as
+frontier when you reach them through the lab itself (Anthropic, OpenAI,
+Google or Google Vertex) or through OpenRouter, Vercel AI Gateway or
+Cloudflare AI Gateway, which forward to the lab. On any other provider they
+keep their catalog tier, and so do a gateway's batch endpoints and
+`~...-latest` aliases, which don't name a fixed model. Gemini 4 Argon and
+the Flash models aren't frontier. Haiku 5 and later get
 the frontier prompt only: when One Code picks a model for subagents or the
 classifier, or decides how strict the permission gate is, a Haiku counts at
 its catalog tier, so it never stands in for Opus. Everything else
