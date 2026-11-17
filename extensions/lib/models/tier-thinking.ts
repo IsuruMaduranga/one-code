@@ -42,10 +42,16 @@ export const PI_DEFAULT_THINKING_LEVEL: ThinkingLevelName = "medium";
  */
 export type LevelSource = "pi" | "default" | "user";
 
-/** Who owns the live level, and the level then live (`/effort` records `user` even for the level already in force). */
+/**
+ * Who owns the live level, and the level then live (`/effort` records `user`
+ * even for the level already in force). `auto`: `/effort auto` set it, which
+ * also ends a launch flag's hold for the rest of the session (a `/tree`
+ * move carries it to the new branch).
+ */
 export interface TierThinkingState {
 	source: LevelSource;
 	level: string;
+	auto?: true;
 }
 
 function recordedState(entry: EntryLike): TierThinkingState | undefined {
@@ -54,7 +60,13 @@ function recordedState(entry: EntryLike): TierThinkingState | undefined {
 	const value = record.data.value as Partial<TierThinkingState> | undefined;
 	const source = value?.source;
 	if (source !== "default" && source !== "pi" && source !== "user") return undefined;
-	return { source, level: typeof value?.level === "string" ? value.level : "" };
+	return { source, level: typeof value?.level === "string" ? value.level : "", ...(value?.auto === true ? { auto: true as const } : {}) };
+}
+
+/** Who owns the branch's live level, and whether `/effort auto` released a launch flag's level. */
+export interface LevelOwnership {
+	source: LevelSource;
+	launchReleased: boolean;
 }
 
 /**
@@ -69,7 +81,16 @@ function recordedState(entry: EntryLike): TierThinkingState | undefined {
  * pick right after a switch never sits next to the `model_change`.
  */
 export function levelSource(branch: readonly unknown[]): LevelSource {
+	return levelOwnership(branch).source;
+}
+
+/**
+ * `levelSource`, and whether an `/effort auto` entry is on the branch: the
+ * user asked for the default, so a launch flag no longer holds the level.
+ */
+export function levelOwnership(branch: readonly unknown[]): LevelOwnership {
 	let source: LevelSource = "pi";
+	let launchReleased = false;
 	let level: string | undefined;
 	let previous: EntryLike | undefined;
 	for (const item of branch as Array<EntryLike & { thinkingLevel?: string }>) {
@@ -79,11 +100,14 @@ export function levelSource(branch: readonly unknown[]): LevelSource {
 			level = item.thinkingLevel;
 		} else {
 			const state = recordedState(item);
-			if (state) ({ source, level } = state);
+			if (state) {
+				({ source, level } = state);
+				launchReleased ||= state.auto === true;
+			}
 		}
 		previous = item;
 	}
-	return source;
+	return { source, launchReleased };
 }
 
 /** Whether the branch holds a conversation: a request went out, so its level is the branch's own. */
@@ -156,10 +180,12 @@ export function declaredLevel(model: Model<Api>): ThinkingLevelName | undefined 
 /**
  * `tierThinkingAction` for `model` at a boundary, its inputs gathered: the
  * profile's level for the model's tier, the user's choices in `settings`
- * (pi's effective settings) and the launch flags.
+ * (pi's effective settings) and the launch flags, unless `/effort auto`
+ * released them. `ownership` is the session's (for a child, the parent's).
  */
-export function tierThinkingAt(boundary: "start" | "switch" | "child", model: Model<Api>, settings: unknown, source: LevelSource): TierThinkingAction {
-	return tierThinkingAction({ boundary, declared: declaredLevel(model), choices: levelChoices(settings, model, launchThinkingFlag()), source });
+export function tierThinkingAt(boundary: "start" | "switch" | "child", model: Model<Api>, settings: unknown, ownership: LevelOwnership): TierThinkingAction {
+	const launchFlag = !ownership.launchReleased && launchThinkingFlag();
+	return tierThinkingAction({ boundary, declared: declaredLevel(model), choices: levelChoices(settings, model, launchFlag), source: ownership.source });
 }
 
 /**

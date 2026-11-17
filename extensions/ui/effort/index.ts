@@ -35,7 +35,7 @@ import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { activeProfile, requireText, toolLive } from "../../lib/profile/profile.ts";
-import { autoThinkingAction, branchHasMessages, declaredLevel, type LevelSource, levelSource, TIER_THINKING_STATE, tierThinkingAt, type TierThinkingState } from "../../lib/models/tier-thinking.ts";
+import { autoThinkingAction, branchHasMessages, declaredLevel, type LevelSource, levelOwnership, TIER_THINKING_STATE, tierThinkingAt, type TierThinkingState } from "../../lib/models/tier-thinking.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../../lib/request/reminders.ts";
 import { readState, recordState } from "../../lib/request/ledger/state.ts";
 import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
@@ -148,16 +148,16 @@ function effortExtension(pi: ExtensionAPI) {
 	/** Whether the profile declares any tier level: without one, nothing here runs or records. */
 	const declaresLevels = () => Object.keys(activeProfile().defaultThinkingLevels).length > 0;
 	/** Record who owns the live level, so a later switch, a resume or a /tree move reads it from the branch. */
-	const recordSource = (source: LevelSource) => {
-		if (declaresLevels()) recordState(pi, TIER_THINKING_STATE, { source, level: pi.getThinkingLevel() } satisfies TierThinkingState);
+	const recordSource = (source: LevelSource, auto = false) => {
+		if (declaresLevels()) recordState(pi, TIER_THINKING_STATE, { source, level: pi.getThinkingLevel(), ...(auto ? { auto: true } : {}) } satisfies TierThinkingState);
 	};
-	/** Set `level` and record who owns it. `quiet`: no effort note for it. */
-	const setRecorded = (ctx: ExtensionContext, level: string, source: LevelSource, quiet = false) => {
+	/** Set `level` and record who owns it. `quiet`: no effort note for it. `auto`: `/effort auto` set it. */
+	const setRecorded = (ctx: ExtensionContext, level: string, source: LevelSource, { quiet = false, auto = false } = {}) => {
 		// pi fits the level to the model; the note is skipped for the level it will settle on.
 		const settles = ctx.model ? (clampThinkingLevel(ctx.model, level as ThinkingLevel) as ThinkingLevel) : (level as ThinkingLevel);
 		if (quiet) quietLevel = settles !== pi.getThinkingLevel() ? settles : undefined;
 		pi.setThinkingLevel(level as ThinkingLevel);
-		recordSource(source);
+		recordSource(source, auto);
 	};
 	/**
 	 * The tier default at a boundary, unless the user chose a level. Applied
@@ -170,9 +170,14 @@ function effortExtension(pi: ExtensionAPI) {
 		// getSettings arrived in pi 1.0.1: without it a saved level cannot be seen, so the user's level stays.
 		const settings = pi.getSettings?.();
 		if (!model || !settings || !declaresLevels()) return;
-		const action = tierThinkingAt(boundary, model, settings, levelSource(ctx.sessionManager.getBranch()));
+		// Ultracode's level is the user's: the default never replaces it, and a switch says so.
+		if (ultracodeActive) {
+			if (boundary === "switch") recordSource("user");
+			return;
+		}
+		const action = tierThinkingAt(boundary, model, settings, levelOwnership(ctx.sessionManager.getBranch()));
 		if (action.level !== undefined) {
-			setRecorded(ctx, action.level, action.source, true);
+			setRecorded(ctx, action.level, action.source, { quiet: true });
 			// A switch may already show pi's carried level; the default replaced it.
 			if (boundary === "switch") hideEffortNote(ctx);
 		} else if (boundary === "switch") {
@@ -189,7 +194,9 @@ function effortExtension(pi: ExtensionAPI) {
 	// pi keeps the live level across a /tree move: its owner is the one the branch left behind, not the new branch's.
 	// Registered before ultracode's own /tree handler (below), which may then set the branch's level as the user's.
 	pi.on("session_tree", (event, ctx) => {
-		recordSource(levelSource(event.oldLeafId ? ctx.sessionManager.getBranch(event.oldLeafId) : []));
+		const left = levelOwnership(event.oldLeafId ? ctx.sessionManager.getBranch(event.oldLeafId) : []);
+		// An /effort auto on the branch left behind still released the launch level.
+		recordSource(left.source, left.launchReleased);
 	});
 
 	/** Whether workflows are on for this session, read with workflow's own settings at session start. */
@@ -350,7 +357,7 @@ function effortExtension(pi: ExtensionAPI) {
 					}
 					// pi's global default, else the tier's, else pi's own. getSettings arrived in pi 1.0.1; a 1.0.0 install has no global default to read.
 					const auto = autoThinkingAction({ declared: ctx.model ? declaredLevel(ctx.model) : undefined, globalDefault: pi.getSettings?.().defaultThinkingLevel });
-					setRecorded(ctx, auto.level, auto.source);
+					setRecorded(ctx, auto.level, auto.source, { auto: true });
 					setUltracode(false);
 					applyStatus(ctx);
 					showEffortNote(ctx, pi.getThinkingLevel());
@@ -420,6 +427,8 @@ function effortExtension(pi: ExtensionAPI) {
 		const on = storedOn && (tree || stored.level === pi.getThinkingLevel());
 		setUltracode(on, on ? (stored?.level as ThinkingLevel) : undefined, { record: false });
 		if (on && tree && pi.getThinkingLevel() !== stored?.level) pi.setThinkingLevel(stored?.level as ThinkingLevel);
+		// Back on a branch that runs ultracode: its level is the user's again, even at the level the old branch's owner left.
+		if (on && tree) recordSource("user");
 		applyStatus(ctx);
 	};
 	pi.on("session_start", (_event, ctx) => {

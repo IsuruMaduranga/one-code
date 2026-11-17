@@ -312,10 +312,60 @@ describe("a /tree move keeps the owner of the live level", () => {
 	});
 });
 
+describe("/effort auto releases a launch level", () => {
+	it("hands later switches back to the tier", async () => {
+		setLaunchArgsForTest(["--thinking", "high"]);
+		const { session } = await start({ thinkingLevel: "high" });
+		expect(session.thinkingLevel).toBe("high");
+		await session.setModel(WORKHORSE as never);
+		// The launch level holds until auto.
+		expect(session.thinkingLevel).toBe("high");
+		const ctx = session.extensionRunner!.createCommandContext();
+		await session.extensionRunner!.getCommand("effort")!.handler("auto", ctx);
+		expect(session.thinkingLevel).toBe("medium");
+		await session.setModel(CHEAP as never);
+		expect(session.thinkingLevel).toBe("low");
+		await session.setModel(FRONTIER as never);
+		expect(session.thinkingLevel).toBe("medium");
+		await session.setModel(CHEAP as never);
+		expect(session.thinkingLevel).toBe("low");
+	});
+});
+
+describe("an active ultracode is never replaced by a tier default", () => {
+	const effort = (session: AgentSession, arg: string) => session.extensionRunner!.getCommand("effort")!.handler(arg, session.extensionRunner!.createCommandContext());
+
+	it("keeps ultracode's level on a switch", async () => {
+		const { session } = await start();
+		await effort(session, "ultracode");
+		expect(session.thinkingLevel).toBe("high");
+		await session.setModel(WORKHORSE as never);
+		expect(session.thinkingLevel).toBe("high");
+	});
+
+	it("keeps ultracode user-owned after a /tree move from a default-owned branch at the same level", async () => {
+		// The cheap tier declares the level ultracode fits to on this model.
+		declare({ cheap: "high", workhorse: "medium" });
+		const { session } = await start();
+		await session.prompt("one");
+		const fork = session.sessionManager.getLeafId()!;
+		await effort(session, "ultracode");
+		await session.prompt("two");
+		const ultracodeLeaf = session.sessionManager.getLeafId()!;
+		await session.navigateTree(fork);
+		await effort(session, "auto");
+		expect(session.thinkingLevel).toBe("high");
+		await session.prompt("three");
+		await session.navigateTree(ultracodeLeaf);
+		await session.setModel(WORKHORSE as never);
+		expect(session.thinkingLevel).toBe("high");
+	});
+});
+
 describe("a subagent the call gave no thinking level", () => {
-	const child = (childModel: ReturnType<typeof model> | undefined, settings: Record<string, unknown> = {}, parentSource: LevelSource = "pi") => {
+	const child = (childModel: ReturnType<typeof model> | undefined, settings: Record<string, unknown> = {}, parentSource: LevelSource = "pi", launchReleased = false) => {
 		const session = { model: childModel, settingsManager: { getSettings: () => settings }, setThinkingLevel: vi.fn() };
-		applyChildTierDefault(session as never, parentSource);
+		applyChildTierDefault(session as never, { source: parentSource, launchReleased });
 		return session.setThinkingLevel.mock.calls.map(([level]) => level);
 	};
 
@@ -338,5 +388,7 @@ describe("a subagent the call gave no thinking level", () => {
 		expect(child(CHEAP, { defaultThinkingLevel: "high" })).toEqual([]);
 		setLaunchArgsForTest(["--thinking", "high"]);
 		expect(child(CHEAP)).toEqual([]);
+		// The parent's /effort auto released the launch level.
+		expect(child(CHEAP, {}, "default", true)).toEqual(["low"]);
 	});
 });

@@ -10,6 +10,7 @@ import {
 	branchHasMessages,
 	type LevelChoices,
 	levelChoices,
+	levelOwnership,
 	levelSource,
 	PI_DEFAULT_THINKING_LEVEL,
 	TIER_THINKING_STATE,
@@ -85,6 +86,16 @@ describe("levelSource reads who set the level from the branch", () => {
 	it("reads a resumed or forked copy of the branch the same way", () => {
 		const branch = [...opening(), levelChange("low"), marker("default", "low"), message(), entry("custom", { customType: "other", data: {} })];
 		expect(levelSource(structuredClone(branch))).toBe("default");
+	});
+});
+
+describe("levelOwnership", () => {
+	it("releases a launch level once /effort auto is on the branch", () => {
+		expect(levelOwnership([...opening(), levelChange("high")])).toEqual({ source: "user", launchReleased: false });
+		const auto = stateEntry(TIER_THINKING_STATE, { source: "default", level: "low", auto: true });
+		expect(levelOwnership([...opening(), levelChange("low"), auto])).toEqual({ source: "default", launchReleased: true });
+		// A later pick takes the level, and the release stays.
+		expect(levelOwnership([...opening(), levelChange("low"), auto, levelChange("high")])).toEqual({ source: "user", launchReleased: true });
 	});
 });
 
