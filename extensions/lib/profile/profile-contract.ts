@@ -14,6 +14,7 @@ import type { ProductLanguageServer } from "./language-servers.ts";
 import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
 import type { ProductSetting } from "./settings-keys.ts";
+import type { ThinkingDefaults } from "./thinking-defaults.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
 import type { AutoModeSetupText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
@@ -197,6 +198,18 @@ export interface Profile {
 	 * lists them as read. A key the base reads itself is refused at load.
 	 */
 	settings?: Readonly<Record<string, ProductSetting>>;
+	/**
+	 * The thinking level each model tier starts at
+	 * (`lib/profile/thinking-defaults.ts`): `{ cheap: "low", workhorse: "medium" }`.
+	 * The effort feature sets it before a new session's first request and when
+	 * the user switches model; a tier left out keeps pi's own level. A level
+	 * the user saved for the model, pi's `defaultThinkingLevel`, a launch
+	 * flag and a level picked in the session all win, and the user's settings
+	 * are never written. pi fits the level to the model, so the level that
+	 * runs can be higher than the one declared. Declaring it while the profile
+	 * turns the effort feature off is refused at load.
+	 */
+	defaultThinkingLevels?: ThinkingDefaults;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features

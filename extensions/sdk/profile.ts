@@ -56,5 +56,6 @@ export type { ProductProvider, ProviderVendor, WireFeature } from "../lib/profil
 export type { ReadOnlyCommands, ReadOnlySubcommand } from "../lib/shell/product-read-only.ts";
 export type { ProductLanguageServer } from "../lib/profile/language-servers.ts";
 export type { ProductSetting } from "../lib/profile/settings-keys.ts";
+export type { ThinkingDefaults, ThinkingLevelName } from "../lib/profile/thinking-defaults.ts";
 // The folder every profile of the product shares (sign-in, sessions, users' profiles, a product's downloads), whichever profile runs: a declaration that names a file there (a language server's jar) needs it at load, where no session exists. `brand.mjs` is plain JS with no pi imports, a leaf the text may load.
 export { sharedStateDir } from "../lib/profile/brand.mjs";

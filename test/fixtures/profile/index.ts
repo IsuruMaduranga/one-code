@@ -34,5 +34,7 @@ export const profile: Profile = {
 	},
 	// The probe extension's switch for its tier notice (extensions/probe, PROBE_TIER_SETTING).
 	settings: { fixtureTierNotice: { type: "boolean", project: true, description: "[fixture:setting.fixtureTierNotice]" } },
+	// Unlike One Code's: a frontier level, and none for workhorse or cheap.
+	defaultThinkingLevels: { frontier: "high", tiny: "minimal" },
 	text: () => allGroups,
 };

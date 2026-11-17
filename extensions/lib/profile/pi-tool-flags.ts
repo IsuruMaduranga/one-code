@@ -23,9 +23,10 @@
 /**
  * pi's flags that take the next argument whatever it is. Every other flag
  * takes a value only when it does not start with "-" (or takes none), and
- * the tool flags all start with "-", so only these can hide one.
+ * the tool flags all start with "-", so only these can hide one (the
+ * thinking flags too, lib/profile/pi-thinking-flags.ts).
  */
-const VALUE_FLAGS = new Set([
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
 	"--provider", "--model", "--api-key", "--system-prompt", "--append-system-prompt", "--name", "-n", "--session", "--session-id", "--fork",
 	"--session-dir", "--models", "--tools", "-t", "--exclude-tools", "-xt", "--thinking", "--export", "--extension", "-e", "--skill",
 	"--prompt-template", "--theme",
