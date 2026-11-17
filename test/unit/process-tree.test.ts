@@ -241,6 +241,28 @@ describe("an owned tree's stop", { timeout: LOADED_MS }, () => {
 		}
 	});
 
+	it.skipIf(win32)("leaves a tree already in its grace to that stop: a second stop sends no second SIGTERM", async () => {
+		// A pid no system hands out, so the group kill fails with ESRCH and falls back
+		// to the fake child's own kill(): the signals sent are the calls it records.
+		const signals: string[] = [];
+		let sigkilled!: () => void;
+		const killed = new Promise<void>((resolve) => (sigkilled = resolve));
+		const kill = vi.fn((signal: string) => {
+			signals.push(signal);
+			if (signal === "SIGKILL") sigkilled();
+			return true;
+		});
+		const fake = () => Object.assign(new EventEmitter(), { pid: 2_147_482_900, kill, exitCode: null as number | null, signalCode: null }) as unknown as ReturnType<typeof spawn>;
+		const tree = spawnOwnedTree(fake);
+		tree.stop(30);
+		tree.stop(30);
+		await killed;
+		// One SIGTERM, then the one SIGKILL the first stop scheduled.
+		expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+		(tree.child as { exitCode: number | null }).exitCode = 0;
+		tree.child.emit("exit", 0, null);
+	});
+
 	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
 		const tree = spawnOwnedTree((detached) => spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detached, stdio: ["ignore", "pipe", "ignore"] }));
 		const child = tree.child;
