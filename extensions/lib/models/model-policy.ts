@@ -294,6 +294,16 @@ export function acceptsAnthropicWire(model: { provider?: string } | undefined, f
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
 /**
+ * A batch endpoint: OpenRouter's `:batch` variant, or Vercel AI Gateway's
+ * `-batch` row (`anthropic/claude-haiku-5.5-batch`), the only provider in pi's
+ * catalog that spells it with a hyphen. A deferred SKU no session or side call
+ * runs on, so it is never picked automatically and never lifted to frontier.
+ */
+export function isBatchEndpoint(model: { provider: string; id: string }): boolean {
+	return /:batch$/i.test(model.id) || (model.provider === "vercel-ai-gateway" && /-batch$/i.test(model.id));
+}
+
+/**
  * The id without OpenRouter's `~` redirect-alias marker and without a
  * `:batch`-style endpoint variant — the spelling the model-catalog lookups key
  * on (`~deepseek/deepseek-v4-flash-latest`
@@ -317,7 +327,7 @@ export function isAliasOrVariantId(id: string): boolean {
  * an explicit `subagentModel` setting.
  */
 export function isSelectableVariant(model: Model<Api>): boolean {
-	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
+	return !UNSUITABLE_VARIANT.test(model.id) && !isBatchEndpoint(model) && !model.id.startsWith("~");
 }
 
 /**

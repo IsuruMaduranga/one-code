@@ -33,6 +33,7 @@ import { autoSelectable, catalogModelFor, isDatedDuplicate, sizeFromName, smallB
 import {
 	anthropicModelId,
 	baseModelId,
+	isBatchEndpoint,
 	isKnownProvider,
 	isExperimentalBuild,
 	isMovingAlias,
@@ -115,7 +116,7 @@ function labModel(model: Model<Api>): LabModel | undefined {
 		const profile = modelIdentity(model).profile;
 		return (profile === "openai" || profile === "google") && profile === policy.profile ? { lab: profile, id: model.id, via: "first-party" } : undefined;
 	}
-	if (policy.kind !== "gateway" || isMovingAlias(model.id) || /[:-]batch$/i.test(model.id)) return undefined;
+	if (policy.kind !== "gateway" || isMovingAlias(model.id) || isBatchEndpoint(model)) return undefined;
 	const identity = modelIdentity(model);
 	if (identity.confidence === "opaque" || identity.profile === undefined || !FRONTIER_LABS.has(identity.profile)) return undefined;
 	const lab = identity.profile as FrontierLab;

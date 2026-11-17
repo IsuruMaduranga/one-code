@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/commands/doctor/presets.ts";
-import { setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { catalogSources, pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
@@ -205,5 +207,24 @@ describe("computePresets", () => {
 		expect(changes[1]).toContain("/subagent clear");
 		expect(changes[2]).toContain("classifier → automatic");
 		expect(changes[2]).toContain("undo: /auto-mode model");
+	});
+});
+
+describe("presets on Vercel AI Gateway", () => {
+	beforeEach(() => setCatalogSourcesForTest(bundledSources()));
+
+	it("never offers a -batch row, a deferred endpoint, for any role", async () => {
+		// pi's real catalog: Vercel lists a `-batch` twin of most models, and it is the only provider that spells it so.
+		const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+		const { MODELS } = (await import(join(root, "node_modules", "@earendil-works", "pi-ai", "dist", "models.generated.js"))) as { MODELS: Record<string, Record<string, any>> };
+		const available = Object.values(MODELS).flatMap((rows) => Object.values(rows));
+		const session = available.find((m) => m.provider === "vercel-ai-gateway" && m.id === "anthropic/claude-sonnet-5.5");
+		expect(available.some((m) => m.provider === "vercel-ai-gateway" && m.id === "anthropic/claude-haiku-5.5-batch")).toBe(true);
+		const { presets } = computePresets(available, session);
+		expect(presets.map((p) => p.name)).toEqual(["economical", "balanced", "quality"]);
+		for (const preset of presets) {
+			for (const picked of [preset.main, preset.subagents.model, preset.classifier]) expect(picked?.id, preset.name).not.toMatch(/-batch$/);
+		}
+		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("anthropic/claude-haiku-5.5");
 	});
 });
