@@ -89,7 +89,7 @@ describe("tasks: off unless the ENABLE_TODO_TOOLS knob is on", () => {
 		expect(t.reminders).toEqual([]);
 	});
 
-	it("keeps a list restored from the branch off screen while the tools are withheld", async () => {
+	it("keeps a list restored from the branch off screen while the tools are withheld or not live", async () => {
 		vi.stubEnv(knob, "1");
 		const source = setup();
 		const created = (await source.run("task_create", { subject: "Old task", description: "" })) as { details: unknown };
@@ -109,5 +109,8 @@ describe("tasks: off unless the ENABLE_TODO_TOOLS knob is on", () => {
 		};
 		expect(await shown("")).toEqual(["cc-tasks", undefined]);
 		expect((await shown("1"))?.[1]).toBeTypeOf("function");
+		// Knob on, but pi's --exclude-tools removed the tools: nothing can update the list, so it stays off screen.
+		setActiveProfileForTest(resolveProfile(shipped, {}, PROFILE_DIR, PRODUCT_DIR, undefined, launchToolFilter(["--exclude-tools", TASK_TOOLS.join(",")])));
+		expect(await shown("1")).toEqual(["cc-tasks", undefined]);
 	});
 });
