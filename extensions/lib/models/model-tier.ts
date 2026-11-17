@@ -88,8 +88,13 @@ interface LabModel {
  * (`google`, `google-vertex`) serving its own vendor's ids.
  *
  * Gateway: a provider `providerPolicy` classes as a gateway (`openrouter`,
- * `vercel-ai-gateway`, `cloudflare-ai-gateway`), where the row names the lab
- * (OpenRouter's and Vercel's `anthropic/` prefix, Cloudflare's API route).
+ * `vercel-ai-gateway`, `cloudflare-ai-gateway`), where the row names the lab.
+ * OpenRouter and Vercel name all three labs by the id's vendor prefix
+ * (`anthropic/`, `openai/`, `google/`). Cloudflare names only Anthropic and
+ * OpenAI, by API route (`cloudflareGatewayIdentity`): it carries no Gemini
+ * row in pi's catalog, its Google models are Workers AI open models (Gemma),
+ * and its OpenAI-compatible route serves several vendors, so a Gemini id
+ * there proves nothing and the Google gate is out of its reach.
  * Closed models run only at the lab and its cloud partners, and a gateway
  * forwards to those, so a gateway copy is the lab's model (decided
  * 2026-11-17). Hosted and opaque providers stay out: a custom provider whose
@@ -186,20 +191,36 @@ function isGoogleFrontier(id: string): boolean {
 	return match !== null && Number(match[1]) >= 4;
 }
 
+/**
+ * A smaller variant of a lab's line (`gpt-6-sol-nano`, `gemini-4-hydrogen-lite`,
+ * `claude-sonnet-5.5-mini`, `gemini-4-carbon-flash`): the catalogs' small-model
+ * reading (`smallByName`, a size tag under the tiny bound) or a `mini` or
+ * `flash` tag. No frontier gate admits one, on any provider, so it keeps its
+ * catalog tier or the small-name guess. `-pro`, `-fast`, `-preview` and dated
+ * ids are not small and pass.
+ */
+function isSmallVariant(id: string): boolean {
+	const size = sizeFromName(id);
+	return smallByName(id) || (size !== undefined && size < TINY_PARAMS) || /(?:^|[-/.])(?:mini|flash)(?:[-/.:]|$)/i.test(id);
+}
+
 /** The frontier rule that admits `model` for `purpose`, as the reason the tier report prints, or undefined. */
 function frontierReason(model: Model<Api>, purpose: TierPurpose): string | undefined {
 	const lab = labModel(model);
-	if (!lab) return undefined;
-	const gateway = lab.via === "gateway" ? " (gateway)" : "";
+	if (!lab || isSmallVariant(lab.id)) return undefined;
+	const reason = (...notes: string[]): string => {
+		const all = lab.via === "gateway" ? [...notes, "gateway"] : notes;
+		return `${lab.lab} frontier allowlist${all.length > 0 ? ` (${all.join(", ")})` : ""}`;
+	};
 	switch (lab.lab) {
 		case "anthropic":
-			if (isAnthropicFrontier(lab.id)) return `anthropic frontier allowlist${gateway}`;
-			if (purpose === "prompt" && isHaikuWithFrontierForms(lab.id)) return `anthropic frontier allowlist (prompt and tool forms${lab.via === "gateway" ? ", gateway" : ""})`;
+			if (isAnthropicFrontier(lab.id)) return reason();
+			if (purpose === "prompt" && isHaikuWithFrontierForms(lab.id)) return reason("prompt and tool forms");
 			return undefined;
 		case "openai":
-			return isOpenAIFrontier(lab.id) ? `openai frontier allowlist${gateway}` : undefined;
+			return isOpenAIFrontier(lab.id) ? reason() : undefined;
 		case "google":
-			return isGoogleFrontier(lab.id) ? `google frontier allowlist${gateway}` : undefined;
+			return isGoogleFrontier(lab.id) ? reason() : undefined;
 	}
 }
 

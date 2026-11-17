@@ -14,6 +14,7 @@ import { classifierCandidates } from "../../extensions/lib/models/classifier-mod
 import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { acceptsAnthropicWire, anthropicModelId, modelIdentity, modelSpec } from "../../extensions/lib/models/model-policy.ts";
 import { classifyModelTier, intrinsicTier, resolveModelTier, usesClaudeCodeFastPaths } from "../../extensions/lib/models/model-tier.ts";
+import { resolveSubagentModel } from "../../extensions/lib/models/subagent-model.ts";
 import { WIRE_FEATURES } from "../../extensions/lib/profile/product-providers.ts";
 
 const noEnv = {} as NodeJS.ProcessEnv;
@@ -172,6 +173,8 @@ describe("Google's frontier rule", () => {
 		expect(resolveModelTier(built("google", "gemini-3-carbon", "google/gemini-4-argon"), noEnv)).not.toBe("frontier");
 		// Azure serves other vendors' models, but it is not Google's provider.
 		expect(resolveModelTier(built("azure", "gemini-4-carbon", "google/gemini-4-argon"), noEnv)).not.toBe("frontier");
+		// Cloudflare names a lab only by API route, and its OpenAI-compatible route serves several vendors.
+		expect(resolveModelTier(built("cloudflare-ai-gateway", "gemini-4-carbon", "cloudflare-ai-gateway/gpt-6.1-sol"), noEnv)).not.toBe("frontier");
 		// GitHub Copilot is a host, not a gateway.
 		expect(resolveModelTier(built("github-copilot", "gemini-4-carbon", "github-copilot/gemini-4-argon"), noEnv)).not.toBe("frontier");
 	});
@@ -203,5 +206,79 @@ describe("the auto-mode classifier for a gateway frontier session", () => {
 		const carbon = built("google", "gemini-4-carbon", "google/gemini-4-argon", { input: 2, output: 10 });
 		const hydrogen = built("google", "gemini-4-hydrogen", "google/gemini-4-argon", { input: 1.5, output: 7.5 });
 		expect(chain(carbon, [carbon, hydrogen])).toEqual({ candidates: ["google/gemini-4-carbon session"], notices: [], fallback: "paired-session" });
+	});
+});
+
+describe("small variants of a frontier line", () => {
+	// No catalog lists these today; the gate must not depend on that.
+	const cases: [string, string, string][] = [
+		["openrouter", "openai/gpt-6-sol-nano", "openrouter/openai/gpt-6-sol"],
+		["openai", "gpt-6-sol-nano", "openai/gpt-6-sol"],
+		["openai", "gpt-6-astra-mini", "openai/gpt-6-astra"],
+		["openrouter", "google/gemini-4-hydrogen-lite", "openrouter/google/gemini-4-argon"],
+		["google", "gemini-4-hydrogen-lite", "google/gemini-4-argon"],
+		["google", "gemini-4-carbon-flash", "google/gemini-4-argon"],
+		["vercel-ai-gateway", "google/gemini-4-carbon-flash", "vercel-ai-gateway/google/gemini-4-argon"],
+		["openrouter", "anthropic/claude-sonnet-5.5-mini", "openrouter/anthropic/claude-sonnet-5.5"],
+		["anthropic", "claude-sonnet-5-5-mini", "anthropic/claude-sonnet-5-5"],
+		["anthropic", "claude-haiku-5-5-nano", "anthropic/claude-haiku-5-5"],
+		["openrouter", "openai/gpt-6-sol-20b", "openrouter/openai/gpt-6-sol"],
+	];
+
+	it("are never frontier, for the prompt or the capability tier, on a gateway or the lab's own provider", () => {
+		for (const [provider, id, from] of cases) {
+			const model = built(provider, id, from);
+			expect(resolveModelTier(model, noEnv), `${provider}/${id}`).not.toBe("frontier");
+			expect(intrinsicTier(model), `${provider}/${id}`).not.toBe("frontier");
+		}
+	});
+
+	it("keeps -pro, -fast, -preview and dated ids admitted", () => {
+		for (const [provider, id, from] of [
+			["openai", "gpt-6.1-sol-pro", "openai/gpt-6.1-sol"],
+			["openrouter", "openai/gpt-6-astra-fast", "openrouter/openai/gpt-6-astra"],
+			["google", "gemini-4-carbon-preview", "google/gemini-4-argon"],
+			["anthropic", "claude-opus-5-5-20261101", "anthropic/claude-opus-5-5"],
+			["openrouter", "anthropic/claude-opus-5.5-fast", "openrouter/anthropic/claude-opus-5.5"],
+		]) {
+			expect(intrinsicTier(built(provider, id, from)), `${provider}/${id}`).toBe("frontier");
+		}
+	});
+});
+
+describe("every gateway row the frontier rule lifts keeps a paired classifier and no visible notice", () => {
+	it("pairs each one through the table (a -pro or -fast SKU like its base line), or keeps the session silently where the table says so", () => {
+		const unpaired: string[] = [];
+		for (const spec of GATEWAY_FRONTIER) {
+			const result = classifierCandidates({ available: catalog, sessionModel: row(spec) });
+			expect(result.notices, spec).toEqual([]);
+			const head = result.candidates[0];
+			if (result.fallback) expect(result.fallback.reason, spec).toBe("paired-session");
+			else if (head?.source !== "paired") unpaired.push(spec);
+		}
+		// The table names no row for these lines (Fable 5, Opus 4.8): the cost algorithm picks, silently, as before the rule.
+		expect(unpaired.sort()).toEqual(
+			[
+				"cloudflare-ai-gateway/claude-fable-5",
+				"cloudflare-ai-gateway/claude-opus-4-8",
+				"openrouter/anthropic/claude-fable-5",
+				"openrouter/anthropic/claude-opus-4.8",
+				"vercel-ai-gateway/anthropic/claude-fable-5",
+				"vercel-ai-gateway/anthropic/claude-opus-4.8",
+				"vercel-ai-gateway/anthropic/claude-opus-4.8-fast",
+			].sort(),
+		);
+	});
+
+	it("gives a -pro or -fast OpenAI SKU its base line's classifier and subagent default", () => {
+		const head = (spec: string) => modelSpec(classifierCandidates({ available: catalog, sessionModel: row(spec) }).candidates[0].model);
+		expect(head("openrouter/openai/gpt-6.1-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
+		expect(head("openrouter/openai/gpt-6-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
+		expect(head("openrouter/openai/gpt-6-astra-pro")).toBe("openrouter/openai/gpt-6.1-sol");
+		expect(head("vercel-ai-gateway/openai/gpt-6-astra-fast")).toBe("vercel-ai-gateway/openai/gpt-6.1-sol");
+		for (const spec of ["openrouter/openai/gpt-6-sol-pro", "openrouter/openai/gpt-6-astra-pro", "vercel-ai-gateway/openai/gpt-6-astra-fast", "openrouter/openai/gpt-6.1-sol-pro"]) {
+			const resolved = resolveSubagentModel({ sessionModel: row(spec), available: catalog });
+			expect(resolved.model && modelSpec(resolved.model), spec).toBe(`${spec.slice(0, spec.indexOf("/openai/"))}/openai/gpt-6.1-terra`);
+		}
 	});
 });
