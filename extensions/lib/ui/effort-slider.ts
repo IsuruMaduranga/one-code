@@ -20,6 +20,7 @@
 import { brandedId } from "../profile/brand.mjs";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { keyId, keyText } from "./key-input.ts";
+import { sliceColumns, visibleWidth } from "./text-width.ts";
 
 /** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
@@ -180,6 +181,12 @@ export interface SliderView {
 	width: number;
 	/** Model name for the "unsupported" note; omitted falls back to "this model". */
 	modelLabel?: string;
+	/**
+	 * A line the profile words for the highlighted stop (`EffortText.sliderNote`),
+	 * drawn dim under the track. One line: only the text up to its first newline,
+	 * trimmed, is shown; nothing is drawn for an empty one.
+	 */
+	note?: string;
 }
 
 const TITLE = "Effort";
@@ -188,6 +195,21 @@ const HINTS = "←/→ or h/l adjust · Enter confirm · s for this session only
 const CACHE_NOTE = "changing effort re-caches the conversation (one uncached request)";
 const SHORT_HINTS = "←/→ h/l · Enter · s · Esc";
 const ULTRACODE_SUBTITLE = `${ULTRACODE_LEVEL} + workflows`;
+
+/** The profile's note for a stop; a throw from the profile's function counts as no note, so it never breaks the slider. */
+export function sliderNoteFor(note: ((choice: EffortChoice) => string | undefined) | undefined, choice: EffortChoice): string | undefined {
+	try {
+		const text = note?.(choice);
+		return typeof text === "string" ? text : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The first line of a profile's note, trimmed; empty when there is nothing to draw. */
+function noteLine(note: string | undefined): string {
+	return (note ?? "").split(/[\r\n\u2028\u2029]/, 1)[0].trim();
+}
 
 /**
  * One label cell per stop, padded so the marker row lines up under the label
@@ -243,7 +265,7 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 
 	// Rows are (plain content, styled content) pairs: nothing wraps for us, and a
 	// wrapped line would shift the marker out from under its label, so widths are
-	// measured on the unstyled text — escape codes would inflate the count.
+	// measured in terminal columns on the unstyled text — escape codes would inflate the count.
 	const rows: [plain: string, styled: string][] = [
 		[TITLE, paint("accent", TITLE)],
 		["", ""],
@@ -253,6 +275,9 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 		[labels, styledLabels],
 	];
 	if (subtitleRow) rows.push([`${" ".repeat(Math.max(0, positions[stops.length - 1]))}${ULTRACODE_SUBTITLE}`, subtitleRow]);
+	// The profile's line for the highlighted stop sits right under the track rows.
+	const profileNote = noteLine(view.note);
+	if (profileNote) rows.push([profileNote, paint("dim", profileNote)]);
 	// When the model can't reach every stop, say so — the dimming alone doesn't
 	// explain itself, and it points at shift+tab for the ones we grey out.
 	const anyDisabled = stops.some((_, i) => !view.enabled[i]);
@@ -261,16 +286,17 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 	rows.push([CACHE_NOTE, paint("dim", CACHE_NOTE)]);
 	rows.push(["", ""], [HINTS, paint("dim", HINTS)]);
 
-	const fits = rows.every(([plainRow]) => [...plainRow].length <= view.width);
+	const fits = rows.every(([plainRow]) => visibleWidth(plainRow) <= view.width);
 	if (fits) return rows.map(([, styled]) => styled);
 
 	// Too narrow for the track (or for the hint line): drop to one stop list and
 	// the shortest usable hint, both clipped, rather than let anything wrap.
-	const clip = (text: string) => [...text].slice(0, view.width).join("");
+	const clip = (text: string) => sliceColumns(text, view.width).text;
 	const list = stops.map((s) => s.label);
 	return [
 		paint("accent", clip(TITLE)),
 		clip(list.join(" · ")).replace(list[view.index], (m) => paint("accent", m)),
+		...(profileNote ? [paint("dim", clip(profileNote))] : []),
 		paint("dim", clip(SHORT_HINTS)),
 	];
 }

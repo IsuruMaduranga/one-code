@@ -22,6 +22,7 @@ export type { BtwText } from "../agents/btw/text.ts";
 export type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../context/compaction/text.ts";
 export type { DoctorText, FixPromptInput } from "../commands/doctor/text.ts";
 export type { EffortText } from "../ui/effort/text.ts";
+export type { EffortChoice } from "../lib/ui/effort-slider.ts";
 export type { InitText } from "../commands/init/text.ts";
 export type { ContextText } from "../lib/context/context-text.ts";
 export type { HandbackText } from "../lib/agents/handback-text.ts";

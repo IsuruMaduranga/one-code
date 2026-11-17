@@ -121,6 +121,19 @@ describe("resolveProfile", () => {
 		expect(resolveProfile({ ...empty, text: refusing("Ask the user.") }, {}, "/p").text.permissions.secretFileRefusal).toBe("Ask the user.");
 	});
 
+	it("takes an effort slider note that is a function, lets it be left out, and names one that is not", () => {
+		const noting = (sliderNote: unknown): Profile["text"] => (env) => {
+			const text = shippedProfile.text(env);
+			const { ultracodeOn, ultracodeOff } = text.effort!;
+			return { ...text, effort: { ultracodeOn, ultracodeOff, ...(sliderNote === undefined ? {} : { sliderNote }) } } as ReturnType<Profile["text"]>;
+		};
+		const resolved = resolveProfile({ ...empty, text: noting((choice: string) => `note ${choice}`) }, {}, "/p");
+		expect(resolved.text.effort?.sliderNote?.("high")).toBe("note high");
+		expect(resolveProfile({ ...empty, text: noting(undefined) }, {}, "/p").text.effort?.sliderNote).toBeUndefined();
+		expect(() => resolveProfile({ ...empty, text: noting("a string") }, {}, "/p")).toThrow(/Invalid profile: its text "effort.sliderNote" must be a function .* not string/);
+		expect(() => resolveProfile({ ...empty, text: noting(null) }, {}, "/p")).toThrow(/"effort.sliderNote" must be a function .* not object/);
+	});
+
 	it("names a reader for every optional text group, and only features", () => {
 		for (const [group, readers] of Object.entries(TEXT_GROUP_READERS)) {
 			expect(readers.length, group).toBeGreaterThan(0);

@@ -343,6 +343,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const textProblems = missingTextProblems(text, features);
 	// An empty refusal would reach the model as an error with no reason.
 	if (text.permissions?.secretFileRefusal?.trim() === "") textProblems.push(`its text "permissions.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
+	// Left out is fine; a value that is not a function would throw on every render of the slider.
+	if (text.effort?.sliderNote !== undefined && typeof text.effort.sliderNote !== "function") textProblems.push(`its text "effort.sliderNote" must be a function from the highlighted stop to a line (or undefined), not ${typeof text.effort.sliderNote}: leave it out for no note`);
 	if (textProblems.length > 0) throw new Error(`Invalid profile: ${textProblems.join("; ")}.`);
 	return {
 		features,

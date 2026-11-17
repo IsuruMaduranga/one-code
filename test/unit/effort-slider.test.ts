@@ -12,11 +12,13 @@ import {
 	nearestEnabled,
 	parseEffortArg,
 	renderEffortSlider,
+	sliderNoteFor,
 	THINKING_LEVELS,
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
 } from "../../extensions/lib/ui/effort-slider.ts";
+import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 
 // Identity paint keeps layout assertions free of colour codes.
 const plain = (_color: string, text: string) => text;
@@ -275,5 +277,130 @@ describe("effortNoteText", () => {
 
 	it("keeps ultracode's own badge", () => {
 		expect(effortNoteText("xhigh", true)).toBe("✦ ultracode · /effort");
+	});
+});
+
+describe("the profile's slider note", () => {
+	const HIGH = EFFORT_CHOICES.indexOf("high");
+	const withNote = (index: number, note: string | undefined, width = 120, enabled: boolean[] = ALL_ON) =>
+		renderEffortSlider({ index, enabled, width, note }, plain);
+	const markerColumn = (lines: string[]) => [...lines.find((l) => l.includes("▲"))!].indexOf("▲");
+
+	it("draws no row, and the same bytes as before, when the profile has no note", () => {
+		const unsupported = enabledStops(["high", "max"]);
+		expect(renderEffortSlider({ index: HIGH, enabled: unsupported, width: 120, modelLabel: "Test Model" }, plain)).toEqual([
+			"Effort",
+			"",
+			"Faster                                          Smarter",
+			"────────────────────────────────────────────│──────────",
+			"                             ▲",
+			"off  minimal  low  medium  high  xhigh  max │ ultracode",
+			"dimmed = unsupported by Test Model",
+			"changing effort re-caches the conversation (one uncached request)",
+			"",
+			"←/→ or h/l adjust · Enter confirm · s for this session only · Esc cancel · shift+tab cycles the plain levels",
+		]);
+		const paint = (c: string, t: string) => `<${c}>${t}</${c}>`;
+		const without = renderEffortSlider({ index: HIGH, enabled: ALL_ON, width: 120 }, paint);
+		for (const note of [undefined, "", "  \t ", "\n second line only"]) {
+			expect(renderEffortSlider({ index: HIGH, enabled: ALL_ON, width: 120, note }, paint)).toEqual(without);
+		}
+	});
+
+	it("puts the note right under the track rows, dim, before the unsupported and cache notes", () => {
+		const paint = (c: string, t: string) => `<${c}>${t}</${c}>`;
+		const lines = renderEffortSlider({ index: HIGH, enabled: enabledStops(["high", "max"]), width: 120, modelLabel: "M", note: "Pricier, slower" }, paint);
+		const at = lines.indexOf("<dim>Pricier, slower</dim>");
+		expect(at).toBeGreaterThan(0);
+		expect(lines[at - 1]).toContain("<accent>high</accent>");
+		expect(lines[at + 1]).toBe("<dim>dimmed = unsupported by M</dim>");
+	});
+
+	it("sits under the ultracode subtitle on the last stop", () => {
+		const lines = withNote(EFFORT_CHOICES.indexOf(ULTRACODE), "All in");
+		const subtitle = lines.findIndex((l) => l.includes(`${ULTRACODE_LEVEL} + workflows`));
+		expect(subtitle).toBeGreaterThan(0);
+		expect(lines[subtitle + 1]).toBe("All in");
+	});
+
+	it("follows the highlighted stop: each index shows its own text", () => {
+		const noteFor = (index: number) => `note for ${EFFORT_CHOICES[index]}`;
+		for (let index = 0; index < EFFORT_CHOICES.length; index++) {
+			const out = withNote(index, noteFor(index));
+			expect(out).toContain(noteFor(index));
+			expect(out.filter((l) => l.startsWith("note for "))).toHaveLength(1);
+		}
+	});
+
+	it("draws no row for an empty or whitespace note", () => {
+		for (const note of [undefined, "", "   ", "\n", " \r\n  "]) expect(withNote(HIGH, note)).toEqual(render(HIGH));
+	});
+
+	it("shows only the first line, trimmed", () => {
+		const out = withNote(HIGH, "  first line  \nsecond line\r\nthird");
+		expect(out).toContain("first line");
+		expect(out.join("\n")).not.toContain("second");
+		expect(out.join("\n")).not.toContain("third");
+		expect(withNote(HIGH, "only\u2028rest").join("\n")).not.toContain("rest");
+	});
+
+	it("keeps the marker under its label with or without a note", () => {
+		for (let index = 0; index < EFFORT_CHOICES.length; index++) {
+			expect(markerColumn(withNote(index, "a note"))).toBe(markerColumn(render(index)));
+		}
+	});
+
+	it("takes part in the fits check: a note wider than the view drops the track layout and is clipped", () => {
+		const note = "x".repeat(70);
+		// 120 columns holds the track, the hints and a 70-column note.
+		const wideView = withNote(HIGH, note, 120);
+		expect(wideView).toContain(note);
+		expect(wideView.some((l) => l.includes("▲"))).toBe(true);
+		// 40 columns holds none of them; the narrow layout carries the clipped note.
+		const narrow = withNote(HIGH, note, 40);
+		expect(narrow).toContain("x".repeat(40));
+		expect(narrow.some((l) => l.includes("▲"))).toBe(false);
+		// A note alone makes a wide-enough view too narrow for the track.
+		const long = "y".repeat(110);
+		const out = withNote(HIGH, long, 112);
+		expect(out.some((l) => l.includes("▲"))).toBe(true);
+		expect(withNote(HIGH, "y".repeat(113), 112).some((l) => l.includes("▲"))).toBe(false);
+		expect(out).toContain(long);
+	});
+
+	it("never lets any row exceed the width, at any width, wide characters included", () => {
+		for (const note of ["a long note ".repeat(20), "注意：これは長い説明です。".repeat(8), "emoji 🎯🎯🎯🎯🎯 ".repeat(6)]) {
+			for (const width of [200, 120, 100, 80, 60, 40, 20, 10, 3]) {
+				for (const index of [0, HIGH, EFFORT_CHOICES.length - 1]) {
+					for (const line of withNote(index, note, width)) {
+						expect(visibleWidth(line), `width ${width}, index ${index}`).toBeLessThanOrEqual(width);
+					}
+				}
+			}
+		}
+	});
+
+	it("measures the row in terminal columns, not code points", () => {
+		// 60 ideographs are 60 code points but 120 columns.
+		const wide = "字".repeat(60);
+		expect(withNote(HIGH, wide, 100).some((l) => l.includes("▲"))).toBe(false);
+		expect(withNote(HIGH, wide, 130)).toContain(wide);
+	});
+});
+
+describe("sliderNoteFor", () => {
+	it("asks the profile for the stop it is given", () => {
+		expect(sliderNoteFor((choice) => `for ${choice}`, "max")).toBe("for max");
+	});
+
+	it("treats a missing function, a non-string and a throw as no note", () => {
+		expect(sliderNoteFor(undefined, "max")).toBeUndefined();
+		expect(sliderNoteFor((() => 3) as never, "max")).toBeUndefined();
+		expect(sliderNoteFor(() => undefined, "max")).toBeUndefined();
+		expect(
+			sliderNoteFor(() => {
+				throw new Error("profile bug");
+			}, "max"),
+		).toBeUndefined();
 	});
 });

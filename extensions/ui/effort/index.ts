@@ -52,6 +52,7 @@ import {
 	nearestEnabled,
 	parseEffortArg,
 	renderEffortSlider,
+	sliderNoteFor,
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
@@ -316,7 +317,7 @@ function effortExtension(pi: ExtensionAPI) {
 				// dialog has no linesComponent wrap, so a final truncate is the safety
 				// net that guarantees no overwide line reaches pi-tui (TUI-REVIEW H1/H2).
 				render: (width: number) =>
-					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""].map((line) => truncateLine(line, width)),
+					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label, note: sliderNoteFor(text.sliderNote, EFFORT_CHOICES[index]) }, paint), ""].map((line) => truncateLine(line, width)),
 				handleInput: (data: string) => {
 					const key = decodeKey(data);
 					if (!key) return;
