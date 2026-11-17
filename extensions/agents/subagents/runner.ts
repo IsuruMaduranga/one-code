@@ -24,7 +24,9 @@ import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
 import { findConfigured, modelSpec } from "../../lib/models/model-policy.ts";
 import { isModelUnavailableError } from "../../lib/models/classifier-model.ts";
-import { toolLive } from "../../lib/profile/profile.ts";
+import { activeProfile, launchThinkingFlag, toolLive } from "../../lib/profile/profile.ts";
+import { modelCapability } from "../../lib/models/model-tier.ts";
+import { levelChoices, tierThinkingAction } from "../../lib/models/tier-thinking.ts";
 import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFlags, unusableAllowlistError } from "../../lib/agents/agent-catalog.ts";
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
@@ -149,6 +151,26 @@ export function newChildSessionManager(spec: Pick<ChildSessionSpec, "cwd" | "for
 			: SessionManager.inMemory(spec.cwd);
 	for (const message of spec.forkMessages ?? []) manager.appendMessage(message);
 	return manager;
+}
+
+/**
+ * A fresh named agent whose call passed no `thinking` starts at the profile's
+ * level for its own model's tier, under the main session's rules
+ * (lib/models/tier-thinking.ts): a level saved for that model, pi's global
+ * default or a launch flag keeps pi's own. Set before the first prompt, and
+ * fitted by pi to the model, so the level that runs can be higher than the
+ * one declared. A fork runs at the parent's level, a resume at its branch's.
+ */
+export function applyChildTierDefault(session: Pick<AgentSession, "model" | "settingsManager" | "setThinkingLevel">): void {
+	const model = session.model;
+	if (!model) return;
+	const action = tierThinkingAction({
+		boundary: "child",
+		declared: activeProfile().defaultThinkingLevels[modelCapability(model).tier],
+		choices: levelChoices(session.settingsManager.getSettings(), model, launchThinkingFlag()),
+		source: "pi",
+	});
+	if (action) session.setThinkingLevel(action.level);
 }
 
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
@@ -450,6 +472,7 @@ export class SubagentRuntime {
 				this.discard(session);
 				throw new Error(unusable);
 			}
+			if (agent && !spec.sessionFile && spec.thinking === undefined) applyChildTierDefault(session);
 			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
 			if (spec.agent) this.agentTypes.set(session.sessionManager.getSessionId(), spec.agent.name);
 			if (spec.mainToolCallId) this.mainToolCalls.set(session.sessionManager.getSessionId(), spec.mainToolCallId);

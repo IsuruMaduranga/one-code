@@ -51,6 +51,8 @@ export const profile: Profile = {
 	// Search goes through the shell on every tier: pi's grep, find and ls are off (decisions/tools.md).
 	tools: { grep: { enabled: false }, find: { enabled: false }, ls: { enabled: false } },
 	childExtensions: [],
+	// Smaller models think less by default: weak models at medium overthink far more than at low. Frontier keeps pi's level.
+	defaultThinkingLevels: { workhorse: "medium", cheap: "low", tiny: "low" },
 	text: ({ live }) => ({
 		systemPrompt: systemPromptText(live),
 		notebook,
