@@ -74,8 +74,9 @@ describe("resolveModelTier", () => {
 		pinCatalog(ANTHROPIC);
 		expect(resolveModelTier(model("claude-opus-4-7", "anthropic", 5), noEnv)).toBe("workhorse");
 		expect(resolveModelTier(model("claude-sonnet-5", "anthropic", 2), noEnv)).toBe("workhorse");
-		// A gateway copy cannot be verified for the frontier gate: its catalog tier serves.
-		expect(resolveModelTier(model("anthropic/claude-sonnet-5.5", "openrouter", 2), noEnv)).toBe("workhorse");
+		// The same lines through a gateway stay below frontier too.
+		expect(resolveModelTier(model("anthropic/claude-sonnet-5", "openrouter", 2), noEnv)).not.toBe("frontier");
+		expect(resolveModelTier(model("anthropic/claude-opus-4.7", "openrouter", 5), noEnv)).not.toBe("frontier");
 	});
 
 	it("gives Haiku 5 and later the frontier prompt, and no older Haiku however its id is spelled", () => {
@@ -96,7 +97,7 @@ describe("resolveModelTier", () => {
 				expect(resolveModelTier(model(id, provider, 2), noEnv)).toBe("frontier");
 			}
 		}
-		expect(resolveModelTier(model("openai/gpt-6-sol", "openrouter", 2), noEnv)).not.toBe("frontier");
+		// A hosted provider is not a gateway: its copy keeps its catalog tier (model-tier-gateway.test.ts covers gateways).
 		expect(resolveModelTier(model("gpt-6-sol", "github-copilot", 2), noEnv)).not.toBe("frontier");
 	});
 

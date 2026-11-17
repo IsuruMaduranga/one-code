@@ -72,7 +72,7 @@
  * a rule that knows the model decided it (the user's `modelTiers` entry, a
  * vendor's frontier rule, a catalog entry) or it is a guess (no model, one
  * the catalogs lack, a custom provider, no price). The `*_PROMPT_TIER` knob
- * never moves it, and first-party Haiku 5 and later sit below frontier there.
+ * never moves it, and Haiku 5 and later sit below frontier there.
  * Pass `ctx.model` at `session_start` and `event.model` at `model_select`.
  *
  * Text that must match the session's prompt register uses

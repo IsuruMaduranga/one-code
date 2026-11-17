@@ -267,8 +267,10 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
  * it (`claude-opus-4-8`), else undefined: a row of Anthropic's provider, or of
  * a provider the profile says serves Anthropic's models (a built-in host's id
  * is read through its own parsing, `us.anthropic.claude-…` on Bedrock). A
- * gateway or host the profile does not vouch for is never one: its copy
- * cannot be verified.
+ * gateway or host the profile does not vouch for is never one: the callers
+ * gate Anthropic's own wire features on it, which a gateway does not
+ * promise to carry. The frontier tier reads gateway rows separately
+ * (`model-tier.ts labModel`).
  */
 export function anthropicModelId(model: { provider?: string; id?: string } | undefined): string | undefined {
 	if (!model?.provider || !model.id) return undefined;
