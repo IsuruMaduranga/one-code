@@ -154,6 +154,19 @@ export class FileTracker {
 }
 
 /**
+ * Whether a `write` may replace an `unread` file anyway: the target is a
+ * regular file itself (not a symlink, device, FIFO or directory) whose
+ * content is exactly empty, so like an absent file it holds nothing the
+ * write could discard. Not `edit` (pi's edit cannot match anything in an
+ * empty file) and not the notebook tool (an empty notebook does not parse).
+ * A file the model read while empty and that was filled since is `stale`,
+ * never `unread`, so this never lets that write through.
+ */
+export function writeDiscardsNothing(tool: string, target: { plainFile: boolean; content: string }): boolean {
+	return tool === "write" && target.plainFile && target.content === "";
+}
+
+/**
  * Renders the changed region of a file the way Claude Code does: the *new* lines,
  * numbered, with a little context, at most `maxLines` of them (the rest are
  * counted). Deliberately not a full diff — the model needs

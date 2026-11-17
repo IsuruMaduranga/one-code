@@ -2,7 +2,8 @@
  * file-tracker extension — Claude Code's read-before-write discipline.
  *
  * - `edit`/`write`/`notebook_edit` on a file that exists but was never read is
- *   blocked with an instruction to read it first.
+ *   blocked with an instruction to read it first, except a `write` over an
+ *   empty regular file, which has nothing to lose (`writeDiscardsNothing`).
  * - An edit to a file that changed since we last saw it is blocked, so the model
  *   cannot overwrite someone else's change.
  * - Files that change out of band are reported in a `<system-reminder>` with the
@@ -20,7 +21,7 @@ import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
@@ -43,7 +44,7 @@ import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.t
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
-import { describeChanges, type FileStamp, FileTracker } from "./tracker.ts";
+import { describeChanges, type FileStamp, FileTracker, writeDiscardsNothing } from "./tracker.ts";
 import { fileTrackerText } from "./text.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -69,6 +70,15 @@ function readIfPresent(path: string): string | undefined {
 function isRegularFile(path: string): boolean {
 	try {
 		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/** Whether `path` itself is a regular file: unlike `isRegularFile`, a symlink to one is not. */
+function isPlainFile(path: string): boolean {
+	try {
+		return lstatSync(path).isFile();
 	} catch {
 		return false;
 	}
@@ -370,12 +380,17 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		if (!path) return undefined;
 		if (event.toolName === "write") writeTargetExisted.set(event.toolCallId, existsSync(path));
 
-		const current = readIfPresent(path);
+		// Regular files only, as for the shell snapshot: a read of a FIFO never
+		// ends and would hang the call. pi's tool reports what it makes of the rest.
+		const current = isRegularFile(path) ? readIfPresent(path) : undefined;
 		const status = tracker.status(path, current);
 
 		// Creating a new file needs no prior read.
 		if (status === "absent" || status === "fresh") return undefined;
-		if (status === "unread") return { block: true, reason: fileTrackerText.unread({ path, tool: event.toolName }) };
+		if (status === "unread") {
+			if (writeDiscardsNothing(event.toolName, { plainFile: isPlainFile(path), content: current ?? "" })) return undefined;
+			return { block: true, reason: fileTrackerText.unread({ path, tool: event.toolName }) };
+		}
 		return { block: true, reason: fileTrackerText.stale({ path }) };
 	});
 

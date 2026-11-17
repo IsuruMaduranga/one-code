@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/safety/file-tracker/tracker.ts";
+import { describeChanges, FileTracker, RACY_STAMP_MS, writeDiscardsNothing } from "../../extensions/safety/file-tracker/tracker.ts";
 import { looksLikeAnthropicRequest } from "../../extensions/lib/request/anthropic-payload.ts";
 import { withClearThinking } from "../../extensions/lib/request/context-management.ts";
+
+describe("writeDiscardsNothing", () => {
+	it("lets a write replace an unread regular file only when it is exactly empty", () => {
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "" })).toBe(true);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "x" })).toBe(false);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\n" })).toBe(false);
+	});
+
+	it("never for a symlink or other non-regular target, an edit or the notebook tool", () => {
+		expect(writeDiscardsNothing("write", { plainFile: false, content: "" })).toBe(false);
+		expect(writeDiscardsNothing("edit", { plainFile: true, content: "" })).toBe(false);
+		expect(writeDiscardsNothing("notebook_edit", { plainFile: true, content: "" })).toBe(false);
+	});
+});
 
 describe("FileTracker.status", () => {
 	it("reports absent for a file that does not exist", () => {
