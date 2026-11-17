@@ -36,5 +36,7 @@ export const profile: Profile = {
 	settings: { fixtureTierNotice: { type: "boolean", project: true, description: "[fixture:setting.fixtureTierNotice]" } },
 	// Unlike One Code's: a frontier level, and none for workhorse or cheap.
 	defaultThinkingLevels: { frontier: "high", tiny: "minimal" },
+	// A floor on one vendor's OpenRouter models, as a product that wants no fp4 hosts would set it.
+	openRouterRouting: { qwen: { quantizations: ["bf16", "fp16", "unknown"] } },
 	text: () => allGroups,
 };

@@ -15,6 +15,7 @@ import type { ReadOnlyCommands } from "../shell/product-read-only.ts";
 import type { ProductProvider } from "./product-providers.ts";
 import type { ProductSetting } from "./settings-keys.ts";
 import type { ThinkingDefaults } from "./thinking-defaults.ts";
+import type { OpenRouterRoutingDefault } from "./openrouter-routing.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
 import type { AutoModeSetupText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
@@ -210,6 +211,17 @@ export interface Profile {
 	 * turns the effort feature off is refused at load.
 	 */
 	defaultThinkingLevels?: ThinkingDefaults;
+	/**
+	 * OpenRouter routing the base adds to every request on a vendor's models,
+	 * keyed by model-id vendor (`lib/request/openrouter-routing-defaults.ts`):
+	 * `{ deepseek: { quantizations: ["fp8", "bf16", "fp16", "fp32", "unknown"] } }`.
+	 * It reaches OpenRouter's Chat Completions models only (not `anthropic/*`),
+	 * steps aside when the user's own routing for the model sets
+	 * `quantizations`, `only` or `order`, and is the same on every request of a
+	 * session and its side calls. A vendor goes in only when each of its
+	 * catalog models keeps a host at the floor.
+	 */
+	openRouterRouting?: Readonly<Record<string, OpenRouterRoutingDefault>>;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features

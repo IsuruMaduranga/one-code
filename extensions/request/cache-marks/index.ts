@@ -18,10 +18,12 @@
  * whose hosts cache nothing without them (lib/request/openrouter-cache-marks.ts),
  * and with the hosts that defeat the prompt cache skipped on the models of
  * their measured vendors
- * (lib/request/openrouter-ignored-hosts.ts).
+ * (lib/request/openrouter-ignored-hosts.ts), and with the routing defaults the
+ * profile declares per vendor (lib/request/openrouter-routing-defaults.ts).
  * `*_CACHE_MARKS=0` turns all marks off, to compare a run with and without
  * them; `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones;
- * `*_OPENROUTER_IGNORE_HOSTS=0` turns off the skipped hosts.
+ * `*_OPENROUTER_IGNORE_HOSTS=0` turns off the skipped hosts;
+ * `*_OPENROUTER_ROUTING_DEFAULTS=0` turns off the profile's routing defaults.
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
@@ -30,19 +32,22 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { looksLikeAnthropicRequest } from "../../lib/request/anthropic-payload.ts";
 import { isFirstPartyAnthropic } from "../../lib/request/anthropic-server-tools.ts";
 import { openRouterRegistration } from "../../lib/request/anthropic-stream.ts";
-import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled, withOpenRouterCacheMarks } from "../../lib/request/openrouter-cache-marks.ts";
-import { openRouterIgnoreHostsEnabled, withOpenRouterIgnoredHosts } from "../../lib/request/openrouter-ignored-hosts.ts";
+import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled } from "../../lib/request/openrouter-cache-marks.ts";
+import { openRouterIgnoreHostsEnabled } from "../../lib/request/openrouter-ignored-hosts.ts";
+import { openRouterRoutingDefaultsEnabled } from "../../lib/request/openrouter-routing-defaults.ts";
+import { activeProfile } from "../../lib/profile/profile.ts";
+import { adjustsOpenRouter, type OpenRouterAdjustOptions, openRouterAdjust } from "./openrouter-adjust.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
 
 function cacheMarksExtension(pi: ExtensionAPI) {
-	const marks = openRouterCacheMarksEnabled();
-	const ignore = openRouterIgnoreHostsEnabled();
-	if (marks || ignore) {
-		const openRouter = openRouterRegistration((model) => {
-			const marked = marks ? withOpenRouterCacheMarks(model) : model;
-			return ignore ? withOpenRouterIgnoredHosts(marked) : marked;
-		});
+	const options: OpenRouterAdjustOptions = {
+		marks: openRouterCacheMarksEnabled(),
+		ignore: openRouterIgnoreHostsEnabled(),
+		routing: openRouterRoutingDefaultsEnabled() ? activeProfile().openRouterRouting : new Map(),
+	};
+	if (adjustsOpenRouter(options)) {
+		const openRouter = openRouterRegistration(openRouterAdjust(options));
 		if (openRouter) pi.registerProvider("openrouter", openRouter);
 	}
 	if (knobValue(CACHE_MARKS_KNOB) === "0") return;
