@@ -431,6 +431,21 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("explains a refusal the quantization floor caused, without a lookup or a retry", async () => {
+		// Qwen carries a floor in both One Code's profile and the fixture profile.
+		const qwen = createFakeCtx({ model: { provider: "openrouter", id: "qwen/qwen3.8-27b", api: "openai-completions", baseUrl: "https://openrouter.ai/api/v1" }, mode: "tui", hasUI: true, modelRegistry: { getApiKeyAndHeaders: getAuth } }) as typeof ctx;
+		const refusal = "404 No allowed providers are available for the selected model.";
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: refusal, content: [] } }, qwen);
+		expect(qwen.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/no host that serves qwen\/qwen3\.8-27b.*OPENROUTER_ROUTING_DEFAULTS=0.*models\.json/), "error");
+		// Another error, or a model with no floor, adds nothing.
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "429 rate limited", content: [] } }, qwen);
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: refusal, content: [] } }, ctx);
+		expect(qwen.ui.notify).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).not.toHaveBeenCalled();
+		expect(qwen.abort).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	const cut = '{ "command": "grep -rn "\t, "timeout": 120000 }';
 
 	it("hands a command that looks cut off back to the model without stopping the turn", async () => {

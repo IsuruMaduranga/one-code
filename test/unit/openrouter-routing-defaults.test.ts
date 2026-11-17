@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getModels } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { openRouterRoutingDefaultsEnabled, withOpenRouterRoutingDefaults, withRoutingDefaults } from "../../extensions/lib/request/openrouter-routing-defaults.ts";
+import { activeOpenRouterRouting, openRouterRoutingDefaultsEnabled, routingFloorFailureHint, withOpenRouterRoutingDefaults, withRoutingDefaults } from "../../extensions/lib/request/openrouter-routing-defaults.ts";
 import { type OpenRouterRoutingDefault, openRouterRoutingProblems } from "../../extensions/lib/profile/openrouter-routing.ts";
 import { adjustsOpenRouter, openRouterAdjust } from "../../extensions/request/cache-marks/openrouter-adjust.ts";
 import { openRouterRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
@@ -111,6 +111,31 @@ describe("openRouterAdjust", () => {
 			{ ignore: ["open-inference"], quantizations: FLOOR },
 			{ ignore: ["open-inference"], quantizations: FLOOR },
 		]);
+	});
+});
+
+describe("routingFloorFailureHint", () => {
+	const refusal = '404 {"error":{"message":"No allowed providers are available for the selected model.","code":404}}';
+
+	it("names the cause, the off switch and the models.json override when the floor left the model no host", () => {
+		const hint = routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, table);
+		expect(hint).toContain("no host that serves deepseek/deepseek-v4.1-flash at the precisions");
+		expect(hint).toContain("(fp8, bf16, fp16, fp32, unknown)");
+		expect(hint).toContain(`${envName("OPENROUTER_ROUTING_DEFAULTS")}=0`);
+		expect(hint).toContain("compat.openRouterRouting for this model in pi's models.json");
+	});
+
+	it("says nothing for another error, or for a model the floor did not reach", () => {
+		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), "429 rate limited", table)).toBeUndefined();
+		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), undefined, table)).toBeUndefined();
+		expect(routingFloorFailureHint(model("z-ai/glm-5.3"), refusal, table)).toBeUndefined();
+		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash", { openRouterRouting: { only: ["relace"] } }), refusal, table)).toBeUndefined();
+		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, new Map())).toBeUndefined();
+		expect(routingFloorFailureHint(model("anthropic/claude-haiku-4.5", {}, { api: "anthropic-messages" }), refusal, new Map([["anthropic", { quantizations: FLOOR }]]))).toBeUndefined();
+	});
+
+	it("reads no table while the switch is off", () => {
+		expect(activeOpenRouterRouting({ [envName("OPENROUTER_ROUTING_DEFAULTS")]: "0" }).size).toBe(0);
 	});
 });
 

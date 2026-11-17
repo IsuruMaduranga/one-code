@@ -1,6 +1,7 @@
 /**
  * Reject damaged OpenRouter streams before tool execution, without changing the request prefix.
- * It also publishes the host that served each main-session reply, which it reads from the stream anyway, for /doctor.
+ * It also publishes the host that served each main-session reply, which it reads from the stream anyway, for /doctor,
+ * and explains a main-session refusal caused by the profile's quantization floor (lib/request/openrouter-routing-defaults.ts).
  */
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -22,6 +23,7 @@ import {
 } from "./tool-call-corruption.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
 import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/request/openrouter-host.ts";
+import { activeOpenRouterRouting, routingFloorFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
@@ -210,6 +212,9 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			// before it was judged whole and stays blocked.
 			const last = event.message.stopReason === "length" ? event.message.content.at(-1) : undefined;
 			if (last?.type === "toolCall") flagged.delete(last.id);
+			// A floor that left the model no host fails every request with OpenRouter's bare refusal: say why, once per reply.
+			const floorHint = announce && event.message.stopReason === "error" ? routingFloorFailureHint(ctx.model!, event.message.errorMessage, activeOpenRouterRouting()) : undefined;
+			if (floorHint) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, floorHint, "error");
 			// The main session's host, for /doctor (lib/request/openrouter-host.ts); a child has its own bus and no report.
 			if (announce && (streamProvider || responseId)) {
 				const model = ctx.model!;

@@ -25,11 +25,16 @@
  * OpenRouter's `anthropic/*` models never carry it.
  *
  * The table's type and its load check are lib/profile/openrouter-routing.ts.
+ * When the floor leaves a model no host, OpenRouter refuses every request with
+ * "No allowed providers"; `routingFloorFailureHint` words what the user sees
+ * then (the tool-call-corruption guard shows it for the main session).
+ *
  * `<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0` turns it off. No pi imports.
  */
 
 import { knobValue } from "../profile/knobs.ts";
 import type { OpenRouterRoutingDefault } from "../profile/openrouter-routing.ts";
+import { brand, envName } from "../profile/brand.mjs";
 import { activeProfile } from "../profile/profile.ts";
 import { type CacheMarksModel, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
@@ -66,4 +71,22 @@ export function withOpenRouterRoutingDefaults<M extends CacheMarksModel>(model: 
 /** The profile's routing defaults by vendor, or none when `<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0`. */
 export function activeOpenRouterRouting(vars: Readonly<Record<string, unknown>> = process.env): ReadonlyMap<string, OpenRouterRoutingDefault> {
 	return openRouterRoutingDefaultsEnabled(vars) ? activeProfile().openRouterRouting : new Map();
+}
+
+/** OpenRouter's refusal when no host of the model passes the request's routing filters. */
+const NO_ALLOWED_PROVIDERS = /no allowed providers/i;
+
+/**
+ * What to tell the user when `model`'s request failed with `errorMessage`
+ * because the floor from `table` left it no host: the cause, the off switch
+ * and the models.json override. Undefined for any other error, or when the
+ * floor was not applied to this model (another vendor, or the user's own
+ * routing chose).
+ */
+export function routingFloorFailureHint<M extends CacheMarksModel>(model: M, errorMessage: string | undefined, table: ReadonlyMap<string, OpenRouterRoutingDefault>): string | undefined {
+	if (!errorMessage || !NO_ALLOWED_PROVIDERS.test(errorMessage)) return undefined;
+	const floored = withOpenRouterRoutingDefaults(model, table);
+	if (floored === model) return undefined;
+	const quantizations = ((floored.compat as { openRouterRouting: { quantizations: string[] } }).openRouterRouting.quantizations).join(", ");
+	return `OpenRouter has no host that serves ${model.id} at the precisions ${brand.name} asks for (${quantizations}). Set ${envName(OPENROUTER_ROUTING_DEFAULTS_KNOB)}=0 to drop that floor, or set your own compat.openRouterRouting for this model in pi's models.json (quantizations, only or order), which replaces it.`;
 }
