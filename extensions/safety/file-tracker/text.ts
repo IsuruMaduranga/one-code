@@ -32,6 +32,10 @@ export interface FileTrackerText {
 	toolResult(outcome: FileToolOutcome): string;
 	/** An edit or write of an existing file the session has not read. */
 	unread(p: { path: string; tool: string }): string;
+	/** An edit or write of an existing regular file the harness could not read (no read permission). */
+	unreadable(p: { path: string; tool: string }): string;
+	/** An edit or write of a path that is neither a regular file nor a directory: a device, FIFO or socket. */
+	notRegularFile(p: { path: string; tool: string }): string;
 	/** An edit or write of a file that changed on disk since the session read it. */
 	stale(p: { path: string }): string;
 	/** A file the session read changed on disk. */
@@ -76,6 +80,10 @@ export const fileTrackerText: FileTrackerText = {
 	toolResult,
 	unread: ({ path, tool }) =>
 		`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when it printed the whole file as it is on disk (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit) or another version of it (such as \`git show HEAD:<file>\`), use the read tool.`,
+	unreadable: ({ path, tool }) =>
+		`Cannot use ${tool} on ${path}: the file exists but could not be read (check its permissions), so it has not been read in this conversation and ${tool} could silently discard content you have not seen. Make it readable and read it first, or use the shell if replacing it unseen is intended.`,
+	notRegularFile: ({ path, tool }) =>
+		`Cannot use ${tool} on ${path}: it is not a regular file (a device, pipe or socket), and opening it could block until something opens the other end. Use the shell for devices and pipes.`,
 	stale: ({ path }) =>
 		`${path} has changed on disk since you last read it — someone else, a formatter, or a command may have modified it. Read it again before editing, or your change would overwrite theirs.`,
 	/**

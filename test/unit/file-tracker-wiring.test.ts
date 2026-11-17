@@ -10,7 +10,7 @@ import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts
 import { useProfile } from "./helpers/profile.ts";
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -200,19 +200,43 @@ describe("file-tracker wiring", () => {
 	// A read of a FIFO never ends, and readFileSync would block the whole test
 	// worker past any timeout: a child opens the FIFO for writing after two
 	// seconds, so a regression returns late and fails instead of hanging.
-	it.skipIf(process.platform === "win32")("never reads a FIFO at a write or edit target", async () => {
+	it.skipIf(process.platform === "win32")("refuses a write or edit at a FIFO without reading it, also through a symlink", async () => {
 		const fifo = path("pipe");
 		execFileSync("mkfifo", [fifo]);
+		const link = path("pipe-link");
+		symlinkSync(fifo, link);
 		const unblocker = spawn(process.execPath, ["-e", `setTimeout(() => require("node:fs").writeFileSync(${JSON.stringify(fifo)}, ""), 2000)`], { stdio: "ignore" });
 		try {
-			for (const toolName of ["write", "edit"]) {
-				const started = Date.now();
-				const result = await fake.fireOne("tool_call", { toolName, input: { path: fifo } }, ctx());
-				expect(Date.now() - started, toolName).toBeLessThan(1000);
-				expect(result, toolName).toBeUndefined();
+			for (const target of [fifo, link]) {
+				for (const toolName of ["write", "edit"]) {
+					const started = Date.now();
+					const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: target } }, ctx());
+					expect(Date.now() - started, `${toolName} ${target}`).toBeLessThan(1000);
+					expect(result?.block, `${toolName} ${target}`).toBe(true);
+					expect(result?.reason, `${toolName} ${target}`).toBe(words.notRegularFile({ path: target, tool: toolName }));
+				}
 			}
 		} finally {
 			unblocker.kill("SIGKILL");
+		}
+	});
+
+	it("lets a directory target through to the tool, which fails on it", async () => {
+		expect(await fake.fireOne("tool_call", { toolName: "write", input: { path: dir } }, ctx())).toBeUndefined();
+	});
+
+	it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("refuses a write over a file that exists but cannot be read", async () => {
+		const file = path("write-only.txt");
+		writeFileSync(file, "content the model cannot see");
+		chmodSync(file, 0o200);
+		try {
+			for (const toolName of ["write", "edit"]) {
+				const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: file } }, ctx());
+				expect(result?.block, toolName).toBe(true);
+				expect(result?.reason, toolName).toBe(words.unreadable({ path: file, tool: toolName }));
+			}
+		} finally {
+			chmodSync(file, 0o600);
 		}
 	});
 

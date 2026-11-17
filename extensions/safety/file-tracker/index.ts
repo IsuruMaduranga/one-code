@@ -4,6 +4,8 @@
  * - `edit`/`write`/`notebook_edit` on a file that exists but was never read is
  *   blocked with an instruction to read it first, except a `write` over an
  *   empty regular file, which has nothing to lose (`writeDiscardsNothing`).
+ *   A file that exists but cannot be read is refused the same way, and a
+ *   device, FIFO or socket is refused outright (opening one can block).
  * - An edit to a file that changed since we last saw it is blocked, so the model
  *   cannot overwrite someone else's change.
  * - Files that change out of band are reported in a `<system-reminder>` with the
@@ -61,26 +63,24 @@ function readIfPresent(path: string): string | undefined {
 	try {
 		return readFileSync(path, "utf-8");
 	} catch {
-		// Binary or unreadable: not something we can reason about, so don't guard it.
+		// Unreadable (no permission, a directory). The guard tells an unreadable
+		// regular file from a missing one by `fileKind` and refuses it.
 		return undefined;
 	}
 }
 
-/** Whether `path` is a regular file (symlinks followed): never a device, FIFO or directory. */
-function isRegularFile(path: string): boolean {
+/**
+ * What `path` is: absent (or not one we could stat), a regular file, a
+ * directory, or something else (a device, FIFO or socket, or with
+ * `followSymlinks` false a symlink). Only a regular file is safe to read: a
+ * read of a FIFO never ends.
+ */
+function fileKind(path: string, followSymlinks = true): "absent" | "file" | "directory" | "other" {
 	try {
-		return statSync(path).isFile();
+		const stat = followSymlinks ? statSync(path) : lstatSync(path);
+		return stat.isFile() ? "file" : stat.isDirectory() ? "directory" : "other";
 	} catch {
-		return false;
-	}
-}
-
-/** Whether `path` itself is a regular file: unlike `isRegularFile`, a symlink to one is not. */
-function isPlainFile(path: string): boolean {
-	try {
-		return lstatSync(path).isFile();
-	} catch {
-		return false;
+		return "absent";
 	}
 }
 
@@ -132,7 +132,7 @@ function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	for (const path of shellReadPaths(command, cwd, homedir(), (dir) => readdirSync(dir))) {
 		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
 		// and a read of it never ends (found by a GPT-6 Astra review).
-		if (!isRegularFile(path)) continue;
+		if (fileKind(path) !== "file") continue;
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
 		const version = versionOf(path);
@@ -152,7 +152,7 @@ function observeShellReads(tracker: FileTracker, before: Map<string, string>, ou
 	if (!output) return observed;
 	for (const [path, version] of before) {
 		const stamp = statIfPresent(path);
-		if (!stamp || !isRegularFile(path) || versionOf(path) !== version) continue;
+		if (!stamp || fileKind(path) !== "file" || versionOf(path) !== version) continue;
 		const content = readIfPresent(path);
 		if (content === undefined || versionOf(path) !== version) continue;
 		if (!shownInFull(output, content)) continue;
@@ -380,15 +380,21 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		if (!path) return undefined;
 		if (event.toolName === "write") writeTargetExisted.set(event.toolCallId, existsSync(path));
 
-		// Regular files only, as for the shell snapshot: a read of a FIFO never
-		// ends and would hang the call. pi's tool reports what it makes of the rest.
-		const current = isRegularFile(path) ? readIfPresent(path) : undefined;
+		// Regular files only, as for the shell snapshot. A device, FIFO or socket
+		// is refused here: a read or write-only open of a FIFO blocks until the
+		// other end opens, in the tracker and in pi's tool, and Esc cannot end it.
+		// A directory goes through to pi's tool, which fails on it.
+		const kind = fileKind(path);
+		if (kind === "other") return { block: true, reason: fileTrackerText.notRegularFile({ path, tool: event.toolName }) };
+		const current = kind === "file" ? readIfPresent(path) : undefined;
+		// A file that exists but cannot be read is not absent: the model cannot have seen it.
+		if (kind === "file" && current === undefined) return { block: true, reason: fileTrackerText.unreadable({ path, tool: event.toolName }) };
 		const status = tracker.status(path, current);
 
 		// Creating a new file needs no prior read.
 		if (status === "absent" || status === "fresh") return undefined;
 		if (status === "unread") {
-			if (writeDiscardsNothing(event.toolName, { plainFile: isPlainFile(path), content: current ?? "" })) return undefined;
+			if (writeDiscardsNothing(event.toolName, { plainFile: fileKind(path, false) === "file", content: current ?? "" })) return undefined;
 			return { block: true, reason: fileTrackerText.unread({ path, tool: event.toolName }) };
 		}
 		return { block: true, reason: fileTrackerText.stale({ path }) };
