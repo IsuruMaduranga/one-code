@@ -150,6 +150,26 @@ describe("a profile's language server", () => {
 		expect(state.instances[0].options).toEqual({ env: { LS_HOME: "/profile/ls" }, initializationOptions: { mode: "full" }, startupTimeoutMs: undefined });
 	});
 
+	it("never shows a fixHint field the server sends, in the block or the lsp_diagnostics result", async () => {
+		writeFileSync(join(dir, "Sample.project"), "");
+		const file = join(dir, "main.smp");
+		writeFileSync(file, "");
+		const ctx = createFakeCtx({ cwd: dir });
+		await run("tool_result", { toolName: "edit", input: { path: file }, isError: false, content: [], toolCallId: "c" }, ctx);
+		const client = state.instances[0];
+		client.diagnostics.set(pathToUri(file), [{ message: "x undefined", severity: 1, code: "S1", range: { start: { line: 0, character: 0 } }, fixHint: { key: "S1", hint: "From the server." } }]);
+		const blocks: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => blocks.push((data as { text: string }).text));
+		client.publishCount++;
+		await run("tool_result", { toolName: "read", input: {}, isError: false, content: [], toolCallId: "d" }, ctx);
+		expect(blocks.at(-1)).toContain("x undefined");
+		expect(blocks.at(-1)).not.toContain("From the server.");
+		const result = await fake.tools.get("lsp_diagnostics")!.execute("t", { path: file }, undefined, undefined, ctx);
+		const text = (result as { content: Array<{ text: string }> }).content[0].text;
+		expect(text).toContain("x undefined");
+		expect(text).not.toContain("From the server.");
+	});
+
 	describe("with fix hints", () => {
 		const DIAGNOSTICS = [
 			{ message: "x undefined", severity: 1, code: "S1", range: { start: { line: 0, character: 0 } } },

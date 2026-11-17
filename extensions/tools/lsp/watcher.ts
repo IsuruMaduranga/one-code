@@ -20,7 +20,7 @@
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type LspDiagnostic, shownDiagnostic } from "./format.ts";
-import { fixHintTrailer } from "./fix-hints.ts";
+import { FIX_HINT, fixHintTrailer } from "./fix-hints.ts";
 import { lspResultText } from "./text.ts";
 
 export const MAX_PER_FILE = 10;
@@ -144,7 +144,7 @@ export function formatNewDiagnostics(delta: Map<string, LspDiagnostic[]>, cwd: s
 		included += kept.length;
 		const entries = kept.map((d) => text.entry(shownDiagnostic(d)));
 		kept.forEach((d, index) => {
-			if (!d.fixHint) return;
+			if (!d[FIX_HINT]) return;
 			const upToEntry = [...parts, text.section({ path: section.path, entries: entries.slice(0, index + 1) })].join("\n\n");
 			if (upToEntry.length <= MAX_CHARS) hinted.push(d);
 		});

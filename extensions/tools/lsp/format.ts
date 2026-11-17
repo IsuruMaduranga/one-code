@@ -3,7 +3,7 @@
  * (`lspResultText`).
  */
 
-import { type FixHint, fixHintTrailer } from "./fix-hints.ts";
+import { FIX_HINT, type FixHint, fixHintTrailer } from "./fix-hints.ts";
 import { lspResultText, type ShownDiagnostic } from "./text.ts";
 
 export interface LspDiagnostic {
@@ -12,8 +12,8 @@ export interface LspDiagnostic {
 	code?: string | number;
 	source?: string;
 	message: string;
-	/** The profile's hint for it (fix-hints.ts), tagged where the servers' diagnostics merge; never sent by a server. */
-	fixHint?: FixHint;
+	/** The profile's hint for it (fix-hints.ts), tagged where the servers' diagnostics merge, under a symbol a server cannot set. */
+	[FIX_HINT]?: FixHint;
 }
 
 export type SeverityFilter = "error" | "warning" | "all";

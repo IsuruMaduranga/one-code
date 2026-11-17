@@ -98,7 +98,8 @@ function lineProblem(value: unknown): string | undefined {
 
 /**
  * What is wrong with a server's fix hints: a shape the base cannot read
- * (`byCode` not a plain object, `byMessage` not a list of pairs), or a key or
+ * (a field other than `byCode` and `byMessage`, `byCode` not a plain object,
+ * `byMessage` not a list of pairs, holes included), or a key or
  * hint that is empty, spans lines or is longer than a line of advice.
  */
 function fixHintProblems(name: string, hints: unknown): string[] {
@@ -114,15 +115,21 @@ function fixHintProblems(name: string, hints: unknown): string[] {
 		if (hintProblem === "empty") problems.push(`${at} has an empty fix hint ${where} for ${JSON.stringify(key)}`);
 		else if (hintProblem) problems.push(`${at} has a fix hint ${where} for ${JSON.stringify(key)} ${hintProblem}`);
 	};
+	for (const field of Object.keys(hints)) {
+		if (field !== "byCode" && field !== "byMessage") problems.push(`${at} has fix hints with an unknown field ${JSON.stringify(field)}: only byCode and byMessage are read`);
+	}
 	const { byCode, byMessage } = hints;
 	if (byCode !== undefined && !isPlainObject(byCode)) problems.push(`${at} has fix hints whose byCode is not an object of code to hint`);
 	else for (const [code, hint] of Object.entries(byCode ?? {})) check("by code", code, hint);
 	if (byMessage !== undefined && !Array.isArray(byMessage)) problems.push(`${at} has fix hints whose byMessage is not a list of [substring, hint] pairs`);
 	else {
-		(byMessage ?? []).forEach((entry: unknown, index: number) => {
+		// By index, not forEach: a hole in a sparse list is a problem too.
+		const entries: unknown[] = byMessage ?? [];
+		for (let index = 0; index < entries.length; index++) {
+			const entry = entries[index];
 			if (!Array.isArray(entry) || entry.length !== 2) problems.push(`${at} has a fix hint by message at position ${index} that is not a [substring, hint] pair`);
 			else check("by message", entry[0], entry[1]);
-		});
+		}
 	}
 	return problems;
 }

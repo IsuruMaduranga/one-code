@@ -18,6 +18,12 @@ import { lspResultText } from "./text.ts";
 /** A server's hints, as the profile resolved them. */
 export type FixHints = ResolvedFixHints;
 
+/**
+ * The key a diagnostic's hint is tagged under: a symbol, so a server's
+ * JSON can never set it and only the profile's table supplies a hint.
+ */
+export const FIX_HINT: unique symbol = Symbol("fixHint");
+
 /** A diagnostic's hint and what it is shown under: its code, or the substring that matched its message. */
 export interface FixHint {
 	key: string;
@@ -52,7 +58,7 @@ export function withFixHints(diagnostics: LspDiagnostic[], hints: FixHints | und
 		const fixHint = fixHintFor(diagnostic, hints);
 		if (!fixHint) return;
 		tagged ??= [...diagnostics];
-		tagged[index] = { ...diagnostic, fixHint };
+		tagged[index] = { ...diagnostic, [FIX_HINT]: fixHint };
 	});
 	return tagged ?? diagnostics;
 }
@@ -61,7 +67,7 @@ export function withFixHints(diagnostics: LspDiagnostic[], hints: FixHints | und
 export function fixHintTrailer(shown: readonly LspDiagnostic[]): string | undefined {
 	const kept: FixHint[] = [];
 	const seen = new Set<string>();
-	for (const { fixHint } of shown) {
+	for (const { [FIX_HINT]: fixHint } of shown) {
 		if (!fixHint) continue;
 		const id = `${fixHint.key}\n${fixHint.hint}`;
 		if (seen.has(id)) continue;
