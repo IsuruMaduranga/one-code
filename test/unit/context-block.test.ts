@@ -17,8 +17,8 @@ import { createFakeCtx, createFakePi, renderRequest } from "./helpers/fake-pi.ts
 import { sourceFiles } from "./helpers/import-graph.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 
-/** A session's bus with the live stack it would render at an epoch, and the facts that epoch would tell. */
-function session() {
+/** A session's bus with the live stack it would render at an epoch, and the facts that epoch would tell; `dir` is the session's folder. */
+function session(dir?: string) {
 	const fake = createFakePi();
 	const live = new LiveReminders();
 	const payloads: ReminderPayload[] = [];
@@ -26,10 +26,10 @@ function session() {
 		payloads.push(data as ReminderPayload);
 		live.apply(data as ReminderPayload);
 	});
-	const ctx = createFakeCtx({});
+	const ctx = dir ? { cwd: dir, sessionManager: { getSessionDir: () => dir, getSessionId: () => "s" } } : createFakeCtx({});
 	/** What an epoch opened now would tell: the facts of the stack's blocks. */
 	const epochFacts = (): ToldFact[] => live.stackEntries().flatMap((entry) => entry.facts ?? []);
-	return { fake, live, payloads, ctx, epochFacts, publish: (key: string, text: string | null) => publishContextBlock(fake.pi as never, ctx, key, text) };
+	return { fake, live, payloads, ctx, epochFacts, publish: (key: string, text: string | null) => publishContextBlock(fake.pi as never, ctx as never, key, text) };
 }
 
 describe("a product's context block", () => {
@@ -89,16 +89,91 @@ describe("a product's context block", () => {
 		expect(renderRequest(s.fake.events, { facts: s.epochFacts() })).toEqual([]);
 	});
 
-	it("persists a text past the memory index's load bound and carries the pointer, never a slice", () => {
-		const { home } = tempHome("context-block-");
+	it("is withdrawn on an empty or whitespace-only text, as on null: nothing empty on the tail, nothing in the next epoch", () => {
+		for (const empty of ["", "  \n\t "]) {
+			const s = session();
+			s.publish("layout", "A");
+			const told = s.epochFacts();
+			s.publish("layout", empty);
+			expect(s.live.stackEntries()).toEqual([]);
+			const withdrawal = { text: contextBlockText.withdrawn("layout"), facts: [toldBlockFact("product:layout", "")] };
+			expect(renderRequest(s.fake.events, { facts: told })).toEqual([withdrawal]);
+			// The next epoch's stack has no block, and its tail adds nothing.
+			expect(s.epochFacts()).toEqual([]);
+			expect(renderRequest(s.fake.events, { epoch: true })).toEqual([]);
+			expect(renderRequest(s.fake.events, { facts: s.epochFacts() })).toEqual([]);
+			expect(s.payloads.filter((payload) => payload.text === empty)).toEqual([]);
+		}
+	});
+
+	it("is told again when republished after a withdrawal", () => {
 		const s = session();
-		const big = `${"x".repeat(CONTEXT_BLOCK_MAX_BYTES)} tail`;
-		publishContextBlock(s.fake.pi as never, { cwd: home, sessionManager: { getSessionDir: () => home } }, "layout", big);
-		const text = s.live.stackEntries()[0].text;
-		expect(text).toContain("<persisted-output>");
-		const file = text.match(/(\S+context-layout-[0-9a-f]+\.txt)/)?.[1];
-		expect(file).toBeDefined();
-		expect(readFileSync(file!, "utf8")).toBe(big);
+		s.publish("layout", "A");
+		const told = s.epochFacts();
+		s.publish("layout", null);
+		const withdrawal = renderRequest(s.fake.events, { facts: told });
+		expect(withdrawal).toEqual([{ text: contextBlockText.withdrawn("layout"), facts: [toldBlockFact("product:layout", "")] }]);
+		s.publish("layout", "A");
+		expect(s.live.stackEntries().map((entry) => entry.text)).toEqual(["A"]);
+		expect(renderRequest(s.fake.events, { facts: [...told, ...withdrawal[0].facts!] })).toEqual([{ text: "A", facts: [toldBlockFact("product:layout", "A")] }]);
+		// Republished before any request told the withdrawal: the epoch still holds "A", so nothing is added.
+		s.publish("layout", null);
+		s.publish("layout", "A");
+		expect(renderRequest(s.fake.events, { facts: told })).toEqual([]);
+	});
+
+	describe(`past ${CONTEXT_BLOCK_MAX_BYTES} UTF-8 bytes`, () => {
+		const big = (fill: string) => `${fill.repeat(CONTEXT_BLOCK_MAX_BYTES)} tail`;
+		const pointerFile = (text: string) => text.match(/(\S+context-layout-[0-9a-f]+\.txt)/)?.[1];
+
+		it("is persisted to the session's folder and the block carries the pointer, never a slice", () => {
+			const { home } = tempHome("context-block-");
+			const s = session(home);
+			s.publish("layout", big("x"));
+			const text = s.live.stackEntries()[0].text;
+			expect(text).toContain("<persisted-output>");
+			const file = pointerFile(text);
+			expect(file?.startsWith(home)).toBe(true);
+			expect(readFileSync(file!, "utf8")).toBe(big("x"));
+		});
+
+		it("counts bytes, not characters", () => {
+			const { home } = tempHome("context-block-");
+			const s = session(home);
+			// Fewer characters than the bound, more bytes: a two-byte character, half the bound plus one.
+			const text = "é".repeat(CONTEXT_BLOCK_MAX_BYTES / 2 + 1);
+			expect(text.length).toBeLessThan(CONTEXT_BLOCK_MAX_BYTES);
+			s.publish("layout", text);
+			expect(s.live.stackEntries()[0].text).toContain("<persisted-output>");
+			s.publish("layout", "é".repeat(CONTEXT_BLOCK_MAX_BYTES / 2));
+			expect(s.live.stackEntries()[0].text).not.toContain("<persisted-output>");
+		});
+
+		it("gives the same pointer for the same text, so republishing it adds nothing", () => {
+			const { home } = tempHome("context-block-");
+			const s = session(home);
+			s.publish("layout", big("x"));
+			const first = s.live.stackEntries()[0].text;
+			const told = s.epochFacts();
+			s.publish("layout", big("x"));
+			expect(s.live.stackEntries()[0].text).toBe(first);
+			expect(renderRequest(s.fake.events, { facts: told })).toEqual([]);
+			// A resumed session (a fresh bus, the same folder) points at the same file.
+			const resumed = session(home);
+			resumed.publish("layout", big("x"));
+			expect(resumed.live.stackEntries()[0].text).toBe(first);
+		});
+
+		it("puts the new pointer on the tail when the text changes inside an epoch", () => {
+			const { home } = tempHome("context-block-");
+			const s = session(home);
+			s.publish("layout", "A");
+			const told = s.epochFacts();
+			s.publish("layout", big("y"));
+			const pointer = s.live.stackEntries()[0].text;
+			expect(pointerFile(pointer)).toBeDefined();
+			expect(renderRequest(s.fake.events, { facts: told })).toEqual([{ text: pointer, facts: [toldBlockFact("product:layout", pointer)] }]);
+		});
 	});
 
 	it("refuses a malformed key, a key of the base's own blocks, and a key another extension publishes", () => {
@@ -119,6 +194,7 @@ describe("a product's context block", () => {
 
 	it("knows every key the base's own first-prepend blocks use", () => {
 		const keys = new Set<string>();
+		const unresolved: string[] = [];
 		for (const file of sourceFiles(EXTENSIONS_DIR, EXTENSIONS_DIR)) {
 			if (file.endsWith("context-block.ts")) continue;
 			const source = readFileSync(join(EXTENSIONS_DIR, file), "utf8");
@@ -126,15 +202,29 @@ describe("a product's context block", () => {
 			lines.forEach((line, index) => {
 				if (!line.includes('placement: "first-prepend"')) return;
 				const near = lines.slice(Math.max(0, index - 6), index + 3).join("\n");
-				for (const match of near.matchAll(/key: "([^"]+)"/g)) keys.add(match[1]);
-				// A key named by a constant: its literal value, the brand's prefix filled in.
-				for (const match of near.matchAll(/key: ([A-Z_]+)/g)) {
-					const value = source.match(new RegExp(`const ${match[1]} = ["\`]([^"\`]+)["\`]`))?.[1];
-					if (value) keys.add(value.replace("${brand.idPrefix}", brand.idPrefix));
+				const found = new Set<string>();
+				for (const match of near.matchAll(/\bkey: "([^"]+)"/g)) found.add(match[1]);
+				// A key named by an identifier (`key: NAME`, or a typed parameter `key: Type` the shorthand `key` reads): its literal value or values.
+				for (const match of near.matchAll(/\bkey: ([A-Za-z_]\w*)/g)) {
+					const values = identifierValues(source, match[1]);
+					if (values.length === 0) unresolved.push(`${file}:${index + 1} key: ${match[1]}`);
+					for (const value of values) found.add(value);
 				}
+				if (found.size === 0) unresolved.push(`${file}:${index + 1} (no key found near it)`);
+				for (const key of found) keys.add(key);
 			});
 		}
-		expect(keys.size).toBeGreaterThanOrEqual(10);
+		expect(unresolved).toEqual([]);
 		expect([...keys].filter((key) => !BASE_BLOCK_KEYS.has(key))).toEqual([]);
+		// Every listed key is one the base uses, so the list cannot drift the other way either.
+		expect([...BASE_BLOCK_KEYS].filter((key) => !keys.has(key))).toEqual([]);
 	});
 });
+
+/** The literal values `name` holds in `source`: a `const` string (the brand's prefix filled in), or a `type` union of string literals. */
+function identifierValues(source: string, name: string): string[] {
+	const constant = source.match(new RegExp(`const ${name} = ["\`]([^"\`]+)["\`]`))?.[1];
+	if (constant) return [constant.replace("${brand.idPrefix}", brand.idPrefix)];
+	const union = source.match(new RegExp(`type ${name} = ((?:\\s*\\|?\\s*"[^"]+")+);`))?.[1];
+	return union ? [...union.matchAll(/"([^"]+)"/g)].map((match) => match[1]) : [];
+}

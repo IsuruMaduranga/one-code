@@ -31,13 +31,14 @@
  *   renders it into the first message when an epoch opens (the first
  *   request, a compaction, a model switch) and, inside an epoch, puts a
  *   changed text on the next request's tail: at most one per request, the
- *   latest text winning; the same text again adds nothing; `null` withdraws
- *   it. Publish at `session_start` and on a real change only: every change
- *   inside an epoch costs a block on the tail, so a text that changes on each
- *   file write would add one to every request. Keep it short and stable
- *   (sorted, no timestamps); past the memory index's load bound (25,000
- *   characters) it is saved to the session's folder and the block points
- *   there. `ctx` is the session's context, for that folder. The key is the
+ *   latest text winning; the same text again adds nothing; `null`, or an
+ *   empty or whitespace-only text, withdraws it. Publish at `session_start`
+ *   and on a real change only: every change inside an epoch costs a block on
+ *   the tail, so a text that changes on each file write would add one to
+ *   every request. Keep it short and stable (sorted, no timestamps); past
+ *   25,000 UTF-8 bytes it is saved to the session's folder and the block
+ *   points there, under a name that changes only with the text. `ctx` is the
+ *   session's context (required), for that folder. The key is the
  *   product's own: lowercase, and never one of the base's blocks (a clash,
  *   or a key another extension already publishes, throws). A child session
  *   sees the block only when the child loads the extension that publishes

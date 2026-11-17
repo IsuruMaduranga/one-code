@@ -74,7 +74,7 @@ import { instructionFileNames } from "../../lib/context/instructions.ts";
 import { runningAfterCompactionReminder } from "./running-after-compaction.ts";
 import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "../../lib/request/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../../lib/agents/task-registry.ts";
 import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
@@ -665,10 +665,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		for (const key of Object.keys(liveBlocks) as SubagentBlockKey[]) {
 			const text = liveBlocks[key];
-			// An absent block is told as its empty text; one never told needs no withdrawal.
-			const told = request.toldBlocks.get(key);
-			const fact = toldBlockFact(key, text ?? "");
-			if (told === fact.hash || (text === null && told === undefined)) continue;
+			const fact = untoldBlockFact(request, key, text);
+			if (!fact) continue;
 			const facts = [fact];
 			if (text === null) request.blocks.push({ text: words[WITHDRAWN[key]], facts });
 			else if (key === "subagent-models" && refusal) request.blocks.push({ text: refusal.refused.map((model) => refusedModelNote(model, refusal?.replacement)).join("\n"), facts });

@@ -11,13 +11,15 @@
  * told, never a rewrite of message 1. At most one delta per key per request:
  * the text as it stands when the request renders, so a product that
  * republishes often still adds one block, and one that republishes the same
- * text adds nothing. A null text withdraws it.
+ * text adds nothing. A null, empty or whitespace-only text withdraws it.
  *
  * Each block sits at the stack's product slot (`CONTEXT_ORDER.productContext`:
  * after the context block, before the date, on the user message), under a
- * namespaced key, so it can never replace a base block. A text past the
- * memory index's load bound is persisted to the session's folder and the
- * block carries the pointer (`persistIfLarge`).
+ * namespaced key, so it can never replace a base block. A text past
+ * `CONTEXT_BLOCK_MAX_BYTES` is persisted to the session's folder and the
+ * block carries the pointer (`persistIfLarge`), under a name that changes
+ * only with the text, so the same text gives the same pointer, resumed or
+ * not.
  *
  * The base's own block owners keep their own render handlers and may adopt
  * this helper in a separate change.
@@ -30,9 +32,8 @@
 
 import { createHash } from "node:crypto";
 import { brand, brandedId } from "../profile/brand.mjs";
-import { INDEX_MAX_CHARS } from "../context/memory-content.ts";
 import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact } from "./reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, untoldBlockFact } from "./reminders.ts";
 import { contextBlockText } from "./context-block-text.ts";
 
 /** The prefix every product block's key carries in the stack. */
@@ -63,8 +64,8 @@ export const BASE_BLOCK_KEYS: ReadonlySet<string> = new Set([
 	`${brand.idPrefix}-context`,
 ]);
 
-/** The largest text a block carries whole: the memory index's load bound, the largest bounded neighbour in the stack. */
-export const CONTEXT_BLOCK_MAX_BYTES = INDEX_MAX_CHARS;
+/** The largest text a block carries whole, in UTF-8 bytes: the size of the largest bounded neighbour in the stack (the memory index). */
+export const CONTEXT_BLOCK_MAX_BYTES = 25_000;
 
 const KEY = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -76,8 +77,11 @@ export interface OwnerProbe {
 	owned?: boolean;
 }
 
-/** What a session needs for the file a large text is persisted to. */
-export type ContextBlockSession = Parameters<typeof sessionResultsDir>[0];
+/** What a session needs for the file a large text is persisted to: its folder, the same on every resume. */
+export interface ContextBlockSession {
+	cwd: string;
+	sessionManager: { getSessionDir: () => string | undefined; getSessionId: () => string };
+}
 
 interface Bus {
 	on(channel: string, handler: (data: unknown) => void): unknown;
@@ -95,13 +99,15 @@ export function contextBlockKeyProblem(key: string): string | undefined {
 }
 
 /**
- * Publish the product block `key` with `text`, or withdraw it with null.
+ * Publish the product block `key` with `text`, or withdraw it with null (or
+ * an empty or whitespace-only text, which says nothing).
  * Throws on a key that is malformed or names a base block, and on a key
  * another extension already publishes in this session.
  */
 export function publishContextBlock(pi: { events: Bus }, session: ContextBlockSession, key: string, text: string | null): void {
 	const problem = contextBlockKeyProblem(key);
 	if (problem) throw new Error(problem);
+	const live = text === null || text.trim() === "" ? null : text;
 	const stackKey = `${PRODUCT_BLOCK_PREFIX}${key}`;
 	let blocks = published.get(pi.events);
 	if (!blocks) {
@@ -125,14 +131,11 @@ export function publishContextBlock(pi: { events: Bus }, session: ContextBlockSe
 		pi.events.on(RENDER_CHANNEL, (data) => {
 			const request = data as RenderRequest;
 			if (request.epoch) return;
-			const told = request.toldBlocks.get(stackKey);
-			const fact = toldBlockFact(stackKey, state.text ?? "");
-			// An absent block is told as its empty text; one never told needs no withdrawal.
-			if (told === fact.hash || (state.text === null && told === undefined)) return;
-			request.blocks.push({ text: state.text ?? contextBlockText.withdrawn(key), facts: [fact] });
+			const fact = untoldBlockFact(request, stackKey, state.text);
+			if (fact) request.blocks.push({ text: state.text ?? contextBlockText.withdrawn(key), facts: [fact] });
 		});
 	}
-	const bounded = text === null ? null : boundedText(session, key, text);
+	const bounded = live === null ? null : boundedText(session, key, live);
 	block.text = bounded;
 	if (bounded === null) {
 		pi.events.emit(REMINDER_CHANNEL, { key: stackKey, remove: true } satisfies ReminderPayload);
