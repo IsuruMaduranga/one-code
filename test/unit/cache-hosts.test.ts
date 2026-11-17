@@ -87,6 +87,34 @@ describe("lookupHosts", () => {
 		vi.useRealTimers();
 	});
 
+	it("counts request time against the wait, caps each request by what is left and skips the ids after the deadline", async () => {
+		vi.useFakeTimers();
+		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+		const timeouts: number[] = [];
+		const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+		vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => {
+			timeouts.push(ms);
+			return realTimeout(ms);
+		});
+		// Each request takes 25 s before it answers 404.
+		const fetch = vi.fn(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 25_000));
+			return new Response("not yet", { status: 404 });
+		});
+		vi.stubGlobal("fetch", fetch);
+		const pending = lookupHosts(["gen-a", "gen-b"]);
+		await vi.runAllTimersAsync();
+		const hosts = await pending;
+		// Requests at 0 s, 27 s and 55 s (the sleeps of 2 s and 3 s between); the third ends at 80 s, past the 60 s deadline.
+		expect(fetch).toHaveBeenCalledTimes(3);
+		expect(timeouts).toEqual([10_000, 10_000, 5_000]);
+		expect(hosts.get("gen-a")).toEqual({ error: "generation lookup returned 404 after 80 s of retries" });
+		expect(hosts.get("gen-b")?.host).toBeUndefined();
+		expect(hosts.get("gen-b")?.error).toMatch(/no time left/);
+		vi.restoreAllMocks();
+		vi.useRealTimers();
+	});
+
 	it("reports a failed lookup instead of a host", async () => {
 		vi.stubEnv("OPENROUTER_API_KEY", "test-key");
 		vi.stubGlobal("fetch", vi.fn(async () => new Response("no", { status: 500 })));

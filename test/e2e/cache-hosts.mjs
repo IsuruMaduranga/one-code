@@ -38,7 +38,8 @@ export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] },
 /**
  * Waits before each retry of a lookup that 404'd (OpenRouter records a
  * generation some seconds after the reply, at times past 12 s), and the most
- * one `lookupHosts` call waits in all; past it the remaining ids fail fast.
+ * one `lookupHosts` call takes in all, requests included; past it the
+ * remaining ids fail fast without a request.
  */
 const RETRY_DELAYS_MS = [2000, 3000, 5000, 8000, 10000, 12000];
 const TOTAL_WAIT_MS = 60_000;
@@ -67,27 +68,33 @@ export async function lookupHosts(ids) {
 	const wanted = [...new Set(ids.filter(isGenerationId))];
 	if (wanted.length === 0) return out;
 	const key = openRouterKey();
-	let waited = 0;
+	const started = Date.now();
+	const deadline = started + TOTAL_WAIT_MS;
 	for (const id of wanted) {
 		if (!key) {
 			out.set(id, { error: "no OpenRouter key to look the host up" });
 			continue;
 		}
+		if (Date.now() >= deadline) {
+			out.set(id, { error: `no time left to look the host up (${Math.round(TOTAL_WAIT_MS / 1000)} s spent)` });
+			continue;
+		}
 		let result;
 		for (let attempt = 0; !result; attempt++) {
-			const last = attempt === RETRY_DELAYS_MS.length || waited + (RETRY_DELAYS_MS[attempt] ?? 0) > TOTAL_WAIT_MS;
+			const remaining = Math.max(1, deadline - Date.now());
+			// Decided once the request has answered: no retry when the next wait would pass the deadline.
+			const isLast = () => attempt === RETRY_DELAYS_MS.length || RETRY_DELAYS_MS[attempt] > deadline - Date.now();
 			try {
-				const res = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(10_000) });
+				const res = await fetch(`https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(Math.min(10_000, remaining)) });
 				if (res.ok) {
 					const host = (await res.json())?.data?.provider_name;
 					result = host ? { host } : { error: "the generation names no host" };
-				} else if (res.status !== 404 || last) result = { error: `generation lookup returned ${res.status}${res.status === 404 ? ` after ${Math.round(waited / 1000)} s of retries` : ""}` };
+				} else if (res.status !== 404 || isLast()) result = { error: `generation lookup returned ${res.status}${res.status === 404 ? ` after ${Math.round((Date.now() - started) / 1000)} s of retries` : ""}` };
 			} catch (error) {
-				if (last) result = { error: `generation lookup failed: ${error?.message ?? error}` };
+				if (isLast()) result = { error: `generation lookup failed: ${error?.message ?? error}` };
 			}
 			if (!result) {
-				await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
-				waited += RETRY_DELAYS_MS[attempt];
+				await new Promise((resolve) => setTimeout(resolve, Math.min(RETRY_DELAYS_MS[attempt], Math.max(0, deadline - Date.now()))));
 			}
 		}
 		out.set(id, result);
