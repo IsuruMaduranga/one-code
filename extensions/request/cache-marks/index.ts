@@ -34,8 +34,7 @@ import { isFirstPartyAnthropic } from "../../lib/request/anthropic-server-tools.
 import { openRouterRegistration } from "../../lib/request/anthropic-stream.ts";
 import { CACHE_MARKS_KNOB, openRouterCacheMarksEnabled } from "../../lib/request/openrouter-cache-marks.ts";
 import { openRouterIgnoreHostsEnabled } from "../../lib/request/openrouter-ignored-hosts.ts";
-import { openRouterRoutingDefaultsEnabled } from "../../lib/request/openrouter-routing-defaults.ts";
-import { activeProfile } from "../../lib/profile/profile.ts";
+import { activeOpenRouterRouting } from "../../lib/request/openrouter-routing-defaults.ts";
 import { adjustsOpenRouter, type OpenRouterAdjustOptions, openRouterAdjust } from "./openrouter-adjust.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { baseMark, withPreviousMark } from "./previous-mark.ts";
@@ -44,7 +43,7 @@ function cacheMarksExtension(pi: ExtensionAPI) {
 	const options: OpenRouterAdjustOptions = {
 		marks: openRouterCacheMarksEnabled(),
 		ignore: openRouterIgnoreHostsEnabled(),
-		routing: openRouterRoutingDefaultsEnabled() ? activeProfile().openRouterRouting : new Map(),
+		routing: activeOpenRouterRouting(),
 	};
 	if (adjustsOpenRouter(options)) {
 		const openRouter = openRouterRegistration(openRouterAdjust(options));

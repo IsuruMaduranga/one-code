@@ -16,6 +16,7 @@
  */
 
 import { brandedId } from "../profile/brand.mjs";
+import { openRouterApiBase } from "./openrouter-generation.ts";
 
 /** Published by the tool-call-corruption extension when a main-session assistant message on OpenRouter ends. */
 export const OPENROUTER_HOST_CHANNEL = brandedId("openrouter-host");
@@ -29,18 +30,10 @@ export interface OpenRouterHostEvent {
 	responseId?: string;
 }
 
-const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-
 /** The endpoints listing of `modelId` under a model's base URL, or undefined when that URL is not OpenRouter's own. */
 export function endpointsListingUrl(baseUrl: string | undefined, modelId: string): string | undefined {
-	try {
-		const url = new URL(baseUrl || OPENROUTER_BASE_URL);
-		if (url.protocol !== "https:" || url.hostname !== "openrouter.ai") return;
-		const id = modelId.replace(/^~/, "").split("/").map(encodeURIComponent).join("/");
-		return `${url.origin}${url.pathname.replace(/\/+$/, "")}/models/${id}/endpoints`;
-	} catch {
-		// A malformed base URL is not OpenRouter's.
-	}
+	const base = openRouterApiBase(baseUrl);
+	return base && `${base}/models/${modelId.replace(/^~/, "").split("/").map(encodeURIComponent).join("/")}/endpoints`;
 }
 
 /** Each host's quantizations in an endpoints listing body, `"unknown"` for an endpoint that declares none. */

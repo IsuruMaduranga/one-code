@@ -7,7 +7,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
-import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
+import { isOpenRouter, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
+import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import {
 	CONTENT_MARKUP_LIMIT,

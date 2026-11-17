@@ -61,13 +61,39 @@ export interface CacheMarksModel {
 	compat?: unknown;
 }
 
+/** A model id's vendor: the part before the slash, without a leading `~`. */
+export function modelVendor(modelId: string): string {
+	return modelId.replace(/^~/, "").split("/")[0];
+}
+
+/** Whether `model` is an OpenRouter Chat Completions model, the only kind pi sends `compat.openRouterRouting` for. */
+export function isOpenRouterChatModel(model: CacheMarksModel): boolean {
+	return model.provider === OPENROUTER_PROVIDER && model.api === OPENROUTER_CACHE_MARKS_API;
+}
+
+/** The OpenRouter routing on a model's compat (pi-ai sends it as the request's `provider` object). */
+export type OpenRouterRouting = Record<string, unknown>;
+
+/**
+ * `model` with its `compat.openRouterRouting` replaced by what `change` makes
+ * of it, as a copy; the model itself when it is not an OpenRouter Chat
+ * Completions model or `change` returns the routing it was given.
+ */
+export function withOpenRouterRouting<M extends CacheMarksModel>(model: M, change: (routing: OpenRouterRouting | undefined, vendor: string) => OpenRouterRouting | undefined): M {
+	if (!isOpenRouterChatModel(model)) return model;
+	const compat = (model.compat ?? {}) as Record<string, unknown>;
+	const routing = compat.openRouterRouting as OpenRouterRouting | undefined;
+	const next = change(routing, modelVendor(model.id));
+	if (next === routing) return model;
+	return { ...model, compat: { ...compat, openRouterRouting: next } };
+}
+
 /** Whether pi should mark `model`'s requests: an OpenRouter Chat Completions model of a measured vendor whose compat names no format. */
 export function takesOpenRouterCacheMarks(model: CacheMarksModel): boolean {
-	if (model.provider !== OPENROUTER_PROVIDER || model.api !== OPENROUTER_CACHE_MARKS_API) return false;
+	if (!isOpenRouterChatModel(model)) return false;
 	const compat = (model.compat ?? {}) as Record<string, unknown>;
 	if (compat.cacheControlFormat !== undefined) return false;
-	const vendor = model.id.replace(/^~/, "").split("/")[0];
-	return MARKED_VENDORS.has(vendor);
+	return MARKED_VENDORS.has(modelVendor(model.id));
 }
 
 /** `model` with Anthropic-style breakpoints on, as a copy; the model itself when it does not take them. */

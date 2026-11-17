@@ -65,7 +65,7 @@ import { promptCommandText } from "../../lib/plugins/skill-invoke.ts";
 import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 import { fetchEndpointQuantizations, OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent, type ServedHost } from "../../lib/request/openrouter-host.ts";
-import { openRouterProviderName } from "../../request/tool-call-corruption/openrouter-generation.ts";
+import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;

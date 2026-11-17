@@ -25,13 +25,13 @@
  * OpenRouter's `anthropic/*` models never carry it.
  *
  * The table's type and its load check are lib/profile/openrouter-routing.ts.
- * `<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0` turns it off. Pure: no pi imports.
+ * `<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0` turns it off. No pi imports.
  */
 
 import { knobValue } from "../profile/knobs.ts";
 import type { OpenRouterRoutingDefault } from "../profile/openrouter-routing.ts";
-import type { CacheMarksModel } from "./openrouter-cache-marks.ts";
-import { OPENROUTER_CACHE_MARKS_API, OPENROUTER_PROVIDER } from "./openrouter-cache-marks.ts";
+import { activeProfile } from "../profile/profile.ts";
+import { type CacheMarksModel, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
 /** The knob that turns the defaults off (`<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0`). */
 export const OPENROUTER_ROUTING_DEFAULTS_KNOB = "OPENROUTER_ROUTING_DEFAULTS";
@@ -41,8 +41,6 @@ export function openRouterRoutingDefaultsEnabled(vars: Readonly<Record<string, u
 	return knobValue(OPENROUTER_ROUTING_DEFAULTS_KNOB, vars) !== "0";
 }
 
-type Routing = Record<string, unknown>;
-
 /** The routing fields that choose hosts themselves: a user who sets one has made the choice a floor would make. */
 const USER_CHOICE_FIELDS = ["quantizations", "only", "order"] as const;
 
@@ -51,7 +49,7 @@ const USER_CHOICE_FIELDS = ["quantizations", "only", "order"] as const;
  * routing already sets `quantizations`, `only` or `order`. Returns `routing`
  * itself when nothing is added.
  */
-export function withRoutingDefaults(routing: Routing | undefined, defaults: OpenRouterRoutingDefault | undefined): Routing | undefined {
+export function withRoutingDefaults(routing: OpenRouterRouting | undefined, defaults: OpenRouterRoutingDefault | undefined): OpenRouterRouting | undefined {
 	if (!defaults || USER_CHOICE_FIELDS.some((field) => routing?.[field] !== undefined)) return routing;
 	return { ...routing, quantizations: [...defaults.quantizations] };
 }
@@ -62,12 +60,10 @@ export function withRoutingDefaults(routing: Routing | undefined, defaults: Open
  * has no entry, or the user's routing already chooses.
  */
 export function withOpenRouterRoutingDefaults<M extends CacheMarksModel>(model: M, table: ReadonlyMap<string, OpenRouterRoutingDefault>): M {
-	if (model.provider !== OPENROUTER_PROVIDER || model.api !== OPENROUTER_CACHE_MARKS_API) return model;
-	const defaults = table.get(model.id.replace(/^~/, "").split("/")[0]);
-	if (!defaults) return model;
-	const compat = (model.compat ?? {}) as Record<string, unknown>;
-	const routing = compat.openRouterRouting as Routing | undefined;
-	const next = withRoutingDefaults(routing, defaults);
-	if (next === routing) return model;
-	return { ...model, compat: { ...compat, openRouterRouting: next } };
+	return withOpenRouterRouting(model, (routing, vendor) => withRoutingDefaults(routing, table.get(vendor)));
+}
+
+/** The profile's routing defaults by vendor, or none when `<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0`. */
+export function activeOpenRouterRouting(vars: Readonly<Record<string, unknown>> = process.env): ReadonlyMap<string, OpenRouterRoutingDefault> {
+	return openRouterRoutingDefaultsEnabled(vars) ? activeProfile().openRouterRouting : new Map();
 }
