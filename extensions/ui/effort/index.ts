@@ -52,7 +52,7 @@ import {
 	nearestEnabled,
 	parseEffortArg,
 	renderEffortSlider,
-	sliderNoteFor,
+	sliderNoteReader,
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
@@ -310,6 +310,9 @@ function effortExtension(pi: ExtensionAPI) {
 		index = nearestEnabled(index, enabled);
 
 		const label = modelLabel(ctx);
+		const noteFor = sliderNoteReader(text.sliderNote, (error) =>
+			ctx.ui.notify(`The profile's effort slider note failed, so the slider shows none: ${error instanceof Error ? error.message : String(error)}`, "warning"),
+		);
 		const chosen = await panelUi(pi.events, ctx.ui).custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
@@ -317,7 +320,7 @@ function effortExtension(pi: ExtensionAPI) {
 				// dialog has no linesComponent wrap, so a final truncate is the safety
 				// net that guarantees no overwide line reaches pi-tui (TUI-REVIEW H1/H2).
 				render: (width: number) =>
-					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label, note: sliderNoteFor(text.sliderNote, EFFORT_CHOICES[index]) }, paint), ""].map((line) => truncateLine(line, width)),
+					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label, note: noteFor(EFFORT_CHOICES[index]) }, paint), ""].map((line) => truncateLine(line, width)),
 				handleInput: (data: string) => {
 					const key = decodeKey(data);
 					if (!key) return;
