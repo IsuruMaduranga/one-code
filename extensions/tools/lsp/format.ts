@@ -4,7 +4,7 @@
  */
 
 import { type FixHint, fixHintTrailer } from "./fix-hints.ts";
-import { type LspText, lspResultText, type ShownDiagnostic } from "./text.ts";
+import { lspResultText, type ShownDiagnostic } from "./text.ts";
 
 export interface LspDiagnostic {
 	range: { start: { line: number; character: number }; end?: { line: number; character: number } };
@@ -43,8 +43,8 @@ export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: Severity
 	return diagnostics.filter((d) => (d.severity ?? 1) <= max);
 }
 
-/** The tool's result: a summary line, then up to `limit` diagnostics, then the fix hints of those shown in the profile's words (`hintWords`). */
-export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], limit = 20, hintWords?: LspText["fixHints"]): string {
+/** The tool's result: a summary line, then up to `limit` diagnostics, then the fix hints of those shown. */
+export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[], limit = 20): string {
 	const text = lspResultText.diagnostics;
 	if (diagnostics.length === 0) return text.none;
 	const kept = diagnostics.slice(0, limit);
@@ -55,6 +55,6 @@ export function formatDiagnostics(relPath: string, diagnostics: LspDiagnostic[],
 		warnings: diagnostics.filter((d) => d.severity === 2).length,
 		total: diagnostics.length,
 	});
-	const hints = fixHintTrailer(kept, hintWords);
+	const hints = fixHintTrailer(kept);
 	return `${summary}\n\n${shown.join("\n")}${hints ? `\n\n${hints}` : ""}`;
 }

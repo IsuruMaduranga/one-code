@@ -209,10 +209,6 @@ export const lsp: NonNullable<ProfileText["lsp"]> = {
 		path: "[lsp.params.path]",
 		severity: "[lsp.params.severity]",
 	},
-	fixHints: {
-		heading: "[lsp.fixHints.heading]",
-		line: ({ key, hint }) => `${key}: ${hint}`,
-	},
 };
 
 export const background: NonNullable<ProfileText["background"]> = {

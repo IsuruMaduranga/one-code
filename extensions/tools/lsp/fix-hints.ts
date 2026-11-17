@@ -6,14 +6,14 @@
  * `<new-diagnostics>` block and the `lsp_diagnostics` result then end with
  * one line per distinct hint, after their own caps and cut, so the
  * diagnostics stay bounded as Claude Code bounds them and a hint is never
- * cut. The profile words the trailer (`LspText.fixHints`). Claude Code has
- * nothing like it: a session whose servers declare no hints sends the same
- * text as before.
+ * cut. The profile supplies only the hints; the base frames them
+ * (`lspResultText.fixHints`). Claude Code has nothing like it: a session
+ * whose servers declare no hints sends the same text as before.
  */
 
 import type { ResolvedFixHints } from "../../lib/profile/language-servers.ts";
 import type { LspDiagnostic } from "./format.ts";
-import type { LspText } from "./text.ts";
+import { lspResultText } from "./text.ts";
 
 /** A server's hints, as the profile resolved them. */
 export type FixHints = ResolvedFixHints;
@@ -57,18 +57,17 @@ export function withFixHints(diagnostics: LspDiagnostic[], hints: FixHints | und
 	return tagged ?? diagnostics;
 }
 
-/** The trailer for the diagnostics shown, in the profile's words; undefined when none carries a hint or the profile words none. */
-export function fixHintTrailer(shown: readonly LspDiagnostic[], words: LspText["fixHints"]): string | undefined {
-	if (!words) return undefined;
-	const lines: string[] = [];
+/** The trailer for the diagnostics shown; undefined when none carries a hint. */
+export function fixHintTrailer(shown: readonly LspDiagnostic[]): string | undefined {
+	const kept: FixHint[] = [];
 	const seen = new Set<string>();
 	for (const { fixHint } of shown) {
 		if (!fixHint) continue;
 		const id = `${fixHint.key}\n${fixHint.hint}`;
 		if (seen.has(id)) continue;
 		seen.add(id);
-		if (lines.length === MAX_FIX_HINTS) break;
-		lines.push(words.line(fixHint));
+		if (kept.length === MAX_FIX_HINTS) break;
+		kept.push(fixHint);
 	}
-	return lines.length > 0 ? `${words.heading}\n${lines.join("\n")}` : undefined;
+	return kept.length > 0 ? lspResultText.fixHints(kept) : undefined;
 }

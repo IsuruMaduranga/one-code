@@ -34,7 +34,7 @@ import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
 import { secretFileProblems } from "./secrets.ts";
 import { type ProductSetting, productSettingProblems } from "./settings-keys.ts";
-import { declaresFixHints, languageServerProblems, type ResolvedLanguageServer, resolveLanguageServers } from "./language-servers.ts";
+import { languageServerProblems, type ResolvedLanguageServer, resolveLanguageServers } from "./language-servers.ts";
 import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
@@ -327,8 +327,6 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const textProblems = missingTextProblems(text, features);
 	// An empty refusal would reach the model as an error with no reason.
 	if (text.permissions?.secretFileRefusal?.trim() === "") textProblems.push(`its text "permissions.secretFileRefusal" must not be empty: leave it out for the base's own wording`);
-	const hinted = declaresFixHints(profile.languageServers ?? {});
-	if (hinted.length > 0 && text.lsp?.fixHints === undefined) textProblems.push(`its language server ${hinted.map((name) => `"${name}"`).join(", ")} declares fix hints, but its text "lsp.fixHints" does not word them`);
 	if (textProblems.length > 0) throw new Error(`Invalid profile: ${textProblems.join("; ")}.`);
 	return {
 		features,
