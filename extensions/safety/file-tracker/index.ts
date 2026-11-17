@@ -23,7 +23,7 @@ import { featureEnabled } from "../../lib/profile/profile.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, getAgentDir, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
@@ -46,7 +46,8 @@ import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.t
 import { fileToolResultContent } from "./results.ts";
 import { shellReadPaths, shownInFull } from "./shell-reads.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
-import { describeChanges, type FileStamp, FileTracker, writeDiscardsNothing } from "./tracker.ts";
+import { describeChanges, type FileStamp, FileTracker, guardDecision } from "./tracker.ts";
+import { fileKind, readIfPresent } from "./files.ts";
 import { fileTrackerText } from "./text.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
@@ -58,31 +59,6 @@ const READ_TOOLS = new Set(["read", "notebook_edit"]);
  */
 const DETAILED_CHANGE_REMINDERS_PER_TURN = 5;
 
-function readIfPresent(path: string): string | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		return readFileSync(path, "utf-8");
-	} catch {
-		// Unreadable (no permission, a directory). The guard tells an unreadable
-		// regular file from a missing one by `fileKind` and refuses it.
-		return undefined;
-	}
-}
-
-/**
- * What `path` is: absent (or not one we could stat), a regular file, a
- * directory, or something else (a device, FIFO or socket, or with
- * `followSymlinks` false a symlink). Only a regular file is safe to read: a
- * read of a FIFO never ends.
- */
-function fileKind(path: string, followSymlinks = true): "absent" | "file" | "directory" | "other" {
-	try {
-		const stat = followSymlinks ? statSync(path) : lstatSync(path);
-		return stat.isFile() ? "file" : stat.isDirectory() ? "directory" : "other";
-	} catch {
-		return "absent";
-	}
-}
 
 /** The file's disk stamp, or undefined when it is gone (or not a plain file we could stat). */
 function statIfPresent(path: string): FileStamp | undefined {
@@ -380,24 +356,24 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		if (!path) return undefined;
 		if (event.toolName === "write") writeTargetExisted.set(event.toolCallId, existsSync(path));
 
-		// Regular files only, as for the shell snapshot. A device, FIFO or socket
-		// is refused here: a read or write-only open of a FIFO blocks until the
-		// other end opens, in the tracker and in pi's tool, and Esc cannot end it.
-		// A directory goes through to pi's tool, which fails on it.
+		// Read regular files only, as for the shell snapshot: a read of a FIFO
+		// never ends. The decision is `guardDecision`'s.
+		const tool = event.toolName;
 		const kind = fileKind(path);
-		if (kind === "other") return { block: true, reason: fileTrackerText.notRegularFile({ path, tool: event.toolName }) };
-		const current = kind === "file" ? readIfPresent(path) : undefined;
-		// A file that exists but cannot be read is not absent: the model cannot have seen it.
-		if (kind === "file" && current === undefined) return { block: true, reason: fileTrackerText.unreadable({ path, tool: event.toolName }) };
-		const status = tracker.status(path, current);
-
-		// Creating a new file needs no prior read.
-		if (status === "absent" || status === "fresh") return undefined;
-		if (status === "unread") {
-			if (writeDiscardsNothing(event.toolName, { plainFile: fileKind(path, false) === "file", content: current ?? "" })) return undefined;
-			return { block: true, reason: fileTrackerText.unread({ path, tool: event.toolName }) };
+		const content = kind === "file" ? readIfPresent(path) : undefined;
+		const outcome = guardDecision({ tool, kind, ownKind: fileKind(path, false), content, status: tracker.status(path, content) });
+		switch (outcome) {
+			case "allow":
+				return undefined;
+			case "notRegularFile":
+				return { block: true, reason: fileTrackerText.notRegularFile({ path, tool }) };
+			case "unreadable":
+				return { block: true, reason: fileTrackerText.unreadable({ path, tool }) };
+			case "unread":
+				return { block: true, reason: fileTrackerText.unread({ path, tool }) };
+			case "stale":
+				return { block: true, reason: fileTrackerText.stale({ path }) };
 		}
-		return { block: true, reason: fileTrackerText.stale({ path }) };
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

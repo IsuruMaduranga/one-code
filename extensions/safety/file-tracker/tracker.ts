@@ -166,6 +166,47 @@ export function writeDiscardsNothing(tool: string, target: { plainFile: boolean;
 	return tool === "write" && target.plainFile && target.content === "";
 }
 
+/** What a path is on disk (`files.ts fileKind`): "other" is a device, FIFO or socket, or a symlink when not followed. */
+export type FileKind = "absent" | "file" | "directory" | "other";
+
+/** The guard's answer to an edit, write or notebook edit: let it through, or which refusal. */
+export type GuardOutcome = "allow" | "notRegularFile" | "unreadable" | "unread" | "stale";
+
+/** What the guard knows about a guarded tool's target when the call is made. */
+export interface GuardFacts {
+	tool: string;
+	/** The target's kind with symlinks followed. */
+	kind: FileKind;
+	/** The target's own kind, symlinks not followed. */
+	ownKind: FileKind;
+	/** Its content, or undefined when it was not read (not a regular file) or could not be read. */
+	content: string | undefined;
+	/** `FileTracker.status` for that content. */
+	status: FreshnessStatus;
+}
+
+/**
+ * The read-before-write guard's decision. A device, FIFO or socket is
+ * refused outright: opening one can block until the other end opens, and
+ * Esc cannot end it. A regular file that exists but could not be read is not
+ * absent: the model cannot have seen it. A directory goes through to the
+ * tool, which fails on it. Otherwise the freshness status decides, with the
+ * empty-file exemption for an unread write (`writeDiscardsNothing`).
+ */
+export function guardDecision(facts: GuardFacts): GuardOutcome {
+	if (facts.kind === "other") return "notRegularFile";
+	if (facts.kind === "file" && facts.content === undefined) return "unreadable";
+	switch (facts.status) {
+		case "absent":
+		case "fresh":
+			return "allow";
+		case "unread":
+			return writeDiscardsNothing(facts.tool, { plainFile: facts.ownKind === "file", content: facts.content ?? "" }) ? "allow" : "unread";
+		case "stale":
+			return "stale";
+	}
+}
+
 /**
  * Renders the changed region of a file the way Claude Code does: the *new* lines,
  * numbered, with a little context, at most `maxLines` of them (the rest are
