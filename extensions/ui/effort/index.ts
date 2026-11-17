@@ -31,10 +31,10 @@
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { clampThinkingLevel, getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import { getAgentDir, SettingsManager, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { effortSetMessage, isPersistedEffort, type PersistedEffort } from "./settings.ts";
 import { activeProfile, requireText, toolLive } from "../../lib/profile/profile.ts";
+import { thinkingLevelsFor } from "../../lib/models/thinking-levels.ts";
 import { autoThinkingAction, branchHasMessages, declaredLevel, type LevelSource, levelOwnership, TIER_THINKING_STATE, tierThinkingAt, type TierThinkingState } from "../../lib/models/tier-thinking.ts";
 import { REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, stickyFact, toldBlockFact } from "../../lib/request/reminders.ts";
 import { readState, recordState } from "../../lib/request/ledger/state.ts";
@@ -52,7 +52,7 @@ import {
 	nearestEnabled,
 	parseEffortArg,
 	renderEffortSlider,
-	THINKING_LEVELS,
+	sliderNoteReader,
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
@@ -66,7 +66,7 @@ import { extendingCompletions } from "../../lib/ui/argument-hints.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
 function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {
-	return ctx.model ? (getSupportedThinkingLevels(ctx.model) as ThinkingLevel[]) : [...THINKING_LEVELS];
+	return [...thinkingLevelsFor(ctx.model).supported];
 }
 
 /** A short name for the model, for messages that name what does/doesn't support a level. */
@@ -154,7 +154,7 @@ function effortExtension(pi: ExtensionAPI) {
 	/** Set `level` and record who owns it. `quiet`: no effort note for it. `auto`: `/effort auto` set it. */
 	const setRecorded = (ctx: ExtensionContext, level: string, source: LevelSource, { quiet = false, auto = false } = {}) => {
 		// pi fits the level to the model; the note is skipped for the level it will settle on.
-		const settles = ctx.model ? (clampThinkingLevel(ctx.model, level as ThinkingLevel) as ThinkingLevel) : (level as ThinkingLevel);
+		const settles = thinkingLevelsFor(ctx.model).settle(level as ThinkingLevel);
 		if (quiet) quietLevel = settles !== pi.getThinkingLevel() ? settles : undefined;
 		pi.setThinkingLevel(level as ThinkingLevel);
 		recordSource(source, auto);
@@ -310,6 +310,9 @@ function effortExtension(pi: ExtensionAPI) {
 		index = nearestEnabled(index, enabled);
 
 		const label = modelLabel(ctx);
+		const noteFor = sliderNoteReader(text.sliderNote, (error) =>
+			ctx.ui.notify(`The profile's effort slider note failed, so the slider shows none: ${error instanceof Error ? error.message : String(error)}`, "warning"),
+		);
 		const chosen = await panelUi(pi.events, ctx.ui).custom<{ choice: EffortChoice; asDefault: boolean } | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
@@ -317,7 +320,7 @@ function effortExtension(pi: ExtensionAPI) {
 				// dialog has no linesComponent wrap, so a final truncate is the safety
 				// net that guarantees no overwide line reaches pi-tui (TUI-REVIEW H1/H2).
 				render: (width: number) =>
-					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""].map((line) => truncateLine(line, width)),
+					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label, note: noteFor(EFFORT_CHOICES[index]) }, paint), ""].map((line) => truncateLine(line, width)),
 				handleInput: (data: string) => {
 					const key = decodeKey(data);
 					if (!key) return;

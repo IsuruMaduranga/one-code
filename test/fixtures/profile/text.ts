@@ -159,6 +159,7 @@ export const recap: NonNullable<ProfileText["recap"]> = {
 export const effort: NonNullable<ProfileText["effort"]> = {
 	ultracodeOn: "[effort.ultracodeOn]",
 	ultracodeOff: "[effort.ultracodeOff]",
+	sliderNote: (choice) => (choice === "high" ? "[effort.sliderNote:high]" : undefined),
 };
 
 export const planMode: NonNullable<ProfileText["planMode"]> = {

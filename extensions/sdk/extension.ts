@@ -65,6 +65,16 @@
  * command, osMessage }` when the opener did not start) so the caller can show
  * the URL instead and say what failed.
  *
+ * A listener on `thinking_level_select` cannot tell pi fitting a level to the
+ * model (`low` runs as `high` on a model with no `low`) from the user picking
+ * it: both announce the level that runs. `thinkingLevelsFor(model)` gives
+ * `{ supported, settle }`: `supported` is the levels the model reaches
+ * (lowest first; the whole ladder when `model` is `undefined`), and
+ * `settle(level)` the level pi runs when `level` is set. A level the extension
+ * set itself, and whose `settle` differs from it, was fitted; compare the
+ * event's level with `settle` of the level that was asked for. Pass the
+ * model the event's context holds (`ctx.model`).
+ *
  * A notice for the user by the session model's tier (a product that wants
  * a stronger model than the one chosen, say) judges the model with
  * `modelCapability(model)`: `{ tier, known }`, the capability tier the base
@@ -72,7 +82,7 @@
  * a rule that knows the model decided it (the user's `modelTiers` entry, a
  * vendor's frontier rule, a catalog entry) or it is a guess (no model, one
  * the catalogs lack, a custom provider, no price). The `*_PROMPT_TIER` knob
- * never moves it, and first-party Haiku 5 and later sit below frontier there.
+ * never moves it, and Haiku 5 and later sit below frontier there.
  * Pass `ctx.model` at `session_start` and `event.model` at `model_select`.
  *
  * Text that must match the session's prompt register uses
@@ -130,6 +140,7 @@ export { toolRenderers } from "../lib/ui/tui-render.ts";
 export { productStateDir } from "../lib/profile/paths.ts";
 export { type NoBrowser, openInBrowser } from "../lib/ui/open-browser.ts";
 export { sessionModelTier } from "../lib/models/session-model-tier.ts";
+export { type ThinkingLevels, thinkingLevelsFor } from "../lib/models/thinking-levels.ts";
 export { type ModelCapability, modelCapability, tiersBelow } from "../lib/models/model-tier.ts";
 export { type NoticeLevel, queueNotice } from "../lib/notify/notices.ts";
 export { notifyOrPrint } from "../lib/notify/headless-output.ts";

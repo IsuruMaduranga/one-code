@@ -19,7 +19,10 @@
 
 import { brandedId } from "../profile/brand.mjs";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { THINKING_LEVEL_NAMES } from "../profile/thinking-defaults.ts";
 import { keyId, keyText } from "./key-input.ts";
+import { sanitizeTitle } from "./terminal-text.ts";
+import { sliceColumns, visibleWidth } from "./text-width.ts";
 
 /** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
@@ -42,11 +45,8 @@ export const ULTRACODE_MODE_CHANNEL = brandedId("ultracode-mode");
 /** The reasoning level ultracode pins, when the model can reach it. */
 export const ULTRACODE_LEVEL: ThinkingLevel = "xhigh";
 
-/** pi's thinking ladder, Faster→Smarter — the same stops shift+tab cycles. */
-export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/** Track stops: pi's ladder, then ultracode past the divider. */
-export const EFFORT_CHOICES = [...THINKING_LEVELS, ULTRACODE] as const;
+/** Track stops: pi's ladder (Faster→Smarter, the stops shift+tab cycles), then ultracode past the divider. */
+export const EFFORT_CHOICES = [...THINKING_LEVEL_NAMES, ULTRACODE] as const;
 export type EffortChoice = (typeof EFFORT_CHOICES)[number];
 
 export function isEffortChoice(value: string): value is EffortChoice {
@@ -167,7 +167,7 @@ export function nearestEnabled(index: number, enabled: boolean[]): number {
 
 /** Rank of a plain level on the ladder (off=0 … max), or -1 if not a plain level. */
 export function levelRank(level: ThinkingLevel): number {
-	return THINKING_LEVELS.indexOf(level);
+	return (THINKING_LEVEL_NAMES as readonly string[]).indexOf(level);
 }
 
 export type Paint = (color: string, text: string) => string;
@@ -180,6 +180,12 @@ export interface SliderView {
 	width: number;
 	/** Model name for the "unsupported" note; omitted falls back to "this model". */
 	modelLabel?: string;
+	/**
+	 * A line the profile words for the highlighted stop (`EffortText.sliderNote`),
+	 * drawn dim under the track. One line: only the text up to its first newline,
+	 * trimmed, is shown; nothing is drawn for an empty one.
+	 */
+	note?: string;
 }
 
 const TITLE = "Effort";
@@ -188,6 +194,43 @@ const HINTS = "←/→ or h/l adjust · Enter confirm · s for this session only
 const CACHE_NOTE = "changing effort re-caches the conversation (one uncached request)";
 const SHORT_HINTS = "←/→ h/l · Enter · s · Esc";
 const ULTRACODE_SUBTITLE = `${ULTRACODE_LEVEL} + workflows`;
+
+/**
+ * A memoized reader of the profile's note: its function is called once per
+ * stop for the life of the reader (one slider opening), and a throw counts as
+ * no note, so it never breaks the slider. `onError` hears the first throw only.
+ */
+export function sliderNoteReader(
+	note: ((choice: EffortChoice) => string | undefined) | undefined,
+	onError: (error: unknown) => void,
+): (choice: EffortChoice) => string | undefined {
+	const known = new Map<EffortChoice, string | undefined>();
+	let reported = false;
+	return (choice) => {
+		if (!known.has(choice)) {
+			let text: unknown;
+			try {
+				text = note?.(choice);
+			} catch (error) {
+				if (!reported) onError(error);
+				reported = true;
+			}
+			known.set(choice, typeof text === "string" ? text : undefined);
+		}
+		return known.get(choice);
+	};
+}
+
+/**
+ * The first line of a profile's note, safe to draw: cut at the first line
+ * break (NEL, vertical tab and form feed count), then stripped of escape
+ * sequences and control characters with whitespace collapsed, since the text
+ * is the profile's and an escape in it would act on the terminal. Empty when
+ * there is nothing to draw.
+ */
+function noteLine(note: string | undefined): string {
+	return sanitizeTitle((note ?? "").split(/[\r\n\v\f\u0085\u2028\u2029]/, 1)[0]);
+}
 
 /**
  * One label cell per stop, padded so the marker row lines up under the label
@@ -243,7 +286,7 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 
 	// Rows are (plain content, styled content) pairs: nothing wraps for us, and a
 	// wrapped line would shift the marker out from under its label, so widths are
-	// measured on the unstyled text — escape codes would inflate the count.
+	// measured in terminal columns on the unstyled text — escape codes would inflate the count.
 	const rows: [plain: string, styled: string][] = [
 		[TITLE, paint("accent", TITLE)],
 		["", ""],
@@ -253,6 +296,12 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 		[labels, styledLabels],
 	];
 	if (subtitleRow) rows.push([`${" ".repeat(Math.max(0, positions[stops.length - 1]))}${ULTRACODE_SUBTITLE}`, subtitleRow]);
+	// The profile's line for the highlighted stop sits right under the track
+	// rows. It is clipped to the view and never decides the layout: a long note
+	// must not collapse a track that fits.
+	const clip = (text: string) => sliceColumns(text, view.width).text;
+	const profileNote = clip(noteLine(view.note));
+	const noteAt = rows.length;
 	// When the model can't reach every stop, say so — the dimming alone doesn't
 	// explain itself, and it points at shift+tab for the ones we grey out.
 	const anyDisabled = stops.some((_, i) => !view.enabled[i]);
@@ -261,16 +310,20 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 	rows.push([CACHE_NOTE, paint("dim", CACHE_NOTE)]);
 	rows.push(["", ""], [HINTS, paint("dim", HINTS)]);
 
-	const fits = rows.every(([plainRow]) => [...plainRow].length <= view.width);
-	if (fits) return rows.map(([, styled]) => styled);
+	const fits = rows.every(([plainRow]) => visibleWidth(plainRow) <= view.width);
+	if (fits) {
+		const styled = rows.map(([, row]) => row);
+		if (profileNote) styled.splice(noteAt, 0, paint("dim", profileNote));
+		return styled;
+	}
 
 	// Too narrow for the track (or for the hint line): drop to one stop list and
 	// the shortest usable hint, both clipped, rather than let anything wrap.
-	const clip = (text: string) => [...text].slice(0, view.width).join("");
 	const list = stops.map((s) => s.label);
 	return [
 		paint("accent", clip(TITLE)),
 		clip(list.join(" · ")).replace(list[view.index], (m) => paint("accent", m)),
+		...(profileNote ? [paint("dim", profileNote)] : []),
 		paint("dim", clip(SHORT_HINTS)),
 	];
 }

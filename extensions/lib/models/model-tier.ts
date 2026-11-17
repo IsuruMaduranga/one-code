@@ -6,7 +6,8 @@
  * its non-frontier audience extends *below* Haiku; a single lean prompt
  * under-instructs it. This module maps a model to one of FOUR tiers:
  *
- *   frontier   Claude Code's own short-prompt models, and OpenAI's GPT-6+ Astra and Sol
+ *   frontier   Claude Code's own short-prompt models, OpenAI's GPT-6+ Astra and Sol,
+ *              and Google's Gemini 4+ Carbon and Hydrogen
  *   workhorse  a vendor's large current models — the long register
  *   cheap      a vendor's smaller or older models — the long register
  *   tiny       literally small models — verbose + weak-model scaffolding
@@ -14,7 +15,8 @@
  * `extensions/request/system-prompt` picks the prompt text from the tier;
  * `extensions/tools/search-tools` activates grep/find/ls only for `tiny`, unless
  * the profile turns those tools off (`searchToolsEnabled`). Frontier is a
- * version-gated first-party allowlist; below it the
+ * version-gated allowlist per lab, on the lab's own providers and the known
+ * gateways (`labModel`); below it the
  * tier comes from the public catalogs (`model-catalog.ts`: release date, price
  * and size against the same vendor's current models), with no model names,
  * dollar floors or benchmark scores in the code. Rationale + rejected
@@ -31,8 +33,10 @@ import { autoSelectable, catalogModelFor, isDatedDuplicate, sizeFromName, smallB
 import {
 	anthropicModelId,
 	baseModelId,
+	isBatchEndpoint,
 	isKnownProvider,
 	isExperimentalBuild,
+	isMovingAlias,
 	modelIdentity,
 	modelsContainedToSession,
 	modelSpec,
@@ -61,21 +65,83 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
 	return isPromptTier(raw) ? raw : undefined;
 }
 
+/** The labs with a frontier rule. */
+type FrontierLab = "anthropic" | "openai" | "google";
+
+const FRONTIER_LABS: ReadonlySet<string> = new Set<FrontierLab>(["anthropic", "openai", "google"]);
+
+/** A frontier lab's model as the lab spells its id, and whether the session reaches it directly or through a gateway. */
+interface LabModel {
+	lab: FrontierLab;
+	id: string;
+	via: "first-party" | "gateway";
+}
+
 /**
- * Anthropic first-party frontier gate (Anthropic's provider, or one the
- * profile says serves Anthropic's models): Opus ≥ 4.8, Sonnet ≥ 5.5 and every
- * Fable — the models Claude Code gives its short prompt and tool forms (Opus
- * 4.7 and Sonnet 5 get the long ones; findings §56). Haiku 5 and later get the
- * short forms too, but only for the prompt (`isHaikuWithFrontierForms`).
+ * The frontier lab behind a row and the row's id in the lab's own spelling,
+ * or undefined when the row is no frontier lab's model or its route proves
+ * nothing.
+ *
+ * First party: Anthropic's provider (or one the profile says serves
+ * Anthropic's models, `anthropicModelId`), and a direct provider of OpenAI
+ * (`openai`, `openai-codex`, `azure`, `azure-openai-responses`) or Google
+ * (`google`, `google-vertex`) serving its own vendor's ids.
+ *
+ * Gateway: a provider `providerPolicy` classes as a gateway (`openrouter`,
+ * `vercel-ai-gateway`, `cloudflare-ai-gateway`), where the row names the lab.
+ * OpenRouter and Vercel name all three labs by the id's vendor prefix
+ * (`anthropic/`, `openai/`, `google/`). Cloudflare names only Anthropic and
+ * OpenAI, by API route (`cloudflareGatewayIdentity`): it carries no Gemini
+ * row in pi's catalog, its Google models are Workers AI open models (Gemma),
+ * and its OpenAI-compatible route serves several vendors, so a Gemini id
+ * there proves nothing and the Google gate is out of its reach.
+ * Closed models run only at the lab and its cloud partners, and a gateway
+ * forwards to those, so a gateway copy is the lab's model (decided
+ * 2026-11-17). Hosted and opaque providers stay out: a custom provider whose
+ * id starts with `anthropic/` proves nothing. Refused on purpose: a moving
+ * alias (`~anthropic/claude-opus-latest`), which names no version, and a
+ * batch endpoint (OpenRouter's `:batch`, Vercel's `-batch`), a deferred SKU
+ * no session runs on that keeps its catalog tier (Vercel's are in no
+ * catalog, so lifting them would loosen the permission gate on a guess).
+ * Another endpoint variant (`:thinking`, `:free`, `:online`) is the same
+ * model and reads as its base id; Vercel's `-fast` suffix falls through the
+ * version parse. Anthropic's dotted version on a gateway
+ * (`claude-sonnet-5.5`) is rewritten the way Anthropic writes it
+ * (`claude-sonnet-5-5`).
+ *
+ * Only the tier reads this: Anthropic wire features and server tools stay on
+ * `anthropicModelId` and `acceptsAnthropicWire`, which no gateway passes.
+ */
+function labModel(model: Model<Api>): LabModel | undefined {
+	const anthropic = anthropicModelId(model);
+	if (anthropic !== undefined) return { lab: "anthropic", id: anthropic, via: "first-party" };
+	const policy = providerPolicy(model.provider);
+	if (policy.kind === "direct") {
+		// The provider's own vendor only: Azure's Foundry rows from other vendors are not OpenAI's.
+		const profile = modelIdentity(model).profile;
+		return (profile === "openai" || profile === "google") && profile === policy.profile ? { lab: profile, id: model.id, via: "first-party" } : undefined;
+	}
+	if (policy.kind !== "gateway" || isMovingAlias(model.id) || isBatchEndpoint(model)) return undefined;
+	const identity = modelIdentity(model);
+	if (identity.confidence === "opaque" || identity.profile === undefined || !FRONTIER_LABS.has(identity.profile)) return undefined;
+	const lab = identity.profile as FrontierLab;
+	const id = baseModelId(identity.normalizedId).toLowerCase();
+	return { lab, id: lab === "anthropic" ? id.replace(/^(claude-[a-z]+-\d+)\.(\d{1,2})(?=-|$)/, "$1-$2") : id, via: "gateway" };
+}
+
+/**
+ * Anthropic frontier gate on a lab-spelled id: Opus ≥ 4.8, Sonnet ≥ 5.5 and
+ * every Fable — the models Claude Code gives its short prompt and tool forms
+ * (Opus 4.7 and Sonnet 5 get the long ones; findings §56). Haiku 5 and later
+ * get the short forms too, but only for the prompt (`isHaikuWithFrontierForms`).
  * Claude Code decides this by version, so One Code does too. Adapted from pi-ai's
  * `defaultSupportsToolReferences` — never Haiku, and the `length < 8` guard stops
  * a dated suffix (`claude-opus-4-8-20251101`) being read as the minor version.
  * Version parse, not price: `claude-opus-4-1` ($15/M) costs more than
  * `opus-4-8`/`opus-5` ($5/M), so cost ranking would misclassify it.
  */
-function isAnthropicFrontier(model: Model<Api>): boolean {
-	const id = anthropicModelId(model);
-	if (id === undefined || id.includes("haiku")) return false;
+function isAnthropicFrontier(id: string): boolean {
+	if (id.includes("haiku")) return false;
 	const version = parseClaudeVersion(id);
 	if (!version) return false;
 	if (version.family === "fable") return true;
@@ -84,13 +150,15 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
 }
 
 /**
- * First-party Haiku 5 and later take the frontier prompt and tool forms
- * (findings §68), but nothing else that reads the tier: model selection, the
- * permission gate's fast paths and the doctor judge a Haiku by its catalog
- * tier, so the cost algorithm never offers one as an Opus-class substitute.
+ * Haiku 5 and later take the frontier prompt and tool forms (findings §68),
+ * but nothing else that reads the tier: model selection, the permission
+ * gate's fast paths and the doctor judge a Haiku by its catalog tier, so the
+ * cost algorithm never offers one as an Opus-class substitute. Through a
+ * gateway too: Claude Code chooses the forms by model, and the gateway serves
+ * the same model.
  */
-function isHaikuWithFrontierForms(model: Model<Api>): boolean {
-	const major = anthropicModelId(model)?.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
+function isHaikuWithFrontierForms(id: string): boolean {
+	const major = id.match(/^claude-haiku-(\d+)(?:-|$)/)?.[1];
 	return major !== undefined && Number(major) >= 5;
 }
 
@@ -98,25 +166,70 @@ function isHaikuWithFrontierForms(model: Model<Api>): boolean {
 export type TierPurpose = "prompt" | "capability";
 
 /**
- * OpenAI first-party frontier gate: the GPT-6 Astra and Sol lines and later
- * majors (`gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol-pro`), served by OpenAI
- * itself (the `openai`, `openai-codex` and `azure` providers; `azure-openai-responses`
- * before pi 1.0.3).
- * GPT-5.x Sol and Terra, and every Luna, stay below it (decided 2026-09-25:
- * Astra and Sol 6 are the OpenAI models comparable to Fable and Opus 5). A
- * gateway-proxied copy can't be verified, the same rule as Claude above.
+ * OpenAI frontier gate on a lab-spelled id: the GPT-6 Astra and Sol lines and
+ * later majors (`gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol-pro`). GPT-5.x Sol
+ * and Terra, and every Luna, stay below it (decided 2026-09-25: Astra and
+ * Sol 6 are the OpenAI models comparable to Fable and Opus 5).
  */
-function isOpenAIFrontier(model: Model<Api>): boolean {
-	if (providerPolicy(model.provider).kind !== "direct" || modelIdentity(model).profile !== "openai") return false;
-	const match = model.id.match(/^gpt-(\d+)(?:\.\d+)?-(?:astra|sol)(?:-|$)/);
+function isOpenAIFrontier(id: string): boolean {
+	const match = id.match(/^gpt-(\d+)(?:\.\d+)?-(?:astra|sol)(?:-|$)/);
 	return match !== null && Number(match[1]) >= 6;
 }
 
 /**
- * Structural parse of a first-party Claude model id (`claude-opus-4-8`,
+ * Google frontier gate on a lab-spelled id: the Gemini 4 Carbon and Hydrogen
+ * lines and later majors (decided 2026-11-17, from the Intelligence Index:
+ * Carbon 60 and Hydrogen 54 against Opus 5.5's 59 and Sonnet 5.5's 55).
+ * Gemini 4 Argon (50, beside GPT-6.1 Terra's 51) and every Flash stay at
+ * their catalog tier. pi's catalog lists only `gemini-4-argon` of the line
+ * so far; `gemini-4-carbon` and `gemini-4-hydrogen` are the spellings the
+ * bundled models.dev and OpenRouter catalogs use, so the gate reads the line
+ * name and major the way the OpenAI one does.
+ */
+function isGoogleFrontier(id: string): boolean {
+	const match = id.match(/^gemini-(\d+)(?:\.\d+)?-(?:carbon|hydrogen)(?:-|$)/);
+	return match !== null && Number(match[1]) >= 4;
+}
+
+/**
+ * A smaller variant of a lab's line (`gpt-6-sol-nano`, `gemini-4-hydrogen-lite`,
+ * `claude-sonnet-5.5-mini`, `gemini-4-carbon-flash`): the catalogs' small-model
+ * reading (`smallByName`, a size tag under the tiny bound) or a `mini` or
+ * `flash` tag. No frontier gate admits one, on any provider, so it keeps its
+ * catalog tier or the small-name guess. `-pro`, `-fast`, `-preview` and dated
+ * ids are not small and pass.
+ */
+function isSmallVariant(id: string): boolean {
+	const size = sizeFromName(id);
+	return smallByName(id) || (size !== undefined && size < TINY_PARAMS) || /(?:^|[-/.])(?:mini|flash)(?:[-/.:]|$)/i.test(id);
+}
+
+/** The frontier rule that admits `model` for `purpose`, as the reason the tier report prints, or undefined. */
+function frontierReason(model: Model<Api>, purpose: TierPurpose): string | undefined {
+	const lab = labModel(model);
+	if (!lab || isSmallVariant(lab.id)) return undefined;
+	const reason = (...notes: string[]): string => {
+		const all = lab.via === "gateway" ? [...notes, "gateway"] : notes;
+		return `${lab.lab} frontier allowlist${all.length > 0 ? ` (${all.join(", ")})` : ""}`;
+	};
+	switch (lab.lab) {
+		case "anthropic":
+			if (isAnthropicFrontier(lab.id)) return reason();
+			if (purpose === "prompt" && isHaikuWithFrontierForms(lab.id)) return reason("prompt and tool forms");
+			return undefined;
+		case "openai":
+			return isOpenAIFrontier(lab.id) ? reason() : undefined;
+		case "google":
+			return isGoogleFrontier(lab.id) ? reason() : undefined;
+	}
+}
+
+/**
+ * Structural parse of a Claude model id in Anthropic's spelling (`claude-opus-4-8`,
  * `claude-sonnet-5`, `claude-opus-4-5-20251101`): family, major, minor. A
  * dated suffix is never read as the minor version (the `length < 8` guard).
- * Undefined for anything else. Shared by the frontier gate here and the
+ * Undefined for anything else, a gateway's dotted `claude-opus-5.5` included
+ * (`labModel` rewrites it first). Shared by the frontier gate here and the
  * server-tools gate in `anthropic-server-tools.ts`.
  */
 export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "fable"; major: number; minor: number } | undefined {
@@ -142,9 +255,10 @@ export interface TierClassification {
  * In order:
  *   1. `*_PROMPT_TIER` (the session's register only; selection ignores it);
  *   2. the user's `modelTiers` setting for this model;
- *   3. the Claude Code parity gate: first-party Opus ≥ 4.8, Sonnet ≥ 5.5,
- *      Fable, and OpenAI's GPT-6+ Astra and Sol are frontier; for the prompt
- *      (`purpose: "prompt"`, the default) first-party Haiku ≥ 5 is too;
+ *   3. the frontier allowlist, on a lab's own provider or a known gateway
+ *      (`labModel`): Opus ≥ 4.8, Sonnet ≥ 5.5, Fable, OpenAI's GPT-6+ Astra
+ *      and Sol, and Google's Gemini 4+ Carbon and Hydrogen; for the prompt
+ *      (`purpose: "prompt"`, the default) Haiku ≥ 5 is too;
  *   4. the catalog tier (`model-catalog.ts`): tiny by size, workhorse or cheap
  *      by size or price against the same vendor's current models, demoted one
  *      step by age;
@@ -172,9 +286,8 @@ function classifyWithBasis(model: Model<Api> | undefined, env: NodeJS.ProcessEnv
 	if (!model) return { tier: "tiny", reason: "no model", known: false }; // unknown model → maximum scaffolding
 	const configured = configuredModelTier(model);
 	if (configured) return { tier: configured, reason: "modelTiers setting", known: true };
-	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist", known: true };
-	if (purpose === "prompt" && isHaikuWithFrontierForms(model)) return { tier: "frontier", reason: "anthropic frontier allowlist (prompt and tool forms)", known: true };
-	if (isOpenAIFrontier(model)) return { tier: "frontier", reason: "openai frontier allowlist", known: true };
+	const frontier = frontierReason(model, purpose);
+	if (frontier) return { tier: "frontier", reason: frontier, known: true };
 	const entry = catalogModelFor(model);
 	if (entry) return { tier: entry.tier, reason: `catalog ${entry.id}: ${entry.reason}`, known: true };
 	const id = baseModelId(model.id);

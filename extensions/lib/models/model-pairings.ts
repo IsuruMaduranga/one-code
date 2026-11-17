@@ -17,9 +17,10 @@
  * decimal, as Artificial Analysis publishes them, and include the bar itself.
  * A deprecated or unscored model is never a pick, and an unscored session
  * model gets no row. `"session"` keeps the
- * session's own model, which also overrides the cost algorithm. A model the
- * table does not name goes to the cost algorithm (`model-tier.ts`
- * `sameTierContainedCandidates`).
+ * session's own model, which also overrides the cost algorithm. A `-pro` or
+ * `-fast` SKU of a model the table names pairs like that model (`rowFor`).
+ * Any other model the table does not name goes to the cost algorithm
+ * (`model-tier.ts` `sameTierContainedCandidates`).
  *
  * The table knows only what existed on PAIRINGS_AS_OF. When the session's
  * provider serves a model of the session's vendor released after that date,
@@ -112,6 +113,22 @@ const AS_OF_TIME = Date.parse(`${PAIRINGS_AS_OF}T23:59:59Z`);
 export type Pairing = { kind: "session" } | { kind: "model"; model: Model<Api> };
 
 /**
+ * The table's row for a session's catalog id: its own, else, for a `-pro` or
+ * `-fast` SKU of a line the table names (`openai/gpt-6.1-sol-pro`), the base
+ * line's row with the base model (`base`), so the SKU pairs like its base
+ * line. Where that row keeps the session's own model, the SKU gets the base
+ * model, the same model at its usual price.
+ */
+function rowFor(catalogId: string): { row: PairingRow; base?: string } | undefined {
+	const id = catalogId.toLowerCase();
+	const own = ROW_BY_SESSION.get(id);
+	if (own) return { row: own };
+	const base = id.replace(/-(?:pro|fast)$/, "");
+	const row = base === id ? undefined : ROW_BY_SESSION.get(base);
+	return row ? { row, base } : undefined;
+}
+
+/**
  * The table's pick for `role` on `sessionModel`, or undefined when the table
  * does not decide: no row names the session model, the session's provider
  * serves a model of its vendor released after PAIRINGS_AS_OF, or no model in
@@ -135,8 +152,8 @@ export function pairedModel(
 	opts: { contained?: Model<Api>[]; requireImageInput?: boolean; price?: ModelPrice; accept?: (model: Model<Api>) => boolean } = {},
 ): Pairing | undefined {
 	const sessionEntry = catalogModelFor(sessionModel);
-	const row = sessionEntry && ROW_BY_SESSION.get(sessionEntry.id.toLowerCase());
-	if (!sessionEntry || !row) return undefined;
+	const found = sessionEntry && rowFor(sessionEntry.id);
+	if (!sessionEntry || !found) return undefined;
 	const pool = opts.contained ?? modelsContainedToSession(available, sessionModel);
 	const served = servedCatalogIds(pool);
 	const selectable = pool.filter((model) => isAutoSelectable(model, served));
@@ -149,7 +166,7 @@ export function pairedModel(
 	});
 	if (newer) return undefined;
 	const usable = selectable.filter((model) => !isDatedDuplicate(model, pool));
-	const pick = row[role];
+	const pick = found.row[role] === SESSION ? (found.base ?? SESSION) : found.row[role];
 	if (pick === SESSION) return { kind: "session" };
 	const wanted = pick.toLowerCase();
 	const accept = opts.accept ?? (() => true);
