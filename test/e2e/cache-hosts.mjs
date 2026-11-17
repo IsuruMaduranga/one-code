@@ -32,8 +32,14 @@ export const DEFAULT_BLOCK = 256;
  * Morph, 2026-11-16: classifier prompts that grew read 31,232, 30,720 and
  * 30,208 of 31,607, 31,084 and 30,610 (61, 60 and 59 blocks of 512), where
  * 1,024-token blocks would have read 30,720, 30,720 and 29,696.
+ * Relace, 2026-11-17: reads are whole 256-token blocks, but the last `tail`
+ * tokens of the prompt it reads from are never read: 20 pinned requests of
+ * 1,527 to 4,320 tokens (prefixes, a repeat and a growing prompt) each read
+ * 256 x floor((prompt - k) / 256) with k 261 or 262 (a repeat of 2,990 read
+ * 2,560), and so did the matrix reads of 31,744 and 7,424. So a read falls
+ * 261 to 517 tokens short, past one block.
  */
-export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] } };
+export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] }, Relace: { block: 256, offsets: [0], tail: 262 } };
 
 /**
  * Waits before each retry of a lookup that 404'd (OpenRouter records a
@@ -104,13 +110,13 @@ export async function lookupHosts(ids) {
 
 /**
  * The shortfall a read may have under the host that served it: the host's
- * block when the host is measured and `read` is a whole number of its blocks
- * after one of its offsets, else `DEFAULT_BLOCK`.
+ * block plus its unread tail when the host is measured and `read` is a whole
+ * number of its blocks after one of its offsets, else `DEFAULT_BLOCK`.
  */
 export function allowance(lookup, read) {
 	const measured = lookup?.host ? MEASURED_HOSTS[lookup.host] : undefined;
 	if (!measured || read <= 0) return DEFAULT_BLOCK;
-	return measured.offsets.some((offset) => (read + offset) % measured.block === 0) ? Math.max(DEFAULT_BLOCK, measured.block) : DEFAULT_BLOCK;
+	return measured.offsets.some((offset) => (read + offset) % measured.block === 0) ? Math.max(DEFAULT_BLOCK, measured.block + (measured.tail ?? 0)) : DEFAULT_BLOCK;
 }
 
 /** The note a line carries: the host, or why it is unknown; empty for a request that did not go through OpenRouter. */

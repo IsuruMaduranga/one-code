@@ -21,6 +21,17 @@ describe("allowance", () => {
 		expect(allowance({ host: "Morph" }, 28_639)).toBe(DEFAULT_BLOCK);
 	});
 
+	it("allows a 256-token block plus the unread tail on Relace for whole blocks", () => {
+		expect(MEASURED_HOSTS.Relace).toEqual({ block: 256, offsets: [0], tail: 262 });
+		// Matrix reads: 31,744 of a 32,193-token prompt (short 449) and 7,424 of 7,734 (short 310); pinned 2,048 of 2,564 (short 516).
+		for (const [prompt, read] of [[32_193, 31_744], [7_734, 7_424], [2_564, 2_048]]) {
+			const allowed = allowance({ host: "Relace" }, read);
+			expect(allowed, String(read)).toBe(518);
+			expect(prompt - read, String(read)).toBeLessThanOrEqual(allowed);
+		}
+		expect(allowance({ host: "Relace" }, 7_425)).toBe(DEFAULT_BLOCK);
+	});
+
 	it("keeps the default on OpenInference for a read that is not whole blocks, or nothing", () => {
 		expect(allowance({ host: "OpenInference" }, 28_640)).toBe(DEFAULT_BLOCK);
 		expect(allowance({ host: "OpenInference" }, 0)).toBe(DEFAULT_BLOCK);
