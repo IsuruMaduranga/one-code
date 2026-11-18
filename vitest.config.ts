@@ -1,9 +1,13 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 export default defineConfig({
 	test: {
+		// A git worktree left under .claude/worktrees (live probes, agent
+		// isolation) holds a whole copy of the suite: collected too, it ran the
+		// suite three times over and hung it (2026-11-18).
+		exclude: [...configDefaults.exclude, ".claude/worktrees/**"],
 		// Unit tests run with an EMPTY model catalog so a fake row is never
 		// classified by the real catalog entry behind the same id (and the suite
 		// does not drift when the bundled catalogs are regenerated). The
