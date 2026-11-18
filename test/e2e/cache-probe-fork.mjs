@@ -67,8 +67,10 @@ const fail = (text) => {
 	process.exit(1);
 };
 
-const mainFile = jsonlIn(dir)[0];
-if (!mainFile) fail(`no main session file in ${dir}`);
+const mainFiles = jsonlIn(dir);
+if (mainFiles.length === 0) fail(`no main session file in ${dir}`);
+if (mainFiles.length > 1) fail(`${mainFiles.length} main session files in ${dir}: one run per session dir`);
+const mainFile = mainFiles[0];
 const spawn = assistants(mainFile).find(({ message }) => Array.isArray(message.content) && message.content.some((block) => block?.type === "toolCall" && block.name === "Agent"));
 if (!spawn) fail("the parent never called Agent (the model did not fork)");
 

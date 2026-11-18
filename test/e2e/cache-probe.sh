@@ -203,7 +203,7 @@ if [ "$FORK" = 1 ]; then
 	probe_project "$WORK/fork-project" websocket
 	(
 		cd "$WORK/fork-project"
-		node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} --model "$MODEL" --mode json --session-dir "$WORK/fork-sessions" -p 'Call the Agent tool exactly once, with subagent_type "fork" and this prompt: "Run echo fork-probe with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' > "$WORK/fork-events.jsonl" 2> "$WORK/fork-stderr.log"
+		WIRE_AUTH_DUMP="$AUTH_DUMP" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ${PHASE_DUMP[@]+"${PHASE_DUMP[@]}"} --model "$MODEL" --mode json --session-dir "$WORK/fork-sessions" -p 'Call the Agent tool exactly once, with subagent_type "fork" and this prompt: "Run echo fork-probe with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' > "$WORK/fork-events.jsonl" 2> "$WORK/fork-stderr.log"
 	) || echo "pi exited non-zero in the fork phase (see $WORK/fork-stderr.log)"
 	node "$REPO/test/e2e/cache-probe-fork.mjs" "$WORK/fork-sessions" --model "$MODEL" || status=1
 fi
@@ -216,10 +216,10 @@ if [ "$LATE_TOOL" = 1 ]; then
 	WIRE_AUTH_DUMP="$AUTH_DUMP" CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" ${LATE_FORM[@]+"${LATE_FORM[@]}"} || status=1
 fi
 if [ -n "$EXPECT_AUTH" ] && [ "$ONE_MODEL" = 1 ]; then
-	echo "--- credential and model check (session, auto-mode and late-tool phases)"
+	echo "--- credential and model check (session, auto-mode, fork and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
 elif [ -n "$EXPECT_AUTH" ]; then
-	echo "--- credential check (session, auto-mode and late-tool phases)"
+	echo "--- credential check (session, auto-mode, fork and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" || status=1
 fi
 exit $status

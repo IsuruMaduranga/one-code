@@ -464,24 +464,25 @@ export class SubagentRuntime {
 		// Told once, when the agent starts: a resume continues a session that heard it.
 		const flagsNote = removed.length > 0 && agent && !spec.sessionFile ? subagentResultText().toolsLeftOut({ name: agent.name, tools: removed }) : undefined;
 		const fork = SubagentRuntime.isFork(spec);
-		// A fork's SendMessage takes the parent's schema (send-to-main-tool.ts).
-		const parentSendMessage = fork ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined;
+		// A fork that extends its parent's captured request: its SendMessage takes the parent's schema (send-to-main-tool.ts).
+		const parentSendMessage = fork && spec.parentRequest ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
+			const sessionManager = newSessionManager();
 			const session = await openChildSession({
 				loader,
 				session: {
 					cwd: spec.cwd,
 					agentDir: getAgentDir(),
 					// A fork's Codex requests go out under its parent's session id, so they read the parent's cache.
-					modelRuntime: fork && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId) : this.modelRuntime,
+					modelRuntime: fork && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId, () => sessionManager.getSessionId()) : this.modelRuntime,
 					model: resolvedModel as never,
 					thinkingLevel: spec.thinking as never,
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All
 					// tools except …" shape), which filters injected customTools too.
 					...agentToolOptions(agent),
 					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s), parentSendMessage), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
-					sessionManager: newSessionManager(),
+					sessionManager,
 				},
 				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",
 				onError: (error) => this.onExtensionError(spec.name, error),

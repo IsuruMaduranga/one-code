@@ -47,7 +47,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
-import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
+import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
@@ -74,7 +74,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		// Every other extension has registered its tools by session start.
 		pi.on("session_start", () => {
 			const own = new Set(pi.getAllTools().map((tool) => tool.name));
-			const declared = forkBaselineNames(capture.payload, capture.api);
+			const declared = captureDeclarations(capture);
 			const parameters = new Map(parentTools.map((tool) => [tool.name, tool.parameters]));
 			const registryName = registryNameOnWire([...parameters.keys()], declared);
 			for (const wireName of declared) {

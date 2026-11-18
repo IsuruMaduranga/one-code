@@ -84,7 +84,7 @@ describe("cache-probe matrix login leg (offline CLI)", () => {
 			});
 			expect(result.error).toBeUndefined();
 			expect(result.stdout).toContain("--- late-tool phase");
-			expect(result.stdout).toContain("--- credential and model check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).toContain("--- credential and model check (session, auto-mode, fork and late-tool phases)");
 			const calls = readFileSync(invocations, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
 			const late = calls.find((args) => args.some((arg) => arg.endsWith("late-tool-fixture.ts")));
 			expect(late).toBeDefined();
@@ -108,7 +108,7 @@ describe("cache-probe credential check (offline CLI)", () => {
 				env: { ...inheritedEnv(), PI_BIN: cli, TMPDIR: root, PROBE_INVOCATIONS: join(root, "invocations.jsonl") },
 			});
 			expect(result.error).toBeUndefined();
-			expect(result.stdout).toContain("--- credential check (session, auto-mode and late-tool phases)");
+			expect(result.stdout).toContain("--- credential check (session, auto-mode, fork and late-tool phases)");
 			expect(result.stdout).not.toContain("model check");
 		} finally {
 			rmSync(root, { recursive: true, force: true });

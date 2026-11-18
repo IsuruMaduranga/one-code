@@ -329,7 +329,7 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 		failure,
 		noOutput: "(Subagent completed but returned no output.)",
 		forkToolUnavailable: ({ tool }) =>
-			`${tool} is not available in a fork: only the main conversation can use it, and this fork's own work runs in the foreground. Do the task without it, and say in your report if you needed it.`,
+			`${tool} is not available in a fork: only the main conversation can use it. Do the task without it, and say in your report if you needed it.`,
 		modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 		renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
 		toolsLeftOut: (p) => product.toolsLeftOut(p),
