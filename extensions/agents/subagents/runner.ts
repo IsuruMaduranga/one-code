@@ -30,7 +30,7 @@ import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFl
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
 import type { RequestCapture } from "../../lib/side-calls/request-replay.ts";
-import { forkCacheExtension } from "./fork-cache.ts";
+import { forkCacheExtension, type ParentTool } from "./fork-cache.ts";
 import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
@@ -89,6 +89,8 @@ interface ChildSessionSpec {
 	 * built from it so the fork reads the parent's prompt cache (fork-cache.ts).
 	 */
 	parentRequest?: RequestCapture;
+	/** The parent's registered tools, for a fork to stub the ones its own session lacks (fork-cache.ts). */
+	parentTools?: readonly ParentTool[];
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
 	sessionFile?: string;
 	/** Where a new run's persisted session lands; falls back to an in-memory session. */
@@ -336,7 +338,7 @@ export class SubagentRuntime {
 				// child's own bus; the turn's outcome carries it to the parent's notification.
 				turnFailureExtension(handback),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
-				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
+				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools ?? [])] : []),
 			],
 			// instructions (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.

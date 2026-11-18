@@ -17,6 +17,27 @@
  * - `before_provider_headers` sends the parent's session-affinity headers, so a
  *   gateway such as OpenRouter routes the fork to the host holding the cache.
  *
+ * The parent's tools block declares tools only the main conversation has
+ * (ask_user_question, list_agents, workflow, yield on a model offered it), so a
+ * fork's model can call one its own session lacks, and pi answers "tool not
+ * found". At session start the fork registers a stub for each such tool, which
+ * refuses with what to do instead (`forkToolUnavailable`). The wire keeps the
+ * parent's tools block, byte for byte, on both of a fork's paths:
+ *
+ * - Only a tool the capture declares gets a stub (its wire name mapped to the
+ *   parent's registry name, `registryNameOnWire`), so the splice below never
+ *   adds one: it appends only tools the parent did not declare.
+ * - Each stub takes the parent tool's own `parameters`, so the fork's ledger,
+ *   which extends the parent's recorded request (`decisions/caching.md`),
+ *   keeps the recorded declaration: it puts a live one in its place only when
+ *   the input schema differs (lib/request/ledger/wire.ts mergeDeclarations).
+ *   This holds while a stubbed tool's rendering depends on its name and
+ *   parameters alone; of One Code's tools only pi's read, edit, write and bash
+ *   set `constrainedSampling`, and every fork has those.
+ *
+ * A request that goes out whole (below) carries the stubs, which mirror the
+ * parent's tools.
+ *
  * Both steps check the same thing first (the capture's model and its boundary
  * message in this context); when either fails, or the tail leaves less than
  * `MIN_REPLAY_OUTPUT_TOKENS` of the captured output room, the request goes out
@@ -28,13 +49,22 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
+import { subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { registryNameOnWire } from "../../lib/request/deferred.ts";
+
+/** One of the parent's registered tools, as a fork needs it to stand in for the tool. */
+export interface ParentTool {
+	name: string;
+	parameters: unknown;
+}
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 
 /** The APIs whose fork splice (`forkRequestPayload`) handles the body's shape. */
 const SPLICED_FORK_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-completions", "openai-responses", "azure-openai-responses", "openai-codex-responses"]);
 
-export function forkCacheExtension(capture: RequestCapture) {
+export function forkCacheExtension(capture: RequestCapture, parentTools: readonly ParentTool[] = []) {
 	return (pi: ExtensionAPI) => {
 		// The fork advertises the parent's tools, where SendMessage is deferred
 		// (agents/subagents/index.ts). Defer the fork's own SendMessage the same way, so a
@@ -42,6 +72,29 @@ export function forkCacheExtension(capture: RequestCapture) {
 		// appends it, and elsewhere the parent's compatible schema (to: "main")
 		// already declares it. Inline extensions load after tool-search.
 		deferBaseTool(pi.events, "SendMessage", ["message", "main", "report", "progress"]);
+		// Every other extension has registered its tools by session start.
+		pi.on("session_start", () => {
+			const own = new Set(pi.getAllTools().map((tool) => tool.name));
+			const declared = forkBaselineNames(capture.payload, capture.api);
+			const registryName = registryNameOnWire(parentTools.map((tool) => tool.name), declared);
+			const parameters = new Map(parentTools.map((tool) => [tool.name, tool.parameters]));
+			for (const wireName of declared) {
+				const tool = registryName(wireName);
+				if (tool === undefined || own.has(tool) || !parameters.has(tool)) continue;
+				own.add(tool);
+				pi.registerTool({
+					name: tool,
+					label: tool,
+					...toolRenderers(tool),
+					description: subagentResultText().forkToolUnavailable({ tool }),
+					parameters: parameters.get(tool) as never,
+					async execute() {
+						return { content: [{ type: "text", text: subagentResultText().forkToolUnavailable({ tool }) }], details: {}, isError: true };
+					},
+				});
+			}
+		});
+
 		/** Set by the context step for the request it shaped; the payload step splices only then. */
 		let shaped = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */

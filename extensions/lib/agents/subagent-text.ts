@@ -123,6 +123,8 @@ export interface SubagentsResultText {
 	failure(failure: RunFailure): string;
 	/** The report of a run that finished without writing anything. */
 	noOutput: string;
+	/** A fork's call to a tool its parent's request declares but only the main conversation has (agents/subagents/fork-cache.ts). */
+	forkToolUnavailable(p: { tool: string }): string;
 	/** The note when a run fell back to the session model. */
 	modelFallback(p: { model?: string; osMessage: string; fallback: string }): string;
 	/** A requested run name already taken. */
@@ -326,6 +328,8 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			problem.kind === "sessionEnded" ? "the session ended before the agent started" : `could not start the subagent runtime: ${problem.osMessage}`,
 		failure,
 		noOutput: "(Subagent completed but returned no output.)",
+		forkToolUnavailable: ({ tool }) =>
+			`${tool} is not available in a fork: only the main conversation can use it, and this fork's own work runs in the foreground. Do the task without it, and say in your report if you needed it.`,
 		modelFallback: ({ model, osMessage, fallback }) => `Subagent model ${model ?? "(none)"} was unavailable (${osMessage}); ran on the session model ${fallback} instead.`,
 		renamed: ({ wanted, takenBy, name }) => `Note: the name "${wanted}" is already used by task ${takenBy} in this session; this run is named "${name}".`,
 		toolsLeftOut: (p) => product.toolsLeftOut(p),

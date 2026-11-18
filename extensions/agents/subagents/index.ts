@@ -87,6 +87,7 @@ import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Work
 import type { SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
 import { textForModel } from "../../lib/agents/child-extensions.ts";
+import type { ParentTool } from "./fork-cache.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";
 import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
@@ -1501,6 +1502,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * last request, for the cache), saved beside its session so a SendMessage
 	 * can resume it later. Undefined for a named agent.
 	 */
+	/** This session's registered tools, for a fork to stub the ones only the main conversation has (fork-cache.ts). */
+	const parentTools = (): ParentTool[] => pi.getAllTools().map(({ name, parameters }) => ({ name, parameters }));
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
 		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);
@@ -1807,6 +1810,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentTools: parentRequest ? parentTools() : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1982,6 +1986,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentTools: parentRequest ? parentTools() : undefined,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2679,6 +2684,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			parentTools: record.agent === FORK_AGENT ? parentTools() : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
 			model: record.model,
