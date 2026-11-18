@@ -6,8 +6,8 @@
  * with the permission mode. One Code keys the same split on the model's tier
  * (`working-docs/decisions/system-prompt.md`, "Four registers"): frontier and
  * workhorse get the short forms, cheap and tiny the long ones, on every
- * provider. A description that names yield also follows whether the model is
- * offered it (`ModelFacts`, lib/models/model-family.ts yieldOffered).
+ * provider. A description that names a model-gated tool also follows whether
+ * the model is offered it (lib/models/model-family.ts toolsWithheldFrom).
  *
  * pi copies a tool's description when the tool is registered, so a tool whose
  * text depends on the session is registered again when that text changes
@@ -22,7 +22,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../models/model-tier.ts";
 import { sessionModelTier } from "../models/session-model-tier.ts";
-import { yieldOffered } from "../models/model-family.ts";
+import { toolsWithheldFrom } from "../models/model-family.ts";
 
 /** Which of Claude Code's description forms a tool carries. */
 export type DescriptionForm = "short" | "long";
@@ -60,18 +60,16 @@ export function registerFormTool(pi: ExtensionAPI, tool: AnyToolDefinition, desc
 	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: describe(form) })));
 }
 
-/** The session model's facts a description follows, frozen at session and model boundaries. */
-export interface ModelFacts {
-	/** The model is offered the yield tool (lib/models/model-family.ts yieldOffered): text naming yield keeps it. */
-	yield: boolean;
-}
-
-/** Apply the frozen session tier's form (and the tier and model facts it came from) only at session and model boundaries. */
-export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm, tier: PromptTier, facts: ModelFacts) => void): void {
+/**
+ * Apply the frozen session tier's form (and the tier it came from, and the
+ * tools the model is not offered, `toolsWithheldFrom`) only at session and
+ * model boundaries.
+ */
+export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm, tier: PromptTier, withheld: readonly string[]) => void): void {
 	const requestTier = sessionModelTier(pi);
 	const follow = (model: Model<Api> | undefined) => {
 		const tier = requestTier();
-		apply(descriptionForm(tier), tier, { yield: yieldOffered(model) });
+		apply(descriptionForm(tier), tier, toolsWithheldFrom(model));
 	};
 	pi.on("session_start", (_event, ctx) => follow(ctx.model));
 	pi.on("model_select", (event) => follow(event.model));

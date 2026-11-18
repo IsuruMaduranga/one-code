@@ -1,6 +1,6 @@
 /**
  * yield is offered only to models outside the Claude family
- * (lib/models/model-family.ts yieldOffered): a Claude model waits the way
+ * (lib/models/model-family.ts toolsWithheldFrom): a Claude model waits the way
  * Claude Code's default does, by ending its turn. The tool leaves the active
  * set on a Claude model, and the Agent, bash and monitor descriptions leave out
  * the passages naming it, switching at session and model boundaries. The TUI
@@ -12,34 +12,39 @@ import backgroundExtension from "../../extensions/tools/background/index.ts";
 import bashExtension from "../../extensions/tools/bash/index.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { textForModel } from "../../extensions/lib/agents/child-extensions.ts";
-import { yieldOffered } from "../../extensions/lib/models/model-family.ts";
+import { toolsWithheldFrom, withOfferedTools } from "../../extensions/lib/models/model-family.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
-import { withYield } from "../../extensions/tools/background/yield-wait.ts";
 import { hiddenToolRenderers } from "../../extensions/lib/ui/tui-render.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const claude = { provider: "anthropic", id: "claude-sonnet-5-5", input: ["text"], cost: { input: 3, output: 15 } };
 const gpt = { provider: "openai", id: "gpt-6.1-terra", input: ["text"], cost: { input: 3, output: 15 } };
 
-describe("yieldOffered", () => {
-	it("offers yield to every model outside the Claude family, on any provider", () => {
-		expect(yieldOffered({ provider: "anthropic", id: "claude-opus-5-5" })).toBe(false);
-		expect(yieldOffered({ provider: "openrouter", id: "anthropic/claude-sonnet-5-5" })).toBe(false);
-		expect(yieldOffered({ provider: "amazon-bedrock", id: "us.anthropic.claude-haiku-5-5" })).toBe(false);
-		expect(yieldOffered({ provider: "openai", id: "gpt-6.1-terra" })).toBe(true);
-		expect(yieldOffered({ provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" })).toBe(true);
-		expect(yieldOffered(undefined)).toBe(true);
+describe("toolsWithheldFrom", () => {
+	it("withholds yield from Claude-family models on any provider, and nothing from the rest", () => {
+		expect(toolsWithheldFrom({ provider: "anthropic", id: "claude-opus-5-5" })).toEqual(["yield"]);
+		expect(toolsWithheldFrom({ provider: "openrouter", id: "anthropic/claude-sonnet-5-5" })).toEqual(["yield"]);
+		expect(toolsWithheldFrom({ provider: "amazon-bedrock", id: "us.anthropic.claude-haiku-5-5" })).toEqual(["yield"]);
+		expect(toolsWithheldFrom({ provider: "openai", id: "gpt-6.1-terra" })).toEqual([]);
+		expect(toolsWithheldFrom({ provider: "openrouter", id: "deepseek/deepseek-v4.1-flash" })).toEqual([]);
+		expect(toolsWithheldFrom(undefined)).toEqual([]);
 	});
 });
 
-describe("withYield", () => {
-	it("adds or removes yield, keeps the other names in order, and returns the same list when nothing changes", () => {
+describe("withOfferedTools", () => {
+	const live = (tool: string) => tool !== "off";
+	it("removes a withheld tool, appends an offered one, keeps the other names in order, and returns the same list when nothing changes", () => {
 		const active = ["read", "bash", "Agent"];
-		expect(withYield(active, false)).toBe(active);
-		expect(withYield(active, true)).toEqual(["read", "bash", "Agent", "yield"]);
+		expect(withOfferedTools(active, ["yield"], ["yield"], live)).toBe(active);
+		expect(withOfferedTools(active, ["yield"], [], live)).toEqual(["read", "bash", "Agent", "yield"]);
 		const withIt = ["read", "yield", "bash"];
-		expect(withYield(withIt, true)).toBe(withIt);
-		expect(withYield(withIt, false)).toEqual(["read", "bash"]);
+		expect(withOfferedTools(withIt, ["yield"], [], live)).toBe(withIt);
+		expect(withOfferedTools(withIt, ["yield"], ["yield"], live)).toEqual(["read", "bash"]);
+	});
+
+	it("never adds a tool the session cannot have", () => {
+		const active = ["read"];
+		expect(withOfferedTools(active, ["off"], [], live)).toBe(active);
 	});
 });
 
@@ -58,8 +63,8 @@ describe("the session's model decides yield", () => {
 			monitor: fake.tools.get("monitor")!.description,
 		});
 		const expected = (yieldOn: boolean) => ({
-			Agent: textForModel("subagents", yieldOn).agentDescription({ form: "short", configDir: projectConfigDirName() }),
-			monitor: textForModel("background", yieldOn).monitor.description,
+			Agent: textForModel("subagents", yieldOn ? [] : ["yield"]).agentDescription({ form: "short", configDir: projectConfigDirName() }),
+			monitor: textForModel("background", yieldOn ? [] : ["yield"]).monitor.description,
 		});
 		return { fake, descriptions, expected };
 	}

@@ -68,24 +68,7 @@ export function waitForBackground(probes: YieldProbes, signal: AbortSignal | und
 			check();
 		});
 		signal?.addEventListener("abort", check, { once: true });
-		const first = yieldEnd(probes, false, signal?.aborted === true, 0, capMs);
-		if (first) {
-			clearInterval(timer);
-			unsubscribe();
-			signal?.removeEventListener("abort", check);
-			resolve(first);
-			return;
-		}
 		timer = setInterval(check, POLL_MS);
+		check();
 	});
-}
-
-/**
- * The active-tool list with yield in it when `offered`, and out of it
- * otherwise; the same array when nothing changes, so the caller sets the
- * tools only on a change. The order of the other names is kept.
- */
-export function withYield(active: string[], offered: boolean): string[] {
-	if (offered === active.includes("yield")) return active;
-	return offered ? [...active, "yield"] : active.filter((name) => name !== "yield");
 }

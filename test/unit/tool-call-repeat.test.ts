@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { REPEAT_LIMITS, repeatLimit, repeatingUnit, trailingRepeat, type RepeatTail } from "../../extensions/request/tool-call-corruption/repeat.ts";
+import { REPEAT_CHECK_EVERY, REPEAT_LIMITS, repeatLimit, repeatingUnit, trailingRepeat, type RepeatTail } from "../../extensions/request/tool-call-corruption/repeat.ts";
 
 /** Stream `raw` in `chunk`-sized deltas; the first runaway seen, with how many characters had streamed by then. */
 function stream(raw: string, limit: number, chunk = 17): { unit: string; at: number } | undefined {
@@ -9,7 +9,7 @@ function stream(raw: string, limit: number, chunk = 17): { unit: string; at: num
 	for (let at = 0; at < raw.length; at += chunk) {
 		const result = trailingRepeat(state, raw.slice(at, at + chunk), limit);
 		state = result.state;
-		if (result.runaway) return { unit: result.runaway.unit, at: Math.min(at + chunk, raw.length) };
+		if (result.unit !== undefined) return { unit: result.unit, at: Math.min(at + chunk, raw.length) };
 	}
 	return undefined;
 }
@@ -61,6 +61,7 @@ describe("a tool call's arguments ending in one unit repeated", () => {
 	it("keeps only the tail it needs, whatever the call's size", () => {
 		let state: RepeatTail | undefined;
 		for (let i = 0; i < 2_000; i++) state = trailingRepeat(state, `row ${i} of a long call\n`, REPEAT_LIMITS.short).state;
-		expect(state!.tail.length).toBeLessThanOrEqual(REPEAT_LIMITS.short + 64);
+		// What the last check kept, plus what streamed since (under one check's worth and one delta).
+		expect(state!.tail.length).toBeLessThanOrEqual(REPEAT_LIMITS.short + 64 + REPEAT_CHECK_EVERY + 32);
 	});
 });

@@ -2439,10 +2439,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	// A model yield is not offered to hears no passage naming it (lib/models/model-family.ts yieldOffered).
-	const describeAgent = (form: DescriptionForm, yieldOn: boolean) => textForModel("subagents", yieldOn).agentDescription({ form, configDir: projectConfigDirName() });
-	const setAgentDescription = registerVariantTool<string>(pi, describeAgent("short", true), (description) => ({ ...agentTool, description }));
-	followDescriptionForm(pi, (form, _tier, facts) => setAgentDescription(describeAgent(form, facts.yield)));
+	const describeAgent = (form: DescriptionForm, withheld: readonly string[]) => textForModel("subagents", withheld).agentDescription({ form, configDir: projectConfigDirName() });
+	const setAgentDescription = registerVariantTool<string>(pi, describeAgent("short", []), (description) => ({ ...agentTool, description }));
+	followDescriptionForm(pi, (form, _tier, withheld) => setAgentDescription(describeAgent(form, withheld)));
 
 	const SendMessageParams = Type.Object({
 		to: Type.String({ description: words.sendMessageParams.to }),

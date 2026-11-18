@@ -96,7 +96,7 @@ import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type A
 import { requireText, toolLive } from "../../lib/profile/profile.ts";
 import { textForModel } from "../../lib/agents/child-extensions.ts";
 import { followDescriptionForm, registerVariantTool } from "../../lib/profile/tool-variants.ts";
-import { yieldOffered } from "../../lib/models/model-family.ts";
+import { toolsWithheldFrom, withOfferedTools } from "../../lib/models/model-family.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../lib/plugins/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../lib/plugins/skill-scan.ts";
@@ -113,7 +113,7 @@ import { extensionVersion } from "../../lib/app/package-version.ts";
 import { spawnOwnedShell, STORED_OUTPUT_CAP, tailCap } from "../../lib/shell-run/bash-background.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
 import type { YieldEnd } from "./text.ts";
-import { waitForBackground, withYield } from "./yield-wait.ts";
+import { waitForBackground } from "./yield-wait.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
@@ -792,17 +792,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	// yield is active only for a model it is offered to; the monitor description names it only then.
-	const followYield = (model: Model<Api> | undefined) => {
-		if (!toolLive("yield")) return;
+	const followModel = (model: Model<Api> | undefined) => {
 		const active = pi.getActiveTools();
-		const next = withYield(active, yieldOffered(model));
-		if (next !== active) pi.setActiveTools(next);
+		const next = withOfferedTools(active, ["yield"], toolsWithheldFrom(model), toolLive);
+		if (next !== active) pi.setActiveTools([...next]);
 	};
-	pi.on("session_start", (_event, ctx) => followYield(ctx.model));
-	pi.on("model_select", (event) => followYield(event.model));
+	pi.on("session_start", (_event, ctx) => followModel(ctx.model));
+	pi.on("model_select", (event) => followModel(event.model));
 	// pi restores the selected branch's tool loadout at a /tree switch.
-	pi.on("session_tree", (_event, ctx) => followYield(ctx.model));
-	followDescriptionForm(pi, (_form, _tier, facts) => setMonitorDescription(textForModel("background", facts.yield).monitor.description));
+	pi.on("session_tree", (_event, ctx) => followModel(ctx.model));
+	followDescriptionForm(pi, (_form, _tier, withheld) => setMonitorDescription(textForModel("background", withheld).monitor.description));
 
 	// One wait per reply, as in Claude Code: a second yield in the same reply returns at once.
 	let yieldedInReply = false;
@@ -811,7 +810,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	// Claude Code 2.1.327's flagged `Yield` (findings §94), offered to every
-	// model outside the Claude family (lib/models/model-family.ts yieldOffered):
+	// model outside the Claude family (lib/models/model-family.ts toolsWithheldFrom):
 	// one blocking call for a model that wants to wait for an agent, a shell or
 	// a monitor, instead of polling. It ends when a notification is handed to pi
 	// (delivered right after this result), the user queues a message, a
@@ -819,10 +818,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 	// aborted, or the cap passes; the reason rides the result as a reminder.
 	// The TUI draws no row for it: the spinner and the agent rows already show
 	// the wait, and the notification follows it.
+	const yieldLabel = "Wait for background work";
 	pi.registerTool({
 		name: "yield",
-		label: "Wait for background work",
-		...hiddenToolRenderers("Wait for background work"),
+		label: yieldLabel,
+		...hiddenToolRenderers(yieldLabel),
 		description: text.yield.description,
 		parameters: Type.Object({}),
 		// After an Agent or bash call in the same reply, so the work it waits for is registered.
@@ -856,7 +856,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			}
 			const resumed = text.yield.resumed({ waitedMs: Date.now() - startedAt, end });
 			pi.events.emit(REMINDER_CHANNEL, { text: resumed, toolCallId } satisfies ReminderPayload);
-			return { content: [{ type: "text", text: text.yield.ended }], details: { end: end.kind, resumed } };
+			return { content: [{ type: "text", text: text.yield.ended }], details: { end: end.kind } };
 		},
 	});
 

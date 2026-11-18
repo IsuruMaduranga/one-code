@@ -6,7 +6,7 @@
  * like progress, and Claude Code's own watchdogs would not either.
  *
  * Fed one streamed delta at a time, it keeps only the tail it needs and checks
- * it every CHECK_EVERY characters, walking back from the end for each
+ * it every REPEAT_CHECK_EVERY characters, walking back from the end for each
  * candidate period, so ordinary text fails a candidate within a few
  * characters. A unit of blank space alone is left to `trailingPadding`, which
  * judges padding by whether it could sit inside a JSON string.
@@ -17,7 +17,7 @@
 /** The longest unit counted as a repeat. */
 export const REPEAT_MAX_UNIT = 64;
 /** Characters streamed between two checks. */
-const CHECK_EVERY = 512;
+export const REPEAT_CHECK_EVERY = 512;
 
 /**
  * How much repetition a call's arguments may end in before it counts as a
@@ -61,17 +61,10 @@ export function repeatLimit(toolName: string | undefined): number {
 }
 
 export interface RepeatTail {
-	/** The last `limit + REPEAT_MAX_UNIT` characters streamed. */
+	/** The last `limit + REPEAT_MAX_UNIT` characters streamed at the last check, and every character since. */
 	tail: string;
 	/** Characters streamed since the last check. */
 	sinceCheck: number;
-}
-
-export interface RunawayRepeat {
-	/** The repeated unit, as streamed (raw JSON text). */
-	unit: string;
-	/** How many characters of repetition were checked. */
-	length: number;
 }
 
 /**
@@ -107,15 +100,19 @@ export function readableUnit(unit: string): string {
 
 /**
  * Feed one streamed delta of a call's arguments. Returns the new state and,
- * once the last `limit` characters are one unit repeated, that unit.
+ * once the last `limit` characters are one unit repeated, that unit (as a
+ * person would read it, `readableUnit`).
  */
-export function trailingRepeat(previous: RepeatTail | undefined, delta: string, limit: number): { state: RepeatTail; runaway?: RunawayRepeat } {
-	const keep = limit + REPEAT_MAX_UNIT;
+export function trailingRepeat(previous: RepeatTail | undefined, delta: string, limit: number): { state: RepeatTail; unit?: string } {
+	// Trimmed only when it is checked: a slice per delta would copy the whole
+	// tail (64 KB for file content) on every streamed chunk.
 	let tail = (previous?.tail ?? "") + delta;
-	if (tail.length > keep) tail = tail.slice(tail.length - keep);
 	const sinceCheck = (previous?.sinceCheck ?? 0) + delta.length;
-	if (tail.length < limit || sinceCheck < CHECK_EVERY) return { state: { tail, sinceCheck } };
+	if (sinceCheck < REPEAT_CHECK_EVERY) return { state: { tail, sinceCheck } };
+	const keep = limit + REPEAT_MAX_UNIT;
+	if (tail.length > keep) tail = tail.slice(tail.length - keep);
+	if (tail.length < limit) return { state: { tail, sinceCheck } };
 	const unit = repeatingUnit(tail.slice(tail.length - limit));
 	const state = { tail, sinceCheck: 0 };
-	return unit === undefined ? { state } : { state, runaway: { unit: readableUnit(unit), length: limit } };
+	return unit === undefined ? { state } : { state, unit: readableUnit(unit) };
 }

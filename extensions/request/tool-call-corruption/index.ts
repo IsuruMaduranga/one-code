@@ -187,8 +187,8 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		const limit = repeatLimit(tool);
 		const repeat = trailingRepeat(repeats.get(update.contentIndex), update.delta, limit);
 		repeats.set(update.contentIndex, repeat.state);
-		if (!repeat.runaway) return;
-		stopRunaway(ctx, toolCallCorruptionText.runawayRepeat({ tool: tool ?? "tool", unit: repeat.runaway.unit, chars: repeat.runaway.length }));
+		if (repeat.unit === undefined) return;
+		stopRunaway(ctx, toolCallCorruptionText.runawayRepeat({ tool: tool ?? "tool", unit: repeat.unit, chars: limit }));
 	});
 
 	pi.on("message_update", (event, ctx) => {

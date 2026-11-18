@@ -88,9 +88,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// A child's words name only the tools every child has (lib/agents/child-extensions.ts).
 	const view = sessionView(pi);
 	const text = view.text("shell");
-	// A model yield is not offered to hears no passage naming it (lib/models/model-family.ts yieldOffered).
-	let yieldOn = true;
-	const describe = () => textForModel("shell", yieldOn, view).bashDescription({ form, autoMode, searchTools });
+	let withheld: readonly string[] = [];
+	const describe = () => textForModel("shell", withheld, view).bashDescription({ form, autoMode, searchTools });
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
@@ -102,9 +101,9 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		words: () => shellResultText(view.live),
 		backgroundShell: () => bash.spawn,
 	});
-	followDescriptionForm(pi, (next, tier, facts) => {
+	followDescriptionForm(pi, (next, tier, withheldTools) => {
 		form = next;
-		yieldOn = facts.yield;
+		withheld = withheldTools;
 		searchTools = searchToolsEnabled(tier, (tool) => view.live.has(tool));
 		setDescription(describe());
 	});

@@ -11,6 +11,7 @@
  */
 import { type CronText, cronWords } from "../../lib/agents/cron-text.ts";
 import { memoOn } from "../../lib/core/text-spans.ts";
+import { countNoun } from "../../lib/ui/tui-render.ts";
 import { type ToolPassages, withoutOff } from "../../lib/profile/live-tools.ts";
 import { activeProfile } from "../../lib/profile/profile.ts";
 
@@ -130,7 +131,7 @@ export interface YieldResultText {
 function waited(ms: number): string {
 	if (ms < 1000) return "Resumed at once";
 	const seconds = Math.round(ms / 1000);
-	if (seconds < 120) return `Resumed after ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+	if (seconds < 120) return `Resumed after ${countNoun(seconds, "second")}`;
 	return `Resumed after ${Math.round(seconds / 60)} minutes`;
 }
 
@@ -149,7 +150,7 @@ function yieldReason(end: YieldEnd): string {
 		case "duplicate":
 			return "an earlier call to this tool in this reply already waited.";
 		case "cap":
-			return `nothing has reported yet; ${end.running} background ${end.running === 1 ? "task" : "tasks"} still running. Call yield again to keep waiting.`;
+			return `nothing has reported yet; ${countNoun(end.running, "background task")} still running. Call yield again to keep waiting.`;
 	}
 }
 
@@ -261,7 +262,7 @@ const monitorResultText: MonitorResultText = {
 		const stderr = events === 0 && stderrPath ? `Its command wrote to stderr, which isn't delivered as events and may mean it failed: see \`${stderrPath}\`. ` : "";
 		return events === 0
 			? `[Monitor expired after ${duration} with no events delivered. ${stderr}Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]`
-			: `[Monitor expired after ${duration} with ${events} ${events === 1 ? "event" : "events"} delivered. Re-arm it if you still need the watch.]`;
+			: `[Monitor expired after ${duration} with ${countNoun(events, "event")} delivered. Re-arm it if you still need the watch.]`;
 	},
 };
 

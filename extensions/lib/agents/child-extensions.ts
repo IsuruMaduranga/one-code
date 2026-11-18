@@ -133,22 +133,25 @@ export function sessionView(pi: { events: { emit(channel: string, data: unknown)
 	return { child: true, live: view.live, features: view.features, text: (group) => view.text[group] ?? requireText(group) };
 }
 
-/** The main session's text without the yield tool: what a model yield is not offered to is told. */
-const textWithoutYield = memoOn((profile: ResolvedProfile): ProfileText => profile.textFor(withoutTools(profile.live, ["yield"])));
+/** Per profile, the main session's text for its tools less a withheld set, by the set's names. */
+const withheldTexts = memoOn((_profile: ResolvedProfile) => new Map<string, ProfileText>());
 
 /**
- * A text group as the session's model is offered the tools: with `yieldOn`
- * false (lib/models/model-family.ts yieldOffered), the text leaves out every
- * passage naming yield, as it does when the profile switches the tool off.
- * A child never has yield (the background feature does not load in one), so
- * its text already leaves it out. `view` is the session's own (`sessionView`);
- * without one, the main session's.
+ * A text group as the session's model is offered the tools: with `withheld`
+ * tools (lib/models/model-family.ts toolsWithheldFrom), the text leaves out
+ * every passage naming them, as it does when the profile switches a tool off.
+ * A child never has a model-gated tool (the background feature does not load
+ * in one), so its text already leaves them out. `view` is the session's own
+ * (`sessionView`); without one, the main session's.
  */
-export function textForModel<K extends keyof ProfileText>(group: K, yieldOn: boolean, view?: SessionView): NonNullable<ProfileText[K]> {
-	if (view?.child) return view.text(group);
+export function textForModel<K extends keyof ProfileText>(group: K, withheld: readonly string[], view?: SessionView): NonNullable<ProfileText[K]> {
+	if (view?.child || withheld.length === 0) return view ? view.text(group) : requireText(group);
 	const profile = activeProfile();
-	if (yieldOn || !profile.live.has("yield")) return requireText(group);
-	return textWithoutYield(profile)[group] ?? requireText(group);
+	const texts = withheldTexts(profile);
+	const key = withheld.join("\0");
+	let text = texts.get(key);
+	if (!text) texts.set(key, (text = profile.textFor(withoutTools(profile.live, withheld))));
+	return text[group] ?? requireText(group);
 }
 
 /**

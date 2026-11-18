@@ -37,11 +37,6 @@ export interface StreamingMessage {
 	content?: unknown;
 }
 
-/**
- * Assistant text of an in-flight message. Extraction is deliberately lazy —
- * message_update fires per token carrying the whole message-so-far, so the
- * registry stores only the reference and the viewer extracts at paint time.
- */
 /** How long a reply streams before its row shows its age and size: a reply stuck in a loop shows itself. */
 export const LONG_REPLY_MS = 20_000;
 
@@ -65,6 +60,11 @@ export function longReplyNote(run: Pick<LiveRun, "streaming" | "streamStartedAt"
 	return `writing a reply · ${size} · ${formatDuration(run.streamStartedAt, now)}`;
 }
 
+/**
+ * Assistant text of an in-flight message. Extraction is deliberately lazy —
+ * message_update fires per token carrying the whole message-so-far, so the
+ * registry stores only the reference and the viewer extracts at paint time.
+ */
 export function streamingText(message: StreamingMessage | undefined): string {
 	const blocks = Array.isArray(message?.content) ? message.content : [];
 	return blocks

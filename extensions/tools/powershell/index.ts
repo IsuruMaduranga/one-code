@@ -84,8 +84,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
 		wrapBackgroundCommand: (command) => `${POWERSHELL_TOOL_PREFIX}${command}`,
 	});
-	// A model yield is not offered to hears no passage naming it (lib/models/model-family.ts yieldOffered).
-	followDescriptionForm(pi, (_form, _tier, facts) => setDescription(textForModel("shell", facts.yield, view).powershellDescription({ edition: powerShellEdition(spec) })));
+	followDescriptionForm(pi, (_form, _tier, withheld) => setDescription(textForModel("shell", withheld, view).powershellDescription({ edition: powerShellEdition(spec) })));
 
 	let noticesShown = false;
 	const reconcile = (ctx?: Pick<ExtensionContext, "hasUI" | "ui">) => {
