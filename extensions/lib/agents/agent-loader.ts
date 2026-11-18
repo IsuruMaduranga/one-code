@@ -68,9 +68,6 @@ export async function createSharedModelRuntime(agentDir: string): Promise<ModelR
 	return withShortCacheRetention(runtime);
 }
 
-/** The APIs whose requests take their cache routing from the session id alone (findings §75). */
-const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-responses"]);
-
 /**
  * `runtime` as a fork of the session `sessionId` sees it: its Codex requests
  * go out under the parent's session id, everything else unchanged.
@@ -88,7 +85,7 @@ const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-response
  */
 export function withParentSessionId<T extends Pick<ModelRuntime, "streamSimple">>(runtime: T, sessionId: string): T {
 	const streamSimple: ModelRuntime["streamSimple"] = (model, context, options) =>
-		runtime.streamSimple(model, context, SESSION_ROUTED_APIS.has(model.api) ? { ...options, sessionId } : options);
+		runtime.streamSimple(model, context, model.api === "openai-codex-responses" ? { ...options, sessionId } : options);
 	return new Proxy(runtime, {
 		get(target, prop) {
 			if (prop === "streamSimple") return streamSimple;

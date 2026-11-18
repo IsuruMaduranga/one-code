@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { captureRequest, type RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
 import { forkCacheExtension } from "../../extensions/agents/subagents/fork-cache.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const model = { api: "openai-completions", provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1", id: "deepseek/deepseek-v4-flash" };
 
@@ -115,4 +115,3 @@ describe("forkCacheExtension", () => {
 		expect([...fake.tools.keys()].sort()).toEqual(["list_agents", "read"]);
 	});
 });
-

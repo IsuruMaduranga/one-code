@@ -1497,13 +1497,13 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// The run still works; only a later resume loses the prompt (and says so).
 		}
 	};
+	/** This session's registered tools, for a fork to stub the ones only the main conversation has (fork-cache.ts). */
+	const parentTools = (): readonly ParentTool[] => pi.getAllTools();
 	/**
 	 * A fork's inputs from this conversation (its system prompt and the parent's
 	 * last request, for the cache), saved beside its session so a SendMessage
 	 * can resume it later. Undefined for a named agent.
 	 */
-	/** This session's registered tools, for a fork to stub the ones only the main conversation has (fork-cache.ts). */
-	const parentTools = (): ParentTool[] => pi.getAllTools().map(({ name, parameters }) => ({ name, parameters }));
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
 		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);

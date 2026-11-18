@@ -338,7 +338,7 @@ export class SubagentRuntime {
 				// child's own bus; the turn's outcome carries it to the parent's notification.
 				turnFailureExtension(handback),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
-				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools ?? [])] : []),
+				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools)] : []),
 			],
 			// instructions (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
@@ -463,6 +463,9 @@ export class SubagentRuntime {
 		const removed = toolsRemovedByFlags(agent);
 		// Told once, when the agent starts: a resume continues a session that heard it.
 		const flagsNote = removed.length > 0 && agent && !spec.sessionFile ? subagentResultText().toolsLeftOut({ name: agent.name, tools: removed }) : undefined;
+		const fork = SubagentRuntime.isFork(spec);
+		// A fork's SendMessage takes the parent's schema (send-to-main-tool.ts).
+		const parentSendMessage = fork ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
 			const session = await openChildSession({
@@ -471,14 +474,13 @@ export class SubagentRuntime {
 					cwd: spec.cwd,
 					agentDir: getAgentDir(),
 					// A fork's Codex requests go out under its parent's session id, so they read the parent's cache.
-					modelRuntime: SubagentRuntime.isFork(spec) && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId) : this.modelRuntime,
+					modelRuntime: fork && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId) : this.modelRuntime,
 					model: resolvedModel as never,
 					thinkingLevel: spec.thinking as never,
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All
 					// tools except …" shape), which filters injected customTools too.
 					...agentToolOptions(agent),
-					// A fork's SendMessage takes the parent's schema (send-to-main-tool.ts).
-					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s), SubagentRuntime.isFork(spec) ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
+					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s), parentSendMessage), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
 					sessionManager: newSessionManager(),
 				},
 				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",

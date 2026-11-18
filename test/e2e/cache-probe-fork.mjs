@@ -15,14 +15,13 @@
  * input + cacheRead + cacheWrite tokens; the fork's first reply is the first
  * assistant entry in the fork's file timestamped after that call (the fork's
  * file opens with copies of the parent's entries). The fork must read at least
- * the parent's prompt less one block (BLOCK tokens; OpenAI-style caches read in
- * blocks). A miss is a FAIL, except on OpenRouter, which can route the fork to
+ * the parent's prompt less one implicit-cache block (`DEFAULT_BLOCK`, as the
+ * other probes allow). A miss is a FAIL, except on OpenRouter, which can route the fork to
  * another upstream host than the parent's: a WARN there.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-
-const BLOCK = 1024;
+import { DEFAULT_BLOCK } from "./cache-hosts.mjs";
 
 const args = process.argv.slice(2);
 const dir = args[0];
@@ -87,7 +86,7 @@ const parentPrompt = prompt(spawn.message.usage);
 const first = forkReplies[0].message.usage;
 const read = first.cacheRead ?? 0;
 const line = `fork's first request read ${read} of the parent's ${parentPrompt}-token prompt (fork prompt ${prompt(first)}, wrote ${first.cacheWrite ?? 0})`;
-if (read >= parentPrompt - BLOCK) {
+if (read >= parentPrompt - DEFAULT_BLOCK) {
 	console.log(`PASS  fork: ${line}`);
 	process.exit(0);
 }

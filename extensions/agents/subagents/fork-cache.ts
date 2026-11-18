@@ -46,12 +46,11 @@
  * filled the window.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { deferBaseTool } from "../../lib/request/deferred.ts";
+import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
 import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 import { toolRenderers } from "../../lib/ui/tui-render.ts";
-import { registryNameOnWire } from "../../lib/request/deferred.ts";
 
 /** One of the parent's registered tools, as a fork needs it to stand in for the tool. */
 export interface ParentTool {
@@ -76,20 +75,21 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		pi.on("session_start", () => {
 			const own = new Set(pi.getAllTools().map((tool) => tool.name));
 			const declared = forkBaselineNames(capture.payload, capture.api);
-			const registryName = registryNameOnWire(parentTools.map((tool) => tool.name), declared);
 			const parameters = new Map(parentTools.map((tool) => [tool.name, tool.parameters]));
+			const registryName = registryNameOnWire([...parameters.keys()], declared);
 			for (const wireName of declared) {
 				const tool = registryName(wireName);
-				if (tool === undefined || own.has(tool) || !parameters.has(tool)) continue;
+				if (tool === undefined || own.has(tool)) continue;
 				own.add(tool);
+				const refusal = subagentResultText().forkToolUnavailable({ tool });
 				pi.registerTool({
 					name: tool,
 					label: tool,
 					...toolRenderers(tool),
-					description: subagentResultText().forkToolUnavailable({ tool }),
+					description: refusal,
 					parameters: parameters.get(tool) as never,
 					async execute() {
-						return { content: [{ type: "text", text: subagentResultText().forkToolUnavailable({ tool }) }], details: {}, isError: true };
+						return { content: [{ type: "text", text: refusal }], details: {}, isError: true };
 					},
 				});
 			}
