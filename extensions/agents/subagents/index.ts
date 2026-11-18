@@ -77,6 +77,7 @@ import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../../lib/agents/task-registry.ts";
+import { SESSION_WORK_CHANNEL, sessionBackgroundTask, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
@@ -312,8 +313,25 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * routed a message addressed to the older task id to the newer agent (M1).
 	 */
 	const runningIds = new Set<string>();
+	/** Every task this extension registered, by task id: the latest for an agent resumed under the same id. */
+	const tasks = new Map<string, BackgroundTask>();
+	const registerTask = (task: BackgroundTask) => {
+		tasks.set(task.id, task);
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+	};
 	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
+	// A resident busy on a later turn (a SendMessage, its own cron fire) has no
+	// running task, yet it is still session work: yield waits for it and the
+	// turn-end line counts it (lib/notify/session-work.ts). One whose task still
+	// runs is reported by the background extension's registry.
+	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
+		const query = data as SessionWorkQuery;
+		for (const [taskId, resident] of residents) {
+			if (resident.handle.exited() || !resident.handle.busy() || tasks.get(taskId)?.status === "running") continue;
+			query.tasks.push(sessionBackgroundTask({ id: taskId, kind: "subagent", status: "running", description: tasks.get(taskId)?.description ?? taskId }));
+		}
+	});
 	/**
 	 * Task id → the main session's tool call that started the run's current
 	 * turn (its Agent call, or the latest SendMessage to it); a nested run
@@ -2064,7 +2082,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			resident: () => !handle.exited(),
 			finished,
 		};
-		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		registerTask(task);
 		void handle.send(frameTask(p.request, worktree, parentCwd));
 
 		return {
@@ -2565,7 +2583,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					review,
 				});
 			});
-			pi.events.emit(TASK_REGISTER_CHANNEL, task);
+			registerTask(task);
 			void resident.handle.send(params.message);
 			return {
 				content: [
@@ -2711,7 +2729,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			stop: () => stopAgent(record.taskId, handle),
 			finished,
 		};
-		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		registerTask(task);
 
 		void handle.result.then(async (outcome) => {
 			runningIds.delete(record.taskId);
@@ -2830,7 +2848,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify([
 				"The interactive task viewer requires TUI mode; showing a task snapshot instead.",
 				...(lines.length ? lines : ["No background tasks in this session."]),
-				`Use /tasks for task status; ${taskToolsHint()}`,
+				taskToolsHint(),
 			].join("\n"), "info");
 			return;
 		}

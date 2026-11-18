@@ -52,6 +52,7 @@ import { watchMcpTools } from "../../lib/plugins/mcp-share.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../../lib/models/subagent-default.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
+import { SESSION_WORK_CHANNEL, sessionBackgroundTask, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import {
 	toolRenderers,
 	customMessageText,
@@ -115,6 +116,15 @@ function workflowExtension(pi: ExtensionAPI) {
 	// After `enter_worktree`, workflow agents run in the worktree (and are guarded there).
 	const enteredWorktree = followEnteredWorktree(pi.events);
 	const manager = new WorkflowRunManager();
+	// Running workflows are session work: the Stop hook's background_tasks, the
+	// turn-end "Waiting for 1 workflow to finish" line and yield's wait all ask
+	// for it here (lib/notify/session-work.ts).
+	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
+		const query = data as SessionWorkQuery;
+		for (const run of manager.list()) {
+			if (run.status === "running") query.tasks.push(sessionBackgroundTask({ id: run.runId, kind: "workflow", status: "running", description: run.meta.description || run.meta.name }));
+		}
+	});
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx, dockRowsReporter(pi.events, "workflow"));
 	// The other strips below the editor (the subagent panel), so the viewer leaves their rows free.

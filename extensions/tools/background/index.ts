@@ -803,6 +803,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.on("session_tree", (_event, ctx) => followModel(ctx.model));
 	followDescriptionForm(pi, (_form, _tier, withheld) => setMonitorDescription(textForModel("background", withheld).monitor.description));
 
+	// A session ending mid-wait ends the wait too, so nothing polls a dead session.
+	let sessionEnded = new AbortController();
+	pi.on("session_shutdown", () => sessionEnded.abort());
+	pi.on("session_start", () => {
+		if (sessionEnded.signal.aborted) sessionEnded = new AbortController();
+	});
+
 	// One wait per reply, as in Claude Code: a second yield in the same reply returns at once.
 	let yieldedInReply = false;
 	pi.on("message_start", (event) => {
@@ -843,15 +850,22 @@ function backgroundExtension(pi: ExtensionAPI) {
 							pi.events.emit(NOTIFIER_BACKLOG_CHANNEL, query);
 							return query;
 						},
-						running: () => registry.running().length,
+						// Every extension's running work: registry tasks, workflow runs, and
+						// residents busy on a later turn (lib/notify/session-work.ts).
+						running: () => {
+							const work: SessionWorkQuery = { crons: [], tasks: [] };
+							pi.events.emit(SESSION_WORK_CHANNEL, work);
+							return work.tasks.length;
+						},
 						userMessageQueued: () => ctx.hasPendingMessages(),
+						// Only a main-session job starts a turn here; a subagent's job fires into the agent.
 						scheduledDue: () => {
-							const next = cron.nextFireAt();
-							return next !== undefined && next <= Date.now();
+							const now = Date.now();
+							return cron.list().some((job) => job.agentId === undefined && job.nextFireAt <= now);
 						},
 						onHanded: (listener) => pi.events.on(NOTIFICATION_HANDED_CHANNEL, listener),
 					},
-					signal,
+					signal ? AbortSignal.any([signal, sessionEnded.signal]) : sessionEnded.signal,
 				);
 			}
 			const resumed = text.yield.resumed({ waitedMs: Date.now() - startedAt, end });
