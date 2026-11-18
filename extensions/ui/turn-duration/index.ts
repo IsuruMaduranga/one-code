@@ -17,6 +17,7 @@ import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
 import { formatDoneAt, TURN_MARK, turnDurationText } from "./line.ts";
 import { TurnSpan } from "./span.ts";
@@ -29,6 +30,18 @@ interface TurnDurationData {
 	durationMs: number;
 	/** Background shells still running when the turn ended (CC's `· 2 shells still running`). */
 	runningShells?: number;
+	/** Background agents still running when the turn ended (CC's `pending_background_agent_count`). */
+	runningAgents?: number;
+	/** Workflows still running when the turn ended (CC's `pending_workflow_count`). */
+	runningWorkflows?: number;
+}
+
+/** Agents and workflows still running, as the background extension's task registry has them (no shared module state). */
+function pendingWork(pi: ExtensionAPI): { agents: number; workflows: number } {
+	const query: SessionWorkQuery = { crons: [], tasks: [] };
+	pi.events.emit(SESSION_WORK_CHANNEL, query);
+	const running = query.tasks.filter((task) => task.status === "running");
+	return { agents: running.filter((task) => task.type === "subagent").length, workflows: running.filter((task) => task.type === "workflow").length };
 }
 
 function turnDurationExtension(pi: ExtensionAPI) {
@@ -39,7 +52,8 @@ function turnDurationExtension(pi: ExtensionAPI) {
 		if (!data) return undefined;
 		// The entry's own timestamp is when the turn settled: Claude Code's `· done 2:33 PM`.
 		const doneAt = formatDoneAt(new Date(entry.timestamp));
-		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs, data.runningShells ?? 0, doneAt));
+		const pending = { agents: data.runningAgents ?? 0, workflows: data.runningWorkflows ?? 0 };
+		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs, data.runningShells ?? 0, doneAt, pending));
 	});
 
 	const span = new TurnSpan();
@@ -56,10 +70,13 @@ function turnDurationExtension(pi: ExtensionAPI) {
 		const durationMs = span.settle(Date.now());
 		if (durationMs === undefined) return;
 		if (!ctx.hasUI) return;
+		const pending = pendingWork(pi);
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),
 			durationMs,
 			runningShells: shellTasks.running().length,
+			...(pending.agents > 0 ? { runningAgents: pending.agents } : {}),
+			...(pending.workflows > 0 ? { runningWorkflows: pending.workflows } : {}),
 		});
 	});
 }

@@ -66,7 +66,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			name: "Name for this run (default: <agent>-<n>)",
 		},
 		sendMessageDescription: withoutOff(
-			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message waits for its next tool round or the end of its current reply; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 			live,
 			SEND_MESSAGE_PASSAGES,
 		),
@@ -76,7 +76,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			summary: "5-10 word preview shown in the UI",
 		},
 		listAgentsDescription: withoutOff(
-			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `resident` is idle but reachable live; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
+			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `idle` finished its turn and waits for a message; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
 			live,
 			LIST_AGENTS_PASSAGES,
 		),

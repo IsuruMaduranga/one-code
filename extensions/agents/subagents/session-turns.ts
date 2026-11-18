@@ -17,6 +17,11 @@ import type { ChildOutcome } from "./outcome.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "../../lib/agents/usage.ts";
 import { type RunFailure, subagentResultText } from "../../lib/agents/subagent-text.ts";
 
+/** Where a guard in the child reports that it stopped the turn (the tracker; runner.ts wires it to the child's bus). */
+export interface TurnFailureSink {
+	recordTurnFailure(reason: string): void;
+}
+
 /** Why a turn was cut short: stopped, or the wall-clock cap. */
 export type AbortReason = Extract<RunFailure, { kind: "aborted" }>["why"];
 
@@ -33,7 +38,7 @@ interface TrackedEvent {
  * records the turn's report here, and the turn's outcome is that report, or
  * the turn's final assistant text when the child never called the tool.
  */
-export class SessionTurnTracker implements HandbackSlot {
+export class SessionTurnTracker implements HandbackSlot, TurnFailureSink {
 	toolCalls = 0;
 	/** What the child did this turn, for auto mode's return review. */
 	actions: ChildAction[] = [];
@@ -55,6 +60,8 @@ export class SessionTurnTracker implements HandbackSlot {
 	transcript = "";
 	/** The report this turn handed back through SubagentHandback, if it did. */
 	handback: string | undefined;
+	/** Why a guard in the child stopped this turn, when one did (`TURN_FAILED_CHANNEL` on the child's bus). */
+	harnessStop: string | undefined;
 
 	/** Call when a new turn is started (a prompt sent while idle). */
 	beginTurn(): void {
@@ -62,6 +69,7 @@ export class SessionTurnTracker implements HandbackSlot {
 		this.providerError = undefined;
 		this.aborted = undefined;
 		this.handback = undefined;
+		this.harnessStop = undefined;
 		// Per turn, not per session: the review that reads this judges the turn just finished.
 		this.actions = [];
 	}
@@ -71,6 +79,11 @@ export class SessionTurnTracker implements HandbackSlot {
 		// First reason wins: a wall-clock cap followed by a shutdown kill in the same
 		// abort-settling window keeps the more specific explanation.
 		this.aborted ??= reason;
+	}
+
+	/** A guard in the child stopped the turn; the first reason wins. */
+	recordTurnFailure(reason: string): void {
+		this.harnessStop ??= reason;
 	}
 
 	recordHandback(message: string): boolean {
@@ -122,7 +135,7 @@ export class SessionTurnTracker implements HandbackSlot {
 
 	/** The outcome of the turn that just settled. */
 	turnOutcome(): ChildOutcome {
-		return finishOutcome(this.result, this.providerError, this.toolCalls, this.usage, this.actions, this.aborted);
+		return finishOutcome(this.result, this.providerError, this.toolCalls, this.usage, this.actions, this.aborted, this.harnessStop);
 	}
 }
 
@@ -143,7 +156,19 @@ export function finishOutcome(
 	usage: UsageTotals,
 	actions: ChildAction[],
 	aborted?: AbortReason,
+	harnessStop?: string,
 ): ChildOutcome {
+	// A guard's stop is also an abort: its reason is the more specific report.
+	if (harnessStop) {
+		return {
+			output: subagentResultText().failure({ kind: "harnessStop", reason: harnessStop, output }),
+			toolCalls,
+			usage,
+			actions,
+			failed: true,
+			failureReason: harnessStop.replace(/\.$/, ""),
+		};
+	}
 	if (aborted) {
 		return {
 			output: subagentResultText().failure({ kind: "aborted", why: aborted, output }),

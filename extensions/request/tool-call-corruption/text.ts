@@ -18,6 +18,12 @@ interface ToolCallCorruptionText {
 	suspectBlock(p: { reason: string }): string;
 	/** A corrupt call, which ends the turn; `repeat` when an earlier command in the run came through cut the same way. */
 	corruptBlock(p: { reason: string; repeat: boolean }): string;
+	/**
+	 * Why the turn stopped: a call's arguments ended in one unit repeated past
+	 * `chars` characters (repeat.ts). The parent of a child session reads it as
+	 * the agent's failure, so it names the tool and the unit.
+	 */
+	runawayRepeat(p: { tool: string; unit: string; chars: number }): string;
 }
 
 function damage(d: ArgumentDamage): string {
@@ -36,4 +42,6 @@ export const toolCallCorruptionText: ToolCallCorruptionText = {
 	suspectBlock: ({ reason }) => `${reason} It was not run. Send the complete command again; if it really ends there, drop the trailing blank or the empty option.`,
 	corruptBlock: ({ reason, repeat }) =>
 		`OpenRouter tool-call corruption: ${reason}${repeat ? " An earlier command in this run came through cut the same way." : ""} Do not retry this call; switch models or exclude the upstream provider.`,
+	runawayRepeat: ({ tool, unit, chars }) =>
+		`The model kept repeating "${unit.trim()}" in a ${tool} call's arguments for over ${chars.toLocaleString("en-US")} characters without finishing the call, so the turn was stopped.`,
 };

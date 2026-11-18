@@ -1390,7 +1390,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				toolUseId: opts.toolUseId,
 				outputFile: opts.outputFile,
 				status,
-				summary: agentSummary(record?.description ?? opts.name, status),
+				summary: agentSummary(record?.description ?? opts.name, status, status === "failed" ? opts.outcome.failureReason : undefined),
 				note: agentNote(),
 				result,
 				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
@@ -2948,7 +2948,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// first, then running, then a finished run resumable from its session.
 	const agentStatus = (record: AgentRunRecord): RunStatus => {
 		const resident = residents.get(record.taskId);
-		if (resident && !resident.handle.exited()) return "resident";
+		// A resident mid-turn is running; between turns it is idle, waiting for a message.
+		if (resident && !resident.handle.exited()) return resident.handle.busy() ? "running" : "resident";
 		if (runningIds.has(record.taskId)) return "running";
 		return record.inline ? "finishedInline" : "finished";
 	};

@@ -12,7 +12,7 @@
 
 import { basename } from "node:path";
 import { unwrapUserMessage } from "../../lib/agents/agent-view.ts";
-import { cutPlainText, firstNonEmptyLine } from "../../lib/ui/tui-render.ts";
+import { cutPlainText, firstNonEmptyLine, formatDuration } from "../../lib/ui/tui-render.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { emptyUsage, sumUsage, type UsageTotals } from "../../lib/agents/usage.ts";
@@ -42,6 +42,29 @@ export interface StreamingMessage {
  * message_update fires per token carrying the whole message-so-far, so the
  * registry stores only the reference and the viewer extracts at paint time.
  */
+/** How long a reply streams before its row shows its age and size: a reply stuck in a loop shows itself. */
+export const LONG_REPLY_MS = 20_000;
+
+/** Characters a streaming message holds so far: its text, thinking and tool-call arguments. */
+export function streamedChars(message: StreamingMessage | undefined): number {
+	const blocks = Array.isArray(message?.content) ? (message.content as Array<Record<string, unknown>>) : [];
+	let total = 0;
+	for (const block of blocks) {
+		if (typeof block.text === "string") total += block.text.length;
+		else if (typeof block.thinking === "string") total += block.thinking.length;
+		else if (block.type === "toolCall") total += JSON.stringify(block.arguments ?? {}).length;
+	}
+	return total;
+}
+
+/** The row's note for a reply that has streamed LONG_REPLY_MS or more ("writing a reply · 12 KB · 1m 40s"), else "". */
+export function longReplyNote(run: Pick<LiveRun, "streaming" | "streamStartedAt">, now: number): string {
+	if (!run.streaming || run.streamStartedAt === undefined || now - run.streamStartedAt < LONG_REPLY_MS) return "";
+	const chars = streamedChars(run.streaming);
+	const size = chars < 1024 ? `${chars} chars` : `${Math.round(chars / 1024)} KB`;
+	return `writing a reply · ${size} · ${formatDuration(run.streamStartedAt, now)}`;
+}
+
 export function streamingText(message: StreamingMessage | undefined): string {
 	const blocks = Array.isArray(message?.content) ? message.content : [];
 	return blocks
@@ -70,6 +93,8 @@ export interface LiveRun {
 	blocks: TranscriptBlock[];
 	/** The in-flight assistant message (whole-so-far), cleared at message_end. */
 	streaming?: StreamingMessage;
+	/** When the in-flight message started streaming: the row shows a long one's age and size. */
+	streamStartedAt?: number;
 	/**
 	 * Lifetime totals carried over from before a resume — a resumed run's fresh
 	 * tracker restarts at 0, so stats() adds the current turn on top of these
@@ -267,6 +292,8 @@ export class LiveRunRegistry {
 	setStreaming(taskId: string, message: StreamingMessage | undefined): void {
 		const run = this.byId.get(taskId);
 		if (!run) return;
+		if (!message) run.streamStartedAt = undefined;
+		else if (!run.streaming) run.streamStartedAt = Date.now();
 		run.streaming = message;
 		this.wake(run);
 		this.changed(taskId);
@@ -279,6 +306,7 @@ export class LiveRunRegistry {
 		run.status = "idle";
 		run.activity = "Idle — waiting";
 		run.streaming = undefined;
+		run.streamStartedAt = undefined;
 		// The turn is over: freeze the clock and start the strip's linger window
 		// (an idle resident leaves the strip like a finished run — it stays
 		// reachable via /agents and SendMessage).
@@ -299,6 +327,7 @@ export class LiveRunRegistry {
 		}
 		run.finishedAt = Date.now();
 		run.streaming = undefined;
+		run.streamStartedAt = undefined;
 		this.changed(taskId);
 	}
 

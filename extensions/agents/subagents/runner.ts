@@ -15,7 +15,7 @@
 import { childWriteWatcher } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, type ExtensionAPI, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../../lib/core/abort.ts";
 import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../../lib/agents/agent-loader.ts";
@@ -35,7 +35,8 @@ import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
-import { type AbortReason, SessionTurnTracker } from "./session-turns.ts";
+import { type AbortReason, SessionTurnTracker, type TurnFailureSink } from "./session-turns.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import type { UsageTotals } from "../../lib/agents/usage.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../../lib/ui/tui-render.ts";
@@ -174,6 +175,19 @@ function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome
 	return note ? { ...outcome, output: `${note}\n\n${outcome.output}` } : outcome;
 }
 
+/**
+ * A child extension that hands a guard's turn-failed reason to the run's
+ * tracker: the child's bus is its own, so nothing else in the parent hears it.
+ */
+export function turnFailureExtension(sink: TurnFailureSink): (pi: Pick<ExtensionAPI, "events">) => void {
+	return (pi) => {
+		pi.events.on(TURN_FAILED_CHANNEL, (data) => {
+			const reason = (data as TurnFailedEvent | undefined)?.reason;
+			if (typeof reason === "string" && reason) sink.recordTurnFailure(reason);
+		});
+	};
+}
+
 export class SubagentRuntime {
 	private readonly modelRuntime: Awaited<ReturnType<typeof createSharedModelRuntime>>;
 	private readonly baseCwd: string;
@@ -299,7 +313,7 @@ export class SubagentRuntime {
 	 * prompt and default tools, review S6); a named agent carries its own; a
 	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
 	 */
-	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot): AgentLoaderOptions {
+	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot & TurnFailureSink): AgentLoaderOptions {
 		const fork = SubagentRuntime.isFork(spec);
 		const systemPrompt = fork ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
 		return {
@@ -318,6 +332,9 @@ export class SubagentRuntime {
 				// Every subagent also gets SendMessage to its caller (sendToMainTool below),
 				// unless pi's tool flags removed it (lib/agents/agent-catalog.ts agentToolOptions).
 				subagentHandbackExtension(handback, { deferred: fork, sendMessage: toolLive("SendMessage") }),
+				// A guard that stops the child's turn (a runaway tool call) says why on the
+				// child's own bus; the turn's outcome carries it to the parent's notification.
+				turnFailureExtension(handback),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
@@ -432,7 +449,7 @@ export class SubagentRuntime {
 	 * inherits the parent transcript + system prompt; a fresh named run gets the
 	 * agent's own prompt and toolset.
 	 */
-	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
+	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot & TurnFailureSink): Promise<{ session: Session; note?: string }> {
 		// The MCP wait first: the loader takes the parent's deferrals, which a server
 		// connecting during the wait adds to (it is instant once the connects settled).
 		const mcpTools = await this.getMcpTools();

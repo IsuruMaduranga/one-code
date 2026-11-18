@@ -3,6 +3,8 @@ import { TURN_FAILED_CHANNEL } from "../../extensions/lib/notify/interrupt.ts";
 import { RUNAWAY_PADDING_LIMIT, trailingPadding } from "../../extensions/request/tool-call-corruption/tool-call-corruption.ts";
 import toolCallCorruptionExtension from "../../extensions/request/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("trailingPadding", () => {
 	it("counts the blank run after the last argument character, and whether it holds a raw tab or newline", () => {
@@ -40,8 +42,8 @@ describe("a runaway tool-call stream on any provider", () => {
 		vi.restoreAllMocks();
 	});
 
-	const stream = async (deltas: string[]) => {
-		const partial = { role: "assistant", content: [] };
+	const stream = async (deltas: string[], toolName?: string) => {
+		const partial = { role: "assistant", content: toolName ? [{ type: "toolCall", id: "call_1", name: toolName, arguments: {} }] : [] };
 		const update = (event: object) => fake.fire("message_update", { message: partial, assistantMessageEvent: { ...event, partial } }, ctx);
 		await fake.fire("message_start", { message: { role: "assistant" } }, ctx);
 		await update({ type: "toolcall_start", contentIndex: 0 });
@@ -54,6 +56,17 @@ describe("a runaway tool-call stream on any provider", () => {
 		await stream(['{"command":"git log', "\t", "\n", ...Array.from({ length: RUNAWAY_PADDING_LIMIT / 12 + 1 }, () => "           \t")]);
 		expect(ctx.abort).toHaveBeenCalledTimes(1);
 		expect(failed).toEqual([{ reason: expect.stringContaining("blank space") }]);
+	});
+
+	it("stops the turn once a call's arguments end in one unit repeated past the tool's limit, naming the tool and the unit", async () => {
+		// The incident: GPT-6.1 Terra looping on "Lspnull" inside a bash call's description (findings §94).
+		const { rawArguments } = JSON.parse(readFileSync(join(__dirname, "fixtures", "runaway-repeat-incident.json"), "utf8")) as { rawArguments: string };
+		const failed: unknown[] = [];
+		fake.events.on(TURN_FAILED_CHANNEL, (data) => failed.push(data));
+		const deltas = Array.from({ length: Math.ceil(rawArguments.length / 23) }, (_, i) => rawArguments.slice(i * 23, i * 23 + 23));
+		await stream(deltas, "bash");
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(failed).toEqual([{ reason: 'The model kept repeating "Lspnull" in a bash call\'s arguments for over 8,192 characters without finishing the call, so the turn was stopped.' }]);
 	});
 
 	it("leaves an ordinary pretty-printed call alone", async () => {

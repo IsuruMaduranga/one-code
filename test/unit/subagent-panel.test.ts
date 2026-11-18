@@ -590,3 +590,30 @@ describe("SubagentWidget after dispose", () => {
 		}
 	});
 });
+
+describe("a long reply in the agent row", () => {
+	it("shows a reply's age and size once it has streamed for 20 s, and nothing before or after", async () => {
+		const { LiveRunRegistry, longReplyNote, streamedChars } = await import("../../extensions/agents/subagents/live-runs.ts");
+		const { buildRows } = await import("../../extensions/agents/subagents/panel-render.ts");
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(1_000_000);
+			const reg = new LiveRunRegistry();
+			reg.register({ taskId: "r1", name: "librarian-1", agentType: "librarian", task: "Look up Stripe", description: "Research Stripe", startedAt: 1_000_000 });
+			const message = { content: [{ type: "toolCall", name: "bash", arguments: { description: "Lspnull  ".repeat(2_000) } }] };
+			reg.setStreaming("r1", message);
+			const run = reg.get("r1")!;
+			expect(streamedChars(message)).toBeGreaterThan(18_000);
+			expect(longReplyNote(run, 1_000_000 + 19_000)).toBe("");
+			expect(longReplyNote(run, 1_000_000 + 100_000)).toBe("writing a reply · 18 KB · 1m 40s");
+			expect(buildRows(reg.list(), true, undefined, 1_000_000 + 100_000)[1].activity).toBe("Research Stripe · writing a reply · 18 KB · 1m 40s");
+			// The same reply growing keeps its start; the next reply starts a new clock.
+			reg.setStreaming("r1", { content: [...message.content, { type: "text", text: "more" }] });
+			expect(reg.get("r1")!.streamStartedAt).toBe(1_000_000);
+			reg.setStreaming("r1", undefined);
+			expect(longReplyNote(reg.get("r1")!, 1_000_000 + 100_000)).toBe("");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});

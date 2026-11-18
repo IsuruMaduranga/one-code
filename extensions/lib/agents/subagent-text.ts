@@ -94,6 +94,8 @@ export type RunFailure =
 	| { kind: "turnNotStarted"; osMessage: string }
 	/** The run was stopped (`stopped`) or hit the wall-clock cap (`wallClock`). */
 	| { kind: "aborted"; why: "stopped" | "wallClock"; output: string }
+	/** A guard in the child stopped its turn and said why (a runaway tool call; findings §94). */
+	| { kind: "harnessStop"; reason: string; output: string }
 	| { kind: "providerError"; error: string; output: string };
 
 /** How a background launch went, one line per run in the Agent result. */
@@ -261,6 +263,8 @@ function failure(f: RunFailure): string {
 			const why = f.why === "wallClock" ? "terminated: turn hit the wall-clock cap" : "terminated before the turn finished";
 			return f.output.trim() ? `${f.output}\n\n[${why}]` : `Subagent ${why}.`;
 		}
+		case "harnessStop":
+			return f.output.trim() ? `${f.output}\n\n[The harness stopped the turn: ${f.reason}]` : `The harness stopped the subagent's turn: ${f.reason}`;
 		case "providerError":
 			return f.output.trim()
 				? `${f.output}\n\n[The subagent's last request ended with a provider error: ${f.error}]`
@@ -282,7 +286,8 @@ function launchLine(line: LaunchLine): string {
 }
 
 const STATUS: Record<RunStatus, string> = {
-	resident: "resident (reachable live)",
+	// A resident between turns: alive, waiting for a message to start its next turn.
+	resident: "idle (its turn finished; it waits for a message)",
 	running: "running",
 	// A one-shot run returned its report in the tool result and never
 	// registered a background task, so pointing at task_output here would send
@@ -303,7 +308,7 @@ const RESULT_PASSAGES: ToolPassages = {
 	task_output: [[", and task_output does not know this id.", "."]],
 	task_stop: [["Stop with task_stop; SendMessage", "SendMessage"], " Use task_stop to end one."],
 	// pi's --exclude-tools takes SendMessage out alone; after task_stop's cut the sentence starts with it.
-	SendMessage: [["; SendMessage reaches the agent even while it runs (the message is steered into its current turn).", "."], " SendMessage reaches the agent even while it runs (the message is steered into its current turn)."],
+	SendMessage: [["; SendMessage reaches the agent even while it runs (the message waits for its next tool round or the end of its current reply).", "."], " SendMessage reaches the agent even while it runs (the message waits for its next tool round or the end of its current reply)."],
 };
 
 /** The base's words of the group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
@@ -346,12 +351,15 @@ export const subagentResultWords = (live: LiveTools, product: SubagentClauses): 
 			// One Code's own read tool, and only for a file a launch line names.
 			const noRead = outputFile ? `Do NOT read or tail the output file while ${many ? "they run" : "it runs"}. ` : "";
 			return results(
-				`${lines.join("\n")}\n\n${many ? "The agents are" : "The agent is"} working in the background. You will be notified automatically when ${many ? "each one completes" : "it completes"}. ${PENDING_RESULT}\nDo not duplicate ${many ? "these agents'" : "this agent's"} work — avoid working with the same files or topics ${many ? "they are" : "it is"} using.\n${noRead}If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+				`${lines.join("\n")}\n\n${many ? "The agents are" : "The agent is"} working in the background. You will be notified automatically when ${many ? "each one completes" : "it completes"}. ${PENDING_RESULT}\nDo not duplicate ${many ? "these agents'" : "this agent's"} work — avoid working with the same files or topics ${many ? "they are" : "it is"} using.\n${noRead}If the user asks for progress, say the agent is still running; you'll get a completion notification. Stop with task_stop; SendMessage reaches the agent even while it runs (the message waits for its next tool round or the end of its current reply).`,
 			);
 		},
 		launchLine,
+		// pi delivers a steer at the agent's next tool round, or once its current
+		// reply ends: an agent stuck inside one reply never reads it. The same
+		// turn then continues, so one completion notification reflects it.
 		steered: ({ name }) =>
-			`Message steered into ${name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
+			`Message queued for ${name}: it reaches the agent at its next tool round, or once its current reply ends, and the turn's completion notification will reflect it. Wait for that notification before resending.`,
 		nextTurn: ({ name }) =>
 			`${name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${name}. ${PENDING_RESULT}`,
 		sentToResident: ({ name, taskId }) =>
