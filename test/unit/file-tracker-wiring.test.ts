@@ -157,7 +157,7 @@ describe("file-tracker wiring", () => {
 		expect(result).toBeUndefined();
 	});
 
-	describe("an unread empty file", () => {
+	describe("an unread empty or blank file", () => {
 		type Verdict = { block?: boolean; reason?: string } | undefined;
 		const call = (toolName: string, file: string) => fake.fireOne<Verdict>("tool_call", { toolName, input: { path: file } }, ctx());
 
@@ -170,9 +170,15 @@ describe("file-tracker wiring", () => {
 			expect(await call("edit", file)).toBeUndefined();
 		});
 
-		it("still refuses a write over an unread file with any content, with the unread text", async () => {
-			const file = path("one-byte.txt");
+		it("accepts a write over a file that holds only a line break, as scaffolders create them", async () => {
+			const file = path("scaffold-newline.bal");
 			writeFileSync(file, "\n");
+			expect(await call("write", file)).toBeUndefined();
+		});
+
+		it("still refuses a write over an unread file with any content, with the unread text", async () => {
+			const file = path("two-bytes.txt");
+			writeFileSync(file, "x\n");
 			const result = await call("write", file);
 			expect(result?.block).toBe(true);
 			expect(result?.reason).toBe(words.unread({ path: file, tool: "write" }));

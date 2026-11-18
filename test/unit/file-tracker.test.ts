@@ -4,10 +4,20 @@ import { looksLikeAnthropicRequest } from "../../extensions/lib/request/anthropi
 import { withClearThinking } from "../../extensions/lib/request/context-management.ts";
 
 describe("writeDiscardsNothing", () => {
-	it("lets a write replace an unread regular file only when it is exactly empty", () => {
+	it("lets a write replace an unread regular file only when it is blank", () => {
 		expect(writeDiscardsNothing("write", { plainFile: true, content: "" })).toBe(true);
+		// A scaffolder's "new empty" source file is often one line break.
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\n" })).toBe(true);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\r\n" })).toBe(true);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "  \t\n\n " })).toBe(true);
 		expect(writeDiscardsNothing("write", { plainFile: true, content: "x" })).toBe(false);
-		expect(writeDiscardsNothing("write", { plainFile: true, content: "\n" })).toBe(false);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\n\nx\n" })).toBe(false);
+	});
+
+	it("counts a BOM or another Unicode space as content", () => {
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "﻿" })).toBe(false);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: " \n" })).toBe(false);
+		expect(writeDiscardsNothing("write", { plainFile: true, content: "\f" })).toBe(false);
 	});
 
 	it("never for a symlink or other non-regular target, an edit or the notebook tool", () => {
@@ -28,6 +38,10 @@ describe("guardDecision", () => {
 		["a fresh file", {}, "allow"],
 		["an unread file with content", { status: "unread" }, "unread"],
 		["an unread empty regular file, for a write", { content: "", status: "unread" }, "allow"],
+		["an unread blank regular file, for a write", { content: "\n", status: "unread" }, "allow"],
+		["an unread blank file, for an edit", { tool: "edit", content: "\n", status: "unread" }, "unread"],
+		["an unread blank file reached through a symlink", { ownKind: "other", content: "\n", status: "unread" }, "unread"],
+		["a stale file, also when blank now", { content: "\n", status: "stale" }, "stale"],
 		["an unread empty file, for an edit", { tool: "edit", content: "", status: "unread" }, "unread"],
 		["an unread empty file, for the notebook tool", { tool: "notebook_edit", content: "", status: "unread" }, "unread"],
 		["an unread empty file reached through a symlink", { ownKind: "other", content: "", status: "unread" }, "unread"],
