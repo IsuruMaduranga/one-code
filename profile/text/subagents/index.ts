@@ -84,7 +84,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 		),
 		toMain: {
 			description:
-				'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then.',
+				'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then. A reply reaches you as a message: while you are working, at your next tool call. If you cannot go on without the answer, ask, then end your turn saying what you are waiting for; the reply starts your next turn, with everything you have done so far.',
 			params: {
 				to: 'Recipient — only "main" is valid from inside a subagent',
 				message: "Plain text message for the main conversation",
