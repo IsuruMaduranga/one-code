@@ -79,3 +79,13 @@ export function waitForBackground(probes: YieldProbes, signal: AbortSignal | und
 		timer = setInterval(check, POLL_MS);
 	});
 }
+
+/**
+ * The active-tool list with yield in it when `offered`, and out of it
+ * otherwise; the same array when nothing changes, so the caller sets the
+ * tools only on a change. The order of the other names is kept.
+ */
+export function withYield(active: string[], offered: boolean): string[] {
+	if (offered === active.includes("yield")) return active;
+	return offered ? [...active, "yield"] : active.filter((name) => name !== "yield");
+}

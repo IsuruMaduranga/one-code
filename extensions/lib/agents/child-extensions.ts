@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { EXTENSIONS_DIR } from "../core/package-root.ts";
 import { memoOn } from "../core/text-spans.ts";
 import { featureOfEntry, TOOL_FEATURES } from "../profile/features.ts";
-import type { LiveFeatures, LiveTools } from "../profile/live-tools.ts";
+import { type LiveFeatures, type LiveTools, withoutTools } from "../profile/live-tools.ts";
 import { brandedId } from "../profile/brand.mjs";
 import { activeProfile, requireText, type ResolvedProfile } from "../profile/profile.ts";
 import type { ProfileText } from "../profile/profile-contract.ts";
@@ -131,6 +131,24 @@ export function sessionView(pi: { events: { emit(channel: string, data: unknown)
 	if (!probe.child) return { child: false, live: activeProfile().live, features: activeProfile().features, text: requireText };
 	const view = childView(activeProfile());
 	return { child: true, live: view.live, features: view.features, text: (group) => view.text[group] ?? requireText(group) };
+}
+
+/** The main session's text without the yield tool: what a model yield is not offered to is told. */
+const textWithoutYield = memoOn((profile: ResolvedProfile): ProfileText => profile.textFor(withoutTools(profile.live, ["yield"])));
+
+/**
+ * A text group as the session's model is offered the tools: with `yieldOn`
+ * false (lib/models/model-family.ts yieldOffered), the text leaves out every
+ * passage naming yield, as it does when the profile switches the tool off.
+ * A child never has yield (the background feature does not load in one), so
+ * its text already leaves it out. `view` is the session's own (`sessionView`);
+ * without one, the main session's.
+ */
+export function textForModel<K extends keyof ProfileText>(group: K, yieldOn: boolean, view?: SessionView): NonNullable<ProfileText[K]> {
+	if (view?.child) return view.text(group);
+	const profile = activeProfile();
+	if (yieldOn || !profile.live.has("yield")) return requireText(group);
+	return textWithoutYield(profile)[group] ?? requireText(group);
 }
 
 /**

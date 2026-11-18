@@ -85,6 +85,7 @@ import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usag
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
 import type { SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
+import { textForModel } from "../../lib/agents/child-extensions.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";
 import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
@@ -2438,8 +2439,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName() }) }));
-	followDescriptionForm(pi, setAgentForm);
+	// A model yield is not offered to hears no passage naming it (lib/models/model-family.ts yieldOffered).
+	const describeAgent = (form: DescriptionForm, yieldOn: boolean) => textForModel("subagents", yieldOn).agentDescription({ form, configDir: projectConfigDirName() });
+	const setAgentDescription = registerVariantTool<string>(pi, describeAgent("short", true), (description) => ({ ...agentTool, description }));
+	followDescriptionForm(pi, (form, _tier, facts) => setAgentDescription(describeAgent(form, facts.yield)));
 
 	const SendMessageParams = Type.Object({
 		to: Type.String({ description: words.sendMessageParams.to }),
