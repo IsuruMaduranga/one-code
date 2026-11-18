@@ -9,6 +9,14 @@
  * execute() calls the parent's `onMessage` callback directly. The main
  * conversation's own `send_message`/`SendMessage` tool (agent→agent addressing)
  * is a different tool registered on the parent session.
+ *
+ * A fork passes the parent's SendMessage `parameters`: its first request
+ * extends the parent's recorded one, tools block included, and the ledger keeps
+ * the recorded declaration only while the live input schema matches it
+ * (lib/request/ledger/wire.ts mergeDeclarations), as the fork's Agent tool does
+ * (decisions/subagents-workflows.md, "A fork's spawn tool declares the parent's
+ * `Agent` schema"). The parent's schema requires `to`; execute() still refuses
+ * anything but "main".
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -17,18 +25,19 @@ import { subagentWords } from "./words.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
 import { subagentToMainResultText } from "./text.ts";
 
-export function sendToMainTool(onMessage: (message: string, summary?: string) => void): ToolDefinition {
+export function sendToMainTool(onMessage: (message: string, summary?: string) => void, parentParameters?: unknown): ToolDefinition {
 	const words = subagentWords();
 	const text = words.toMain;
 	return {
 		name: "SendMessage",
 		label: "Send Message",
 		description: text.description,
-		parameters: Type.Object({
-			to: Type.Optional(Type.String({ description: text.params.to })),
-			message: Type.String({ description: text.params.message }),
-			summary: Type.Optional(Type.String({ description: text.params.summary })),
-		}) as never,
+		parameters: (parentParameters ??
+			Type.Object({
+				to: Type.Optional(Type.String({ description: text.params.to })),
+				message: Type.String({ description: text.params.message }),
+				summary: Type.Optional(Type.String({ description: text.params.summary })),
+			})) as never,
 		async execute(_toolCallId: string, params: unknown) {
 			const p = (params ?? {}) as { to?: unknown; message?: unknown; summary?: unknown };
 			// Fail loud (working-docs/decisions/tools.md): a wrong recipient or a missing

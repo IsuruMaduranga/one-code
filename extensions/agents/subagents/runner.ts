@@ -476,7 +476,8 @@ export class SubagentRuntime {
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All
 					// tools except …" shape), which filters injected customTools too.
 					...agentToolOptions(agent),
-					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
+					// A fork's SendMessage takes the parent's schema (send-to-main-tool.ts).
+					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s), SubagentRuntime.isFork(spec) ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
 					sessionManager: newSessionManager(),
 				},
 				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",
