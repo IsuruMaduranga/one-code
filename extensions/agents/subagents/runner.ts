@@ -18,7 +18,7 @@ import { existsSync } from "node:fs";
 import { type AgentSession, type ExtensionAPI, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../../lib/core/abort.ts";
-import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../../lib/agents/agent-loader.ts";
+import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, withParentSessionId, disposeChildSession, openChildSession } from "../../lib/agents/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../../lib/side-calls/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
@@ -470,7 +470,8 @@ export class SubagentRuntime {
 				session: {
 					cwd: spec.cwd,
 					agentDir: getAgentDir(),
-					modelRuntime: this.modelRuntime,
+					// A fork's Codex requests go out under its parent's session id, so they read the parent's cache.
+					modelRuntime: SubagentRuntime.isFork(spec) && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId) : this.modelRuntime,
 					model: resolvedModel as never,
 					thinkingLevel: spec.thinking as never,
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All

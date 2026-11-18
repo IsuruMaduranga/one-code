@@ -68,6 +68,36 @@ export async function createSharedModelRuntime(agentDir: string): Promise<ModelR
 	return withShortCacheRetention(runtime);
 }
 
+/** The APIs whose requests take their cache routing from the session id alone (findings §75). */
+const SESSION_ROUTED_APIS: ReadonlySet<string> = new Set(["openai-codex-responses"]);
+
+/**
+ * `runtime` as a fork of the session `sessionId` sees it: its Codex requests
+ * go out under the parent's session id, everything else unchanged.
+ *
+ * pi-ai builds a Codex request's `session-id` header, `x-client-request-id`
+ * and body `prompt_cache_key` from `options.sessionId`, after every extension
+ * hook, and the fork is its own session: so a fork read only a sliver of the
+ * prefix it shares with its parent (findings §75). pi hands every agent
+ * request to its runtime's `streamSimple` with that option, so a fork's runtime
+ * substitutes its parent's id there. A Codex WebSocket cached under that id is
+ * shared safely: a busy socket makes the other session open its own, and a
+ * request that does not extend a socket's last one is sent whole.
+ *
+ * A proxy, not a copy: every other member reads and writes the shared runtime.
+ */
+export function withParentSessionId<T extends Pick<ModelRuntime, "streamSimple">>(runtime: T, sessionId: string): T {
+	const streamSimple: ModelRuntime["streamSimple"] = (model, context, options) =>
+		runtime.streamSimple(model, context, SESSION_ROUTED_APIS.has(model.api) ? { ...options, sessionId } : options);
+	return new Proxy(runtime, {
+		get(target, prop) {
+			if (prop === "streamSimple") return streamSimple;
+			const value = Reflect.get(target, prop, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+}
+
 export interface AgentLoaderOptions {
 	cwd: string;
 	agentDir: string;
