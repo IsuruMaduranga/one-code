@@ -10,7 +10,7 @@ import { commandBreadcrumb, typedSkillContent } from "../../extensions/lib/plugi
 import { USER_MARKDOWN_CHANNEL, type UserMarkdownQuery } from "../../extensions/lib/ui/user-message.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
-import { profile } from "../../profile/index.ts";
+import { profile } from "./helpers/default-profile.ts";
 
 afterEach(() => setActiveProfileForTest(undefined));
 

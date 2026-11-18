@@ -168,6 +168,7 @@ describe("the secret-values extension", () => {
 		const dir = mkdtempSync(join(tmpdir(), "secrets-child-"));
 		try {
 			mkdirSync(join(dir, "extensions", "bal"), { recursive: true });
+			writeFileSync(join(dir, "extensions", "bal", "index.ts"), "");
 			writeFileSync(join(dir, "extensions", "bal", "child.ts"), "");
 			useProfile({ childExtensions: ["extensions/bal/child.ts"] }, dir);
 			const paths = childExtensionPaths().map((path) => path.replaceAll("\\", "/"));

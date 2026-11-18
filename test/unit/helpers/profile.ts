@@ -5,7 +5,7 @@
 import { afterEach, beforeEach } from "vitest";
 import type { Profile } from "../../../extensions/lib/profile/profile-contract.ts";
 import { activeProfile, PRODUCT_DIR, PROFILE_DIR, type ResolvedProfile, resolveProfile, setActiveProfileForTest } from "../../../extensions/lib/profile/profile.ts";
-import { profile as shippedSource } from "../../../profile/index.ts";
+import { profile as shippedSource } from "./default-profile.ts";
 
 // Captured once: `activeProfile()` returns the test's own profile after the first `useProfile`.
 const shipped = activeProfile();
@@ -15,8 +15,8 @@ const shipped = activeProfile();
  * the new profile's own live tools. Undo it with
  * `setActiveProfileForTest(undefined)` in `afterEach`.
  */
-export function useProfile(fields: Partial<Profile>, profileDir = "/p"): void {
-	setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: ({ live }) => shipped.textFor(live), ...fields }, {}, profileDir));
+export function useProfile(fields: Partial<Profile>, profileDir = "/p", productDir = profileDir): void {
+	setActiveProfileForTest(resolveProfile({ features: {}, tools: {}, childExtensions: [], text: ({ live }) => shipped.textFor(live), ...fields }, {}, profileDir, productDir));
 }
 
 let allTools: ResolvedProfile | undefined;

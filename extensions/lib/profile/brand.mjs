@@ -12,14 +12,17 @@
  * module-scope constants in their owners, so the prefix is known at import.
  *
  * A product may ship several profiles (working-docs/decisions/bi-fork.md,
- * "Profiles are chosen at launch"): `profile/` is the default one, and each
- * id in the brand's `profiles` list names a folder `profile/profiles/<id>/`
- * with its own `index.ts` and a `brand.json` holding only the names that
- * differ (`PROFILE_BRAND_FIELDS`). The launch chooses one: `--profile <name>`,
- * `--<id>` or `<envPrefix>_PROFILE`. A name that is no product profile is a
- * user's own profile (lib/profile/user-profile.ts), which may name the
- * product profile it sits on. The choice is read here, before any module
- * reads a name, because the state folder's name is one of them.
+ * "Profiles are chosen at launch"): each id in the brand's `profiles` list
+ * names a folder `profile/profiles/<id>/` with its own `index.ts` and a
+ * `brand.json` holding only the names that differ (`PROFILE_BRAND_FIELDS`).
+ * The default profile, which a launch with no choice runs, is `profile/`
+ * itself, or the profile the brand's `defaultProfile` names; that one's
+ * `brand.json` is optional, so the product's names apply. The launch chooses
+ * another: `--profile <name>`, `--<id>` or `<envPrefix>_PROFILE`. A name that
+ * is no product profile is a user's own profile
+ * (lib/profile/user-profile.ts), which may name the product profile it sits
+ * on, and otherwise sits on the default. The choice is read here, before any
+ * module reads a name, because the state folder's name is one of them.
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -67,6 +70,8 @@ export function checkBrand(value) {
 			if (taken.length > 0) problems.push(`"profiles" must not use ${taken.map((id) => `"${id}"`).join(", ")}: \`--${taken[0]}\` is already a launch flag`);
 		}
 	}
+	// Spelled as the list spells it: the id names a folder, and folder names are case-sensitive on Linux.
+	if (value.defaultProfile !== undefined && (typeof value.defaultProfile !== "string" || !Array.isArray(value.profiles) || !value.profiles.includes(value.defaultProfile))) problems.push(`"defaultProfile" must be one of the ids in "profiles", spelled as the list spells it`);
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
 	return value;
 }
@@ -152,8 +157,9 @@ function readJson(path) {
  * (`selectedProfileName`); `read` reads a JSON file (a test passes its own).
  * A name that is no product profile is a user's: its `profile.json` in
  * `<shared state dir>/profiles/<name>/` may name the product profile it sits
- * on (`base`). A user profile that is missing or unreadable resolves to the
- * default product profile here; lib/profile/user-profile.ts reports it.
+ * on (`base`). A user profile that is missing or unreadable, or names no
+ * product profile, sits on the default profile (`defaultProfile`, else
+ * `profile/` itself); lib/profile/user-profile.ts reports the problem.
  */
 export function resolveBrand(data, options) {
 	return resolveChecked(checkBrand(structuredClone(data)), options);
@@ -173,6 +179,7 @@ function resolveChecked(product, { name, profileRoot, sharedStateDir, read = rea
 			} catch {}
 		}
 	}
+	productProfile ??= product.defaultProfile;
 	const merged = { ...product };
 	if (productProfile !== undefined) {
 		const file = join(profileRoot, "profiles", productProfile, "brand.json");
@@ -180,7 +187,9 @@ function resolveChecked(product, { name, profileRoot, sharedStateDir, read = rea
 		try {
 			own = read(file);
 		} catch (error) {
-			throw new Error(`profile "${productProfile}": cannot read ${file} (${error instanceof Error ? error.message : error})`);
+			// The default profile may leave its names to the product's; another profile has its own (its state folder, at least).
+			if (productProfile === product.defaultProfile && error?.code === "ENOENT") own = {};
+			else throw new Error(`profile "${productProfile}": cannot read ${file} (${error instanceof Error ? error.message : error})`);
 		}
 		if (typeof own !== "object" || own === null || Array.isArray(own)) throw new Error(`${file}: not a JSON object`);
 		const unknown = Object.keys(own).filter((key) => !PROFILE_BRAND_FIELDS.includes(key));
@@ -248,10 +257,10 @@ export const brand = deepFreeze(resolved.brand);
 /** The product's own brand, before the chosen profile's names: equal to `brand` on the default profile. */
 export const productBrand = deepFreeze(resolved.product);
 
-/** The launch's choice: a product profile's id, a user's profile's name, both (a user profile on a product profile) or neither. */
+/** The launch's choice: a product profile's id (the default one's when the brand names it), a user's profile's name, both (a user profile on a product profile) or neither. */
 export const profileSelection = Object.freeze(resolved.selection);
 
-/** The chosen profile's folder, relative to the package root: `profile`, or `profile/profiles/<id>`. */
+/** The chosen profile's folder, relative to the package root: `profile/profiles/<id>`, or `profile` on a product whose default profile is `profile/` itself. */
 export const profileDirName = resolved.profileDir;
 
 /**

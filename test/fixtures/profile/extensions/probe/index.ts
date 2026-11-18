@@ -8,7 +8,9 @@
  * a setting the profile declares switches off, a block of project facts in
  * the first message's context) the way a product's extension would. The base
  * suite copies this profile into place, so the manifest's product entry loads
- * it there (`product-extension.test.ts`).
+ * it there (`product-extension.test.ts`). The default profile runs it; `Alt`
+ * leaves it out (`Profile.extensions`), so its `productExtension` wrapper
+ * skips it there.
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -23,6 +25,7 @@ import {
 	modelCapability,
 	notifyOrPrint,
 	openInBrowser,
+	productExtension,
 	productSetting,
 	publishContextBlock,
 	productStateDir,
@@ -65,7 +68,7 @@ export const PROBE_CONTEXT = "[fixture:project-layout]";
 /** A command that writes a page into the product's state folder and opens it. */
 export const PROBE_COMMAND = "fixture-page";
 
-export default function probe(pi: ExtensionAPI) {
+export default productExtension("probe", (pi: ExtensionAPI) => {
 	/**
 	 * The user's notice, at the session's start and at each switch of model;
 	 * never in the request. Judged by the model's capability, not the prompt
@@ -120,4 +123,4 @@ export default function probe(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		pi.events.emit(REMINDER_CHANNEL, { key: "fixture-probe", text: PROBE_REMINDER, placement: "last-append" } satisfies ReminderPayload);
 	});
-}
+});

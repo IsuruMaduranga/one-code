@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
-import { profile as shipped } from "../../profile/index.ts";
+import { profile as shipped } from "./helpers/default-profile.ts";
 import { cwdLine, type SectionSession, type SystemPromptSection, type SystemPromptText, toolList } from "../../extensions/request/system-prompt/text.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";

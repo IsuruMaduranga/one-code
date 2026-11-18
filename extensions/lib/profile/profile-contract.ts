@@ -1,11 +1,14 @@
 /**
  * What a profile supplies to the base harness (types only). One Code's own
  * profile is `profile/index.ts` at the repo root; a product replaces that
- * folder with its own implementation of this contract
+ * folder with its own implementation of this contract, one `index.ts` per
+ * profile it ships (`profile/profiles/<id>/`, and `profile/` itself unless
+ * the brand names a `defaultProfile`; lib/profile/brand.mjs)
  * (working-docs/decisions/bi-fork.md, working-docs/features/profiles/).
  *
- * It carries the feature and tool switches, the extra extensions child
- * sessions load, the text groups, and the source provider's module. The
+ * It carries the feature and tool switches, the product extensions it runs,
+ * the extra extensions child sessions load, the text groups, and the source
+ * provider's module. The
  * brand is `brand.json` beside it (lib/profile/brand.mjs) and the catalogs
  * are folders (agents/, skills/, themes/).
  */
@@ -142,11 +145,23 @@ export interface Profile {
 	/** Per-tool switches, keyed by tool name. */
 	tools: Readonly<Record<string, ToolSwitch>>;
 	/**
-	 * Extension entry files, relative to the profile folder and under its
-	 * `extensions/` folder, that in-process child sessions (subagents, workflow
-	 * agents) load after the base's own child extensions; a missing file fails
-	 * at load. The main session loads `extensions/<name>/index.ts` of every
-	 * folder there, through the manifest's last entry
+	 * The product extensions this profile runs, by folder name under the
+	 * product's `extensions/` (`["ballerina"]`); left out, every one. pi loads
+	 * every folder's `index.ts` whatever the profile (the manifest's entry is
+	 * a fixed glob), so each wraps its factory in `productExtension(name, …)`
+	 * (`extensions/sdk/extension.ts`), which skips it when its name is not
+	 * listed, in the main session and in child sessions alike. A name with no
+	 * folder, and a child extension in a folder the list leaves out, fail at
+	 * load.
+	 */
+	extensions?: readonly string[];
+	/**
+	 * Extension entry files, relative to the product's folder (`profile/`,
+	 * which every profile of the product shares) and under its `extensions/`
+	 * folder, that in-process child sessions (subagents, workflow agents) load
+	 * after the base's own child extensions; a missing file fails at load. The
+	 * main session loads `extensions/<name>/index.ts` of every folder there,
+	 * through the manifest's last entry
 	 * (`lib/profile/features.ts PRODUCT_EXTENSIONS_ENTRY`). Either way they load
 	 * after the request pipeline (`ledger/wire`, cache-marks), so a product
 	 * extension must not shape the request tail in a `context` or payload hook;

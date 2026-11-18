@@ -7,7 +7,7 @@ import { emptyCatalogSources, setCatalogSourcesForTest } from "../extensions/lib
 import { setModelTierOverridesForTest } from "../extensions/lib/models/model-tier.ts";
 import { bashParserReady } from "../extensions/lib/shell/bash-parser.ts";
 import { setLaunchArgsForTest, shareShippedProfileForTest } from "../extensions/lib/profile/profile.ts";
-import { profile } from "../profile/index.ts";
+import { profile } from "./unit/helpers/default-profile.ts";
 
 // The shipped profile through the test run's own module graph (lib/profile/profile.ts
 // loads it on demand under jiti, where vitest's import is not the one used).

@@ -27,7 +27,7 @@ import { toolResultsText } from "../../extensions/lib/request/tool-results-text.
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
-import { profile as shipped } from "../../profile/index.ts";
+import { profile as shipped } from "./helpers/default-profile.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },

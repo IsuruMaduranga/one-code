@@ -22,7 +22,7 @@ import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts
 import { childLive } from "../../extensions/lib/agents/child-extensions.ts";
 import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, requireText, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
-import { profile as shipped } from "../../profile/index.ts";
+import { profile as shipped } from "./helpers/default-profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { backgroundWords } from "../../extensions/tools/background/text.ts";
 

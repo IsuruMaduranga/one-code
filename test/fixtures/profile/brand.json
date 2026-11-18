@@ -30,6 +30,8 @@
 		}
 	},
 	"profiles": [
+		"Main",
 		"Alt"
-	]
+	],
+	"defaultProfile": "Main"
 }

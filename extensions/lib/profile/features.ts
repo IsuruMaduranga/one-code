@@ -103,9 +103,17 @@ export const PRODUCT_EXTENSIONS_DIR = "extensions";
  * announces at load, and after the request pipeline, so a product extension
  * must not shape the request tail. Only `secret-values` loads after it, to
  * redact what a product's result handlers add. These entries belong to no feature: the
- * product ships the ones it wants (working-docs/decisions/bi-fork.md).
+ * product ships the ones it wants, and since the glob is fixed before any
+ * profile is read, each entry's `productExtension` wrapper skips it under a
+ * profile that does not run it (`Profile.extensions`;
+ * working-docs/decisions/bi-fork.md).
  */
 export const PRODUCT_EXTENSIONS_ENTRY = `profile/${PRODUCT_EXTENSIONS_DIR}/*/index.ts`;
+
+/** Whether a folder under the product's `extensions/` is one the entry's glob loads: pi's glob skips dot folders. */
+export function isProductExtensionFolder(name: string): boolean {
+	return !name.startsWith(".");
+}
 
 export const FEATURE_IDS = Object.keys(FEATURES) as FeatureId[];
 
