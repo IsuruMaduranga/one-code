@@ -17,11 +17,13 @@ import { ENTER_WORKTREE_DESCRIPTION, EXIT_WORKTREE_DESCRIPTION } from "../text/w
 import { sha } from "./helpers/sha.ts";
 
 describe("the shipped texts", () => {
+	// Bash and Agent carry Claude Code 2.1.327's "To wait on background work, call Yield." (with One Code's
+	// tool name), which Claude Code shows while its Yield flag is on (findings §94).
 	it.each([
-		["Bash short, auto mode", bashDescription("short", true), 1383, "e03a867af7d49b2d"],
-		["Bash short, other modes", bashDescription("short", false), 1693, "3a9ad4dc1b7c13f6"],
-		["Bash long", BASH_LONG_DESCRIPTION, 10117, "150cfe7f15de9c0f"],
-		["Agent short (Claude Code's part)", AGENT_SHORT_DESCRIPTION, 3034, "3a10343eed1321c7"],
+		["Bash short, auto mode", bashDescription("short", true), 1423, "e374879fece4c8ae"],
+		["Bash short, other modes", bashDescription("short", false), 1733, "aaeba5b0f83bb85b"],
+		["Bash long", BASH_LONG_DESCRIPTION, 10161, "2474302193436afb"],
+		["Agent short (Claude Code's part)", AGENT_SHORT_DESCRIPTION, 3074, "123fc136c3ad9e36"],
 		["Agent long (Claude Code's part)", AGENT_LONG_DESCRIPTION, 7054, "8688abf39f02eb87"],
 		["Write short", WRITE_SHORT_DESCRIPTION, 240, "6b258dbec215234d"],
 		["Write long", WRITE_LONG_DESCRIPTION, 618, "abb9cbaad9e678a9"],

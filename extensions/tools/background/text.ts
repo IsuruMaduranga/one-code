@@ -95,13 +95,68 @@ export interface LoopText {
 	foldNote(p: { streak: number }): string;
 }
 
+/** The yield tool's description (Claude Code 2.1.327's flagged `Yield`, findings §94). */
+export interface YieldText {
+	description: string;
+}
+
 export interface BackgroundText {
 	cron: CronText;
 	wakeup: WakeupText;
 	monitor: MonitorText;
 	tasks: TaskToolsText;
 	loop: LoopText;
+	yield: YieldText;
 }
+
+/** Why a yield ended, in Claude Code 2.1.327's order of precedence. */
+export type YieldEnd =
+	| { kind: "delivered" }
+	| { kind: "message" }
+	| { kind: "scheduled" }
+	| { kind: "nothingRunning" }
+	| { kind: "interrupted" }
+	| { kind: "duplicate" }
+	| { kind: "cap"; running: number };
+
+/** The yield tool's results, which the base words (Claude Code 2.1.327's, with One Code's tool name). */
+export interface YieldResultText {
+	/** The tool result itself; the reason follows on its own line. */
+	ended: string;
+	/** "Resumed after 59 seconds: something arrived; it follows this line." */
+	resumed(p: { waitedMs: number; end: YieldEnd }): string;
+}
+
+function waited(ms: number): string {
+	if (ms < 1000) return "Resumed at once";
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 120) return `Resumed after ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+	return `Resumed after ${Math.round(seconds / 60)} minutes`;
+}
+
+function yieldReason(end: YieldEnd): string {
+	switch (end.kind) {
+		case "delivered":
+			return "something arrived; it follows this line.";
+		case "message":
+			return "a message arrived. If it follows this line, deal with it as you judge right, then end your turn rather than waiting again: a reply before another wait may not be shown to the person. If it doesn't follow, end your turn and it reaches you then.";
+		case "scheduled":
+			return "a scheduled prompt is due. It starts a new turn once you end this one.";
+		case "nothingRunning":
+			return "none of your background work is running. If you have nothing left to do, end your turn.";
+		case "interrupted":
+			return "the wait was interrupted.";
+		case "duplicate":
+			return "an earlier call to this tool in this reply already waited.";
+		case "cap":
+			return `nothing has reported yet; ${end.running} background ${end.running === 1 ? "task" : "tasks"} still running. Call yield again to keep waiting.`;
+	}
+}
+
+const yieldResultText: YieldResultText = {
+	ended: "The wait has ended. The line after this result says why.",
+	resumed: ({ waitedMs, end }) => `${waited(waitedMs)}: ${yieldReason(end)}`,
+};
 
 /** The group's results, refusals and notes, which the base words (`wakeupResultText`). */
 export interface WakeupResultText {
@@ -250,6 +305,7 @@ const merge = (profile: BackgroundText) => ({
 	monitor: { ...profile.monitor, ...monitorResultText },
 	tasks: { ...profile.tasks, ...taskToolsResultText },
 	loop: profile.loop,
+	yield: { ...profile.yield, ...yieldResultText },
 });
 
 /**

@@ -320,6 +320,7 @@ function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose
  */
 const TOOL_LABELS: Record<string, string> = {
 	edit: "Update",
+	yield: "Wait for background work",
 	ls: "LS",
 	powershell: "PowerShell",
 	ask_user_question: "Ask User",

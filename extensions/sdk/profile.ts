@@ -17,7 +17,7 @@ export type { AutoModeSetupText, ClassifierRuleset, ClassifierText } from "../sa
 export type { PermissionsText } from "../lib/rules/permission-text.ts";
 export { AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL } from "../tools/background/loop-sentinels.ts";
 export type { CronText } from "../lib/agents/cron-text.ts";
-export type { BackgroundText, LoopFile, LoopText, LoopTick, MonitorText, TaskToolsText, WakeupText } from "../tools/background/text.ts";
+export type { BackgroundText, LoopFile, LoopText, LoopTick, MonitorText, TaskToolsText, WakeupText, YieldText } from "../tools/background/text.ts";
 export type { BtwText } from "../agents/btw/text.ts";
 export type { CompactionReason, CompactionText, KeptTail, KeptTailLandmark } from "../context/compaction/text.ts";
 export type { DoctorText, FixPromptInput } from "../commands/doctor/text.ts";

@@ -9,7 +9,10 @@ import {
 	handBackPointer,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
+	NOTIFICATION_HANDED_CHANNEL,
 	NOTIFICATION_ID_KEY,
+	NOTIFIER_BACKLOG_CHANNEL,
+	type NotifierBacklogQuery,
 	notificationBody,
 	sessionOutlivesTurn,
 	shellSummary,
@@ -65,6 +68,29 @@ function fakePi(options: { prompted?: boolean; sendThrows?: boolean } = {}) {
 	};
 	return { pi: pi as never, sent, sentAsUser, fire, deliver, primed, emit: pi.events.emit };
 }
+
+describe("the notifier's backlog, as yield reads it", () => {
+	it("counts a coalescing notification, then a handed one until pi delivers it, and says when it hands one over", async () => {
+		const { pi, primed, deliver, emit } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 50 });
+		primed();
+		const handed: unknown[] = [];
+		(pi as { events: { on(c: string, h: (d: unknown) => void): void } }).events.on(NOTIFICATION_HANDED_CHANNEL, (data) => handed.push(data));
+		const backlog = () => {
+			const query: NotifierBacklogQuery = { coalescing: 0, handed: 0 };
+			emit(NOTIFIER_BACKLOG_CHANNEL, query);
+			return query;
+		};
+		notify("task-notification", shellDone("b1"), { taskId: "b1" });
+		expect(backlog()).toEqual({ coalescing: 1, handed: 0 });
+		expect(handed).toEqual([]);
+		await new Promise((resolve) => setTimeout(resolve, 80));
+		expect(backlog()).toEqual({ coalescing: 0, handed: 1 });
+		expect(handed).toEqual([{ customType: "task-notification" }]);
+		deliver(0);
+		expect(backlog()).toEqual({ coalescing: 0, handed: 0 });
+	});
+});
 
 describe("createTaskNotifier", () => {
 	it("steers with triggerTurn and stamps an outbox id into details", () => {

@@ -146,6 +146,7 @@ export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
 	schedule_wakeup: "background",
 	task_output: "background",
 	task_stop: "background",
+	yield: "background",
 	lsp_diagnostics: "lsp",
 	list_mcp_resources: "mcp",
 	read_mcp_resource: "mcp",

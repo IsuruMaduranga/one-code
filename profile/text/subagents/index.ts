@@ -12,6 +12,8 @@ import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const AGENT_PASSAGES: ToolPassages = {
+	// Claude Code 2.1.327 says it only while Yield is on (findings §94).
+	yield: [" To wait on background work, call yield."],
 	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
 	// pi's --exclude-tools takes SendMessage out alone: the facts that hold without it stay.
 	SendMessage: [

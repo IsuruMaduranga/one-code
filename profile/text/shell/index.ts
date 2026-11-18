@@ -10,6 +10,8 @@ import { powerShellToolDescription } from "./powershell-description.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const BASH_PASSAGES: ToolPassages = {
+	// Claude Code 2.1.327 says it only while Yield is on (findings §94).
+	yield: [" To wait on background work, call yield.", "  - To wait on background work, call yield.\n"],
 	monitor: [" Foreground `sleep` is blocked; use monitor with an until-loop to wait on a condition.", "  - Long leading `sleep` commands are blocked. To poll until a condition is met, use monitor with an until-loop (e.g. `until <check>; do sleep 2; done`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.\n", "  - Use the monitor tool to stream events from a background process (each stdout line is a notification). For one-shot \"wait until done,\" use bash with run_in_background instead.\n"],
 	// After Agent's: with both off, its replacement leaves "task_create tool".
 	Agent: [["task_create or Agent tools", "task_create tool"]],
@@ -26,6 +28,7 @@ const PS_TASK_TOOLS = [
 ] as const;
 
 const POWERSHELL_PASSAGES: ToolPassages = {
+	yield: [" To wait on background work, call yield."],
 	task_output: PS_TASK_TOOLS,
 	task_stop: PS_TASK_TOOLS,
 	monitor: ["; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor)"],

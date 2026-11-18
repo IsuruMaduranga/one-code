@@ -36,6 +36,7 @@ const CC_CANONICAL: Record<string, string> = {
 	task_update: "TaskUpdate",
 	task_output: "TaskOutput",
 	task_stop: "TaskStop",
+	yield: "Yield",
 	monitor: "Monitor",
 	schedule_wakeup: "ScheduleWakeup",
 	cron_create: "CronCreate",

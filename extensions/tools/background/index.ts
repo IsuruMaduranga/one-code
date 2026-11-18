@@ -68,6 +68,9 @@ import {
 	monitorEndedSummary,
 	monitorEventSummary,
 	oneShotNote,
+	NOTIFICATION_HANDED_CHANNEL,
+	NOTIFIER_BACKLOG_CHANNEL,
+	type NotifierBacklogQuery,
 	sessionOutlivesTurn,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	type TaskOutputDelivered,
@@ -104,6 +107,9 @@ import { recordState, stateSinceCompaction } from "../../lib/request/ledger/stat
 import { processState } from "../../lib/profile/process-state.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
 import { spawnOwnedShell, STORED_OUTPUT_CAP, tailCap } from "../../lib/shell-run/bash-background.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
+import type { YieldEnd } from "./text.ts";
+import { waitForBackground } from "./yield-wait.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
@@ -776,6 +782,62 @@ function backgroundExtension(pi: ExtensionAPI) {
 				content: [...flag, { type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },
 			};
+		},
+	});
+
+	// One wait per reply, as in Claude Code: a second yield in the same reply returns at once.
+	let yieldedInReply = false;
+	pi.on("message_start", (event) => {
+		if ((event.message as { role?: string }).role === "assistant") yieldedInReply = false;
+	});
+
+	// Claude Code 2.1.327's flagged `Yield`, on every model (findings §94): one
+	// blocking call for a model that wants to wait for an agent, a shell or a
+	// monitor, instead of polling. It ends when a notification is handed to pi
+	// (delivered right after this result), the user queues a message, a
+	// scheduled prompt is due, nothing is left that could report, the call is
+	// aborted, or the cap passes; the reason rides the result as a reminder.
+	pi.registerTool({
+		name: "yield",
+		label: "Wait for background work",
+		...toolRenderers("Wait for background work", {
+			title: () => "",
+			result: (result) => (result.details as { resumed?: string } | undefined)?.resumed,
+		}),
+		description: text.yield.description,
+		parameters: Type.Object({}),
+		// After an Agent or bash call in the same reply, so the work it waits for is registered.
+		executionMode: "sequential",
+		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
+			lastCtx = ctx;
+			const startedAt = Date.now();
+			let end: YieldEnd;
+			if (yieldedInReply) end = { kind: "duplicate" };
+			// A one-shot run blocks on every agent and shell: nothing is in the background to wait for.
+			else if (!sessionOutlivesTurn(ctx.mode)) end = { kind: "nothingRunning" };
+			else {
+				yieldedInReply = true;
+				end = await waitForBackground(
+					{
+						backlog: () => {
+							const query: NotifierBacklogQuery = { coalescing: 0, handed: 0 };
+							pi.events.emit(NOTIFIER_BACKLOG_CHANNEL, query);
+							return query;
+						},
+						running: () => registry.running().length,
+						userMessageQueued: () => ctx.hasPendingMessages(),
+						scheduledDue: () => {
+							const next = cron.nextFireAt();
+							return next !== undefined && next <= Date.now();
+						},
+						onHanded: (listener) => pi.events.on(NOTIFICATION_HANDED_CHANNEL, listener),
+					},
+					signal,
+				);
+			}
+			const resumed = text.yield.resumed({ waitedMs: Date.now() - startedAt, end });
+			pi.events.emit(REMINDER_CHANNEL, { text: resumed, toolCallId } satisfies ReminderPayload);
+			return { content: [{ type: "text", text: text.yield.ended }], details: { end: end.kind, resumed } };
 		},
 	});
 

@@ -16,7 +16,7 @@ Pick by how many notifications you need:
 - **One per occurrence, until the monitor expires (re-arm to continue)** ("tell me every time an ERROR line appears") → monitor with an unbounded command (\`tail -f\`, \`inotifywait -m\`, \`while true\`).
 - **One per occurrence, until a known end** ("emit each CI step result, stop when the run completes") → monitor with a command that emits lines and then exits.
 
-Your script's stdout is the event stream. Each line becomes a notification. Exit ends the watch.
+Your script's stdout is the event stream. Each line becomes a notification. Exit ends the watch. monitor tells you when something happens; yield is how you wait for it.
 
   # Each matching log line is an event
   tail -f /var/log/app.log | grep --line-buffered "ERROR"

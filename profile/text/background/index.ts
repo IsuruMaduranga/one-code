@@ -10,8 +10,9 @@ import { loop } from "./loop.ts";
 import { monitor } from "./monitor.ts";
 import { tasks } from "./tasks.ts";
 import { wakeup } from "./wakeup.ts";
+import { yieldTool } from "./yield.ts";
 
-export const background: BackgroundText = { cron, wakeup, monitor, tasks, loop };
+export const background: BackgroundText = { cron, wakeup, monitor, tasks, loop, yield: yieldTool };
 
 /** Per tool, the passages of the task_output description that name it. */
 const OUTPUT_PASSAGES: ToolPassages = {
@@ -23,6 +24,8 @@ const OUTPUT_PASSAGES: ToolPassages = {
 
 /** The monitor description's pointers to a background bash run, for a session without the bash tool. */
 const MONITOR_PASSAGES: ToolPassages = {
+	// Claude Code 2.1.327 says it only while Yield is on (findings §94).
+	yield: [" monitor tells you when something happens; yield is how you wait for it."],
 	bash: [
 		["use **bash with `run_in_background`**", "use a **background shell run (`run_in_background`)**"],
 		["use bash `run_in_background` with an `until` loop", "use a background shell run with an `until` loop"],
