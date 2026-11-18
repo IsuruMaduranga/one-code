@@ -152,6 +152,17 @@ describe("subagent RPC commands", () => {
 		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
 	});
 
+	it("lists the agent catalog one agent per line when nothing runs", async () => {
+		const h = await mount([], session, "rpc");
+		h.ctx.hasUI = true;
+		await h.fake.commands.get("agents")!.handler("", h.ctx);
+		const notice = h.notices();
+		expect(notice).toMatch(/^Available agents:\n- /m);
+		// Every catalog row starts its own line: a list put into the text as is would run them together with commas.
+		expect(notice).toContain(`\n${subagentResultText().forkRow}`);
+		expect(notice).not.toMatch(/,- /);
+	});
+
 	it("keeps the existing /subagent status fallback in RPC", async () => {
 		const h = await mount([], session, "rpc");
 		h.ctx.hasUI = true;

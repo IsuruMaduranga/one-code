@@ -3003,7 +3003,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				].join("\n"), "info");
 				return;
 			}
-			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
+			ctx.ui.notify(subagentResultText().catalogList({ rows: describeAgents(ctx.cwd) }), "info");
 		},
 	});
 
