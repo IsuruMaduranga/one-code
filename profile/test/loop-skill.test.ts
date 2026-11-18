@@ -43,8 +43,12 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.288)", () => {
 		expect(text).toContain("1. Call cron_create with: `cron` (the expression above)");
 		expect(text).toContain("recurring tasks auto-expire after 7 days, and that the user can cancel sooner with cron_delete (include the job ID).");
 		expect(text).toContain("If it's a slash command, invoke it via the skill tool;");
-		expect(text).toContain("call schedule_wakeup with `stop: true` (no other fields) and task_stop any monitor you armed (use task_output to find the task ID");
-		expect(text).toContain("arm one now with `persistent: true`");
+		expect(text).toContain("call schedule_wakeup with `stop: true` (no other fields) and task_stop any monitor you armed (if its task ID is no longer in context, task_stop with an unknown ID lists the background tasks)");
+		// Claude Code 2.1.327's monitor branch: a deadline, re-armed at expiry, and no output tool.
+		expect(text).toContain("arm one now with `timeout_ms: 1800000`");
+		expect(text).toContain("A monitor expires after at most 30 minutes and tells you; on later iterations re-arm only if no monitor for it is still running.");
+		expect(text).not.toContain("task_output");
+		expect(text).not.toContain("persistent");
 		expect(text.endsWith("## Input\n\ncheck the deploy every 20m")).toBe(true);
 		// The claude.ai-only branches are gone, without leaving gaps.
 		expect(text).not.toContain("Offer cloud first");
@@ -56,7 +60,7 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.288)", () => {
 		const visible =
 			"This must be ordinary visible response text — the user cannot see your thinking/reasoning, so an update written only there is invisible to them. Make it the last thing in the turn, then end the turn.";
 		const outcome =
-			"(use task_output to find the task ID if it is no longer in context). Then write the loop's outcome for the user as ordinary visible response text — a stopped loop has no next tick to surface it. Stopping is the loop's normal ending";
+			"(if its task ID is no longer in context, task_stop with an unknown ID lists the background tasks). Then write the loop's outcome for the user as ordinary visible response text — a stopped loop has no next tick to surface it. Stopping is the loop's normal ending";
 		const explicit = loopSkillPrompt("check the deploy", null);
 		expect(explicit).toContain("3. **Decide whether the loop continues.** If the task needs another iteration, call schedule_wakeup with:");
 		expect(explicit).toContain(

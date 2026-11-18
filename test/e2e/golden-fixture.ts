@@ -448,24 +448,23 @@ const CRON_ROUNDS: ToolCall[][] = [
 ];
 
 /**
- * monitor, task_output and task_stop under GOLDEN_MONITOR. The tools scenario
- * is a one-shot run, so a monitor runs to its end and returns inline: events
- * and an exit, nothing seen, a deadline, the persistent flag a one-shot run
- * cannot honour, a WebSocket URL that cannot open, and neither or both of
- * command and ws; then task_output and task_stop on an unknown id.
+ * monitor and task_stop under GOLDEN_MONITOR (task_output is off in the
+ * shipped profile). The tools scenario is a one-shot run, so a monitor runs to
+ * its end and returns inline: events and an exit, nothing seen, a deadline, a
+ * WebSocket URL that cannot open, and neither or both of command and ws; then
+ * task_stop on an unknown id. Every call passes `timeout_ms`, which the tool
+ * requires as Claude Code 2.1.327's does.
  */
 const mo = (id: string, name: string, input: Record<string, unknown>): ToolCall => ({ id: `toolu_golden_monitor_${id}`, name, input });
 const MONITOR_ROUNDS: ToolCall[][] = [
-	[mo("load", "tool_search", { query: "select:monitor,task_output,task_stop" })],
+	[mo("load", "tool_search", { query: "select:monitor,task_stop" })],
 	[
-		mo("events", "monitor", { command: "printf 'one\\ntwo\\n'; exit 3", description: "golden events" }),
-		mo("quiet", "monitor", { command: "true", description: "golden quiet" }),
+		mo("events", "monitor", { command: "printf 'one\\ntwo\\n'; exit 3", description: "golden events", timeout_ms: 30000 }),
+		mo("quiet", "monitor", { command: "true", description: "golden quiet", timeout_ms: 30000 }),
 		mo("deadline", "monitor", { command: "sleep 30", description: "golden deadline", timeout_ms: 1000 }),
-		mo("persistent", "monitor", { command: "sleep 30", description: "golden persistent", persistent: true, timeout_ms: 1000 }),
-		mo("ws_bad", "monitor", { ws: { url: "not a url" }, description: "golden socket" }),
-		mo("neither", "monitor", { description: "golden neither" }),
-		mo("both", "monitor", { command: "true", ws: { url: "ws://golden.example" }, description: "golden both" }),
-		mo("output_unknown", "task_output", { task_id: "nope" }),
+		mo("ws_bad", "monitor", { ws: { url: "not a url" }, description: "golden socket", timeout_ms: 30000 }),
+		mo("neither", "monitor", { description: "golden neither", timeout_ms: 30000 }),
+		mo("both", "monitor", { command: "true", ws: { url: "ws://golden.example" }, description: "golden both", timeout_ms: 30000 }),
 		mo("stop_unknown", "task_stop", { task_id: "nope" }),
 	],
 ];

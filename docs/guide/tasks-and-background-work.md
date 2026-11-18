@@ -45,8 +45,9 @@ time limit: it runs until it exits or is stopped, even if the model passed a
 `--mode json` run, the command runs in the foreground instead and stops at
 its timeout; see [Non-interactive runs](#non-interactive-runs).) Output spools to a log file
 under the session directory. When the command finishes, the model is
-notified with the result, and it can read the output at any time with
-`task_output` or stop the command with `task_stop`.
+notified with the result. While it runs, the model can read the log file
+with `read` or stop the command with `task_stop`. There's no separate tool
+for fetching a task's output: the notification brings the result.
 
 Running and recently finished shells appear in the panel below the editor:
 
@@ -84,11 +85,12 @@ while the model is idle, once every ten seconds while it's working, so a
 noisy process doesn't flood the conversation.
 
 A monitor runs until its command exits or its timeout passes (five minutes
-by default, one hour at most), or for the whole session when started as
-persistent. The model can stop it with `task_stop`. The whole stream is
-also written to a log file under the session directory, like a background
-shell's. When `task_output` has more than it can show, it returns the most
-recent part and names that file.
+by default, 30 minutes at most). When the timeout passes, the model gets one
+notice with the number of events it delivered, and it starts the monitor
+again if it still needs the watch. The model can stop a monitor early with
+`task_stop`. The whole stream is also written to a log file under the
+session directory, like a background shell's, and a batch too long to show
+whole names that file.
 
 A monitor isn't auto-approved, because it runs a shell command; the
 permission gate treats it like `bash`.

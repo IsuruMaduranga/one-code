@@ -26,8 +26,9 @@ import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
-import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest, toolLive } from "../../extensions/lib/profile/profile.ts";
 import { profile as shipped } from "./helpers/default-profile.ts";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -144,7 +145,10 @@ describe("subagent RPC commands", () => {
 		expect(views).toEqual([]);
 		await h.fake.commands.get("tasks")!.handler("", h.ctx);
 		expect(h.notices()).toContain("Check the code");
-		expect(h.notices()).toContain("task_output");
+		// The notice names task_output only while the profile has it live (One Code's has it off).
+		expect(h.notices()).toContain("task_stop");
+		if (toolLive("task_output")) expect(h.notices()).toContain("task_output");
+		else expect(h.notices()).not.toContain("task_output");
 		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
 	});
 
@@ -506,6 +510,8 @@ describe("a turn that ends with an agent pending", () => {
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2 and M3: a resumed turn (SendMessage
 // to a finished agent).
 describe("subagent resumed turns", () => {
+	// task_output is switched off in the shipped profile; these tests drive it.
+	useShippedProfileWithAllTools();
 	const resumable = (): AgentRunRecord => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(sessionFile, "");
@@ -875,6 +881,8 @@ describe("hand-back shape by permission mode", () => {
 // reach the model with the report, and a later turn's update is not the
 // report task_output returns.
 describe("task_output beside a background agent's hand-back", () => {
+	// task_output is switched off in the shipped profile; these tests drive it.
+	useShippedProfileWithAllTools();
 	const textOf = (content: unknown) =>
 		typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("");
 	const sent = (h: Awaited<ReturnType<typeof mount>>) => h.fake.sentMessages.map((m) => textOf(m.message.content)).join("\n");

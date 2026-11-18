@@ -13,17 +13,27 @@ import { wakeup } from "./wakeup.ts";
 
 export const background: BackgroundText = { cron, wakeup, monitor, tasks, loop };
 
-/** Per tool, the passages of the monitor and task_output descriptions that name it. */
-const DESCRIPTION_PASSAGES: ToolPassages = {
-	bash: ["; for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own", ["(monitor or background bash)", "(monitor)"]],
+/** Per tool, the passages of the task_output description that name it. */
+const OUTPUT_PASSAGES: ToolPassages = {
+	bash: [["(monitor or background bash)", "(monitor)"]],
 	// After bash's: with both off, its replacement leaves the second form.
 	monitor: [["(monitor or background bash)", "(background bash)"], [" (monitor)", ""]],
 	Agent: [" Not for background agents: an agent's report arrives as its task notification, and this tool does not wait for one."],
 };
 
+/** The monitor description's pointers to a background bash run, for a session without the bash tool. */
+const MONITOR_PASSAGES: ToolPassages = {
+	bash: [
+		["use **bash with `run_in_background`**", "use a **background shell run (`run_in_background`)**"],
+		["use bash `run_in_background` with an `until` loop", "use a background shell run with an `until` loop"],
+		["same shell environment as bash.", "same shell environment as your shell commands."],
+		["Use bash when you need to transform", "Use a command when you need to transform"],
+	],
+};
+
 /** The group, for the tools this session can have (`live`): text naming a tool that is off leaves it out. */
 export const backgroundText = (live: LiveTools): BackgroundText => ({
 	...background,
-	monitor: { ...monitor, description: withoutOff(monitor.description, live, DESCRIPTION_PASSAGES) },
-	tasks: { ...tasks, outputDescription: withoutOff(tasks.outputDescription, live, DESCRIPTION_PASSAGES) },
+	monitor: { ...monitor, description: withoutOff(monitor.description, live, MONITOR_PASSAGES) },
+	tasks: { ...tasks, outputDescription: withoutOff(tasks.outputDescription, live, OUTPUT_PASSAGES) },
 });

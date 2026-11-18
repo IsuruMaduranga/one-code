@@ -4,6 +4,10 @@ import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
 import { agentMessage, createTaskNotifier, TASK_COMPLETION_KEY, TASK_OUTPUT_DELIVERED_CHANNEL, type TaskOutputDelivered, taskNotification } from "../../extensions/lib/notify/notifications.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
+
+// task_output is switched off in the shipped profile (Claude Code 2.1.327 has none); these tests drive it.
+useShippedProfileWithAllTools();
 
 function mountTask(kind = "test") {
 	const fake = createFakePi();

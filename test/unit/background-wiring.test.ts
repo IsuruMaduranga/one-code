@@ -54,6 +54,13 @@ import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helper
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 import { backgroundWords } from "../../extensions/tools/background/text.ts";
+import { shippedProfileWithAllTools, useShippedProfileWithAllTools } from "./helpers/profile.ts";
+import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+
+// task_output is switched off in the shipped profile (Claude Code 2.1.327 has none); these tests drive it,
+// and `words` below is built under the same profile the tests run on, so spies reach the extension's words.
+useShippedProfileWithAllTools();
+setActiveProfileForTest(shippedProfileWithAllTools());
 
 // The profile's words: each test checks that the base hands them the right
 // facts and places what they return (One Code's wording is
@@ -743,6 +750,28 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const silent = await output("true");
 		expect(silent).toContain(words.monitor.noOutput);
 		expect(silent).not.toContain(words.tasks.noOutputYet);
+	});
+
+	it("a monitor's deadline ends it with Claude Code 2.1.327's expiry line in its last batch, and no stopped notice", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "echo one; sleep 30", description: "slow", timeout_ms: 1000 },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		for (let waited = 0; fake.sentMessages.length === 0 && waited < 5000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 300));
+		const texts = fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "");
+		const all = texts.join("\n");
+		expect(all).toContain(`<task-id>${start.details.taskId}</task-id>`);
+		expect(all).toContain(escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 })));
+		expect(all).not.toContain(summaryTag(monitorEndedSummary("slow", "killed", true)));
+		expect(all).not.toContain("<status>");
 	});
 
 	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {

@@ -44,7 +44,7 @@ describe("One Code's schedule_wakeup text", () => {
 describe("One Code's monitor and task tool text", () => {
 	it("words a background monitor and an aborted one-shot monitor", () => {
 		expect(monitor.started({ id: "b1234567", description: "logs" })).toBe(
-			"Monitor b1234567 started (logs). Events arrive as task notifications; stop with task_stop, inspect with task_output.",
+			"Monitor b1234567 started (logs). Events arrive as task notifications; stop with task_stop.",
 		);
 		expect(monitor.ranToEnd({ id: "b1234567", description: "logs", end: { kind: "aborted" }, events: 1, note: "N.", output: "x" })).toBe(
 			"Monitor b1234567 (logs) stopped (tool call aborted) after 1 event(s). N.\n\nx",
@@ -55,8 +55,20 @@ describe("One Code's monitor and task tool text", () => {
 		expect(monitor.startFailed({ kind: "noShell" })).toBe("Cannot start the monitor: no bash shell was found");
 	});
 
-	it("counts the lines a batch left out on a line of their own", () => {
-		expect(monitor.moreLines({ hidden: 25, taskId: "m1" })).toBe("\n… +25 more line(s) not shown — task_output m1 has the full stream");
+	it("counts the lines a batch left out on a line of their own, and points at the output file", () => {
+		expect(monitor.moreLines({ hidden: 25, taskId: "m1" })).toBe("\n… +25 more line(s) not shown");
+		expect(monitor.moreLines({ hidden: 25, taskId: "m1", logPath: "/s/m1.log" })).toBe("\n… +25 more line(s) not shown — the full stream is in /s/m1.log");
+	});
+
+	it("words a monitor's expiry as Claude Code 2.1.327 does", () => {
+		expect(monitor.expired({ duration: "5m", events: 3 })).toBe("[Monitor expired after 5m with 3 events delivered. Re-arm it if you still need the watch.]");
+		expect(monitor.expired({ duration: "5m", events: 1 })).toBe("[Monitor expired after 5m with 1 event delivered. Re-arm it if you still need the watch.]");
+		expect(monitor.expired({ duration: "30m", events: 0 })).toBe(
+			"[Monitor expired after 30m with no events delivered. Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]",
+		);
+		expect(monitor.expired({ duration: "5m", events: 0, stderrPath: "/s/m.log" })).toBe(
+			"[Monitor expired after 5m with no events delivered. Its command wrote to stderr, which isn't delivered as events and may mean it failed: see `/s/m.log`. Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]",
+		);
 	});
 
 	it("words task_stop's outcomes and the task line", () => {

@@ -277,6 +277,11 @@ const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
 /** The `one-code:state` key of the models this account refused (lib/models/model-unusable.ts). */
 const REFUSED_MODELS_STATE = "subagents:refused-models";
 
+/** How the non-TUI notices name the task tools: task_output only while it is live (the profile may switch it off). */
+function taskToolsHint(): string {
+	return toolLive("task_output") ? "task_output and task_stop inspect or stop a task." : "task_stop stops a task.";
+}
+
 function subagentsExtension(pi: ExtensionAPI) {
 	/** The profile's subagent words (fails closed: every Agent call reads them). */
 	const words = subagentWords();
@@ -955,7 +960,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	const openView = (ctx: ExtensionContext, taskId: string) => {
 		if (ctx.mode !== "tui") {
-			ctx.ui.notify("The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task.", "warning");
+			ctx.ui.notify(`The live subagent panel requires TUI mode. Use /tasks for task status; ${taskToolsHint()}`, "warning");
 			return;
 		}
 		if (view) return view.retarget(taskId);
@@ -2823,7 +2828,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify([
 				"The interactive task viewer requires TUI mode; showing a task snapshot instead.",
 				...(lines.length ? lines : ["No background tasks in this session."]),
-				"Use task_output to inspect a task and task_stop to stop it.",
+				`Use /tasks for task status; ${taskToolsHint()}`,
 			].join("\n"), "info");
 			return;
 		}
@@ -2990,7 +2995,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify([
 					"The live subagent panel requires TUI mode; showing spawned agents instead.",
 					...registry.list().map((run) => subagentResultText().agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
-					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
+					`Use /tasks for task status; ${taskToolsHint()}`,
 				].join("\n"), "info");
 				return;
 			}

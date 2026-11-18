@@ -178,7 +178,7 @@ export const TOOL_FEATURES: Readonly<Record<string, FeatureId>> = {
  */
 export const BUNDLED_SKILL_TOOLS: Readonly<Record<string, readonly string[]>> = {
 	"artifact-design": ["artifact"],
-	loop: ["cron_create", "cron_delete", "schedule_wakeup", "monitor", "task_output", "task_stop"],
+	loop: ["cron_create", "cron_delete", "schedule_wakeup", "monitor", "task_stop"],
 	"workflow-authoring": ["workflow"],
 };
 
@@ -228,7 +228,7 @@ export const FEATURE_CORE_TOOLS: Readonly<Partial<Record<FeatureId, readonly str
 export const TOOL_NEEDS: Readonly<Record<string, readonly string[]>> = {
 	cron_list: ["cron_create"],
 	cron_delete: ["cron_create"],
-	monitor: ["task_output", "task_stop"],
+	monitor: ["task_stop"],
 	read_mcp_resource: ["list_mcp_resources"],
 	list_agents: ["Agent"],
 };

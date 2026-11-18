@@ -463,6 +463,10 @@ export interface TaskNotifier {
 }
 
 /**
+ * Inert while a profile switches `task_output` off (One Code's does: Claude
+ * Code 2.1.327 has no output tool, findings §94); kept for profiles that turn
+ * it on.
+ *
  * `task_output` announces here that it returns a FINISHED task's output in a
  * tool result, which it always does. A notifier created with
  * `withdrawOnDelivery` then drops that task's completion notification

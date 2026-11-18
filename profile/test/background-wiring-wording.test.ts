@@ -24,7 +24,7 @@ describe("monitor notifications", () => {
 	});
 
 	it("closes a batch that left lines out with the count and where the rest is", () => {
-		expect(monitor.moreLines({ hidden: 10, taskId: "b1234567" })).toContain("+10 more line(s) not shown — task_output b1234567 has the full stream");
+		expect(monitor.moreLines({ hidden: 10, taskId: "b1234567", logPath: "/s/b1234567.log" })).toContain("+10 more line(s) not shown — the full stream is in /s/b1234567.log");
 	});
 });
 

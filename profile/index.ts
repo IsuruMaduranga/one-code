@@ -52,7 +52,9 @@ const OPENROUTER_QUANTIZATION_FLOOR = ["fp8", "bf16", "fp16", "fp32", "unknown"]
 export const profile: Profile = {
 	features: {},
 	// Search goes through the shell on every tier: pi's grep, find and ls are off (decisions/tools.md).
-	tools: { grep: { enabled: false }, find: { enabled: false }, ls: { enabled: false } },
+	// Claude Code 2.1.327 has no output tool: a notification brings every background task's result, and a
+	// shell's or monitor's output file is read with read (findings §94). The code stays, switchable per profile.
+	tools: { grep: { enabled: false }, find: { enabled: false }, ls: { enabled: false }, task_output: { enabled: false } },
 	childExtensions: [],
 	// Smaller models think less by default: weak models at medium overthink far more than at low. Frontier keeps pi's level.
 	defaultThinkingLevels: { workhorse: "medium", cheap: "low", tiny: "low" },
