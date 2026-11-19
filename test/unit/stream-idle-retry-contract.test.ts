@@ -9,10 +9,15 @@
  * One Code's providers use. If a pi bump changes the error text or the rule,
  * a stalled stream would end the turn instead of retrying it.
  */
+import { createRequire } from "node:module";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { fileURLToPath } from "node:url";
 import { isRetryableAssistantError, streamSimple } from "@earendil-works/pi-ai/compat";
-import { Agent, fetch as undiciFetch } from "undici";
+
+/** The undici pi's own dispatcher uses, resolved from pi-coding-agent (One Code declares none). */
+const piPackage = fileURLToPath(new URL("../../node_modules/@earendil-works/pi-coding-agent/package.json", import.meta.url));
+const { Agent, fetch: undiciFetch } = createRequire(piPackage)("undici") as typeof import("undici");
 import { afterEach, describe, expect, it } from "vitest";
 
 let server: Server | undefined;

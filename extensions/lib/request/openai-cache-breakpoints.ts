@@ -8,8 +8,8 @@
  * message (lib/request/system-role.ts withSystemRoleContext). Pure.
  */
 
-/** The breakpoint as an input part carries it. */
-export const RESPONSES_BREAKPOINT = { mode: "explicit" } as const;
+/** The breakpoint as an input part carries it; frozen, since every marked part shares it. */
+export const RESPONSES_BREAKPOINT = Object.freeze({ mode: "explicit" } as const);
 
 /** Whether `model` takes explicit breakpoints: an OpenAI Responses model with pi's explicit-cache flag. */
 export function takesExplicitCacheBreakpoints(model: { api: string; compat?: unknown }): boolean {

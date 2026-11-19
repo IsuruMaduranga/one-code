@@ -17,8 +17,6 @@ import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
-import { type ParentTool, withParentParameters } from "../../extensions/agents/subagents/fork-cache.ts";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentRunRecord } from "../../extensions/agents/subagents/runs.ts";
 import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
 import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
@@ -631,30 +629,6 @@ describe("fork runs in a one-shot session", () => {
 		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
 
-	/**
-	 * The spawn tools a fork's session declares: the runner gives them the
-	 * parent's schemas (fork-cache.ts withParentParameters) from the parent's
-	 * tools, which index.ts hands a fork that has its parent's request (these
-	 * one-shot forks have none, so the parent's registry stands in).
-	 */
-	const forkTools = (h: { fake: { tools: Map<string, { name: string; parameters?: unknown }> } }, spec: unknown) =>
-		withParentParameters(
-			(spec as { extraTools?: ToolDefinition[] }).extraTools ?? [],
-			[...h.fake.tools.values()].map(({ name, parameters }): ParentTool => ({ name, parameters })),
-		);
-
-	// A fork's first request extends the parent's recorded one, tools block
-	// included; the ledger keeps a recorded declaration only while the live
-	// schema matches (lib/request/ledger/wire.ts mergeDeclarations), so a fork's spawn
-	// tool with its own schema replaced the parent's Agent mid-array and the fork
-	// missed the parent's cache from there on.
-	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
-		const { h, run } = await mountFork();
-		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const nested = forkTools(h, run.mock.calls[0][0]).find((tool) => tool.name === "Agent");
-		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
-	});
-
 	// The fork's wire carries the parent's Agent declaration, which offers these
 	// options; a nested run cannot honor them, so the result names the fix.
 	it("refuses the parent's options a nested run cannot honor, naming the fix, and runs the call without them", async () => {
@@ -677,19 +651,15 @@ describe("fork runs in a one-shot session", () => {
 		expect(run).toHaveBeenCalledTimes(2);
 	});
 
-	// The same rule for every tool a fork is handed: one whose schema differs
-	// from the parent's tool of that name replaces the parent's recorded
-	// declaration, and the fork misses the parent's cache from there on.
-	it("gives a fork only tools whose schemas match the parent's tools of the same name", async () => {
+	// A fork declares the parent's schema for every tool it is handed
+	// (fork-cache.ts withParentParameters, applied by the runner:
+	// fork-runner-tools.test.ts), so each spawn tool must be one the parent has.
+	it("hands a fork only spawn tools the parent also has", async () => {
 		const { h, run } = await mountFork();
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const extraTools = forkTools(h, run.mock.calls[0][0]);
+		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? [];
 		expect(extraTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
-		for (const tool of extraTools) {
-			const parent = h.fake.tools.get(tool.name);
-			expect(parent, `the parent has no ${tool.name} tool`).toBeDefined();
-			expect(JSON.stringify(tool.parameters), tool.name).toBe(JSON.stringify(parent!.parameters));
-		}
+		for (const tool of extraTools) expect(h.fake.tools.get(tool.name), `the parent has no ${tool.name} tool`).toBeDefined();
 	});
 
 	// pi's tool flags restrict a fresh agent as they restrict the parent, and a

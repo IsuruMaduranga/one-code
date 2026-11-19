@@ -50,8 +50,14 @@ describe("the runner's fork tools", () => {
 		expect(tools.Agent).toBe(parentAgent);
 	});
 
-	it("keep their own schemas in a fork without its parent's request, and in a named agent", async () => {
-		for (const spec of [{ parentSystemPrompt: "parent prompt", parentTools }, { parentTools }]) {
+	it("declare the parent's schemas on a resume whose saved request is gone, so they match the fork's own recorded requests", async () => {
+		const tools = await customTools({ parentSystemPrompt: "parent prompt", parentTools });
+		expect(tools.SendMessage).toBe(parentSendMessage);
+		expect(tools.Agent).toBe(parentAgent);
+	});
+
+	it("keep their own schemas in a fork not handed the parent's tools, and in a named agent", async () => {
+		for (const spec of [{ parentSystemPrompt: "parent prompt" }, { parentTools }]) {
 			const tools = await customTools(spec);
 			expect(tools.SendMessage).not.toBe(parentSendMessage);
 			expect(tools.Agent).toBe(nestedAgent);

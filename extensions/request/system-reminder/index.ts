@@ -212,7 +212,7 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		const layout = systemRoleLayout(model);
 		const role = instructionRole(shape, model);
 		let payload = event.payload as Record<string, unknown>;
-		if (layout) payload = withSystemRoleContext(payload, layout, moved, role, contextBreakpoint(model, payload, () => authKind(model.provider, model.baseUrl))) ?? payload;
+		if (layout) payload = withSystemRoleContext(payload, layout, moved, role, () => contextBreakpoint(model, payload, () => authKind(model.provider, model.baseUrl))) ?? payload;
 		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
 		// gets its clear_at nudge after each tool result.
 		const systemRoleWire = acceptsAnthropicWire(model, "system-role");

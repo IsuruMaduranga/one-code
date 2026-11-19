@@ -90,10 +90,10 @@ describe("withSystemRoleContext", () => {
 	// message (findings §95); Claude Code marks the same message on Anthropic.
 	it("puts OpenAI's explicit cache breakpoint on the context message's one part when asked, and only on Responses", () => {
 		const responses = { input: [{ role: "developer", content: "prompt" }, { role: "user", content: [{ type: "input_text", text: ENV.framed }, { type: "input_text", text: "hi" }] }] };
-		const out = withSystemRoleContext(responses, "responses", [ENV], "developer", true) as { input: unknown[] };
+		const out = withSystemRoleContext(responses, "responses", [ENV], "developer", () => true) as { input: unknown[] };
 		expect(out.input[2]).toEqual({ role: "developer", content: [{ type: "input_text", text: ENV.inner, prompt_cache_breakpoint: { mode: "explicit" } }] });
 		const completions = { messages: [{ role: "system", content: "prompt" }, { role: "user", content: [{ type: "text", text: ENV.framed }, { type: "text", text: "hi" }] }] };
-		expect((withSystemRoleContext(completions, "completions", [ENV], "system", true) as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
+		expect((withSystemRoleContext(completions, "completions", [ENV], "system", () => true) as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
 	});
 
 	it("marks the context message only for an OpenAI Responses model that takes breakpoints, with caching on and no ChatGPT sign-in", () => {

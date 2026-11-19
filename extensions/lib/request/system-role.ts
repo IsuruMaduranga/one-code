@@ -128,8 +128,8 @@ export function systemMessage(layout: SystemRoleLayout, role: "system" | "develo
  * moves. The cache mark is reseated afterwards (anthropic-payload.ts
  * reseatMessageMark). Undefined when nothing changes.
  *
- * With `breakpoint` (an OpenAI model that takes explicit breakpoints, caching
- * on), the message carries OpenAI's explicit cache breakpoint on its one part.
+ * With `breakpoint` (asked only when the message is built: an OpenAI model that
+ * takes explicit breakpoints, caching on), the message carries OpenAI's explicit cache breakpoint on its one part.
  * OpenAI's implicit cache never ends at a developer message after the first
  * user message, so without it the epoch's first request cached only up to the
  * user message and the next request (a fork's too) paid the context again
@@ -143,7 +143,7 @@ export function withSystemRoleContext(
 	layout: SystemRoleLayout,
 	moved: readonly MovedBlock[],
 	role: "system" | "developer",
-	breakpoint = false,
+	breakpoint: () => boolean = () => false,
 ): Record<string, unknown> | undefined {
 	if (moved.length === 0) return undefined;
 	const key = messagesKey(layout);
@@ -169,5 +169,5 @@ export function withSystemRoleContext(
 		.join("\n\n");
 
 	const user: WireMessage = { ...carrier, content: kept };
-	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text, breakpoint), ...messages.slice(index + 1)] };
+	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text, breakpoint()), ...messages.slice(index + 1)] };
 }
