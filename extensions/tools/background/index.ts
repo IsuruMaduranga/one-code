@@ -27,7 +27,7 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
-import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -35,7 +35,7 @@ import {
 	shownTask,
 	TASK_REGISTER_CHANNEL,
 } from "../../lib/agents/task-registry.ts";
-import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
+import { SWITCH_CANCEL, SWITCH_STOP, switchWarning } from "./switch-guard.ts";
 import { DynamicLoop, scheduledText } from "./wakeup.ts";
 import { backgroundWords, type MonitorEnd, type MonitorStartFailure, type TaskToolsWords, type WakeupMissingField } from "./text.ts";
 import {
@@ -238,9 +238,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(TASK_REGISTER_CHANNEL, (data) => {
 		const task = data as BackgroundTask;
 		registry.register(task);
-		// Shells and subagent runs count toward the widget's warning line too.
-		updateWidget();
-		task.finished?.then(updateWidget, updateWidget);
 	});
 	// A subagent's cron tools (lib/agents/agent-cron.ts): its jobs, its view, its deletes.
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
@@ -271,17 +268,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 		query.crons.push(...cron.list().map(sessionCron));
 		query.tasks.push(...registry.running().map(sessionBackgroundTask));
 	});
-
-	const updateWidget = () => {
-		// liveUiCtx: a stale ctx (session replaced) reads as "no UI", never a throw;
-		// session_shutdown also drops lastCtx, so a late repaint is a no-op.
-		const live = liveUiCtx(lastCtx);
-		if (!live) return;
-		// Every running task and scheduled job, panel-owned ones included: the
-		// line is the warning of what /clear, /reload or quitting stops (switch-guard.ts).
-		const line = workWidgetLine(registry.running().length, cron.list().length);
-		live.ui.setWidget("cc-background", line ? [line] : undefined);
-	};
 
 	// The wire frames are model-facing; the transcript shows a compact headline
 	// instead (ctrl+o expands). One registration covers every emitter of
@@ -413,12 +399,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 		if (cronTimer) clearTimeout(cronTimer);
 		cronTimer = undefined;
 		// A busy agent re-runs this at agent_settled; a dead session never does.
-		if (!alive() || agentBusy) {
-			updateWidget();
-			return;
-		}
+		if (!alive() || agentBusy) return;
 		for (const fire of cron.takeDue(Date.now())) fireCron(fire);
-		updateWidget();
 		const next = cron.nextFireAt();
 		if (next === undefined) return;
 		cronTimer = setTimeout(runCron, Math.min(Math.max(0, next - Date.now()), MAX_TIMER_MS));
@@ -554,11 +536,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 						const duration = formatDuration(0, timeoutMs).replace(/ 0[sm]$/, "");
 						pushEvent(pending, text.monitor.expired({ duration, events: eventCount, stderrPath: stderrWritten ? task.logPath : undefined }));
 						flush(true);
-						updateWidget();
 						return;
 					}
 					flush(true);
-					updateWidget();
 					// CC's monitor end: the recent tail rides <event> under the ended summary.
 					const ccStatus = taskStatusOf(finalStatus);
 					const recent = tailCap(stored, MONITOR_BATCH_MAX_CHARS, text.monitor.earlierTruncated).trim();
@@ -670,10 +650,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			// A one-shot monitor is awaited below and never addressable afterwards, so
 			// it is not registered behind task_output/task_stop (like bash's blocking
 			// path).
-			if (!oneShot) {
-				registry.register(task);
-				updateWidget();
-			}
+			if (!oneShot) registry.register(task);
 
 			const timeoutMs = Math.min(params.timeout_ms ?? DEFAULT_MONITOR_TIMEOUT_MS, MAX_MONITOR_TIMEOUT_MS);
 			const timer = setTimeout(() => {
@@ -748,7 +725,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 			// running one returns at once and says so, whatever `block` asks,
 			// so a wait for the report never becomes a poll.
 			if (task.kind === "subagent" && task.status === "running") {
-				updateWidget();
 				return {
 					content: [{ type: "text", text: `${text.tasks.taskLine(shownTask(task))}\n\n${text.tasks.agentStillRunning}` }],
 					details: { taskId: task.id, status: task.status, logPath: task.logPath },
@@ -774,7 +750,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 				}
 			}
 
-			updateWidget();
 			const header = text.tasks.taskLine(shownTask(task));
 			// A finished task's output is always returned here; its completion
 			// notification is withdrawn where pi does not hold it yet
@@ -891,7 +866,6 @@ function backgroundExtension(pi: ExtensionAPI) {
 			}
 			const wasResident = task.status !== "running";
 			task.stop();
-			updateWidget();
 			return {
 				content: [
 					{

@@ -143,3 +143,41 @@ describe("spinner wiring (retry keeps the open span)", () => {
 		}
 	});
 });
+
+describe("spinner wiring (a yield wait says what it waits for)", () => {
+	it("shows Claude Code's waiting line while a yield call runs, and the verb again after", async () => {
+		vi.useFakeTimers();
+		try {
+			const { default: spinnerExtension } = await import("../../extensions/ui/spinner/index.ts");
+			const { createFakePi } = await import("./helpers/fake-pi.ts");
+			const { SESSION_WORK_CHANNEL } = await import("../../extensions/lib/notify/session-work.ts");
+			const fake = createFakePi();
+			const tasks = [{ id: "a1", type: "subagent", status: "running", description: "Build" }];
+			fake.events.on(SESSION_WORK_CHANNEL, (data: unknown) => (data as { tasks: unknown[] }).tasks.push(...tasks));
+			const messages: Array<string | undefined> = [];
+			const ctx = { hasUI: true, ui: { theme: undefined, setWorkingIndicator: () => {}, setWorkingMessage: (text?: string) => messages.push(text) } };
+			spinnerExtension(fake.pi as never);
+			await fake.fire("agent_start", { type: "agent_start" }, ctx);
+			const verb = messages.at(-1)?.split("…")[0];
+
+			await fake.fire("tool_execution_start", { type: "tool_execution_start", toolCallId: "y1", toolName: "yield", args: {} }, ctx);
+			expect(messages.at(-1)).toBe("Waiting for 1 background agent to finish… (0s)");
+			tasks.push({ id: "a2", type: "subagent", status: "running", description: "Test" });
+			vi.advanceTimersByTime(65_000);
+			expect(messages.at(-1)).toBe("Waiting for 2 background agents to finish… (1m 5s)");
+
+			// Another tool does not end the wait; the yield call's end does.
+			await fake.fire("tool_execution_end", { type: "tool_execution_end", toolCallId: "b1", toolName: "bash", result: {}, isError: false }, ctx);
+			expect(messages.at(-1)).toContain("Waiting for 2 background agents");
+			await fake.fire("tool_execution_end", { type: "tool_execution_end", toolCallId: "y1", toolName: "yield", result: {}, isError: false }, ctx);
+			expect(messages.at(-1)).toBe(`${verb}… (1m 5s)`);
+
+			// A wait on a shell alone still says what it waits for.
+			tasks.splice(0, tasks.length, { id: "s1", type: "shell", status: "running", description: "npm test" });
+			await fake.fire("tool_execution_start", { type: "tool_execution_start", toolCallId: "y2", toolName: "yield", args: {} }, ctx);
+			expect(messages.at(-1)).toBe("Waiting for 1 background task to finish… (1m 5s)");
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+});

@@ -1,12 +1,13 @@
 /**
  * A session switch stops every background task and scheduled job, so it asks
- * first (session_before_switch / session_before_fork can cancel); quitting
- * cannot be cancelled, so the widget line warns while anything runs.
+ * first (session_before_switch / session_before_fork can cancel). Quitting
+ * cannot be cancelled and stops it without a standing warning line, as in
+ * Claude Code.
  */
 import { describe, expect, it, vi } from "vitest";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import { TASK_REGISTER_CHANNEL, type BackgroundTask } from "../../extensions/lib/agents/task-registry.ts";
-import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "../../extensions/tools/background/switch-guard.ts";
+import { SWITCH_CANCEL, SWITCH_STOP, switchWarning } from "../../extensions/tools/background/switch-guard.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 function fakeTask(id: string, description: string): BackgroundTask & { settle: () => void } {
@@ -59,14 +60,6 @@ describe("switch guard texts", () => {
 
 	it("says nothing when nothing runs", () => {
 		expect(switchWarning([], [], "Starting a new session")).toBeUndefined();
-		expect(workWidgetLine(0, 0)).toBeUndefined();
-	});
-
-	it("the widget line warns about /clear and quitting, and points at /tasks only for tasks", () => {
-		expect(workWidgetLine(2, 0)).toBe(" 2 background tasks · stopped by /clear, /reload or quitting · /tasks to manage");
-		// A /reload re-arms scheduled jobs from the branch; only running tasks stop.
-		expect(workWidgetLine(0, 1)).toBe(" 1 scheduled job · stopped by /clear or quitting");
-		expect(workWidgetLine(1, 2)).toBe(" 1 background task and 2 scheduled jobs · stopped by /clear or quitting, the tasks by /reload too · /tasks to manage");
 	});
 });
 
@@ -103,15 +96,10 @@ describe("switch guard wiring", () => {
 		expect(select).not.toHaveBeenCalled();
 	});
 
-	it("the widget counts a panel-owned shell while it runs and clears when it finishes", async () => {
+	it("draws no standing line while a task runs: the strip and the shells chip show it", async () => {
 		const setWidget = vi.fn();
 		const { fake } = await started({ setWidget });
-		const task = fakeTask("b1", "npm run dev");
-		fake.events.emit(TASK_REGISTER_CHANNEL, task);
-		expect(setWidget).toHaveBeenLastCalledWith("cc-background", [" 1 background task · stopped by /clear, /reload or quitting · /tasks to manage"]);
-		task.settle();
-		await task.finished;
-		await Promise.resolve();
-		expect(setWidget).toHaveBeenLastCalledWith("cc-background", undefined);
+		fake.events.emit(TASK_REGISTER_CHANNEL, fakeTask("b1", "npm run dev"));
+		expect(setWidget).not.toHaveBeenCalled();
 	});
 });

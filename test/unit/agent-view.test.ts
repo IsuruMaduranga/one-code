@@ -85,6 +85,7 @@ describe("renderTasksDialog", () => {
 			"    ⏺ Read notes.txt and report after delay   running · Sonnet 5",
 			"    Completed (1)",
 			"    ✔ write a 300-word poem   done · Haiku 4.5",
+			"  Quitting or /reload stops running tasks.",
 			"  ↑/↓ to select · Enter to view · x to stop · Esc to close",
 		]);
 	});

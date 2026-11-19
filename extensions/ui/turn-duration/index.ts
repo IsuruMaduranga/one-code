@@ -17,7 +17,7 @@ import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
+import { pendingWork } from "../../lib/notify/session-work.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
 import { formatDoneAt, TURN_MARK, turnDurationText } from "./line.ts";
 import { TurnSpan } from "./span.ts";
@@ -34,14 +34,6 @@ interface TurnDurationData {
 	runningAgents?: number;
 	/** Workflows still running when the turn ended (CC's `pending_workflow_count`). */
 	runningWorkflows?: number;
-}
-
-/** Agents and workflows still running, as the background extension's task registry has them (no shared module state). */
-function pendingWork(pi: ExtensionAPI): { agents: number; workflows: number } {
-	const query: SessionWorkQuery = { crons: [], tasks: [] };
-	pi.events.emit(SESSION_WORK_CHANNEL, query);
-	const running = query.tasks.filter((task) => task.status === "running");
-	return { agents: running.filter((task) => task.type === "subagent").length, workflows: running.filter((task) => task.type === "workflow").length };
 }
 
 function turnDurationExtension(pi: ExtensionAPI) {
@@ -70,7 +62,7 @@ function turnDurationExtension(pi: ExtensionAPI) {
 		const durationMs = span.settle(Date.now());
 		if (durationMs === undefined) return;
 		if (!ctx.hasUI) return;
-		const pending = pendingWork(pi);
+		const pending = pendingWork(pi.events);
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),
 			durationMs,

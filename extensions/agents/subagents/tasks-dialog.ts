@@ -13,9 +13,12 @@
  *     ⏺ Read notes.txt and report after delay   running · Sonnet 5
  *     Completed (1)
  *     ✔ write a 300-word poem about the word in the file   done · Haiku 4.5
+ *   Quitting or /reload stops running tasks.
  *   ↑/↓ to select · Enter to view · x to stop · Esc to close
  *
- * With nothing to list it reads `No tasks currently running`. Enter on a shell
+ * The quit line is One Code's: pi cannot ask before quitting or reloading
+ * (switch-guard.ts), so the dialog says it while anything runs. With nothing
+ * to list it reads `No tasks currently running`. Enter on a shell
  * shows its details in the same dialog (renderShellDetail), and ← goes back
  * to the list. The shells chip below the editor opens this dialog too.
  * index.ts owns the dialog and what Enter and x do.
@@ -24,6 +27,9 @@
 import type { BackgroundTask } from "../../lib/agents/task-registry.ts";
 import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../../lib/ui/tui-render.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
+
+/** What quitting or `/reload` does to the running tasks, which pi cannot ask about first. */
+export const STOPPED_BY_QUIT = "Quitting or /reload stops running tasks.";
 
 /** One selectable row. */
 export type TasksItem =
@@ -97,6 +103,7 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 			index++;
 		}
 	}
+	if (runningShells > 0 || agents.running.length > 0) out.push(paint.fg("dim", line(`  ${STOPPED_BY_QUIT}`)));
 	pushHints();
 	return out;
 }
