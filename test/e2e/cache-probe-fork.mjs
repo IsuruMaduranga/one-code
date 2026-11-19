@@ -14,14 +14,13 @@
  * (`subagents/<task>/`). The parent's request is its reply that called
  * Agent; the fork's first reply is the first assistant entry in the fork's file
  * timestamped after that call (the fork's file opens with copies of the
- * parent's entries). The fork must read at least what the parent's request
- * left cached, less one implicit-cache block (`DEFAULT_BLOCK`, as the other
- * probes allow): on a cache that reports writes (Anthropic, OpenAI's marked
- * models) that is the request's cacheRead + cacheWrite, which can end before
- * the prompt does (GPT-6.1 Sol caches up to a marker ahead of the trailing
- * reminders, and the parent's own next request reads no more); on an implicit
- * cache (Codex, OpenRouter's) it is the whole prompt. A miss is a FAIL, except on OpenRouter, which can route the fork to
- * another upstream host than the parent's: a WARN there.
+ * parent's entries). The fork must read the parent's whole prompt, less one
+ * implicit-cache block (`DEFAULT_BLOCK`, as the other probes allow). On
+ * OpenAI's models with explicit breakpoints that holds only because the
+ * context message after the first user message carries one (findings §95):
+ * without it the parent's first request caches only up to the user message.
+ * A miss is a FAIL, except on OpenRouter, which can route the fork to another
+ * upstream host than the parent's: a WARN there.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -90,11 +89,10 @@ if (forkReplies.length === 0) fail("no fork reply after the Agent call (the fork
 
 const parent = spawn.message.usage;
 const parentPrompt = prompt(parent);
-const parentCached = (parent.cacheWrite ?? 0) > 0 ? (parent.cacheRead ?? 0) + parent.cacheWrite : parentPrompt;
 const first = forkReplies[0].message.usage;
 const read = first.cacheRead ?? 0;
-const line = `fork's first request read ${read} of the ${parentCached} tokens the parent's ${parentPrompt}-token prompt left cached (fork prompt ${prompt(first)}, wrote ${first.cacheWrite ?? 0})`;
-if (read >= parentCached - DEFAULT_BLOCK) {
+const line = `fork's first request read ${read} of the parent's ${parentPrompt}-token prompt (parent wrote ${parent.cacheWrite ?? 0}; fork prompt ${prompt(first)}, wrote ${first.cacheWrite ?? 0})`;
+if (read >= parentPrompt - DEFAULT_BLOCK) {
 	console.log(`PASS  fork: ${line}`);
 	process.exit(0);
 }

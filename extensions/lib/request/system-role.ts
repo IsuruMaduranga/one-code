@@ -108,9 +108,43 @@ export function byWireCallId<V>(stored: ReadonlyMap<string, V>, wireId: string):
 	return undefined;
 }
 
-/** A system message with `text` in the API's own shape. */
-export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string): WireMessage {
-	return layout === "anthropic" ? { role: "system", content: [{ type: "text", text }] } : { role, content: text };
+/**
+ * Whether `model` takes OpenAI's explicit prompt-cache breakpoints
+ * (`prompt_cache_breakpoint` on an input part): an OpenAI Responses model whose
+ * pi catalog entry sets `compat.supportsExplicitPromptCacheMode` (GPT-5.6 and
+ * later). Its implicit cache reuses a prefix only at an eligible item's end
+ * (findings §89, §95).
+ */
+export function takesExplicitCacheBreakpoints(model: { api: string; compat?: unknown }): boolean {
+	const compat = model.compat as { supportsExplicitPromptCacheMode?: unknown } | undefined;
+	return model.api === "openai-responses" && compat?.supportsExplicitPromptCacheMode === true;
+}
+
+/**
+ * Whether the context message carries OpenAI's explicit cache breakpoint
+ * (withSystemRoleContext): a model that takes one, not on Sign in with ChatGPT
+ * (`auth`, lib/request/anthropic-auth.ts authKind; untested there, and pi-ai
+ * drops the cache fields it rejects), and not when pi-ai asked for explicit
+ * mode, its "no caching".
+ */
+export function contextBreakpoint(model: { api: string; compat?: unknown }, payload: Record<string, unknown>, auth: "oauth" | "chatgpt" | "key"): boolean {
+	if (!takesExplicitCacheBreakpoints(model) || auth === "chatgpt") return false;
+	const options = payload.prompt_cache_options as { mode?: unknown } | undefined;
+	return options?.mode !== "explicit";
+}
+
+/** OpenAI's explicit prompt-cache breakpoint, as an input part carries it. */
+const RESPONSES_BREAKPOINT = { mode: "explicit" } as const;
+
+/**
+ * A system message with `text` in the API's own shape. With `breakpoint`, a
+ * Responses message ends in a part that carries OpenAI's explicit cache
+ * breakpoint (only `takesExplicitCacheBreakpoints` models; see
+ * withSystemRoleContext).
+ */
+export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string, breakpoint = false): WireMessage {
+	if (layout === "anthropic") return { role: "system", content: [{ type: "text", text }] };
+	return breakpoint && layout === "responses" ? { role, content: [{ type: "input_text", text, prompt_cache_breakpoint: RESPONSES_BREAKPOINT }] } : { role, content: text };
 }
 
 /**
@@ -121,12 +155,23 @@ export function systemMessage(layout: SystemRoleLayout, role: "system" | "develo
  * position: a fork's request drops the parent's first message, and then nothing
  * moves. The cache mark is reseated afterwards (anthropic-payload.ts
  * reseatMessageMark). Undefined when nothing changes.
+ *
+ * With `breakpoint` (an OpenAI model that takes explicit breakpoints, caching
+ * on), the message carries OpenAI's explicit cache breakpoint on its one part.
+ * OpenAI's implicit cache never ends at a developer message after the first
+ * user message, so without it the epoch's first request cached only up to the
+ * user message and the next request (a fork's too) paid the context again
+ * (findings §95). Claude Code marks the same message on Anthropic (findings
+ * §94). It is set here, before the ledger records the request, so every
+ * replay of it (a fork, a side call) carries the same bytes; a mark on a
+ * message's last part costs no tokens and leaves the prefix unchanged.
  */
 export function withSystemRoleContext(
 	payload: Record<string, unknown>,
 	layout: SystemRoleLayout,
 	moved: readonly MovedBlock[],
 	role: "system" | "developer",
+	breakpoint = false,
 ): Record<string, unknown> | undefined {
 	if (moved.length === 0) return undefined;
 	const key = messagesKey(layout);
@@ -152,5 +197,5 @@ export function withSystemRoleContext(
 		.join("\n\n");
 
 	const user: WireMessage = { ...carrier, content: kept };
-	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text), ...messages.slice(index + 1)] };
+	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text, breakpoint), ...messages.slice(index + 1)] };
 }
