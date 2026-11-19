@@ -191,12 +191,39 @@ export function turnFailureExtension(sink: TurnFailureSink): (pi: Pick<Extension
 	};
 }
 
-/** A child extension that tells the run's tracker each raw provider event arrived, for the stall watch (stall-watch.ts). */
-export function streamProgressExtension(sink: TurnFailureSink): (pi: Pick<ExtensionAPI, "on">) => void {
+/**
+ * A child extension that fails a turn with no progress for ten minutes
+ * (stall-watch.ts): every message event and raw provider event is progress, a
+ * tool or a compaction pauses the clock. It stops the turn as the tool-call
+ * guard does, so turnFailureExtension carries the reason to the tracker.
+ */
+export function stallWatchExtension(ms?: number): (pi: Pick<ExtensionAPI, "on" | "events">) => void {
 	return (pi) => {
-		pi.on("provider_stream_event", () => {
-			sink.recordStreamEvent?.();
-		});
+		let ctx: { abort(): void } | undefined;
+		const watch = new StallWatch((seconds) => {
+			pi.events.emit(TURN_FAILED_CHANNEL, { reason: subagentResultText().stalled({ seconds }) } satisfies TurnFailedEvent);
+			try {
+				ctx?.abort();
+			} catch {
+				// A child disposed mid-turn (no session_shutdown): nothing left to stop.
+			}
+		}, ms);
+		const track = (handler: () => void) => (_event: unknown, context: { abort(): void }) => {
+			ctx = context;
+			handler();
+		};
+		pi.on("agent_start", track(() => watch.turnStarted()));
+		pi.on("message_start", track(() => watch.replyStarted()));
+		pi.on("message_update", track(() => watch.progress()));
+		pi.on("message_end", track(() => watch.progress()));
+		pi.on("provider_stream_event", track(() => watch.progress()));
+		pi.on("tool_execution_start", track(() => watch.toolStarted()));
+		pi.on("tool_execution_end", track(() => watch.toolEnded()));
+		pi.on("session_before_compact", track(() => watch.compactionStarted()));
+		pi.on("session_compact", track(() => watch.compactionEnded()));
+		pi.on("session_compact_failed", track(() => watch.compactionEnded()));
+		pi.on("agent_settled", () => watch.stop());
+		pi.on("session_shutdown", () => watch.stop());
 	};
 }
 
@@ -347,7 +374,7 @@ export class SubagentRuntime {
 				// A guard that stops the child's turn (a runaway tool call) says why on the
 				// child's own bus; the turn's outcome carries it to the parent's notification.
 				turnFailureExtension(handback),
-				streamProgressExtension(handback),
+				stallWatchExtension(),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools)] : []),
 			],
@@ -398,16 +425,8 @@ export class SubagentRuntime {
 		sink?: LiveSink,
 	): () => void {
 		const childWrote = childWriteWatcher(session.sessionManager?.getCwd?.() ?? this.baseCwd);
-		// A turn with no progress for ten minutes fails, behind pi's own stream
-		// watchdog and retries (stall-watch.ts); the reason reaches the parent as a guard's does.
-		const stall = new StallWatch((seconds) => {
-			tracker.recordTurnFailure(subagentResultText().stalled({ seconds }));
-			void session.abort();
-		});
-		tracker.onStreamEvent = () => stall.progress();
-		const unsubscribe = session.subscribe((event) => {
+		return session.subscribe((event) => {
 			try {
-				stall.observe(event as never);
 				const settled = tracker.process(event as never);
 				const wrote = childWrote(event as never);
 				if (wrote) this.onChildWrite(wrote, this.runNames.get(session.sessionId));
@@ -450,11 +469,6 @@ export class SubagentRuntime {
 				// A bad event shape must never throw into the agent's emit loop.
 			}
 		});
-		return () => {
-			stall.stop();
-			tracker.onStreamEvent = undefined;
-			unsubscribe();
-		};
 	}
 
 	/**

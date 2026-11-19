@@ -3,11 +3,12 @@
  * the session-fact blocks leave the first user message for one system message
  * right after it; the instructions and context blocks stay.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { reseatMessageMark } from "../../extensions/lib/request/anthropic-payload.ts";
-import { contextBreakpoint, instructionRole, takesExplicitCacheBreakpoints, withSystemRoleContext } from "../../extensions/lib/request/system-role.ts";
+import { instructionRole, withSystemRoleContext } from "../../extensions/lib/request/system-role.ts";
+import { contextBreakpoint, takesExplicitCacheBreakpoints } from "../../extensions/lib/request/openai-cache-breakpoints.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const ENV = { framed: wrapReminder("# Environment\nx"), inner: "# Environment\nx" };
@@ -101,11 +102,13 @@ describe("withSystemRoleContext", () => {
 		expect(takesExplicitCacheBreakpoints({ api: "openai-responses", compat: {} })).toBe(false);
 		expect(takesExplicitCacheBreakpoints({ ...sol, api: "openai-codex-responses" })).toBe(false);
 		expect(takesExplicitCacheBreakpoints({ ...sol, api: "azure-openai-responses" })).toBe(false);
-		expect(contextBreakpoint(sol, {}, "key")).toBe(true);
-		expect(contextBreakpoint(sol, { prompt_cache_options: { ttl: "30m" } }, "key")).toBe(true);
-		expect(contextBreakpoint(sol, { prompt_cache_options: { mode: "explicit" } }, "key")).toBe(false);
-		expect(contextBreakpoint(sol, {}, "chatgpt")).toBe(false);
-		expect(contextBreakpoint({ api: "anthropic-messages" }, {}, "key")).toBe(false);
+		expect(contextBreakpoint(sol, {}, () => "key")).toBe(true);
+		expect(contextBreakpoint(sol, { prompt_cache_options: { ttl: "30m" } }, () => "key")).toBe(true);
+		expect(contextBreakpoint(sol, { prompt_cache_options: { mode: "explicit" } }, () => "key")).toBe(false);
+		expect(contextBreakpoint(sol, {}, () => "chatgpt")).toBe(false);
+		const auth = vi.fn(() => "key" as const);
+		expect(contextBreakpoint({ api: "anthropic-messages" }, {}, auth)).toBe(false);
+		expect(auth).not.toHaveBeenCalled();
 	});
 
 	it("picks the role pi gives a system message on each API", () => {

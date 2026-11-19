@@ -68,8 +68,11 @@ export interface ParentTool {
  * the parent has one of that name (the rule in the header).
  */
 export function withParentParameters(tools: readonly ToolDefinition[], parentTools: readonly ParentTool[]): ToolDefinition[] {
-	const parameters = new Map(parentTools.map((tool) => [tool.name, tool.parameters]));
-	return tools.map((tool) => (parameters.has(tool.name) ? { ...tool, parameters: parameters.get(tool.name) as ToolDefinition["parameters"] } : tool));
+	const byName = new Map(parentTools.map((tool) => [tool.name, tool]));
+	return tools.map((tool) => {
+		const parent = byName.get(tool.name);
+		return parent ? { ...tool, parameters: parent.parameters as ToolDefinition["parameters"] } : tool;
+	});
 }
 
 type ModelRef = { api?: string; provider?: string; id?: string };

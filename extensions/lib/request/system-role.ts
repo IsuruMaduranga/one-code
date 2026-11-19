@@ -13,6 +13,7 @@
  */
 
 import { parseClaudeId } from "../profile/claude-id.ts";
+import { RESPONSES_BREAKPOINT } from "./openai-cache-breakpoints.ts";
 
 /** The wire shape a system message takes: Anthropic `system`, OpenAI Responses `input`, or Chat Completions `messages`. */
 export type SystemRoleLayout = "anthropic" | "responses" | "completions";
@@ -109,38 +110,9 @@ export function byWireCallId<V>(stored: ReadonlyMap<string, V>, wireId: string):
 }
 
 /**
- * Whether `model` takes OpenAI's explicit prompt-cache breakpoints
- * (`prompt_cache_breakpoint` on an input part): an OpenAI Responses model whose
- * pi catalog entry sets `compat.supportsExplicitPromptCacheMode` (GPT-5.6 and
- * later). Its implicit cache reuses a prefix only at an eligible item's end
- * (findings §89, §95).
- */
-export function takesExplicitCacheBreakpoints(model: { api: string; compat?: unknown }): boolean {
-	const compat = model.compat as { supportsExplicitPromptCacheMode?: unknown } | undefined;
-	return model.api === "openai-responses" && compat?.supportsExplicitPromptCacheMode === true;
-}
-
-/**
- * Whether the context message carries OpenAI's explicit cache breakpoint
- * (withSystemRoleContext): a model that takes one, not on Sign in with ChatGPT
- * (`auth`, lib/request/anthropic-auth.ts authKind; untested there, and pi-ai
- * drops the cache fields it rejects), and not when pi-ai asked for explicit
- * mode, its "no caching".
- */
-export function contextBreakpoint(model: { api: string; compat?: unknown }, payload: Record<string, unknown>, auth: "oauth" | "chatgpt" | "key"): boolean {
-	if (!takesExplicitCacheBreakpoints(model) || auth === "chatgpt") return false;
-	const options = payload.prompt_cache_options as { mode?: unknown } | undefined;
-	return options?.mode !== "explicit";
-}
-
-/** OpenAI's explicit prompt-cache breakpoint, as an input part carries it. */
-const RESPONSES_BREAKPOINT = { mode: "explicit" } as const;
-
-/**
  * A system message with `text` in the API's own shape. With `breakpoint`, a
- * Responses message ends in a part that carries OpenAI's explicit cache
- * breakpoint (only `takesExplicitCacheBreakpoints` models; see
- * withSystemRoleContext).
+ * Responses message is one part carrying OpenAI's explicit cache breakpoint
+ * (lib/request/openai-cache-breakpoints.ts contextBreakpoint).
  */
 export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string, breakpoint = false): WireMessage {
 	if (layout === "anthropic") return { role: "system", content: [{ type: "text", text }] };

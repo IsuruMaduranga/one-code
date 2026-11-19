@@ -1,16 +1,16 @@
 /**
- * agents/subagents/stall-watch.ts: a subagent turn with no progress for ten
- * minutes fails, as Claude Code's async-agent stall watchdog does (findings
- * §94): every streamed chunk counts as progress, a running tool pauses it.
+ * agents/subagents/stall-watch.ts and runner.ts stallWatchExtension: a
+ * subagent turn with no progress for ten minutes fails, as Claude Code's
+ * async-agent stall watchdog does (findings §94): every streamed chunk counts
+ * as progress, a running tool pauses it. The reason reaches the run's tracker
+ * the way a guard's does.
  */
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { streamProgressExtension, SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { stallWatchExtension, turnFailureExtension } from "../../extensions/agents/subagents/runner.ts";
 import { SessionTurnTracker } from "../../extensions/agents/subagents/session-turns.ts";
 import { AGENT_STALL_MS, StallWatch } from "../../extensions/agents/subagents/stall-watch.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { createFakePi } from "./helpers/fake-pi.ts";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -23,69 +23,22 @@ const watch = () => {
 describe("StallWatch", () => {
 	it("fails a turn that streams nothing for ten minutes, once", () => {
 		const { stalls, watch: w } = watch();
-		w.observe({ type: "agent_start" });
+		w.turnStarted();
 		vi.advanceTimersByTime(AGENT_STALL_MS - 1);
 		expect(stalls).toEqual([]);
 		vi.advanceTimersByTime(1);
 		expect(stalls).toEqual([600]);
-		w.observe({ type: "message_update" });
+		w.progress();
 		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
 		expect(stalls).toEqual([600]);
 	});
 
-	it("counts every streamed chunk as progress", () => {
-		const { stalls, watch: w } = watch();
-		w.observe({ type: "agent_start" });
-		for (let i = 0; i < 5; i++) {
-			vi.advanceTimersByTime(AGENT_STALL_MS - 1000);
-			w.observe({ type: "message_update" });
-		}
-		expect(stalls).toEqual([]);
-	});
-
-	it("pauses while a tool runs or the session compacts, and counts again after", () => {
-		const { stalls, watch: w } = watch();
-		w.observe({ type: "agent_start" });
-		w.observe({ type: "tool_execution_start" });
-		w.observe({ type: "tool_execution_start" });
-		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
-		w.observe({ type: "tool_execution_end" });
-		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
-		expect(stalls).toEqual([]);
-		w.observe({ type: "tool_execution_end" });
-		w.observe({ type: "compaction_start" });
-		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
-		expect(stalls).toEqual([]);
-		w.observe({ type: "compaction_end" });
-		vi.advanceTimersByTime(AGENT_STALL_MS);
-		expect(stalls).toEqual([600]);
-	});
-
-	it("stops when the turn settles, and watches the next turn afresh", () => {
-		const { stalls, watch: w } = watch();
-		w.observe({ type: "agent_start" });
-		w.observe({ type: "agent_settled" });
-		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
-		expect(stalls).toEqual([]);
-		// Between turns nothing counts.
-		w.observe({ type: "message_update" });
-		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
-		expect(stalls).toEqual([]);
-		w.observe({ type: "agent_start" });
-		vi.advanceTimersByTime(AGENT_STALL_MS);
-		expect(stalls).toEqual([600]);
-		w.observe({ type: "agent_settled" });
-		w.observe({ type: "agent_start" });
-		vi.advanceTimersByTime(AGENT_STALL_MS);
-		expect(stalls).toEqual([600, 600]);
-	});
-
-	it("counts every raw provider event as progress, but only during a turn", () => {
+	it("counts every streamed chunk as progress, but only during a turn", () => {
 		const { stalls, watch: w } = watch();
 		w.progress();
 		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
 		expect(stalls).toEqual([]);
-		w.observe({ type: "agent_start" });
+		w.turnStarted();
 		for (let i = 0; i < 5; i++) {
 			vi.advanceTimersByTime(AGENT_STALL_MS - 1000);
 			w.progress();
@@ -95,65 +48,86 @@ describe("StallWatch", () => {
 		expect(stalls).toEqual([600]);
 	});
 
-	it("hears the child's provider events through its extension", () => {
-		const handlers = new Map<string, () => void>();
-		const tracker = new SessionTurnTracker();
-		let heard = 0;
-		tracker.onStreamEvent = () => heard++;
-		streamProgressExtension(tracker)({ on: ((name: string, handler: () => void) => handlers.set(name, handler)) as never });
-		handlers.get("provider_stream_event")?.();
-		handlers.get("provider_stream_event")?.();
-		expect(heard).toBe(2);
+	it("pauses while a tool runs or the session compacts, and counts again after", () => {
+		const { stalls, watch: w } = watch();
+		w.turnStarted();
+		w.toolStarted();
+		w.toolStarted();
+		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
+		w.toolEnded();
+		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
+		expect(stalls).toEqual([]);
+		w.toolEnded();
+		w.compactionStarted();
+		vi.advanceTimersByTime(AGENT_STALL_MS * 3);
+		expect(stalls).toEqual([]);
+		w.compactionEnded();
+		vi.advanceTimersByTime(AGENT_STALL_MS);
+		expect(stalls).toEqual([600]);
 	});
 
-	it("says why in Claude Code's words", () => {
-		expect(subagentResultText().stalled({ seconds: 600 })).toBe("Agent stalled: no progress for 600s (stream watchdog did not recover)");
+	it("ends a compaction pause at the next reply, so a compaction that never reports its end cannot hide a stall", () => {
+		const { stalls, watch: w } = watch();
+		w.turnStarted();
+		w.compactionStarted();
+		w.replyStarted();
+		vi.advanceTimersByTime(AGENT_STALL_MS);
+		expect(stalls).toEqual([600]);
+	});
+
+	it("stops when the turn settles, and watches the next turn afresh", () => {
+		const { stalls, watch: w } = watch();
+		w.turnStarted();
+		w.stop();
+		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
+		w.progress();
+		vi.advanceTimersByTime(AGENT_STALL_MS * 2);
+		expect(stalls).toEqual([]);
+		w.turnStarted();
+		vi.advanceTimersByTime(AGENT_STALL_MS);
+		w.stop();
+		w.turnStarted();
+		vi.advanceTimersByTime(AGENT_STALL_MS);
+		expect(stalls).toEqual([600, 600]);
 	});
 });
 
-describe("a subagent run whose stream goes silent", () => {
-	it("fails after ten minutes with the stall reason, and aborts the child", async () => {
-		vi.useRealTimers();
-		const agentDir = mkdtempSync(join(tmpdir(), "stall-run-agent-"));
-		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		try {
-			const runtime = await SubagentRuntime.create(agentDir);
-			vi.useFakeTimers();
-			let listener: ((event: unknown) => void) | undefined;
-			let aborted!: () => void;
-			const abortedNow = new Promise<void>((resolve) => { aborted = resolve; });
-			const session = {
-				subscribe: (fn: (event: unknown) => void) => {
-					listener = fn;
-					return () => { listener = undefined; };
-				},
-				abort: vi.fn(async () => aborted()),
-				dispose: vi.fn(),
-				isIdle: true,
-				sessionManager: { getSessionId: () => "child" },
-				// The turn starts, then the stream says nothing until the child is aborted.
-				prompt: vi.fn(async () => {
-					listener?.({ type: "agent_start" });
-					listener?.({ type: "message_start", message: { role: "assistant" } });
-					await abortedNow;
-					listener?.({ type: "message_end", message: { role: "assistant", stopReason: "aborted", content: [] } });
-					listener?.({ type: "agent_settled" });
-				}),
-			};
-			vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session } as never);
-			vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockResolvedValue((() => {}) as never);
-			const handle = runtime.run({ cwd: agentDir, task: "look", onProgress: () => {} });
+describe("stallWatchExtension in a child session", () => {
+	/** A child's bus with the stall watch and the guard path that carries its reason to the run's tracker. */
+	function child() {
+		const fake = createFakePi();
+		const tracker = new SessionTurnTracker();
+		turnFailureExtension(tracker)(fake.pi as never);
+		stallWatchExtension()(fake.pi as never);
+		const ctx = { abort: vi.fn() };
+		const fire = (event: string) => fake.fire(event, { type: event }, ctx);
+		return { tracker, ctx, fire };
+	}
+
+	it("stops a silent turn after ten minutes with Claude Code's reason, which the tracker reports", async () => {
+		const { tracker, ctx, fire } = child();
+		await fire("agent_start");
+		await fire("message_start");
+		await vi.advanceTimersByTimeAsync(AGENT_STALL_MS - 1000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(ctx.abort).toHaveBeenCalledOnce();
+		expect(tracker.harnessStop).toBe(subagentResultText().stalled({ seconds: 600 }));
+		expect(tracker.turnOutcome().failureReason).toBe("Agent stalled: no progress for 600s (stream watchdog did not recover)");
+	});
+
+	it("keeps a turn alive on raw provider events, and lets a running tool take as long as it needs", async () => {
+		const { ctx, fire } = child();
+		await fire("agent_start");
+		for (let i = 0; i < 3; i++) {
 			await vi.advanceTimersByTimeAsync(AGENT_STALL_MS - 1000);
-			expect(session.abort).not.toHaveBeenCalled();
-			await vi.advanceTimersByTimeAsync(1000);
-			const result = await handle.result;
-			expect(session.abort).toHaveBeenCalled();
-			expect(result.failed).toBe(true);
-			expect(result.failureReason).toBe("Agent stalled: no progress for 600s (stream watchdog did not recover)");
-		} finally {
-			vi.unstubAllEnvs();
-			vi.restoreAllMocks();
-			rmSync(agentDir, { recursive: true, force: true });
+			await fire("provider_stream_event");
 		}
+		await fire("tool_execution_start");
+		await vi.advanceTimersByTimeAsync(AGENT_STALL_MS * 3);
+		await fire("tool_execution_end");
+		await fire("agent_settled");
+		await vi.advanceTimersByTimeAsync(AGENT_STALL_MS * 3);
+		expect(ctx.abort).not.toHaveBeenCalled();
 	});
 });
