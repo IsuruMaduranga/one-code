@@ -9,7 +9,9 @@
  * stop the work without asking, and the `/tasks` dialog says so.
  */
 
-/** A running task or scheduled job, as the dialog and widget name it. */
+import { countNoun } from "../../lib/ui/tui-render.ts";
+
+/** A running task or scheduled job, as the dialog names it. */
 export interface SessionWork {
 	id: string;
 	label: string;
@@ -21,10 +23,8 @@ export const SWITCH_STOP = "Stop them and continue";
 /** At most this many items are named in the dialog; the rest are counted. */
 const MAX_NAMED = 6;
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
 function counts(tasks: number, jobs: number): string {
-	const parts = [tasks > 0 ? plural(tasks, "background task") : "", jobs > 0 ? plural(jobs, "scheduled job") : ""].filter(Boolean);
+	const parts = [tasks > 0 ? countNoun(tasks, "background task") : "", jobs > 0 ? countNoun(jobs, "scheduled job") : ""].filter(Boolean);
 	return parts.join(" and ");
 }
 

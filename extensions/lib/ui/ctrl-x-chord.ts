@@ -1,42 +1,83 @@
 /**
- * The `ctrl+x` chord prefix, shared between extensions. Claude Code reads
+ * The `ctrl+x` chord prefix, one for every extension. Claude Code reads
  * `ctrl+x` as the prefix of several chords: `ctrl+x ctrl+s` sends a queued
  * message now (ui/send-now), `ctrl+x ctrl+k` stops the background agents
- * (agents/subagents). Each extension holds `ctrl+x` while its own chord
- * applies, but pi-tui gives a key to the first input listener that consumes
- * it, so the other extension never sees the prefix. The one that held it
- * therefore offers a second key that is not its own here, and the extension
- * whose chord that key completes claims it and acts.
+ * (agents/subagents). Each extension registers its chord's second key with
+ * `claimChordKey`, and feeds its terminal input through a `CtrlXPrefix`.
  *
- * Pure: no pi imports; the event bus is passed in (jiti isolation, findings §3).
+ * pi-tui gives a key to the first input listener that consumes it, so the
+ * prefix never belongs to one extension: whichever listener runs first holds
+ * `ctrl+x` when any registered chord applies right now (asked over the bus),
+ * and offers the next key to all of them. When none applies, `ctrl+x` passes
+ * on to pi, which binds it to copy. A held `ctrl+x` that no chord completes
+ * (another key, or the timeout) is dropped, and that key passes on.
  */
 
 import { brandedId } from "../profile/brand.mjs";
+import { isKeyRelease, keyId } from "./key-input.ts";
 
 export const CTRL_X_CHORD_CHANNEL = brandedId("ctrl-x-chord");
 
-/** A chord's second key (a key id such as "ctrl+k"), offered after another extension held the `ctrl+x`. */
-export interface CtrlXChordOffer {
-	key: string;
-	claimed: boolean;
-}
+/** How long a held `ctrl+x` waits for its second key. */
+export const CHORD_TIMEOUT_MS = 1000;
 
-interface Bus {
-	emit(channel: string, data: unknown): void;
-	on(channel: string, handler: (data: unknown) => void): () => void;
-}
+/** "Does any chord apply now?" (asked on a `ctrl+x`), or a second key offered to the chords. */
+type ChordMessage = { kind: "applies"; applies: boolean } | { kind: "key"; key: string; claimed: boolean };
 
-/** Offer `key` to the extension whose chord it completes; true when one claimed it. */
-export function offerChordKey(events: Pick<Bus, "emit">, key: string): boolean {
-	const offer: CtrlXChordOffer = { key, claimed: false };
-	events.emit(CTRL_X_CHORD_CHANNEL, offer);
-	return offer.claimed;
-}
+type Emit = { emit(channel: string, data: unknown): void };
+type On = { on(channel: string, handler: (data: unknown) => void): () => void };
 
-/** Claim `key` when it is offered and `act` applies (returns true); returns the unsubscribe. */
-export function claimChordKey(events: Pick<Bus, "on">, key: string, act: () => boolean): () => void {
+/**
+ * Register a chord: `ctrl+x` then `key` runs `act` while `applies()` holds.
+ * Returns the unsubscribe.
+ */
+export function claimChordKey(events: On, key: string, chord: { applies(): boolean; act(): void }): () => void {
 	return events.on(CTRL_X_CHORD_CHANNEL, (data) => {
-		const offer = data as CtrlXChordOffer;
-		if (!offer.claimed && offer.key === key && act()) offer.claimed = true;
+		const message = data as ChordMessage;
+		if (message.kind === "applies") {
+			if (!message.applies && chord.applies()) message.applies = true;
+		} else if (!message.claimed && message.key === key && chord.applies()) {
+			message.claimed = true;
+			chord.act();
+		}
 	});
+}
+
+/** One input listener's view of the prefix: feed it every key; it says which to consume. */
+export class CtrlXPrefix {
+	private armed = false;
+	private timer: ReturnType<typeof setTimeout> | undefined;
+
+	constructor(
+		private readonly events: Emit,
+		private readonly timeoutMs = CHORD_TIMEOUT_MS,
+	) {}
+
+	feed(data: string): { consume: true } | undefined {
+		if (isKeyRelease(data)) return undefined;
+		const id = keyId(data);
+		const armed = this.armed;
+		this.disarm();
+		if (id === "ctrl+x") {
+			// A second ctrl+x, or the kitty protocol's auto-repeat of a held one, keeps it held.
+			if (!this.ask({ kind: "applies", applies: false })) return undefined;
+			this.armed = true;
+			this.timer = setTimeout(() => this.disarm(), this.timeoutMs);
+			this.timer.unref?.();
+			return { consume: true };
+		}
+		if (!armed || !id) return undefined;
+		return this.ask({ kind: "key", key: id, claimed: false }) ? { consume: true } : undefined;
+	}
+
+	disarm(): void {
+		this.armed = false;
+		clearTimeout(this.timer);
+		this.timer = undefined;
+	}
+
+	private ask(message: ChordMessage): boolean {
+		this.events.emit(CTRL_X_CHORD_CHANNEL, message);
+		return message.kind === "applies" ? message.applies : message.claimed;
+	}
 }

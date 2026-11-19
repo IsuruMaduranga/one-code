@@ -1225,6 +1225,26 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		expect(sent()).not.toContain("was stopped by user");
 	});
 
+	it("drops the agent's own notice for a turn a SendMessage started, which has a task id of its own", async () => {
+		const { h, runtime, input, sent } = await launched();
+		runtime.finish();
+		await vi.advanceTimersByTimeAsync(2000);
+		await h.call("SendMessage", { to: "general-purpose-1", message: "Now the tests" });
+		// The resident's first activity on the new turn wakes its row to running, as the runner's sink does.
+		(runtime.options() as { sink: { onActivity(tool: string, args: unknown, text?: string): void } }).sink.onActivity("bash", { command: "npm test" });
+		await vi.advanceTimersByTimeAsync(100);
+		const before = sent().length;
+		input(CTRL_X);
+		input(CTRL_K);
+		input(CTRL_X);
+		input(CTRL_K);
+		expect(runtime.handle.kill).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(2000);
+		const after = sent().slice(before);
+		expect(after).toContain('Background agent "Build the integration" was stopped by the user.');
+		expect(after).not.toContain("was stopped by user");
+	});
+
 	it("leaves ctrl+x to pi's copy when no agent runs, and hands an unknown second key back", async () => {
 		const { runtime, input } = await launched();
 		input(CTRL_X);

@@ -11,6 +11,7 @@
  */
 
 import { brandedId } from "../profile/brand.mjs";
+import { countNoun } from "../ui/tui-render.ts";
 
 export const SESSION_WORK_CHANNEL = brandedId("session-work");
 
@@ -65,6 +66,13 @@ export function sessionBackgroundTask(task: { id: string; kind: string; status: 
 	};
 }
 
+/** What will wake the session later, read back after the synchronous emit (the background extension fills it). */
+export function querySessionWork(events: { emit(channel: string, data: unknown): void }): SessionWorkQuery {
+	const query: SessionWorkQuery = { crons: [], tasks: [] };
+	events.emit(SESSION_WORK_CHANNEL, query);
+	return query;
+}
+
 /** Background work still running: agents and workflows (Claude Code's pending counts), and every other task (shells, monitors). */
 export interface PendingWork {
 	agents: number;
@@ -72,27 +80,23 @@ export interface PendingWork {
 	others: number;
 }
 
-/** What is running now, as the background extension's registry has it (read back after the synchronous emit). */
+/** What is running now, counted. */
 export function pendingWork(events: { emit(channel: string, data: unknown): void }): PendingWork {
-	const query: SessionWorkQuery = { crons: [], tasks: [] };
-	events.emit(SESSION_WORK_CHANNEL, query);
-	const running = query.tasks.filter((task) => task.status === "running");
+	const running = querySessionWork(events).tasks.filter((task) => task.status === "running");
 	const agents = running.filter((task) => task.type === "subagent").length;
 	const workflows = running.filter((task) => task.type === "workflow").length;
 	return { agents, workflows, others: running.length - agents - workflows };
 }
 
-const counted = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
-
 /**
  * Claude Code 2.1.327's "Waiting for 1 background agent to finish" (findings
  * §94), shown at turn end in place of "Done in Ns" and, here, on the spinner
  * while the model waits in `yield`. Agents and workflows are named; other
- * tasks are counted only when `withOthers` and nothing else runs, so a wait on
- * a shell still says what it waits for. Undefined when nothing it counts runs.
+ * tasks are counted only when nothing else runs, so a wait on a shell still
+ * says what it waits for. Undefined when nothing runs.
  */
-export function waitingForText(pending: PendingWork, withOthers = false): string | undefined {
-	const named = [pending.agents > 0 ? counted(pending.agents, "background agent") : "", pending.workflows > 0 ? counted(pending.workflows, "workflow") : ""].filter(Boolean);
-	if (named.length === 0 && withOthers && pending.others > 0) named.push(counted(pending.others, "background task"));
+export function waitingForText(pending: PendingWork): string | undefined {
+	const named = [pending.agents > 0 ? countNoun(pending.agents, "background agent") : "", pending.workflows > 0 ? countNoun(pending.workflows, "workflow") : ""].filter(Boolean);
+	if (named.length === 0 && pending.others > 0) named.push(countNoun(pending.others, "background task"));
 	return named.length > 0 ? `Waiting for ${named.join(" and ")} to finish` : undefined;
 }

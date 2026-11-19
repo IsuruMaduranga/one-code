@@ -103,7 +103,7 @@ import { BUNDLED_SKILLS_DIR } from "../../lib/plugins/skill-scan.ts";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
+import { querySessionWork, SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
 import { queueNotice } from "../../lib/notify/notices.ts";
 import { makeRecord, RECORD } from "../../lib/request/ledger/records.ts";
@@ -827,11 +827,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 						},
 						// Every extension's running work: registry tasks, workflow runs, and
 						// residents busy on a later turn (lib/notify/session-work.ts).
-						running: () => {
-							const work: SessionWorkQuery = { crons: [], tasks: [] };
-							pi.events.emit(SESSION_WORK_CHANNEL, work);
-							return work.tasks.length;
-						},
+						running: () => querySessionWork(pi.events).tasks.length,
 						userMessageQueued: () => ctx.hasPendingMessages(),
 						// Only a main-session job starts a turn here; a subagent's job fires into the agent.
 						scheduledDue: () => {
@@ -1041,7 +1037,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		return messages ? { messages } : undefined;
 	});
 	// A switch stops everything below, so ask first. pi can cancel a switch but
-	// not a quit; the widget line covers quitting (switch-guard.ts).
+	// not a quit; the /tasks dialog says that quitting stops it (switch-guard.ts).
 	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
 		if (!ctx.hasUI) return undefined;
 		const title = switchWarning(

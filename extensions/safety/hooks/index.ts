@@ -52,7 +52,7 @@ import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { DESKTOP_NOTIFICATION_CHANNEL, type DesktopNotification } from "../../lib/notify/desktop.ts";
 import { RunOutcomeLatch } from "../../lib/notify/interrupt.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
+import { querySessionWork } from "../../lib/notify/session-work.ts";
 import { defaultDiscoverRoots } from "../../lib/plugins/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
@@ -662,8 +662,7 @@ function hooksExtension(pi: ExtensionAPI) {
 		if (stopOutcome.take() !== "ok") return;
 		// Claude Code's two lists of what will wake the session later, filled by the
 		// background extension (lib/notify/session-work.ts); empty arrays when none.
-		const work: SessionWorkQuery = { crons: [], tasks: [] };
-		pi.events.emit(SESSION_WORK_CHANNEL, work);
+		const work = querySessionWork(pi.events);
 		const payload: HookStdinPayload = {
 			...basePayload(ctx, "Stop"),
 			stop_hook_active: stopHookBlocks > 0,

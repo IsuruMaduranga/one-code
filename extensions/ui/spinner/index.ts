@@ -51,7 +51,7 @@ function spinnerExtension(pi: ExtensionAPI) {
 	const updateWorkingMessage = () => {
 		const ctx = lastCtx;
 		if (!ctx?.hasUI || !turnStartedAt) return;
-		const waiting = waits.size > 0 ? waitingForText(pendingWork(pi.events), true) : undefined;
+		const waiting = waits.size > 0 ? waitingForText(pendingWork(pi.events)) : undefined;
 		ctx.ui.setWorkingMessage(
 			composeWorkingMessage({
 				verb: waiting ?? verb,

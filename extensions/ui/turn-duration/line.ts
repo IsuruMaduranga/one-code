@@ -22,6 +22,7 @@ export const TURN_MARK = "✻";
  */
 export function turnDurationText(verb: string, durationMs: number, runningShells = 0, doneAt?: string, pending?: Pick<PendingWork, "agents" | "workflows">): string {
 	const shells = runningShells > 0 ? ` · ${countNoun(runningShells, "shell")} still running` : "";
+	// Shells have their own tail here; only agents and workflows are waited for.
 	const waiting = pending && waitingForText({ ...pending, others: 0 });
 	if (waiting) return `${waiting}${shells}`;
 	const done = doneAt ? ` · done ${doneAt}` : "";
