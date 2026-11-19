@@ -17,26 +17,31 @@
  * - `before_provider_headers` sends the parent's session-affinity headers, so a
  *   gateway such as OpenRouter routes the fork to the host holding the cache.
  *
- * The parent's tools block declares tools only the main conversation has
- * (ask_user_question, list_agents, workflow, yield on a model offered it), so a
- * fork's model can call one its own session lacks, and pi answers "tool not
- * found". At session start the fork registers a stub for each such tool, which
- * refuses with what to do instead (`forkToolUnavailable`). The wire keeps the
- * parent's tools block, byte for byte, on both of a fork's paths:
+ * One rule keeps the parent's tools block, byte for byte: every tool the
+ * parent declared, the fork declares with the parent tool's own `parameters`.
+ * The fork's ledger extends the parent's recorded request
+ * (`decisions/caching.md`) and keeps a recorded declaration only while the
+ * live input schema matches it (lib/request/ledger/wire.ts mergeDeclarations);
+ * otherwise it declares the fork's in its place, mid-array, and the cache
+ * misses from there. pi validates a call against the live schema, so the
+ * tool's execute() gets the parent's shape and refuses what the fork cannot do.
+ * It is applied in two places, from the same `ParentTool` handover:
  *
- * - Only a tool the capture declares gets a stub (its wire name mapped to the
- *   parent's registry name, `registryNameOnWire`), so the splice below never
- *   adds one: it appends only tools the parent did not declare.
- * - Each stub takes the parent tool's own `parameters`, so the fork's ledger,
- *   which extends the parent's recorded request (`decisions/caching.md`),
- *   keeps the recorded declaration: it puts a live one in its place only when
- *   the input schema differs (lib/request/ledger/wire.ts mergeDeclarations).
- *   This holds while a stubbed tool's rendering depends on its name and
- *   parameters alone; of One Code's tools only pi's read, edit, write and bash
- *   set `constrainedSampling`, and every fork has those.
+ * - The fork's SDK tools (SendMessage, the spawn tool Agent, the cron and MCP
+ *   tools) take the parent's parameters in the runner (`withParentParameters`):
+ *   pi lets an SDK tool override any extension registration, so this
+ *   extension cannot.
+ * - A parent tool the fork lacks (ask_user_question, list_agents, workflow,
+ *   yield on a model offered it) gets a stub at session start, which refuses
+ *   with what to do instead (`forkToolUnavailable`), so the model's call is not
+ *   "tool not found". Only a tool the capture declares gets one (its wire name
+ *   mapped to the parent's registry name, `registryNameOnWire`), so the splice
+ *   below never adds one: it appends only tools the parent did not declare.
  *
- * A request that goes out whole (below) carries the stubs, which mirror the
- * parent's tools.
+ * This holds while a tool's rendering depends on its name and parameters
+ * alone; of One Code's tools only pi's read, edit, write and bash set
+ * `constrainedSampling`, and every fork has those. A request that goes out
+ * whole (below) carries the same declarations.
  *
  * Both steps check the same thing first (the capture's model and its boundary
  * message in this context); when either fails, or the tail leaves less than
@@ -45,7 +50,7 @@
  * compacted its own history away, runs on another model, or has nearly
  * filled the window.
  */
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
 import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
@@ -56,6 +61,15 @@ import { toolRenderers } from "../../lib/ui/tui-render.ts";
 export interface ParentTool {
 	name: string;
 	parameters: unknown;
+}
+
+/**
+ * The fork's own SDK tools, each declaring the parent tool's parameters where
+ * the parent has one of that name (the rule in the header).
+ */
+export function withParentParameters(tools: readonly ToolDefinition[], parentTools: readonly ParentTool[]): ToolDefinition[] {
+	const parameters = new Map(parentTools.map((tool) => [tool.name, tool.parameters]));
+	return tools.map((tool) => (parameters.has(tool.name) ? { ...tool, parameters: parameters.get(tool.name) as ToolDefinition["parameters"] } : tool));
 }
 
 type ModelRef = { api?: string; provider?: string; id?: string };

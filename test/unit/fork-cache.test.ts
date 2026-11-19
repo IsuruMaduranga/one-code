@@ -5,7 +5,8 @@
 import { describe, expect, it } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
 import { captureRequest, type RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
-import { forkCacheExtension } from "../../extensions/agents/subagents/fork-cache.ts";
+import { forkCacheExtension, withParentParameters } from "../../extensions/agents/subagents/fork-cache.ts";
+import { sendToMainTool } from "../../extensions/agents/subagents/send-to-main-tool.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -113,5 +114,23 @@ describe("forkCacheExtension", () => {
 		forkCacheExtension(capture, [{ name: "read", parameters: {} }, { name: "list_agents", parameters: { type: "object" } }])(fake.pi as never);
 		await fake.fire("session_start", { type: "session_start", reason: "startup" }, createFakeCtx({ model }));
 		expect([...fake.tools.keys()].sort()).toEqual(["list_agents", "read"]);
+	});
+});
+
+describe("withParentParameters", () => {
+	it("gives each of the fork's own tools the parent's parameters by name, keeping the rest of the tool", async () => {
+		const sent: string[] = [];
+		const own = sendToMainTool((message) => sent.push(message));
+		const solo = { ...own, name: "fork_only" };
+		const parent = { type: "object", properties: { to: { type: "string" }, message: { type: "string" } }, required: ["to", "message"] };
+		const [send, other] = withParentParameters([own, solo], [{ name: "SendMessage", parameters: parent }]);
+		expect(send.parameters).toBe(parent);
+		expect(other).toBe(solo);
+		expect(own.parameters).not.toBe(parent);
+		// execute() is the fork's own: it delivers to main and refuses any other recipient.
+		await send.execute("c1", { to: "main", message: "found it" }, undefined, undefined, undefined as never);
+		const wrong = (await send.execute("c2", { to: "fork-2", message: "hi" }, undefined, undefined, undefined as never)) as { isError?: boolean };
+		expect(sent).toEqual(["found it"]);
+		expect(wrong.isError).toBe(true);
 	});
 });

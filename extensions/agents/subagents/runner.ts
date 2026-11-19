@@ -30,7 +30,7 @@ import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFl
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
 import type { RequestCapture } from "../../lib/side-calls/request-replay.ts";
-import { forkCacheExtension, type ParentTool } from "./fork-cache.ts";
+import { forkCacheExtension, type ParentTool, withParentParameters } from "./fork-cache.ts";
 import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
@@ -464,8 +464,9 @@ export class SubagentRuntime {
 		// Told once, when the agent starts: a resume continues a session that heard it.
 		const flagsNote = removed.length > 0 && agent && !spec.sessionFile ? subagentResultText().toolsLeftOut({ name: agent.name, tools: removed }) : undefined;
 		const fork = SubagentRuntime.isFork(spec);
-		// A fork that extends its parent's captured request: its SendMessage takes the parent's schema (send-to-main-tool.ts).
-		const parentSendMessage = fork && spec.parentRequest ? spec.parentTools?.find((tool) => tool.name === "SendMessage")?.parameters : undefined;
+		const ownTools = [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)];
+		// A fork that extends its parent's captured request declares the parent's schemas (fork-cache.ts).
+		const customTools = fork && spec.parentRequest ? withParentParameters(ownTools, spec.parentTools ?? []) : ownTools;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
 			const sessionManager = newSessionManager();
@@ -481,7 +482,7 @@ export class SubagentRuntime {
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All
 					// tools except …" shape), which filters injected customTools too.
 					...agentToolOptions(agent),
-					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s), parentSendMessage), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
+					customTools,
 					sessionManager,
 				},
 				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",

@@ -17,6 +17,8 @@ import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
+import { type ParentTool, withParentParameters } from "../../extensions/agents/subagents/fork-cache.ts";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentRunRecord } from "../../extensions/agents/subagents/runs.ts";
 import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
 import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
@@ -629,6 +631,18 @@ describe("fork runs in a one-shot session", () => {
 		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
 
+	/**
+	 * The spawn tools a fork's session declares: the runner gives them the
+	 * parent's schemas (fork-cache.ts withParentParameters) from the parent's
+	 * tools, which index.ts hands a fork that has its parent's request (these
+	 * one-shot forks have none, so the parent's registry stands in).
+	 */
+	const forkTools = (h: { fake: { tools: Map<string, { name: string; parameters?: unknown }> } }, spec: unknown) =>
+		withParentParameters(
+			(spec as { extraTools?: ToolDefinition[] }).extraTools ?? [],
+			[...h.fake.tools.values()].map(({ name, parameters }): ParentTool => ({ name, parameters })),
+		);
+
 	// A fork's first request extends the parent's recorded one, tools block
 	// included; the ledger keeps a recorded declaration only while the live
 	// schema matches (lib/request/ledger/wire.ts mergeDeclarations), so a fork's spawn
@@ -637,7 +651,7 @@ describe("fork runs in a one-shot session", () => {
 	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
 		const { h, run } = await mountFork();
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools?.find((tool) => tool.name === "Agent");
+		const nested = forkTools(h, run.mock.calls[0][0]).find((tool) => tool.name === "Agent");
 		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
 	});
 
@@ -669,7 +683,7 @@ describe("fork runs in a one-shot session", () => {
 	it("gives a fork only tools whose schemas match the parent's tools of the same name", async () => {
 		const { h, run } = await mountFork();
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools ?? [];
+		const extraTools = forkTools(h, run.mock.calls[0][0]);
 		expect(extraTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
 		for (const tool of extraTools) {
 			const parent = h.fake.tools.get(tool.name);

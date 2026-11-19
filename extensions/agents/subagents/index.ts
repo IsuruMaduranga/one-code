@@ -1587,13 +1587,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// accepted as `task`, `description` is tolerated, and the agent name is
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
-			// A fork inherits the parent's tools block byte for byte (its first request
-			// extends the parent's recorded one, decisions/caching.md), so its spawn
-			// tool takes the parent's Agent schema: the ledger keeps the recorded
-			// declaration only while the live schema matches it, and pi validates the
-			// call against the live one. The options a nested run lacks are refused in
-			// execute() with the fix named.
-			parameters: (parentRecord.agent === FORK_AGENT ? subagentParams(words) : nestedAgentParams(words)) as never,
+			// In a fork it declares the parent's Agent schema (fork-cache.ts
+			// withParentParameters); execute() refuses the options a nested run lacks,
+			// with the fix named.
+			parameters: nestedAgentParams(words) as never,
 			prepareArguments: prepareAgentArguments as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
@@ -1605,7 +1602,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (!ctx) return refuseCall({ kind: "hostNotReady" });
 				if (agentName.toLowerCase() === FORK_AGENT) return refuseCall({ kind: "nestedFork" });
 				const agents = loadAgents(parentRecord.cwd);
-				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
+				// Only the parent's schema, which a fork declares, offers these.
 				if (p.action === "list") return { content: [{ type: "text" as const, text: subagentResultText().catalogList({ rows: catalogLines(agents) }) }], details: {} };
 				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
 				if (unsupported.length > 0) return refuseCall({ kind: "nestedOptions", options: unsupported });
