@@ -21,6 +21,7 @@ import type { AgentRunRecord } from "../../extensions/agents/subagents/runs.ts";
 import * as worktrees from "../../extensions/lib/agents/agent-worktree.ts";
 import type { Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
+import { claimChordKey } from "../../extensions/lib/ui/ctrl-x-chord.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-model.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
@@ -1243,6 +1244,16 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		const after = sent().slice(before);
 		expect(after).toContain('Background agent "Build the integration" was stopped by the user.');
 		expect(after).not.toContain("was stopped by user");
+	});
+
+	it("lets send now's ctrl+x ctrl+s through while the strip has focus", async () => {
+		const { h, input } = await launched();
+		let sent = 0;
+		claimChordKey(h.fake.events, "ctrl+s", { applies: () => true, act: () => sent++ });
+		expect(input("\x1b[B")).toEqual({ consume: true });
+		expect(input(CTRL_X)).toEqual({ consume: true });
+		expect(input("\x13")).toEqual({ consume: true });
+		expect(sent).toBe(1);
 	});
 
 	it("leaves ctrl+x to pi's copy when no agent runs, and hands an unknown second key back", async () => {

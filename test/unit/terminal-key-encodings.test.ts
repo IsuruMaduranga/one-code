@@ -96,23 +96,14 @@ describe("letter shortcuts in every encoding", () => {
 describe("the subagent strip under the kitty protocol", () => {
 	it("ignores key releases instead of reading them as typing", () => {
 		for (const d of ["\x1b[1;1:3B", "\x1b[1;1:3A", "\x1b[120;5:3u", "\x1b[13;1:3u"]) {
-			expect(decodeStripKey(d, false), JSON.stringify(d)).toEqual({ chordArmed: false, release: true });
-			expect(decodeStripKey(d, true)).toEqual({ chordArmed: true, release: true });
+			expect(decodeStripKey(d), JSON.stringify(d)).toEqual({ release: true });
 		}
 		expect(isStripEntryKey("\x1b[1;1:3B")).toBe(false);
 		each(DOWN, (d) => expect(isStripEntryKey(d)).toBe(true));
 	});
-	it("arms and completes ctrl+x ctrl+k in every encoding", () => {
-		for (const x of ["\x18", "\x1b[120;5u", "\x1b[27;5;120~"]) {
-			for (const k of ["\x0b", "\x1b[107;5u", "\x1b[27;5;107~"]) {
-				expect(decodeStripKey(x, false)).toEqual({ chordArmed: true });
-				expect(decodeStripKey(k, true), `${JSON.stringify(x)} ${JSON.stringify(k)}`).toEqual({ key: "stopAll", chordArmed: false });
-			}
-		}
-	});
 	it("leaves on Esc and repeats keys the terminal auto-repeats", () => {
-		each(ESC, (d) => expect(decodeStripKey(d, false).key).toBe("leave"));
-		expect(decodeStripKey("\x1b[1;1:2B", false).key).toBe("down");
+		each(ESC, (d) => expect(decodeStripKey(d).key).toBe("leave"));
+		expect(decodeStripKey("\x1b[1;1:2B").key).toBe("down");
 	});
 });
 

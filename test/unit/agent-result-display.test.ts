@@ -15,7 +15,9 @@ const launch = { background: true, agentRuns: [{ name: "explore-1" }], lines };
 describe("agentResultDisplay", () => {
 	it("shows a background launch as Claude Code's one line, with the launch lines and the prompt when expanded", () => {
 		expect(agentResultDisplay(launch, { expanded: false, prompt: "Trace the check", expandHint: "ctrl+o to expand" })).toBe("Backgrounded agent (↓ to manage · ctrl+o to expand)");
-		expect(agentResultDisplay(launch, { expanded: false, expandHint: "ctrl+o to expand" })).toBe("Backgrounded agent (↓ to manage)");
+		// The launch lines alone are worth expanding for; with nothing to expand there is no hint.
+		expect(agentResultDisplay(launch, { expanded: false, expandHint: "ctrl+o to expand" })).toBe("Backgrounded agent (↓ to manage · ctrl+o to expand)");
+		expect(agentResultDisplay({ background: true }, { expanded: false, expandHint: "ctrl+o to expand" })).toBe("Backgrounded agent (↓ to manage)");
 		expect(agentResultDisplay(launch, { expanded: false, prompt: "Trace the check", expandHint: null })).toBe("Backgrounded agent (↓ to manage)");
 		expect(agentResultDisplay(launch, { expanded: true, prompt: "  Trace the check\n" , expandHint: "ctrl+o to expand" })).toBe(`Backgrounded agent\n${lines[0]}\n\nTrace the check`);
 	});

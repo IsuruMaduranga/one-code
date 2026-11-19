@@ -25,11 +25,12 @@ export function agentResultDisplay(details: unknown, view: { expanded: boolean; 
 	const d = details as RunDetails | undefined;
 	if (d?.background !== true) return undefined;
 	const prompt = view.prompt?.trim();
+	const lines = Array.isArray(d.lines) ? d.lines.filter((line): line is string => typeof line === "string") : [];
 	if (!view.expanded) {
-		const hints = ["↓ to manage", ...(prompt && view.expandHint ? [view.expandHint] : [])];
+		// Expanding shows the launch lines (the rename and model notes among them) and the prompt.
+		const hints = ["↓ to manage", ...((prompt || lines.length > 0) && view.expandHint ? [view.expandHint] : [])];
 		return `${BACKGROUNDED} (${hints.join(" · ")})`;
 	}
-	const lines = Array.isArray(d.lines) ? d.lines.filter((line): line is string => typeof line === "string") : [];
 	return [BACKGROUNDED, ...lines, ...(prompt ? ["", prompt] : [])].join("\n");
 }
 

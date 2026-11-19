@@ -498,34 +498,24 @@ describe("resolvePiTuiEntry", () => {
 
 describe("decodeStripKey", () => {
 	it("maps arrows, enter, esc, x, page keys; typing decodes to nothing", () => {
-		expect(decodeStripKey("\x1b[A", false).key).toBe("up");
-		expect(decodeStripKey("\x1b[B", false).key).toBe("down");
-		expect(decodeStripKey("\r", false).key).toBe("open");
-		expect(decodeStripKey("\x1b", false).key).toBe("leave");
-		expect(decodeStripKey("x", false).key).toBe("stop");
-		expect(decodeStripKey("\x1b[5~", false).key).toBe("pageUp");
-		expect(decodeStripKey("\x1b[6~", false).key).toBe("pageDown");
-		expect(decodeStripKey("a", false).key).toBeUndefined();
+		expect(decodeStripKey("\x1b[A").key).toBe("up");
+		expect(decodeStripKey("\x1b[B").key).toBe("down");
+		expect(decodeStripKey("\r").key).toBe("open");
+		expect(decodeStripKey("\x1b").key).toBe("leave");
+		expect(decodeStripKey("x").key).toBe("stop");
+		expect(decodeStripKey("\x1b[5~").key).toBe("pageUp");
+		expect(decodeStripKey("\x1b[6~").key).toBe("pageDown");
+		expect(decodeStripKey("a").key).toBeUndefined();
 		// Tab, the side arrows and space are typing: no strip key uses them.
-		expect(decodeStripKey("\t", false).key).toBeUndefined(); // Tab is typing (no next-agent key)
-		expect(decodeStripKey("\x1b[C", false).key).toBeUndefined();
-		expect(decodeStripKey("\x1b[D", false).key).toBeUndefined();
-		expect(decodeStripKey(" ", false).key).toBeUndefined();
+		expect(decodeStripKey("\t").key).toBeUndefined(); // Tab is typing (no next-agent key)
+		expect(decodeStripKey("\x1b[C").key).toBeUndefined();
+		expect(decodeStripKey("\x1b[D").key).toBeUndefined();
+		expect(decodeStripKey(" ").key).toBeUndefined();
 	});
 
-	it("handles the ctrl+x ctrl+k stop-all chord", () => {
-		const armed = decodeStripKey("\x18", false);
-		expect(armed.key).toBeUndefined();
-		expect(armed.chordArmed).toBe(true);
-		const done = decodeStripKey("\x0b", true);
-		expect(done.key).toBe("stopAll");
-		expect(done.chordArmed).toBe(false);
-	});
-
-	it("cancels the chord on any non-ctrl+k key and decodes it fresh", () => {
-		const after = decodeStripKey("x", true);
-		expect(after.key).toBe("stop");
-		expect(after.chordArmed).toBe(false);
+	it("reads ctrl+x and ctrl+k as no strip key: the shared prefix takes the chord", () => {
+		expect(decodeStripKey("\x18")).toEqual({});
+		expect(decodeStripKey("\x0b")).toEqual({});
 	});
 });
 

@@ -13,7 +13,7 @@
  *     ⏺ Read notes.txt and report after delay   running · Sonnet 5
  *     Completed (1)
  *     ✔ write a 300-word poem about the word in the file   done · Haiku 4.5
- *   Quitting or /reload stops running tasks.
+ *   Quitting or /reload stops running background work.
  *   ↑/↓ to select · Enter to view · x to stop · Esc to close
  *
  * The quit line is One Code's: pi cannot ask before quitting or reloading
@@ -28,8 +28,18 @@ import type { BackgroundTask } from "../../lib/agents/task-registry.ts";
 import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../../lib/ui/tui-render.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 
-/** What quitting or `/reload` does to the running tasks, which pi cannot ask about first. */
-export const STOPPED_BY_QUIT = "Quitting or /reload stops running tasks.";
+/**
+ * What quitting or `/reload` would stop, which pi cannot ask about first:
+ * every running task (monitors and workflows too, which the dialog does not
+ * list) and the scheduled jobs (a `/reload` re-arms those from the branch).
+ * Undefined when nothing would stop.
+ */
+export function quitNote(runningTasks: number, scheduledJobs: number): string | undefined {
+	if (runningTasks > 0 && scheduledJobs > 0) return "Quitting stops running background work and scheduled jobs; /reload stops the running work.";
+	if (runningTasks > 0) return "Quitting or /reload stops running background work.";
+	if (scheduledJobs > 0) return "Quitting stops scheduled jobs.";
+	return undefined;
+}
 
 /** One selectable row. */
 export type TasksItem =
@@ -42,6 +52,8 @@ export interface TasksDialogInput {
 	agents: Array<Extract<TasksItem, { kind: "agent" }>>;
 	selected: number;
 	width: number;
+	/** quitNote's line, shown above the hints. */
+	quitNote?: string;
 }
 
 export interface TasksPaint {
@@ -70,8 +82,12 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 	// Hints wrap at their separators on a narrow terminal, so none is cut off.
 	const hint = ["↑/↓ to select", "Enter to view", ...(current?.running ? ["x to stop"] : []), "Esc to close"].join(" · ");
 	const pushHints = () => out.push(...hintLines(hint, width, "  ").map((hintLine) => paint.fg("dim", hintLine)));
+	const pushQuitNote = () => {
+		if (input.quitNote) out.push(paint.fg("dim", line(`  ${input.quitNote}`)));
+	};
 	if (items.length === 0) {
 		out.push(line("  No tasks currently running"));
+		pushQuitNote();
 		pushHints();
 		return out;
 	}
@@ -103,7 +119,7 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 			index++;
 		}
 	}
-	if (runningShells > 0 || agents.running.length > 0) out.push(paint.fg("dim", line(`  ${STOPPED_BY_QUIT}`)));
+	pushQuitNote();
 	pushHints();
 	return out;
 }

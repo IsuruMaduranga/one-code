@@ -134,8 +134,10 @@ parent. A finished agent leaves the list, and the panel says
 - Press **↓** from an empty editor to focus the rows (after the shells
   chip, if background shells exist).
 - **↑** and **↓** select an agent. **Enter** views it.
-- **x** stops the selected agent. **ctrl+x** then **ctrl+k** stops all of
-  them.
+- **x** stops the selected agent. **ctrl+x** then **ctrl+k** stops every
+  running one; it works from the prompt too, and asks first (press it
+  again within three seconds). Agents waiting idle for a message keep
+  running.
 - **Esc** puts you back in the editor and keeps the agent on screen.
 
 ### Talk to an agent
