@@ -20,6 +20,8 @@ import { type RunFailure, subagentResultText } from "../../lib/agents/subagent-t
 /** Where a guard in the child reports that it stopped the turn (the tracker; runner.ts wires it to the child's bus). */
 export interface TurnFailureSink {
 	recordTurnFailure(reason: string): void;
+	/** A raw provider event arrived in the child (runner.ts streamProgressExtension); the stall watch counts it. */
+	recordStreamEvent?(): void;
 }
 
 /** Why a turn was cut short: stopped, or the wall-clock cap. */
@@ -84,6 +86,13 @@ export class SessionTurnTracker implements HandbackSlot, TurnFailureSink {
 	/** A guard in the child stopped the turn; the first reason wins. */
 	recordTurnFailure(reason: string): void {
 		this.harnessStop ??= reason;
+	}
+
+	/** Set by the runner while it watches this session for stalls (stall-watch.ts). */
+	onStreamEvent: (() => void) | undefined;
+
+	recordStreamEvent(): void {
+		this.onStreamEvent?.();
 	}
 
 	recordHandback(message: string): boolean {

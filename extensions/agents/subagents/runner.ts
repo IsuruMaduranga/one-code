@@ -31,6 +31,7 @@ import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
 import type { RequestCapture } from "../../lib/side-calls/request-replay.ts";
 import { forkCacheExtension, type ParentTool, withParentParameters } from "./fork-cache.ts";
+import { StallWatch } from "./stall-watch.ts";
 import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
@@ -190,6 +191,15 @@ export function turnFailureExtension(sink: TurnFailureSink): (pi: Pick<Extension
 	};
 }
 
+/** A child extension that tells the run's tracker each raw provider event arrived, for the stall watch (stall-watch.ts). */
+export function streamProgressExtension(sink: TurnFailureSink): (pi: Pick<ExtensionAPI, "on">) => void {
+	return (pi) => {
+		pi.on("provider_stream_event", () => {
+			sink.recordStreamEvent?.();
+		});
+	};
+}
+
 export class SubagentRuntime {
 	private readonly modelRuntime: Awaited<ReturnType<typeof createSharedModelRuntime>>;
 	private readonly baseCwd: string;
@@ -337,6 +347,7 @@ export class SubagentRuntime {
 				// A guard that stops the child's turn (a runaway tool call) says why on the
 				// child's own bus; the turn's outcome carries it to the parent's notification.
 				turnFailureExtension(handback),
+				streamProgressExtension(handback),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools)] : []),
 			],
@@ -387,8 +398,16 @@ export class SubagentRuntime {
 		sink?: LiveSink,
 	): () => void {
 		const childWrote = childWriteWatcher(session.sessionManager?.getCwd?.() ?? this.baseCwd);
-		return session.subscribe((event) => {
+		// A turn with no progress for ten minutes fails, behind pi's own stream
+		// watchdog and retries (stall-watch.ts); the reason reaches the parent as a guard's does.
+		const stall = new StallWatch((seconds) => {
+			tracker.recordTurnFailure(subagentResultText().stalled({ seconds }));
+			void session.abort();
+		});
+		tracker.onStreamEvent = () => stall.progress();
+		const unsubscribe = session.subscribe((event) => {
 			try {
+				stall.observe(event as never);
 				const settled = tracker.process(event as never);
 				const wrote = childWrote(event as never);
 				if (wrote) this.onChildWrite(wrote, this.runNames.get(session.sessionId));
@@ -431,6 +450,11 @@ export class SubagentRuntime {
 				// A bad event shape must never throw into the agent's emit loop.
 			}
 		});
+		return () => {
+			stall.stop();
+			tracker.onStreamEvent = undefined;
+			unsubscribe();
+		};
 	}
 
 	/**

@@ -27,11 +27,12 @@ import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/req
 import { activeOpenRouterRouting, routingFloorFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
-// Silence allowed inside a stream. Every raw chunk restarts the clock, but
-// OpenRouter's keepalive comments never reach us, so a model thinking
-// server-side before its first token looks silent: that wait is long. After
-// the first content it is Claude Code's 90 s watchdog, and 60 s while a tool
-// call's arguments stream (arguments never pause for thinking).
+// Silence allowed inside an OpenRouter stream. Every raw chunk restarts the
+// clock, but OpenRouter's keepalive comments never reach us, so a model
+// thinking server-side before its first token looks silent: that wait is long.
+// After the first content it is 90 s, and 60 s while a tool call's arguments
+// stream (arguments never pause for thinking). pi's own 300 s idle timeout
+// covers every provider, this one included (agents/subagents/stall-watch.ts).
 const FIRST_CONTENT_IDLE_MS = 300_000;
 const STREAM_IDLE_MS = 90_000;
 const TOOL_CALL_IDLE_MS = 60_000;
