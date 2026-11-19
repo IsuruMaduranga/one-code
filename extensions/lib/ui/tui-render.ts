@@ -662,6 +662,33 @@ export interface ToolRenderSpec<TArgs = unknown, TDetails = unknown> {
 }
 
 /**
+ * A tool's renderers with some results shown as a short line instead of
+ * their text: a background start's result tells the model how to wait, and
+ * the user sees one line (Claude Code: "Running in the background",
+ * "Backgrounded agent"). `display` returns the line, or several when
+ * `expanded`, and undefined for a result the tool's own renderer shows. An
+ * error result always goes to the tool's own renderer.
+ */
+export function withResultDisplay<R extends { renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => TuiComponent }>(
+	renderers: R,
+	display: (result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, expanded: boolean, context: any) => string | undefined,
+): R {
+	return {
+		...renderers,
+		renderResult(result, options, theme, context) {
+			let text: string | undefined;
+			try {
+				text = context?.isError ? undefined : display(result, options.expanded, context);
+			} catch {
+				text = undefined;
+			}
+			if (text === undefined) return renderers.renderResult(result, options, theme, context);
+			return linesComponent(() => resultLines(theme, text, options.expanded, false, { hint: expandHintFor(context) }));
+		},
+	};
+}
+
+/**
  * renderShell/renderCall/renderResult for `pi.registerTool` — spread into the
  * definition: `...toolRenderers("Task Output", { title: (a) => a?.task_id })`.
  *

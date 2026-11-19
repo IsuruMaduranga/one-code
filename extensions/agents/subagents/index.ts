@@ -82,6 +82,7 @@ import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
+import { agentResultDisplay, sendMessageResultDisplay } from "./result-display.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
 import type { SubagentsText } from "./text.ts";
@@ -107,7 +108,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -2172,9 +2173,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const agentTool = defineTool({
 		name: "Agent",
 		label: "Agent",
-		...toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
-			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
-		}),
+		...withResultDisplay(
+			toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
+				title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
+			}),
+			(result, expanded, context) => agentResultDisplay(result.details, { expanded, prompt: context.args?.task ?? context.args?.prompt, expandHint: expandHintFor(context) }),
+		),
 		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
 		promptSnippet: words.agentPromptSnippet,
 		parameters: agentParams,
@@ -2455,7 +2459,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						text: subagentResultText().launched({ lines, running: launchedRecords.length, outputFile }),
 					},
 				],
-				details: { agentRuns: launchedRecords, background: true },
+				details: { agentRuns: launchedRecords, background: true, lines },
 			};
 		},
 	});
@@ -2524,7 +2528,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 								text: subagentResultText().steered({ name: record.name }),
 							},
 						],
-						details: { agentRuns: [record], steered: true },
+						details: { agentRuns: [record], steered: true, pending: true },
 					};
 				}
 				// The turn had just ended (settle window): the message rides the next
@@ -2536,7 +2540,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 							text: subagentResultText().nextTurn({ name: record.name }),
 						},
 					],
-					details: { agentRuns: [record] },
+					details: { agentRuns: [record], pending: true },
 				};
 			}
 
@@ -2594,7 +2598,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						text: subagentResultText().sentToResident({ name: record.name, taskId }),
 					},
 				],
-				details: { agentRuns: [record], taskId },
+				details: { agentRuns: [record], taskId, pending: true },
 			};
 		}
 
@@ -2771,16 +2775,19 @@ function subagentsExtension(pi: ExtensionAPI) {
 					text: subagentResultText().sent({ name: record.name, taskId }),
 				},
 			],
-			details: { agentRuns: [record], taskId },
+			details: { agentRuns: [record], taskId, pending: true },
 		};
 	};
 
 	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
-		...toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
-			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
-		}),
+		...withResultDisplay(
+			toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
+				title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
+			}),
+			(result) => sendMessageResultDisplay(result.details),
+		),
 		description: words.sendMessageDescription,
 		parameters: SendMessageParams,
 		execute: (toolCallId, params, signal, _onUpdate, ctx) => sendMessage(toolCallId, params, signal, ctx),

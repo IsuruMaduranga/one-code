@@ -25,7 +25,7 @@ import type { ShellBlock, ShellEnd, ShellResultText } from "./shell-text.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
-import { ccWrapBuiltinRenderers, expandHintFor, linesComponent, resultLines } from "../ui/tui-render.ts";
+import { ccWrapBuiltinRenderers, withResultDisplay } from "../ui/tui-render.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
 import { shellResultText } from "./shell-text.ts";
 
@@ -143,7 +143,13 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// `● Label(cmd)` / elbow-indented output, like every other One Code tool.
 	// Not passing base.renderCall also drops its timer state, so the misleading
 	// "Took Ns" that counted permission-prompt wait disappears.
-	const wrapped = ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command });
+	// A background start returns a model-facing instruction paragraph; the
+	// transcript needs one line (Claude Code: "Running in the background").
+	const wrapped = withResultDisplay(ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command }), (result, expanded) => {
+		const details = result.details as { taskId?: string; logPath?: string } | undefined;
+		if (!details?.taskId) return undefined;
+		return expanded ? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})` : "Running in the background (↓ to manage)";
+	});
 
 	const definition = {
 		name: spec.name,
@@ -161,18 +167,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 		constrainedSampling: spec.base.constrainedSampling,
 		renderShell: wrapped.renderShell,
 		renderCall: wrapped.renderCall as ToolDefinition<P>["renderCall"],
-		renderResult: ((result, options, theme, context) => {
-			// A background start returns a model-facing instruction paragraph;
-			// the transcript needs one line (Claude Code: "Running in the background").
-			const details = result.details as { taskId?: string; logPath?: string } | undefined;
-			if (details?.taskId && !context.isError) {
-				const line = options.expanded
-					? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
-					: "Running in the background (↓ to manage)";
-				return linesComponent(() => resultLines(theme as any, line, options.expanded, false, { hint: expandHintFor(context) }));
-			}
-			return wrapped.renderResult(result, options, theme, context);
-		}) as ToolDefinition<P>["renderResult"],
+		renderResult: wrapped.renderResult as ToolDefinition<P>["renderResult"],
 		parameters: spec.parameters,
 		async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
 			const params = rawParams as Static<P> & ShellToolParams;
