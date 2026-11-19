@@ -117,6 +117,8 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-chann
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
+import { PROMPT_CHORD_TIMEOUT_MS, PromptChord, STOP_ALL_CONFIRM_MS, StopAllPresses, stopAllNote } from "./stop-all.ts";
+import { claimChordKey, offerChordKey } from "../../lib/ui/ctrl-x-chord.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent, viewportScrollFor } from "../../lib/agents/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
@@ -367,6 +369,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
 	 */
 	const stoppedTaskIds = new Set<string>();
+	/** Agents the user stopped all at once: one notification names them, so their own are dropped (stop-all.ts). */
+	const quietStops = new Set<string>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
 	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
@@ -382,6 +386,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// A (re)starting run is no longer stopped — a resumed agent that was killed
 		// earlier must not inherit the "Stopped" mark.
 		stoppedTaskIds.delete(record.taskId);
+		quietStops.delete(record.taskId);
 		// A resumed run (SendMessage to a finished agent) re-enters its existing
 		// panel entry; only a never-seen taskId registers fresh.
 		if (!liveRuns.reactivate(record.taskId, request.task, Date.now())) {
@@ -897,6 +902,36 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return exits;
 	};
 
+	// --- ctrl+x ctrl+k: stop every background agent, from the prompt or the strip (stop-all.ts) ---
+
+	const runningAgents = () => liveRuns.list().filter((run) => run.status === "running");
+	const stopAllPresses = new StopAllPresses();
+	panel.setMainNote((now, focused) => stopAllNote(stopAllPresses.asking(now), runningAgents().length > 0, focused));
+	/** Stop every running agent at the user's word: their own notifications are dropped (notifyHandBack) for one line naming them all. */
+	const stopAllByUser = () => {
+		const running = runningAgents();
+		if (running.length === 0) return;
+		for (const run of running) quietStops.add(run.taskId);
+		stopAllAgents();
+		const descriptions = running.map((run) => registry.resolve(run.taskId)?.description ?? run.name);
+		notify("subagent-result", subagentResultText().stoppedByUser({ descriptions }), { stoppedByUser: running.map((run) => run.taskId) });
+		panel.refresh();
+	};
+	/** One press of the chord: the first asks, a second inside the window stops. */
+	const pressStopAll = (): boolean => {
+		if (runningAgents().length === 0) return false;
+		if (stopAllPresses.press(Date.now()) === "stop") {
+			stopAllByUser();
+			return true;
+		}
+		panel.refresh();
+		// Take the prompt down when the window closes, even if nothing else repaints.
+		setTimeout(() => panel.refresh(), STOP_ALL_CONFIRM_MS + 50).unref?.();
+		return true;
+	};
+	// The ctrl+k after a ctrl+x that send now held (lib/ui/ctrl-x-chord.ts).
+	claimChordKey(pi.events, "ctrl+k", pressStopAll);
+
 	/**
 	 * Markdown prose for the transcript views — pi-tui's real renderer, loaded
 	 * lazily on first view; falls back to plain wrapped text with one warning.
@@ -1127,8 +1162,30 @@ function subagentsExtension(pi: ExtensionAPI) {
 			return { consume: true };
 		};
 		const doStopAll = (): KeyResult => {
-			stopAllAgents();
+			pressStopAll();
 			return { consume: true };
+		};
+		// The chord typed at the prompt, the strip unfocused (stop-all.ts PromptChord).
+		const promptChord = new PromptChord();
+		let promptChordTimer: ReturnType<typeof setTimeout> | undefined;
+		/** A key the prompt chord takes, or "notMine" for the usual handling. */
+		const handlePromptChord = (data: string): KeyResult | "notMine" => {
+			clearTimeout(promptChordTimer);
+			switch (promptChord.feed(data, panel.editorFocused() && runningAgents().length > 0)) {
+				case "hold":
+					promptChordTimer = setTimeout(() => promptChord.expire(), PROMPT_CHORD_TIMEOUT_MS);
+					promptChordTimer.unref?.();
+					return { consume: true };
+				case "stopAll":
+					pressStopAll();
+					return { consume: true };
+				case "offer": {
+					const key = keyId(data);
+					return key && offerChordKey(pi.events, key) ? { consume: true } : "notMine";
+				}
+				default:
+					return "notMine";
+			}
 		};
 		/** Unrecognized key: ctrl+x keeps the stop-all chord armed, else drop focus
 		 * (any open view stays) and let the byte resume in the editor. */
@@ -1196,6 +1253,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && !panel.shellChipFocused) {
+					const chord = handlePromptChord(data);
+					if (chord !== "notMine") return chord;
 					// Viewing an agent with the editor focused: the viewport keys scroll
 					// the view under the user's own bindings (an open autocomplete menu
 					// keeps them), and Esc in an empty editor goes back to main. In
@@ -1389,6 +1448,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		review: HandBackVerdict | undefined;
 		details?: Record<string, unknown>;
 	}) => {
+		if (opts.stopped && quietStops.delete(opts.taskId)) return;
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
 		const record = registry.resolve(opts.from);

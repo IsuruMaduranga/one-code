@@ -52,7 +52,8 @@ describe("SendNowChord", () => {
 	it("drops an unfinished chord: the next key passes, a later ctrl+s does not send", () => {
 		const chord = new SendNowChord();
 		chord.feed("\x1b[120;5u", true);
-		expect(chord.feed("a", true)).toBe("pass");
+		// Offered to another chord's extension first; it passes when none claims it.
+		expect(chord.feed("a", true)).toBe("offer");
 		expect(chord.feed("\x13", true)).toBe("pass");
 	});
 

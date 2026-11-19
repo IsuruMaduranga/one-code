@@ -22,6 +22,8 @@
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SEND_NOW_CHANNEL } from "../../lib/notify/send-now-channel.ts";
+import { claimChordKey, offerChordKey } from "../../lib/ui/ctrl-x-chord.ts";
+import { keyId } from "../../lib/ui/key-input.ts";
 import { safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { SEND_NOW_HINT, SendNowChord } from "./chord.ts";
 
@@ -104,13 +106,24 @@ function sendNowExtension(pi: ExtensionAPI) {
 				case "send":
 					void sendNow(ctx);
 					return { consume: true };
+				case "offer": {
+					const key = keyId(data);
+					return key && offerChordKey(pi.events, key) ? { consume: true } : undefined;
+				}
 				default:
 					return undefined;
 			}
 		});
+		// The ctrl+s after a ctrl+x that another chord's extension held.
+		const stopClaiming = claimChordKey(pi.events, "ctrl+s", () => {
+			if (!active()) return false;
+			void sendNow(ctx);
+			return true;
+		});
 		unsubscribe = () => {
 			clearTimeout(timer);
 			stopUnsubscribe();
+			stopClaiming();
 		};
 
 		ctx.ui.setWidget("send-now", (_tui, theme) => {

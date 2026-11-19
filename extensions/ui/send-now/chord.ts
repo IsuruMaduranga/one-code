@@ -14,7 +14,10 @@
  * takes a `ctrl+x` only while send now applies (a turn runs with something to
  * send), where it is the chord's prefix as in Claude Code: one the chord does
  * not complete (another key, or the extension's timeout) is dropped. At every
- * other time `ctrl+x` reaches pi and copies.
+ * other time `ctrl+x` reaches pi and copies. A held `ctrl+x` followed by a
+ * key that is not `ctrl+s` may be another extension's chord (`ctrl+x ctrl+k`
+ * stops the background agents): that key is offered to it through
+ * lib/ui/ctrl-x-chord.ts, and passes on when nobody claims it.
  */
 
 import { isKeyRelease, keyId } from "../../lib/ui/key-input.ts";
@@ -30,9 +33,10 @@ export function classifyKey(data: string): ChordKey {
 
 /**
  * What the extension does with a key: let it through, hold it (a `ctrl+x`
- * that may start the chord, consumed), or send now (the `ctrl+s`, consumed).
+ * that may start the chord, consumed), send now (the `ctrl+s`, consumed), or
+ * offer it to another extension's chord (the key after a held `ctrl+x`).
  */
-export type ChordAction = "pass" | "hold" | "send";
+export type ChordAction = "pass" | "hold" | "send" | "offer";
 
 export class SendNowChord {
 	private armed = false;
@@ -49,7 +53,7 @@ export class SendNowChord {
 			return "hold";
 		}
 		if (armed && key === "ctrl+s" && active) return "send";
-		return "pass";
+		return armed && key === "other" ? "offer" : "pass";
 	}
 
 	/** The chord timed out: its `ctrl+x` is dropped. */

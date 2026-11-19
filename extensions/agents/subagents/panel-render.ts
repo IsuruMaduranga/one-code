@@ -134,6 +134,8 @@ export interface StripInput {
 	viewedId?: string;
 	width: number;
 	now: number;
+	/** Dim text on the right of the `main` row (the stop-all hint or its prompt, stop-all.ts). */
+	mainNote?: string;
 }
 
 /**
@@ -179,7 +181,7 @@ export function renderStrip(input: StripInput, paint: Paint): string[] {
 						.join(" · ");
 		const elbow = row.depth > 0 ? `${"  ".repeat(row.depth - 1)}└ ` : "";
 		const left = `${caret} ${elbow}${dot} ${row.label}${row.activity ? `  ${row.activity}` : ""}`;
-		const line = splitCell(left, row.run ? stats : "", width);
+		const line = splitCell(left, row.run ? stats : (input.mainNote ?? ""), width);
 		if (selected) out.push(paint.fg("accent", paint.bold(line)));
 		else if (STATUS_ROW_STYLE[row.status]) out.push(paint.fg(STATUS_ROW_STYLE[row.status]!, line));
 		else out.push(row.run ? line : paint.fg("dim", line));

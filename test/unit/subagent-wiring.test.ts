@@ -1181,3 +1181,57 @@ describe("agent view scrolling without branding's editor", () => {
 		}
 	});
 });
+
+// Claude Code's chat:killAgents: ctrl+x ctrl+k from the prompt, twice within
+// three seconds, stops every running agent and tells the model in one line.
+describe("ctrl+x ctrl+k at the prompt", () => {
+	const CTRL_X = "\x18";
+	const CTRL_K = "\x0b";
+	const textOf = (content: unknown) =>
+		typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("");
+
+	async function launched() {
+		const runtime = fakeResident();
+		const h = await mount([], session, "tui", undefined, { hasUI: true });
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Build it", description: "Build the integration", run_in_background: true });
+		const ui = h.ctx.ui as Record<string, ReturnType<typeof vi.fn>>;
+		const editor = { getText: () => "", isShowingAutocomplete: () => false };
+		const tui = { terminal: { rows: 30, columns: 80 }, getFocusedComponent: () => editor, requestRender: () => {} };
+		// The strip paints after a debounce; mounting it tells the panel the TUI and its focused editor.
+		const lastStrip = () => {
+			for (const [key, factory] of ui.setWidget.mock.calls.slice().reverse()) if (key === "subagents" && typeof factory === "function") return (factory(tui, {}) as { render(width: number): string[] }).render(100).join("\n");
+			return "";
+		};
+		await vi.advanceTimersByTimeAsync(300);
+		expect(lastStrip()).toContain("Build");
+		const input = ui.onTerminalInput.mock.calls[0][0] as (data: string) => { consume?: boolean } | undefined;
+		return { h, runtime, input, lastStrip, sent: () => h.fake.sentMessages.map((m) => textOf(m.message.content)).join("\n") };
+	}
+
+	it("asks on the first press, stops every running agent on the second, and sends one line naming them", async () => {
+		const { runtime, input, lastStrip, sent } = await launched();
+		expect(lastStrip()).toContain("ctrl+x ctrl+k to stop agents");
+
+		expect(input(CTRL_X)).toEqual({ consume: true });
+		expect(input(CTRL_K)).toEqual({ consume: true });
+		expect(runtime.handle.kill).not.toHaveBeenCalled();
+		expect(lastStrip()).toContain("Press ctrl+x ctrl+k again to stop background agents");
+
+		input(CTRL_X);
+		input(CTRL_K);
+		expect(runtime.handle.kill).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sent()).toContain('Background agent "Build the integration" was stopped by the user.');
+		expect(sent()).not.toContain("was stopped by user");
+	});
+
+	it("leaves ctrl+x to pi's copy when no agent runs, and hands an unknown second key back", async () => {
+		const { runtime, input } = await launched();
+		input(CTRL_X);
+		expect(input("a")).toBeUndefined();
+		runtime.finish();
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(input(CTRL_X)).toBeUndefined();
+		expect(runtime.handle.kill).not.toHaveBeenCalled();
+	});
+});
