@@ -28,6 +28,8 @@ export type MonitorStartFailure =
 	| { kind: "commandOrSocket" }
 	/** No bash shell to run the command; `osMessage` says why, when known. */
 	| { kind: "noShell"; osMessage?: string }
+	/** The shell sandbox is required by the settings and is not running. */
+	| { kind: "sandboxRequired"; reason: string }
 	| { kind: "socketFailed"; url: string; osMessage: string };
 
 /** How a monitor in a one-shot run ended. */
@@ -226,6 +228,8 @@ function startFailed(failure: MonitorStartFailure): string {
 			return "Pass exactly one of `command` or `ws`.";
 		case "noShell":
 			return `Cannot start the monitor: ${failure.osMessage ?? "no bash shell was found"}`;
+		case "sandboxRequired":
+			return `Cannot start the monitor: the user's settings require the command sandbox (sandbox.failIfUnavailable) and it is not running: ${failure.reason}. Tell the user what is missing.`;
 		case "socketFailed":
 			return `Could not open the WebSocket — check \`ws.url\` ("${failure.url}"): ${failure.osMessage}`;
 	}

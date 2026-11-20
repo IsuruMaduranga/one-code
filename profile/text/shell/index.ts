@@ -7,6 +7,7 @@
 import type { LiveTools, ShellText } from "../../../extensions/sdk/profile.ts";
 import { BASH_PARAMS, bashDescription } from "./bash-description.ts";
 import { powerShellToolDescription } from "./powershell-description.ts";
+import { shellSandboxText } from "./sandbox-text.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const BASH_PASSAGES: ToolPassages = {
@@ -47,4 +48,5 @@ export const shellText = (live: LiveTools): ShellText => ({
 		description: "Clear, concise description of what this command does in active voice.",
 		run_in_background: "Set to true to run this command in the background.",
 	},
+	sandbox: shellSandboxText,
 });

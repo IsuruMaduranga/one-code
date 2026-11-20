@@ -45,6 +45,28 @@ export interface ShellParams {
 	run_in_background: string;
 }
 
+/** The words of the shell sandbox (lib/shell-run/sandbox.ts), for a session whose settings turn it on. */
+export interface ShellSandboxText {
+	/** The Bash tool's `dangerouslyDisableSandbox` parameter. */
+	disableParam: string;
+	/**
+	 * The first-message section. `filesystem` and `network` are the session's
+	 * rules as JSON; `unsandboxedAllowed` says the model may ask to leave the
+	 * sandbox (`sandbox.allowUnsandboxedCommands`).
+	 */
+	section(p: { platform: "darwin" | "linux"; filesystem: string; network: string; unsandboxedAllowed: boolean }): string;
+	/** The tail note when a session told of a sandbox no longer has one. */
+	turnedOff: string;
+	/** The section when the sandbox could not start; `required` says commands are refused without it. */
+	unavailable(p: { reason: string; required: boolean }): string;
+	/**
+	 * A shell call refused: the sandbox is required and is not running
+	 * (`unavailable`), or the call is a PowerShell command, which the sandbox
+	 * does not run (`powershell`).
+	 */
+	refused(p: { kind: "unavailable"; reason: string } | { kind: "powershell" }): string;
+}
+
 export interface ShellText {
 	/** The system prompt guideline when PowerShell is the primary shell (Claude Code names it so). */
 	powershellPrimary: string;
@@ -53,6 +75,7 @@ export interface ShellText {
 	bashParams: ShellParams;
 	powershellDescription(p: { edition: PowerShellEditionName }): string;
 	powershellParams: ShellParams;
+	sandbox: ShellSandboxText;
 }
 
 /** The group's results, refusals and notes, which the base words (`shellResultText`). */

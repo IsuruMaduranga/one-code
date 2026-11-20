@@ -73,6 +73,7 @@ import { analyzeShellCommand } from "../../lib/shell/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../../lib/shell/bash-parser.ts";
 import type { PowerShellParse } from "../../lib/shell/powershell-parser.ts";
 import { powerShellParser } from "../../lib/shell-run/shell-spawn.ts";
+import { unsandboxedRequest } from "../../lib/shell-run/sandbox.ts";
 import { powershellReadOnly } from "../../lib/shell/powershell-rules.ts";
 import { isShellTool } from "../../lib/rules/matcher.ts";
 import { gitStatusOutput } from "../../lib/context/git.ts";
@@ -773,7 +774,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; history?: HistoryCursor; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; history?: HistoryCursor; signal?: AbortSignal; powershellParse?: PowerShellParse; unsandboxed?: boolean },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -781,7 +782,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
 
-		if (normalizeToolName(toolName) === "bash" && subject) {
+		// A call that asks to leave the shell sandbox is never cleared by the
+		// pre-gate: the classifier reads it.
+		if (opts?.unsandboxed) {
+			// falls through to the classifier
+		} else if (normalizeToolName(toolName) === "bash" && subject) {
 			if (analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots }).verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -1427,6 +1432,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		currentMainToolCallId = event.toolCallId;
 		inFlightMainCalls.push(event.toolCallId);
 
+		// A shell call that asks to leave the sandbox takes no fast path (lib/rules/matcher.ts `unsandboxed`).
+		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(event.input as Record<string, unknown>);
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
 				toolName: event.toolName,
@@ -1437,6 +1444,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				ask,
 				allow: allowRules,
 				classifyAllShell: classifyAllShell(),
+				unsandboxed,
 				resolvedSubject,
 				resolvedCwd: resolvedCallCwd,
 				planFilePath,
@@ -1565,7 +1573,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
 					{
-						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
+						cwd: callCwd, powershellParse, toolCallId: event.toolCallId, unsandboxed,
 						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command),
 					},
 				);
@@ -1724,6 +1732,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, subject, mode);
+		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(input);
 
 		const result = decide({
 			toolName,
@@ -1737,6 +1746,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// denied) for a call the parent would allow (SUBAGENT-REVIEW L5).
 			allow: [...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])],
 			classifyAllShell: classifyAllShell(),
+			unsandboxed,
 			resolvedSubject,
 			// The child's own cwd (a worktree, if isolated) is its working directory.
 			resolvedCwd: resolveForContainment(cwd),
@@ -1807,6 +1817,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				// didn't supply one, so classify() still gets the signal it expects.
 				signal: call.signal ?? new AbortController().signal,
 				powershellParse,
+				unsandboxed,
 			});
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);

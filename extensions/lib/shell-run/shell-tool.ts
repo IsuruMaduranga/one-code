@@ -21,7 +21,8 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TAS
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
-import type { ShellBlock, ShellEnd, ShellResultText } from "./shell-text.ts";
+import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
+import { sandboxedCommand, withSandboxViolations } from "./sandbox.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -50,6 +51,8 @@ export interface ShellToolParams {
 	timeout?: number;
 	description?: string;
 	run_in_background?: boolean;
+	/** Only in a session whose settings turn the shell sandbox on and let the model ask to leave it. */
+	dangerouslyDisableSandbox?: boolean;
 }
 
 /** The parts of pi's shell tool definition the shared body reads (structural, so the concrete generic types assign). */
@@ -87,6 +90,10 @@ export interface ShellToolSpec<P extends TObject> {
 	words?: () => ShellResultText;
 	/** The spawn for a background run, or undefined when the shell is unavailable. */
 	backgroundShell: () => ShellSpawn | undefined;
+	/** The sandbox's words, for a call it refuses. */
+	sandboxText: () => ShellSandboxText;
+	/** The bash that runs this tool's commands inside the shell sandbox; absent for a shell the sandbox does not run. */
+	sandboxBash?: () => string | undefined;
 	/** Rewrites the command for a background spawn (PowerShell prepends its UTF-8 prefix). Default: identity. */
 	wrapBackgroundCommand?: (command: string) => string;
 }
@@ -180,6 +187,16 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
 			// 33 hours (review T11). A command that names none gets Claude Code's
 			// default, which is what the descriptions promise.
+			// The session's sandbox wraps what runs; guards, rules and the transcript keep the model's command.
+			const sandboxed = await sandboxedCommand({
+				command: params.command,
+				original: originalCommand,
+				disable: params.dangerouslyDisableSandbox === true,
+				cwd: ctx.cwd,
+				bash: spec.sandboxBash?.(),
+				id: toolCallId,
+			});
+			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: {} };
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
 			const timeoutSeconds = (explicitTimeout ? Math.min(params.timeout!, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS) / 1000;
 
@@ -189,13 +206,17 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				// cut the output Claude Code's way (its head, not pi's tail). Then
 				// Claude Code's result text (`Exit code N` first, trimmed output).
 				const result = await keepSpillReadable(
-					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
+					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
 				);
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();
-				return withClaudeCodeShellText(result, spec.name, originalCommand);
+				const shaped = withClaudeCodeShellText(result, spec.name, originalCommand);
+				// What the sandbox denied (a host its proxy refused) follows the output.
+				const first = shaped.content?.[0];
+				if (!sandboxed.sandbox || first?.type !== "text" || typeof first.text !== "string") return shaped;
+				return { ...shaped, content: [{ ...first, text: withSandboxViolations(first.text, sandboxed.sandbox, toolCallId) }, ...shaped.content.slice(1)] };
 			}
 
 			const shell = spec.backgroundShell();
@@ -209,7 +230,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const id = generateTaskId();
 			const logPath = taskLogPath(ctx, id);
 			const description = params.description || params.command.slice(0, 80);
-			const command = wrap(params.command);
+			const command = wrap(sandboxed.command);
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: a
 			// detached task would be orphaned, and its completion callback would

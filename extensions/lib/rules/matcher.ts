@@ -910,6 +910,15 @@ export interface DecideInput {
 	/** Auto mode: route every shell command through the classifier, ignoring narrow Bash allow rules. */
 	classifyAllShell?: boolean;
 	/**
+	 * A shell call that asks to run outside the shell sandbox
+	 * (`dangerouslyDisableSandbox`, where a sandbox runs and the settings let
+	 * the model ask): the shell tools' own fast paths do not clear it, so it
+	 * reaches the user's rules, then a prompt or the classifier, as Claude
+	 * Code's unsandboxed retry does. The flag is the model's to write and only
+	 * ever makes the gate stricter.
+	 */
+	unsandboxed?: boolean;
+	/**
 	 * The subject with symlinks resolved (see lib/shell/paths.ts), when the
 	 * caller could resolve it. The protected-path check consults it as well as
 	 * the literal spelling, so writing through `ln -s .git/hooks build` is as
@@ -1559,7 +1568,7 @@ export function decide(params: DecideInput): Decision {
 	 * working space for its writes. Cheap and tiny models keep the stricter path.
 	 */
 	const fastPaths = params.claudeCodeFastPaths === true;
-	if (subject && tool === "bash") {
+	if (subject && tool === "bash" && !params.unsandboxed) {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
@@ -1567,7 +1576,7 @@ export function decide(params: DecideInput): Decision {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
-	if (subject && tool === "powershell" && params.powershellParse) {
+	if (subject && tool === "powershell" && params.powershellParse && !params.unsandboxed) {
 		if (powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
 			return { decision: "allow", cause: "read-only" };
 		}

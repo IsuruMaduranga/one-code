@@ -27,6 +27,7 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
+import { sandboxedCommand } from "../../lib/shell-run/sandbox.ts";
 import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -430,6 +431,14 @@ function backgroundExtension(pi: ExtensionAPI) {
 			lastCtx = ctx;
 			const startFailed = (failure: MonitorStartFailure) => ({ content: [{ type: "text" as const, text: text.monitor.startFailed(failure) }], details: {}, isError: true });
 			if (Boolean(params.command) === Boolean(params.ws)) return startFailed({ kind: "commandOrSocket" });
+			// A monitor's command runs in the session's shell sandbox like any command the model starts.
+			let command = params.command;
+			const sandboxBash = bashSpawn().spawn?.shell;
+			if (command && sandboxBash) {
+				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId });
+				if ("refused" in sandboxed) return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "it runs Bash commands only" });
+				command = sandboxed.command;
+			}
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: the
 			// notifier goes inert, shutdown kills the monitor, and nothing it saw
@@ -583,7 +592,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// The session's bash (Git Bash on Windows) — lib/shell-run/shell-spawn.ts.
 				const bash = bashSpawn();
 				if (!bash.spawn) return startFailed({ kind: "noShell", osMessage: bash.error });
-				const tree = spawnOwnedShell({ shell: bash.spawn, command: params.command, cwd: ctx.cwd });
+				const tree = spawnOwnedShell({ shell: bash.spawn, command: command ?? params.command, cwd: ctx.cwd });
 				const child = tree.child;
 				const lines = new MonitorLineSplitter();
 				// Streaming decoders: a UTF-8 character split across reads stays whole.

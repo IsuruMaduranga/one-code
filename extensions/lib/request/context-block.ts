@@ -46,6 +46,7 @@ export const PRODUCT_BLOCK_PREFIX = "product:";
  * context-block.test.ts.
  */
 export const BASE_BLOCK_KEYS: ReadonlySet<string> = new Set([
+	"sandbox",
 	"environment",
 	"model-line",
 	"one-shot",

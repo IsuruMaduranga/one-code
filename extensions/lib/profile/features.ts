@@ -47,6 +47,7 @@ export const FEATURES = {
 	"file-tracker": { entries: ["safety/file-tracker/index.ts"], guard: true },
 	memory: { entries: ["context/memory/index.ts"] },
 	permissions: { entries: ["safety/permissions/index.ts"], required: true },
+	sandbox: { entries: ["safety/sandbox/index.ts"] },
 	"ask-user": { entries: ["tools/ask-user/index.ts"] },
 	skill: { entries: ["tools/skill/index.ts"] },
 	background: { entries: ["tools/background/index.ts"] },

@@ -32,7 +32,7 @@ export type { NativeWebText } from "../lib/request/native-web-text.ts";
 export type { NotificationsText } from "../lib/notify/notifications-text.ts";
 export type { WorkflowSizeGuideline } from "../lib/profile/product-settings.ts";
 export type { Profile, ProfileText } from "../lib/profile/profile-contract.ts";
-export type { PowerShellEditionName, ShellText } from "../lib/shell-run/shell-text.ts";
+export type { PowerShellEditionName, ShellSandboxText, ShellText } from "../lib/shell-run/shell-text.ts";
 export type { DescriptionForm } from "../lib/profile/tool-variants.ts";
 export type { LspText } from "../tools/lsp/text.ts";
 export type { McpText } from "../tools/mcp/text.ts";

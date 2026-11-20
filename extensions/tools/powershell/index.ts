@@ -66,6 +66,8 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		ccLabel: "PowerShell",
 		description: text.powershellDescription({ edition: powerShellEdition(spec) }),
 		parameters: powerShellParams(text.powershellParams),
+		// No `sandboxBash`: where the shell sandbox runs, it runs Bash commands only, and a PowerShell call is refused.
+		sandboxText: () => text.sandbox,
 		base,
 		// The guideline joins the system prompt's tool guidelines at registration
 		// (before the first request), so it is part of the cached prefix, never a
