@@ -435,7 +435,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			let command = params.command;
 			const sandboxBash = bashSpawn().spawn?.shell;
 			if (command && sandboxBash) {
-				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId });
+				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId, detached: true });
 				if ("refused" in sandboxed) return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "it runs Bash commands only" });
 				command = sandboxed.command;
 			}

@@ -71,13 +71,16 @@ export type TranscriptEntry =
  * classifier in two shapes. A shell call is its command as the model wrote it: `asWritten` when
  * the harness has since wrapped the call's own command (a worktree's `cd`
  * wrapper), so the classifier judges what the model asked for and the wrapper
- * does not escalate every call (PERMISSIONS-REVIEW-2026-09-05 L3). Every other
- * tool is its whole input.
+ * does not escalate every call (PERMISSIONS-REVIEW-2026-09-05 L3). The hosts
+ * the call names for itself (`allowed_domains`) stay with it: allowing the
+ * call grants them, so the classifier reads them (the ruleset's "Command
+ * Network Lists"). Every other tool is its whole input.
  */
 export function toolCallEntry(tool: string, input: unknown, asWritten?: string): TranscriptEntry {
-	if (asWritten !== undefined) return { kind: "tool", tool, input: { command: asWritten } };
 	const args = isPlainObject(input) ? input : {};
-	if (SHELL_TOOLS.has(tool) && typeof args.command === "string") return { kind: "tool", tool, input: { command: args.command } };
+	const hosts = Array.isArray(args.allowed_domains) && args.allowed_domains.length > 0 ? { allowed_domains: args.allowed_domains } : {};
+	if (asWritten !== undefined) return { kind: "tool", tool, input: { command: asWritten, ...hosts } };
+	if (SHELL_TOOLS.has(tool) && typeof args.command === "string") return { kind: "tool", tool, input: { command: args.command, ...hosts } };
 	return { kind: "tool", tool, input: args };
 }
 
@@ -106,7 +109,9 @@ function handBackReport(report: string): string {
 /**
  * Render one entry as its compact JSON line. The shell tools render as
  * `{"Bash":"<command>"}` / `{"PowerShell":"<command>"}` (the command string,
- * as Claude Code does); every other tool renders as `{"<Tool>":{…input…}}`.
+ * as Claude Code does), or as `{"Bash":{"command":…,"allowed_domains":[…]}}`
+ * when the call names hosts for itself; every other tool renders as
+ * `{"<Tool>":{…input…}}`.
  * Keep the input intact, including earlier commands and file contents.
  */
 function renderEntry(entry: TranscriptEntry): string {
@@ -125,7 +130,7 @@ function renderEntry(entry: TranscriptEntry): string {
 	const name = ccToolName(entry.tool);
 	const command = entry.input.command;
 	if (SHELL_TOOLS.has(entry.tool) && typeof command === "string") {
-		return JSON.stringify({ [name]: command });
+		return JSON.stringify({ [name]: entry.input.allowed_domains === undefined ? command : { command, allowed_domains: entry.input.allowed_domains } });
 	}
 	return JSON.stringify({ [name]: entry.input });
 }

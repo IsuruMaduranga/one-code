@@ -369,6 +369,8 @@ export const shell: NonNullable<ProfileText["shell"]> = {
 	},
 	sandbox: {
 		disableParam: "[shell.sandbox.disableParam]",
+		allowedDomainsParam: "[shell.sandbox.allowedDomainsParam]",
+		hostNotListed: "[shell.sandbox.hostNotListed]",
 		section: (p) => mark("shell.sandbox.section", p),
 		turnedOff: "[shell.sandbox.turnedOff]",
 		unavailable: (p) => mark("shell.sandbox.unavailable", p),

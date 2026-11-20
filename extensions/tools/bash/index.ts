@@ -28,7 +28,8 @@ import { childProcessEnv, LAUNCHER_ENV_VAR } from "../../lib/app/app-launch.mjs"
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../../lib/shell-run/shell-spawn.ts";
 import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
-import { sandboxConfigured, sandboxSettings } from "../../lib/shell-run/sandbox.ts";
+import { sandboxConfigured } from "../../lib/shell-run/sandbox.ts";
+import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "../../lib/shell-run/sandbox-settings.ts";
 import { type DescriptionForm, followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
@@ -38,14 +39,20 @@ import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
 import { turnAfterBashAllowed, USER_BASH_CHANNEL, type UserBashTurnRequest, withTurnAfterRun } from "../../lib/shell-run/user-bash-turn.ts";
 
 /** The tool's parameters, described in the profile's words. */
-const bashParams = (d: ShellParams, disableSandbox?: string) =>
+const bashParams = (d: ShellParams, sandbox?: { disableParam: string; allowedDomainsParam: string }) =>
 	Type.Object({
 		command: Type.String({ description: d.command }),
 		timeout: Type.Optional(Type.Number({ description: d.timeout })),
 		description: Type.Optional(Type.String({ description: d.description })),
 		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
-		// Only where the settings turn the shell sandbox on and let the model ask to leave it (lib/shell-run/sandbox.ts).
-		...(disableSandbox ? { dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: disableSandbox })) } : {}),
+		// Only where the settings turn the shell sandbox on (lib/shell-run/sandbox.ts). Both stay in the schema when
+		// the settings forbid leaving the sandbox, as in Claude Code: the section tells the model the first is off.
+		...(sandbox
+			? {
+					dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: sandbox.disableParam })),
+					allowed_domains: Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: sandbox.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX })),
+				}
+			: {}),
 	});
 
 function bashExtension(pi: ExtensionAPI) {
@@ -97,7 +104,7 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		name: "bash",
 		ccLabel: "Bash",
 		description: describe(),
-		parameters: bashParams(text.bashParams, sandboxConfigured() && sandboxSettings().allowUnsandboxedCommands ? text.sandbox.disableParam : undefined),
+		parameters: bashParams(text.bashParams, sandboxConfigured() ? text.sandbox : undefined),
 		sandboxText: () => text.sandbox,
 		sandboxBash: () => bash.spawn?.shell,
 		base,

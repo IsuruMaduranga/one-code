@@ -7,24 +7,42 @@
  * configured in a section in front of the environment block, as in Claude
  * Code. The section is told once per epoch; a change since then (a resume
  * under other settings) goes on the request's tail. A host the settings do
- * not list is refused, except in bypassPermissions mode, where nothing is
- * judged. `/sandbox` shows the state.
+ * not list is decided by the permission mode (hosts.ts): the user is asked
+ * in the manual modes, and auto mode sends the model to the command's own
+ * host list. `/sandbox` shows the state.
  *
  * Child sessions do not load this file: they share the process's sandbox.
  */
 
 import { homedir } from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { privateSessionTempDir } from "../../lib/core/scratchpad.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
+import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { desktopNotificationText } from "../../lib/notify/desktop.ts";
+import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
+import { projectConfigDir } from "../../lib/profile/sources.ts";
 import { gateControlFiles } from "../../lib/profile/settings-files.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { listWorkspaceDirectories } from "../../lib/rules/settings.ts";
 import { activeSandbox, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxUnavailable, startSandbox, stopSandbox } from "../../lib/shell-run/sandbox.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { sandboxSectionText, sandboxStatusLines } from "./section.ts";
+import { createHostGate, type HostAnswer } from "./hosts.ts";
+import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
+
+/**
+ * What a project's config folder holds that runs or steers the agent: never
+ * writable from inside the sandbox, whatever allows the project directory.
+ * With auto-allow on, a sandboxed command runs without a prompt in the
+ * manual modes, so the sandbox is what keeps it off them. The settings files are in
+ * `gateControlFiles`; the runtime itself denies the shell and git startup
+ * files, `.git/hooks`, `.git/config`, `.vscode` and `.idea`.
+ */
+const PROTECTED_CONFIG_CHILDREN = ["skills", "hooks", "commands", "agents", "rules", "workflows"];
+const protectedConfig = (dir: string): string[] => PROTECTED_CONFIG_CHILDREN.map((child) => join(projectConfigDir(dir), child));
 
 /** The told fact of the sandbox section. */
 const SANDBOX_FACT = "sandbox:section";
@@ -37,10 +55,22 @@ function sandboxExtension(pi: ExtensionAPI) {
 		mode = (data as PermissionStatus).mode;
 	});
 
+	// The session's latest context: a host prompt opens on it, mid-command.
+	let liveCtx: ExtensionContext | undefined;
+	const askUser = async (host: string, port: number | undefined): Promise<HostAnswer> => {
+		const ctx = liveCtx;
+		if (!ctx) return undefined;
+		const options = hostPromptOptions(host);
+		const choice = await bindGatePrompt(pi.events, ctx)(desktopNotificationText.permission(brand.name, "Bash"), ctx.signal, () => ctx.ui.select(hostPromptTitle(host, port), [options.once, options.session, options.no], { signal: ctx.signal }));
+		return choice === options.once ? "once" : choice === options.session ? "session" : choice === options.no ? "no" : undefined;
+	};
+	const hosts = createHostGate({ mode: () => mode, notListed: text.hostNotListed, prompt: askUser });
+	pi.on("agent_end", () => hosts.endRun());
+
 	registerLocalCommand(pi, "sandbox", {
 		description: "Show the command sandbox's state and rules",
 		handler: async (_args, ctx) => {
-			ctx.ui.notify(sandboxStatusLines({ settings: sandboxSettings(), platform: sandboxPlatform(), active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: ctx.cwd }).join("\n"), "info");
+			ctx.ui.notify(sandboxStatusLines({ settings: sandboxSettings(), platform: sandboxPlatform(), active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: ctx.cwd, sessionHosts: hosts.sessionHosts() }).join("\n"), "info");
 		},
 	});
 
@@ -63,6 +93,7 @@ function sandboxExtension(pi: ExtensionAPI) {
 	let warned = false;
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		cwd = ctx.cwd;
+		liveCtx = ctx;
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		const workspace = listWorkspaceDirectories(ctx.cwd, home).map((dir) => dir.path);
@@ -70,9 +101,9 @@ function sandboxExtension(pi: ExtensionAPI) {
 		starting = startSandbox({
 			cwd: ctx.cwd,
 			...(tempDir ? { tempDir } : {}),
-			scopeFor: (dir) => ({ cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace], protectedFiles: gateControlFiles(dir, home) }),
-			// A host the settings do not list. bypassPermissions judges nothing, as in Claude Code; elsewhere it is refused.
-			ask: async () => mode === "bypassPermissions",
+			scopeFor: (dir) => ({ cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }),
+			// A host the settings do not list (hosts.ts).
+			ask: hosts.ask,
 		}).then((failure) => {
 			if (!failure || warned) return;
 			warned = true;
@@ -88,6 +119,7 @@ function sandboxExtension(pi: ExtensionAPI) {
 
 	pi.on("turn_start", async (_event, ctx) => {
 		cwd = ctx.cwd;
+		liveCtx = ctx;
 		// The section names whether the sandbox started, so it waits for the answer.
 		await starting;
 		const live = section(ctx.cwd);

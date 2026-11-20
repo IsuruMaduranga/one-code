@@ -4,8 +4,8 @@
  * the files.
  *
  * A file the repository controls may only tighten the sandbox: it can turn
- * it on, add `denyRead`, `denyWrite` and `deniedDomains` entries, and forbid
- * unsandboxed commands. What widens access (turning the sandbox off, write
+ * it on, add `denyRead`, `denyWrite` and `deniedDomains` entries, forbid
+ * unsandboxed commands, and turn auto-allow off. What widens access (turning the sandbox off, write
  * and read allowances, network hosts, excluded commands, local binding, Unix
  * sockets) counts from the user's, the product's and managed files only, as
  * a repository's permission mode does (lib/rules/settings.ts).
@@ -19,6 +19,12 @@ export interface SandboxSettings {
 	allowUnsandboxedCommands: boolean;
 	/** Refuse shell commands when the sandbox is on and cannot start, in place of running them unsandboxed. */
 	failIfUnavailable: boolean;
+	/**
+	 * True: a Bash command that will run inside the sandbox needs no prompt in
+	 * the manual modes (Claude Code's auto-allow). Off by default, as in Claude
+	 * Code: the sandbox adds its limits and every prompt stays.
+	 */
+	autoAllowBashIfSandboxed: boolean;
 	/** Command patterns that run outside the sandbox (`docker compose *`). */
 	excludedCommands: string[];
 	filesystem: { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] };
@@ -29,6 +35,7 @@ export const SANDBOX_OFF: SandboxSettings = {
 	enabled: false,
 	allowUnsandboxedCommands: true,
 	failIfUnavailable: false,
+	autoAllowBashIfSandboxed: false,
 	excludedCommands: [],
 	filesystem: { allowWrite: [], denyWrite: [], denyRead: [], allowRead: [] },
 	network: { allowedDomains: [], deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] },
@@ -54,6 +61,7 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
 	// Tightening, from any file.
 	if (sandbox.enabled === true) next.enabled = true;
 	if (sandbox.allowUnsandboxedCommands === false) next.allowUnsandboxedCommands = false;
+	if (sandbox.autoAllowBashIfSandboxed === false) next.autoAllowBashIfSandboxed = false;
 	add(next.filesystem.denyWrite, strings(filesystem.denyWrite));
 	add(next.filesystem.denyRead, strings(filesystem.denyRead));
 	add(next.network.deniedDomains, strings(network.deniedDomains));
@@ -61,6 +69,7 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
 	// Widening, and the choices that are the user's alone.
 	if (sandbox.enabled === false) next.enabled = false;
 	if (sandbox.failIfUnavailable === true) next.failIfUnavailable = true;
+	if (sandbox.autoAllowBashIfSandboxed === true) next.autoAllowBashIfSandboxed = true;
 	add(next.excludedCommands, strings(sandbox.excludedCommands));
 	add(next.filesystem.allowWrite, strings(filesystem.allowWrite));
 	add(next.filesystem.allowRead, strings(filesystem.allowRead));
@@ -102,6 +111,21 @@ export function isExcludedCommand(command: string, patterns: readonly string[]):
 		if (prefix === undefined) return line === pattern;
 		return prefix !== "" && (line === prefix || line.startsWith(`${prefix} `));
 	});
+}
+
+/** The most hosts one command may name for itself, and the longest of them (Claude Code's limits). */
+export const COMMAND_HOSTS_MAX = 100;
+export const COMMAND_HOST_MAX_LENGTH = 260;
+
+/**
+ * The hosts a shell call names for itself (`allowed_domains`): the non-empty
+ * strings within the limits, without repeats. The tool's schema refuses a
+ * list past the limits; a call that reached here another way gets only the
+ * entries inside them.
+ */
+export function commandHosts(input: Record<string, unknown> | undefined): string[] {
+	const hosts = strings(input?.allowed_domains).map((host) => host.trim()).filter((host) => host !== "" && host.length <= COMMAND_HOST_MAX_LENGTH);
+	return [...new Set(hosts)].slice(0, COMMAND_HOSTS_MAX);
 }
 
 /** What the session gives the sandbox beyond the user's settings. */

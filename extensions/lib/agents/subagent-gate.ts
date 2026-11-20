@@ -38,6 +38,8 @@ export interface ChildToolCall {
 	 * screen and holds the prompt chain (SUBAGENT-REVIEW M5).
 	 */
 	signal?: AbortSignal;
+	/** The call's own id, set by the child's gate from the event (never from tool input): a grant for this one call is filed under it. */
+	toolCallId?: string;
 	/** The child session's id (what the gate can see); the runner maps it to `agent`. */
 	sessionId?: string;
 	/**

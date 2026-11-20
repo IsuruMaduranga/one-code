@@ -22,7 +22,7 @@ import { commandToEvaluate, trackOriginalCommands } from "../shell/original-comm
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
-import { sandboxedCommand, withSandboxViolations } from "./sandbox.ts";
+import { sandboxedCommand } from "./sandbox.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -51,8 +51,10 @@ export interface ShellToolParams {
 	timeout?: number;
 	description?: string;
 	run_in_background?: boolean;
-	/** Only in a session whose settings turn the shell sandbox on and let the model ask to leave it. */
+	/** Only in a session whose settings turn the shell sandbox on. */
 	dangerouslyDisableSandbox?: boolean;
+	/** Only there too: hosts this one command needs, honoured in auto mode after the classifier read them. */
+	allowed_domains?: string[];
 }
 
 /** The parts of pi's shell tool definition the shared body reads (structural, so the concrete generic types assign). */
@@ -195,6 +197,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				cwd: ctx.cwd,
 				bash: spec.sandboxBash?.(),
 				id: toolCallId,
+				detached: params.run_in_background === true,
 			});
 			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: {} };
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
@@ -209,14 +212,14 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
-				);
+				).finally(() => sandboxed.run?.finish());
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();
 				const shaped = withClaudeCodeShellText(result, spec.name, originalCommand);
 				// What the sandbox denied (a host its proxy refused) follows the output.
 				const first = shaped.content?.[0];
-				if (!sandboxed.sandbox || first?.type !== "text" || typeof first.text !== "string") return shaped;
-				return { ...shaped, content: [{ ...first, text: withSandboxViolations(first.text, sandboxed.sandbox, toolCallId) }, ...shaped.content.slice(1)] };
+				if (!sandboxed.run || first?.type !== "text" || typeof first.text !== "string") return shaped;
+				return { ...shaped, content: [{ ...first, text: sandboxed.run.withViolations(first.text) }, ...shaped.content.slice(1)] };
 			}
 
 			const shell = spec.backgroundShell();

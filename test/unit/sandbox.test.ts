@@ -8,15 +8,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
-import { type ActiveSandbox, sandboxedCommand, setSandboxForTest, unsandboxedRequest } from "../../extensions/lib/shell-run/sandbox.ts";
-import { isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { type ActiveSandbox, grantCommandHosts, requestedHosts, runsSandboxed, sandboxedCommand, setSandboxForTest, unsandboxedRequest } from "../../extensions/lib/shell-run/sandbox.ts";
+import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
+import { createHostGate, type HostAnswer } from "../../extensions/safety/sandbox/hosts.ts";
 import { sandboxSectionText, sandboxStatusLines } from "../../extensions/safety/sandbox/section.ts";
+import { renderTranscript, toolCallEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const ON: SandboxSettings = { ...SANDBOX_OFF, enabled: true };
+/** The user also turned auto-allow on. */
+const AUTO: SandboxSettings = { ...ON, autoAllowBashIfSandboxed: true };
 const text = {
 	disableParam: "disable",
+	allowedDomainsParam: "hosts",
+	hostNotListed: "not listed",
 	section: (p: object) => `section ${JSON.stringify(p)}`,
 	turnedOff: "off",
 	unavailable: (p: object) => `unavailable ${JSON.stringify(p)}`,
@@ -24,11 +30,18 @@ const text = {
 };
 
 /** A running sandbox that marks what it wraps and reports `violations` once per call. */
-function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox & { wrapped: Array<{ command: string; cwd: string; shell: string; id: string }> } {
+function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox & { wrapped: Array<{ command: string; cwd: string; shell: string; id: string }>; hosts: Map<string, string[]> } {
 	const wrapped: Array<{ command: string; cwd: string; shell: string; id: string }> = [];
+	const hosts = new Map<string, string[]>();
 	return {
 		settings,
 		wrapped,
+		hosts,
+		allowHosts: (id, list) => {
+			if (list.some((host) => host.includes(" "))) throw new Error(`invalid host "${list.find((host) => host.includes(" "))}"`);
+			hosts.set(id, [...list]);
+		},
+		release: (id) => void hosts.delete(id),
 		wrap: async (command, call) => {
 			wrapped.push({ command, ...call });
 			return `SANDBOX(${command})`;
@@ -65,6 +78,7 @@ describe("sandbox settings", () => {
 			enabled: true,
 			allowUnsandboxedCommands: false,
 			failIfUnavailable: true,
+			autoAllowBashIfSandboxed: false,
 			excludedCommands: ["docker *"],
 			filesystem: block.filesystem,
 			network: block.network,
@@ -76,6 +90,12 @@ describe("sandbox settings", () => {
 		expect(mergeSandboxBlock(ON, { enabled: false }, false).enabled).toBe(false);
 		const strict = mergeSandboxBlock(ON, { allowUnsandboxedCommands: false }, false);
 		expect(mergeSandboxBlock(strict, { allowUnsandboxedCommands: true }, false).allowUnsandboxedCommands).toBe(false);
+		// Auto-allow is off until the user turns it on; a repository can turn it off again and never on.
+		expect(ON.autoAllowBashIfSandboxed).toBe(false);
+		expect(mergeSandboxBlock(ON, { autoAllowBashIfSandboxed: true }, true).autoAllowBashIfSandboxed).toBe(false);
+		const auto = mergeSandboxBlock(ON, { autoAllowBashIfSandboxed: true }, false);
+		expect(auto.autoAllowBashIfSandboxed).toBe(true);
+		expect(mergeSandboxBlock(auto, { autoAllowBashIfSandboxed: false }, true).autoAllowBashIfSandboxed).toBe(false);
 	});
 
 	it("ignores a block of the wrong shape", () => {
@@ -116,8 +136,73 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 	it("wraps a command for its own directory and shell", async () => {
 		const sandbox = fakeSandbox(ON);
 		setSandboxForTest(ON, sandbox);
-		expect(await sandboxedCommand(request)).toEqual({ command: "SANDBOX(npm test)", sandbox });
-		expect(sandbox.wrapped).toEqual([{ command: "npm test", cwd: "/work", shell: "/bin/bash", id: "call-1" }]);
+		expect(await sandboxedCommand(request)).toMatchObject({ command: "SANDBOX(npm test)", run: {} });
+		expect(sandbox.wrapped).toMatchObject([{ command: "npm test", cwd: "/work", shell: "/bin/bash" }]);
+		// The id the command presents to the proxy is random, never the tool call's.
+		expect(sandbox.wrapped[0].id).toMatch(/^[\w-]{22}$/);
+		expect(sandbox.wrapped[0].id).not.toBe("call-1");
+	});
+
+	it("gives a call the hosts the gate granted it, for its one run", async () => {
+		const sandbox = fakeSandbox(ON);
+		setSandboxForTest(ON, sandbox);
+		grantCommandHosts("call-1", ["registry.npmjs.org"]);
+		const first = await sandboxedCommand(request);
+		const id = sandbox.wrapped[0].id;
+		expect(sandbox.hosts.get(id)).toEqual(["registry.npmjs.org"]);
+		if (!("run" in first) || !first.run) throw new Error("not sandboxed");
+		first.run.finish();
+		first.run.finish();
+		expect(sandbox.hosts.size).toBe(0);
+		// The grant was the one run's: the same call id again gets nothing.
+		await sandboxedCommand(request);
+		expect(sandbox.hosts.size).toBe(0);
+	});
+
+	it("gives a detached command no hosts of its own, and nothing without the gate's grant", async () => {
+		const sandbox = fakeSandbox(ON);
+		setSandboxForTest(ON, sandbox);
+		grantCommandHosts("call-1", ["registry.npmjs.org"]);
+		await sandboxedCommand({ ...request, detached: true });
+		await sandboxedCommand({ ...request, id: "call-2" });
+		expect(sandbox.hosts.size).toBe(0);
+	});
+
+	it("refuses a call whose granted host list the sandbox rejects, with the reason", async () => {
+		const sandbox = fakeSandbox(ON);
+		setSandboxForTest(ON, sandbox);
+		grantCommandHosts("call-1", ["not a host"]);
+		expect(await sandboxedCommand(request)).toEqual({ refused: { kind: "hosts", reason: 'invalid host "not a host"' } });
+		expect(sandbox.wrapped).toEqual([]);
+	});
+
+	it("reads a call's own hosts only where a sandbox will hold the call", () => {
+		expect(commandHosts({ allowed_domains: [" a.example ", "a.example", "", 3, "x".repeat(261)] })).toEqual(["a.example"]);
+		expect(commandHosts({ allowed_domains: Array.from({ length: 150 }, (_, i) => `h${i}.example`) })).toHaveLength(100);
+		setSandboxForTest(SANDBOX_OFF);
+		expect(requestedHosts({ allowed_domains: ["a.example"] })).toEqual([]);
+		setSandboxForTest(ON, fakeSandbox(ON));
+		expect(requestedHosts({ allowed_domains: ["a.example"] })).toEqual(["a.example"]);
+		expect(requestedHosts({ allowed_domains: ["a.example"], dangerouslyDisableSandbox: true })).toEqual([]);
+	});
+
+	it("says which calls will run sandboxed, for the gate's manual modes", () => {
+		setSandboxForTest(SANDBOX_OFF);
+		expect(runsSandboxed({}, "npm test")).toBe(false);
+		setSandboxForTest(AUTO, undefined, "no bwrap");
+		expect(runsSandboxed({}, "npm test")).toBe(false);
+		const settings = { ...AUTO, excludedCommands: ["docker *"] };
+		setSandboxForTest(settings, fakeSandbox(settings));
+		expect(runsSandboxed({}, "npm test")).toBe(true);
+		expect(runsSandboxed({ dangerouslyDisableSandbox: true }, "npm test")).toBe(false);
+		expect(runsSandboxed({}, "docker ps")).toBe(false);
+		// Off by default: the sandbox alone changes no prompt.
+		setSandboxForTest(ON, fakeSandbox(ON));
+		expect(runsSandboxed({}, "npm test")).toBe(false);
+		// Strict mode ignores the flag, so the call stays sandboxed.
+		const strict = { ...AUTO, allowUnsandboxedCommands: false };
+		setSandboxForTest(strict, fakeSandbox(strict));
+		expect(runsSandboxed({ dangerouslyDisableSandbox: true }, "npm test")).toBe(true);
 	});
 
 	it("lets the model leave the sandbox only where the settings allow it", async () => {
@@ -208,6 +293,91 @@ describe("the gate and a call that asks to leave the sandbox", () => {
 	});
 });
 
+describe("the gate and a command the sandbox will hold", () => {
+	const base = { toolName: "bash", cwd: "/work", deny: [], ask: [], allow: [], claudeCodeFastPaths: true, sandboxed: true };
+
+	it("runs without a prompt in default and acceptEdits modes only", () => {
+		expect(decide({ ...base, mode: "default", subject: "npm test", sandboxed: false }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "default", subject: "npm test" })).toMatchObject({ decision: "allow", cause: "sandboxed" });
+		expect(decide({ ...base, mode: "acceptEdits", subject: "npm test" })).toMatchObject({ decision: "allow", cause: "sandboxed" });
+		expect(decide({ ...base, toolName: "monitor", mode: "default", subject: "tail -f log" }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "auto", subject: "npm test" }).decision).toBe("classify");
+		expect(decide({ ...base, mode: "dontAsk", subject: "npm test" }).decision).toBe("deny");
+	});
+
+	it("keeps deny rules, ask rules and the prompt for a write it can see on a protected path", () => {
+		const rule = (raw: string) => ({ tool: "bash", pattern: raw, raw: `Bash(${raw})` });
+		expect(decide({ ...base, mode: "default", subject: "npm publish", deny: [rule("npm publish:*")] } as never).decision).toBe("deny");
+		expect(decide({ ...base, mode: "default", subject: "npm publish", ask: [rule("npm publish:*")] } as never).decision).toBe("ask");
+		expect(decide({ ...base, mode: "default", subject: "echo x > .git/hooks/pre-commit" }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "default", subject: "echo x > out.txt" })).toMatchObject({ decision: "allow" });
+	});
+});
+
+describe("the gate and a call that names hosts for itself", () => {
+	const base = { toolName: "bash", cwd: "/work", deny: [], ask: [], allow: [], claudeCodeFastPaths: true, mode: "auto" as const };
+
+	it("is classified in auto mode whatever fast path or allow rule would clear the command", () => {
+		const allow = [{ tool: "bash", pattern: "curl:*", raw: "Bash(curl:*)" }];
+		expect(decide({ ...base, subject: "ls" })).toMatchObject({ decision: "allow", cause: "read-only" });
+		expect(decide({ ...base, subject: "ls", commandHosts: true }).decision).toBe("classify");
+		expect(decide({ ...base, subject: "curl https://a.example", allow } as never)).toMatchObject({ decision: "allow", cause: "rule" });
+		expect(decide({ ...base, subject: "curl https://a.example", allow, commandHosts: true } as never).decision).toBe("classify");
+	});
+
+	it("shows the classifier the hosts with the command, and a plain command as before", () => {
+		const line = (input: object, asWritten?: string) => renderTranscript([toolCallEntry("bash", input, asWritten)]);
+		expect(line({ command: "ls", description: "list" })).toContain('{"Bash":"ls"}');
+		expect(line({ command: "curl https://a.example", allowed_domains: ["a.example"] })).toContain('{"Bash":{"command":"curl https://a.example","allowed_domains":["a.example"]}}');
+		expect(line({ command: "cd /wt && (curl x)", allowed_domains: ["a.example"] }, "curl x")).toContain('{"Bash":{"command":"curl x","allowed_domains":["a.example"]}}');
+		expect(line({ command: "ls", allowed_domains: [] })).toContain('{"Bash":"ls"}');
+		// The flag that asks to leave the sandbox is not part of the entry, as in Claude Code.
+		expect(line({ command: "ls", dangerouslyDisableSandbox: true })).toContain('{"Bash":"ls"}');
+	});
+});
+
+describe("a host the settings do not list", () => {
+	function gate(mode: string, answers: HostAnswer[] = []) {
+		const asked: string[] = [];
+		const hosts = createHostGate({
+			mode: () => mode,
+			notListed: "not listed",
+			prompt: async (host) => {
+				asked.push(host);
+				return answers.shift();
+			},
+		});
+		return { hosts, asked };
+	}
+
+	it("follows the permission mode without asking where no prompt belongs", async () => {
+		expect(await gate("bypassPermissions").hosts.ask({ host: "a.example" })).toBe(true);
+		expect(await gate("auto").hosts.ask({ host: "a.example" })).toEqual({ allow: false, reason: "not listed" });
+		expect(await gate("dontAsk").hosts.ask({ host: "a.example" })).toBe(false);
+	});
+
+	it("asks the user once per host and run, and keeps a session grant", async () => {
+		const { hosts, asked } = gate("default", ["once", "no", "session", "no"]);
+		expect(await Promise.all([hosts.ask({ host: "a.example" }), hosts.ask({ host: "A.example", port: 443 })])).toEqual([true, true]);
+		expect(await hosts.ask({ host: "b.example" })).toBe(false);
+		expect(await hosts.ask({ host: "b.example" })).toBe(false);
+		expect(await hosts.ask({ host: "c.example" })).toBe(true);
+		expect(asked).toEqual(["a.example", "b.example", "c.example"]);
+		hosts.endRun();
+		expect(await hosts.ask({ host: "c.example" })).toBe(true);
+		expect(await hosts.ask({ host: "a.example" })).toBe(false);
+		expect(asked).toEqual(["a.example", "b.example", "c.example", "a.example"]);
+		expect(hosts.sessionHosts()).toEqual(["c.example"]);
+	});
+
+	it("refuses when there is no one to ask, and asks again next time", async () => {
+		const { hosts, asked } = gate("default", [undefined, "once"]);
+		expect(await hosts.ask({ host: "a.example" })).toBe(false);
+		expect(await hosts.ask({ host: "a.example" })).toBe(true);
+		expect(asked).toEqual(["a.example", "a.example"]);
+	});
+});
+
 describe("the sandbox section and /sandbox", () => {
 	const facts = { settings: ON, platform: "darwin" as const, unavailable: undefined, cwd: "/work" };
 
@@ -217,7 +387,6 @@ describe("the sandbox section and /sandbox", () => {
 			`section ${JSON.stringify({
 				platform: "darwin",
 				filesystem: JSON.stringify({ read: { denyOnly: [], allowWithinDeny: [] }, write: { allowOnly: ["/work", "/tmp/session"], denyWithinAllow: ["/work/.claude/settings.json"] } }),
-				network: JSON.stringify({ allowedDomains: [], deniedDomains: [] }),
 				unsandboxedAllowed: true,
 			})}`,
 		);

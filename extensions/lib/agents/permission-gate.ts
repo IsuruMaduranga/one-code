@@ -45,7 +45,7 @@ import { claudeConfigDir, claudeJsonPath, productStateDir } from "../profile/pat
 import { gateControlFiles } from "../profile/settings-files.ts";
 import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
-import { unsandboxedRequest } from "../shell-run/sandbox.ts";
+import { runsSandboxed, unsandboxedRequest } from "../shell-run/sandbox.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, isShellTool, normalizeToolName, type PermissionMode, parseRules } from "../rules/matcher.ts";
 import { projectAllowApproved } from "../consent/project-trust.ts";
@@ -221,6 +221,7 @@ export function permissionGateFactory(
 						const input = (event.input ?? {}) as Record<string, unknown>;
 						return await bridge({
 							toolName: event.toolName,
+							toolCallId: event.toolCallId,
 							input,
 							cwd: runCwd,
 							signal: ctx?.signal,
@@ -274,6 +275,7 @@ export function permissionGateFactory(
 					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,
 					powershellParse,
 					unsandboxed: isShellTool(tool) && unsandboxedRequest(event.input as Record<string, unknown>),
+					sandboxed: tool === "bash" && runsSandboxed(event.input as Record<string, unknown>, subject),
 				});
 				if (result.decision === "allow") return undefined;
 				const outsideWorkingDir = result.cause === "working-dir";

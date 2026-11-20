@@ -49,22 +49,30 @@ export interface ShellParams {
 export interface ShellSandboxText {
 	/** The Bash tool's `dangerouslyDisableSandbox` parameter. */
 	disableParam: string;
+	/** The Bash tool's `allowed_domains` parameter: hosts for this one command, in auto mode. */
+	allowedDomainsParam: string;
 	/**
-	 * The first-message section. `filesystem` and `network` are the session's
-	 * rules as JSON; `unsandboxedAllowed` says the model may ask to leave the
-	 * sandbox (`sandbox.allowUnsandboxedCommands`).
+	 * Why a host was refused in auto mode, inside the command's
+	 * `<sandbox_violations>` block: the call did not name it.
 	 */
-	section(p: { platform: "darwin" | "linux"; filesystem: string; network: string; unsandboxedAllowed: boolean }): string;
+	hostNotListed: string;
+	/**
+	 * The first-message section. `filesystem` is the session's rules as JSON;
+	 * `unsandboxedAllowed` says the model may ask to leave the sandbox
+	 * (`sandbox.allowUnsandboxedCommands`).
+	 */
+	section(p: { platform: "darwin" | "linux"; filesystem: string; unsandboxedAllowed: boolean }): string;
 	/** The tail note when a session told of a sandbox no longer has one. */
 	turnedOff: string;
 	/** The section when the sandbox could not start; `required` says commands are refused without it. */
 	unavailable(p: { reason: string; required: boolean }): string;
 	/**
 	 * A shell call refused: the sandbox is required and is not running
-	 * (`unavailable`), or the call is a PowerShell command, which the sandbox
-	 * does not run (`powershell`).
+	 * (`unavailable`), the call is a PowerShell command, which the sandbox
+	 * does not run (`powershell`), or its own host list has an entry the
+	 * sandbox rejects (`hosts`).
 	 */
-	refused(p: { kind: "unavailable"; reason: string } | { kind: "powershell" }): string;
+	refused(p: { kind: "unavailable"; reason: string } | { kind: "powershell" } | { kind: "hosts"; reason: string }): string;
 }
 
 export interface ShellText {
