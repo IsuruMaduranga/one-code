@@ -55,6 +55,13 @@ export interface ChildToolCall {
 	 * (safety/permissions/auto-mode/history.ts childHistoryCursor).
 	 */
 	parentToolCallId?: string;
+	/**
+	 * Where the child's own session persists oversized tool outputs, resolved,
+	 * set by the child's gate from its session (never from tool input). It is
+	 * not the parent's when the child runs in another directory (a worktree) or
+	 * has no session file, and the child is told to read those files back.
+	 */
+	resultsDirPath?: string;
 }
 
 /** A permission decision: `undefined` = allow; otherwise block with a model-facing reason. */

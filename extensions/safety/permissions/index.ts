@@ -1743,7 +1743,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 			planFilePath,
 			memoryDirPath,
 			scratchpadDirPath,
-			resultsDirPath,
+			// The child's own persisted outputs are its working space; the parent's
+			// stay readable, since a prompt may hand the child a path into them.
+			resultsDirPath: call.resultsDirPath ?? resultsDirPath,
 			sessionDirPath,
 			protectedDirs: protectedFor(cwd),
 			secretPaths,
@@ -1751,7 +1753,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// The child's own model: a cheaper subagent gets the stricter gate.
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
 			blockReadsOutsideWorkingDirectories: blockOutsideReads,
-			readOnlyDirs: docsDirPaths,
+			readOnlyDirs: call.resultsDirPath && resultsDirPath ? [...docsDirPaths, resultsDirPath] : docsDirPaths,
 			powershellParse,
 		});
 
