@@ -3,7 +3,7 @@
  * reaches the progress line, the viewer's agent record and the run report,
  * for a finished agent and for a failed one alike.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { buildRunReport, WorkflowRunManager } from "../../extensions/agents/workflow/run-manager.ts";
 import { buildDetail } from "../../extensions/agents/workflow/viewer.ts";
 import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
+import { PERSIST_MAX_BYTES } from "../../extensions/lib/request/persisted-output.ts";
 
 vi.mock("../../extensions/agents/workflow/agent-session.ts", () => ({ AgentRunner: { create: vi.fn() } }));
 
@@ -71,5 +72,26 @@ describe("kept workflow worktrees", () => {
 		const detail = buildDetail(a, 80, Date.now(), false).map((line) => line.text);
 		expect(detail).toContain("Worktree kept");
 		expect(detail.some((text) => text.includes("/tmp/cc-wt-a/tree (branch cc-subagent/a)"))).toBe(true);
+	});
+	// Never truncated: a value too large to send whole is saved under the run's
+	// directory, inside the session's, and the report says where.
+	it("persists a script value too large for the report and names the file", async () => {
+		const handle = manager.start({
+			script: `${META}return 'r'.repeat(${PERSIST_MAX_BYTES} + 1)`,
+			args: undefined,
+			tokenBudget: null,
+			cwd: sessionDir,
+			sessionDir,
+			defaultModel: undefined,
+		});
+		await handle.finished;
+		expect(handle.status).toBe("completed");
+
+		const file = join(handle.runDir, "tool-results", "result.txt");
+		const report = buildRunReport(handle);
+		expect(report).toContain(file);
+		expect(report.length).toBeLessThan(PERSIST_MAX_BYTES / 2);
+		expect(readFileSync(file, "utf8")).toBe("r".repeat(PERSIST_MAX_BYTES + 1));
+		expect(handle.runDir.startsWith(sessionDir)).toBe(true);
 	});
 });
