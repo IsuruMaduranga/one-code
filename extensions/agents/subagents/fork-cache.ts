@@ -36,7 +36,9 @@
  *   with what to do instead (`forkToolUnavailable`), so the model's call is not
  *   "tool not found". Only a tool the capture declares gets one (its wire name
  *   mapped to the parent's registry name, `registryNameOnWire`), so the splice
- *   below never adds one: it appends only tools the parent did not declare.
+ *   below never adds one: it appends only tools the parent did not declare. A
+ *   resume hands over the parent's tools at spawn for any the parent has since
+ *   lost (`withSavedParentTools`), so its stub still answers.
  *
  * This holds while a tool's rendering depends on its name and parameters
  * alone; of One Code's tools only pi's read, edit, write and bash set
@@ -73,6 +75,21 @@ export function withParentParameters(tools: readonly ToolDefinition[], parentToo
 		const parent = byName.get(tool.name);
 		return parent ? { ...tool, parameters: parent.parameters as ToolDefinition["parameters"] } : tool;
 	});
+}
+
+/**
+ * A resumed fork's parent tools: the parent's current ones, plus each tool
+ * `saved` (the parent's tools when the fork was spawned, read back from disk)
+ * names that the parent no longer registers, so the fork still stubs a tool
+ * its saved capture declares after a tool flag or profile removed it. The
+ * current parameters win where both have a tool. `saved` is untrusted file
+ * content: anything but an array of named tools is ignored.
+ */
+export function withSavedParentTools(current: readonly ParentTool[], saved: unknown): readonly ParentTool[] {
+	if (!Array.isArray(saved)) return current;
+	const names = new Set(current.map((tool) => tool.name));
+	const missing = saved.filter((tool): tool is ParentTool => typeof (tool as Partial<ParentTool> | null)?.name === "string" && !names.has((tool as ParentTool).name));
+	return missing.length ? [...current, ...missing.map((tool) => ({ name: tool.name, parameters: tool.parameters }))] : current;
 }
 
 type ModelRef = { api?: string; provider?: string; id?: string };

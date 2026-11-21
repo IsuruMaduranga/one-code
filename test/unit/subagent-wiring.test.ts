@@ -13,6 +13,7 @@ import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { captureRequest, LAST_REQUEST_CHANNEL } from "../../extensions/lib/side-calls/request-replay.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
@@ -325,6 +326,25 @@ describe("the main-session call that started a run's turn", () => {
 	});
 });
 
+// A finished agent that SendMessage resumes in a session that outlives the
+// turn runs as a background task, so its child gets the stall watch a
+// resident has (runner.ts childLoaderOptions).
+describe("a resumed agent's background turn", () => {
+	it("runs as a background run in a TUI session", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: new Promise(() => {}), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		runtime.finish([], "FIRST REPORT");
+		await runtime.handle.kill();
+		writeFileSync(join(spawned.details.agentRuns[0].sessionSearchDir, "child.jsonl"), "");
+		const reply = (await h.call("SendMessage", { to: "worker", message: "Add a total row" })) as { details: { taskId?: string } };
+		expect(runtime.runner.run).toHaveBeenCalledOnce();
+		expect(h.tasks.get(reply.details.taskId!)?.status).toBe("running");
+		expect(runtime.runner.run.mock.calls[0][0].background).toBe(true);
+	});
+});
+
 describe("subagent task_stop", () => {
 	it.each([false, true])("keeps a stopped turn distinct from a resumed run during review (repeat stop=%s)", async (repeatStop) => {
 		const runtime = fakeResident(true, [{ toolName: "read", input: { path: "file.ts" } }]);
@@ -617,6 +637,33 @@ describe("fork runs in a one-shot session", () => {
 		expect(sent.content[0].text).not.toContain("was not persisted");
 		expect(run).toHaveBeenCalledTimes(2);
 		expect(run.mock.calls[1][0].parentSystemPrompt).toBe(run.mock.calls[0][0].parentSystemPrompt);
+		// The resumed turn blocks this call, so it runs without the background stall watch.
+		expect((run.mock.calls[1][0] as { background?: boolean }).background).toBe(false);
+	});
+
+	// A fork resumed after the parent lost a tool its saved request declares
+	// (another --tools flag, another profile) still gets that tool's stub,
+	// with the schema the parent had when the fork was spawned (fork-cache.ts).
+	it("hands a resumed fork the parent tools it was spawned with that the parent has since lost", async () => {
+		const parent = join(dir, "parent.jsonl");
+		writeFileSync(parent, "");
+		const run = vi.fn((_options: { parentTools?: ReadonlyArray<{ name: string; parameters: unknown }> }) => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({ run } as unknown as SubagentRuntime);
+		const sessionModel = { ...session, api: "openai-completions" };
+		const h = await mount([], sessionModel, "print", parent);
+		const schema = { type: "object", properties: { question: { type: "string" } } };
+		(h.fake.pi as { registerTool(tool: unknown): void }).registerTool({ name: "ask_user_question", label: "ask", description: "ask", parameters: schema, execute: async () => ({ content: [], details: undefined }) } as never);
+		h.fake.events.emit(LAST_REQUEST_CHANNEL, captureRequest(sessionModel, { messages: [], tools: [{ type: "function", function: { name: "ask_user_question" } }] }, { role: "user", timestamp: 1 }));
+		const spawned = (await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" })) as Result;
+		const record = spawned.details!.agentRuns![0];
+		expect(run.mock.calls[0][0].parentTools?.find((tool) => tool.name === "ask_user_question")?.parameters).toBe(schema);
+		writeFileSync(join(record.sessionSearchDir, "child.jsonl"), "");
+		h.fake.tools.delete("ask_user_question");
+		await h.call("SendMessage", { to: "historian", message: "Which commit added median?" });
+		expect(run).toHaveBeenCalledTimes(2);
+		const resumed = run.mock.calls[1][0].parentTools ?? [];
+		expect(resumed.find((tool) => tool.name === "ask_user_question")?.parameters).toEqual(schema);
+		expect(resumed.filter((tool) => tool.name === "SendMessage")).toHaveLength(1);
 	});
 
 	// DeepSeek V3.2 (battery round 8): a fork rejected for its model override
@@ -944,6 +991,37 @@ describe("task_output beside a background agent's hand-back", () => {
 		expect(result.content[0].text).toContain("FIRST REPORT");
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		expect(sent(h)).not.toContain("FIRST REPORT");
+	});
+});
+
+// A resident busy on a turn no task covers counts as session work; a turn a
+// SendMessage started has its own task, which the background registry reports,
+// so the resident must not be counted a second time.
+describe("a resident's later turn in the session work", () => {
+	const residentWork = (h: Awaited<ReturnType<typeof mount>>) => {
+		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		h.fake.events.emit(SESSION_WORK_CHANNEL, query);
+		return query.tasks;
+	};
+
+	it("counts a turn with no task, and leaves a SendMessage turn to its own task", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		const taskId = spawned.details.agentRuns[0].taskId;
+		runtime.finish([], "FIRST REPORT");
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		expect(residentWork(h)).toEqual([]);
+		const reply = (await h.call("SendMessage", { to: "worker", message: "Add a total row" })) as { details: { taskId: string } };
+		expect(h.tasks.get(reply.details.taskId)?.status).toBe("running");
+		// One agent at work: the turn's own task (the harness's registry reports it), not the resident besides.
+		expect(residentWork(h).map((task) => task.id)).toEqual([reply.details.taskId]);
+		runtime.finish([], "SECOND REPORT");
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		expect(h.tasks.get(reply.details.taskId)?.status).toBe("completed");
+		// A turn that starts with no SendMessage (a cron fire) has no task: the resident is counted itself.
+		await runtime.handle.send();
+		expect(residentWork(h).map((task) => [task.id, task.status])).toEqual([[taskId, "running"]]);
 	});
 });
 

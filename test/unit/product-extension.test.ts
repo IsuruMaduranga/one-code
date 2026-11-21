@@ -249,17 +249,19 @@ describe("the product extensions a profile runs", () => {
 
 	it("are every folder when the profile lists none, and only the listed ones when it does", () => {
 		const dir = productWith("lookup", "deploy");
-		// A linked folder is one pi's glob loads, so it is one the wrapper knows.
+		// A linked folder is none: pi's glob (Node's fs.globSync) does not follow a link, so the session never loads it.
 		const linked = mkdtempSync(join(tmpdir(), "product-extension-linked-"));
 		made.push(linked);
 		writeFileSync(join(linked, "index.ts"), "");
 		symlinkSync(linked, join(dir, PRODUCT_EXTENSIONS_DIR, "linked"), "junction");
 		useProfile({}, dir);
-		expect([...activeProfile().productExtensions]).toEqual([["deploy", true], ["linked", true], ["lookup", true]]);
+		expect([...activeProfile().productExtensions]).toEqual([["deploy", true], ["lookup", true]]);
 		useProfile({ extensions: ["lookup"] }, dir);
-		expect([...activeProfile().productExtensions]).toEqual([["deploy", false], ["linked", false], ["lookup", true]]);
+		expect([...activeProfile().productExtensions]).toEqual([["deploy", false], ["lookup", true]]);
 		useProfile({ extensions: [] }, dir);
-		expect([...activeProfile().productExtensions.values()]).toEqual([false, false, false]);
+		expect([...activeProfile().productExtensions.values()]).toEqual([false, false]);
+		// Listing it is refused rather than turning on an extension that never runs.
+		expect(() => useProfile({ extensions: ["linked"] }, dir)).toThrow(/"linked", which has no folder extensions\/linked\/ with an index.ts \(a linked folder is none/);
 	});
 
 	it("refuse a listed name with no folder, and a child extension in a folder the list leaves out", () => {

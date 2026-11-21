@@ -248,16 +248,20 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 }
 
 /**
- * The product's extension folders the manifest's glob loads: every folder,
- * a linked one included, with an `index.ts`. Read on each resolve, not once
- * per process: /reload globs the entries again, and a folder added since must
- * not stop the wrapper (a few file checks per extension copy at startup).
+ * The product's extension folders the manifest's glob loads: every real
+ * folder with an `index.ts`. A linked folder is none: pi expands the entry
+ * with Node's `fs.globSync`, whose `*` does not follow a symbolic link, so a
+ * profile listing one would run an extension the session never loads. Read
+ * on each resolve, not once per process: /reload globs the entries again, and
+ * a folder added since must not stop the wrapper (a few file checks per
+ * extension copy at startup).
  */
 export function productExtensionFolders(productDir: string): string[] {
 	const root = resolve(productDir, PRODUCT_EXTENSIONS_DIR);
 	if (!existsSync(root)) return [];
-	return readdirSync(root)
-		.filter((name) => isProductExtensionFolder(name) && existsSync(join(root, name, "index.ts")))
+	return readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && isProductExtensionFolder(entry.name) && existsSync(join(root, entry.name, "index.ts")))
+		.map((entry) => entry.name)
 		.sort();
 }
 
@@ -271,7 +275,7 @@ function productExtensionChoice(listed: unknown, folders: readonly string[]): { 
 		return { choice: new Map(folders.map((name) => [name, false])), problems: [`its "extensions" must be an array of folder names under ${PRODUCT_EXTENSIONS_DIR}/`] };
 	}
 	const names = listed as readonly string[] | undefined;
-	const problems = (names ?? []).filter((name) => !folders.includes(name)).map((name) => `it lists the extension "${name}", which has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts`);
+	const problems = (names ?? []).filter((name) => !folders.includes(name)).map((name) => `it lists the extension "${name}", which has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts (a linked folder is none: pi's glob does not follow links)`);
 	return { choice: new Map(folders.map((name) => [name, names === undefined || names.includes(name)])), problems };
 }
 

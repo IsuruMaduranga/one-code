@@ -124,6 +124,12 @@ interface ChildSessionSpec {
 export interface SubagentRunOptions extends ChildSessionSpec {
 	task: string;
 	signal?: AbortSignal;
+	/**
+	 * The caller runs this turn as a background task (a SendMessage resume in a
+	 * session that outlives the turn): its child gets the stall watch, as a
+	 * resident does, so a silent agent fails instead of waiting out the wall-clock cap.
+	 */
+	background?: boolean;
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
 	/** Optional live sink for the subagent panel (activity + transcript blocks). */
 	sink?: LiveSink;
@@ -611,7 +617,7 @@ export class SubagentRuntime {
 				// corrupt session file, loader error) must resolve to a failed
 				// outcome, never reject handle.result — call sites like the
 				// SendMessage resume path consume it with a bare .then().
-				const built = await this.buildChildSession(options, tracker);
+				const built = await this.buildChildSession(options, tracker, options.background === true);
 				session = built.session;
 				spawnNote = built.note;
 				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);

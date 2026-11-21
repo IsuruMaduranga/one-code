@@ -6,7 +6,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import data from "../../profile/brand.json" with { type: "json" };
 import { productBrand, resolveBrand, selectedProfileName, withoutProfileFlags } from "../../extensions/lib/profile/brand.mjs";
@@ -169,9 +168,9 @@ describe("a product profile's brand", () => {
 	const other = (productBrand.profiles ?? []).find((id) => id !== productBrand.defaultProfile);
 	it.skipIf(other === undefined)("is in force in a process launched with the profile's flag", () => {
 		const id = other!;
-		const module = fileURLToPath(new URL("../../extensions/lib/profile/brand.mjs", import.meta.url));
-		const launch = fileURLToPath(new URL("../../extensions/lib/app/app-launch.mjs", import.meta.url)).replaceAll("\\", "/");
-		const script = `const m = await import(${JSON.stringify(`file://${module.replaceAll("\\", "/")}`)}); const l = await import(${JSON.stringify(`file://${launch}`)}); const env = {}; const agent = l.applyLauncherEnv(env, { home: "/h", appVersion: "1", installMethod: "npm" }); console.log(JSON.stringify([m.brand.stateDir, m.productBrand.stateDir, m.profileDirName, m.profileSelection, agent, env[l.SESSION_DIR_VAR], m.sharedStateDir({}, "/h"), m.sharedStateDir({ [m.productBrand.envPrefix + "_STATE_DIR"]: "/run" }, "/h")]));`;
+		const module = new URL("../../extensions/lib/profile/brand.mjs", import.meta.url).href;
+		const launch = new URL("../../extensions/lib/app/app-launch.mjs", import.meta.url).href;
+		const script = `const m = await import(${JSON.stringify(module)}); const l = await import(${JSON.stringify(launch)}); const env = {}; const agent = l.applyLauncherEnv(env, { home: "/h", appVersion: "1", installMethod: "npm" }); console.log(JSON.stringify([m.brand.stateDir, m.productBrand.stateDir, m.profileDirName, m.profileSelection, agent, env[l.SESSION_DIR_VAR], m.sharedStateDir({}, "/h"), m.sharedStateDir({ [m.productBrand.envPrefix + "_STATE_DIR"]: "/run" }, "/h")]));`;
 		const env: NodeJS.ProcessEnv = { ...process.env, [`${productBrand.envPrefix}_PROFILE`]: id.toLowerCase() };
 		// The test run's own state folder override would name both folders alike.
 		delete env[`${productBrand.envPrefix}_STATE_DIR`];
@@ -191,8 +190,8 @@ describe("a product profile's brand", () => {
 	});
 
 	it("is the default profile in a process launched with no choice", () => {
-		const module = fileURLToPath(new URL("../../extensions/lib/profile/brand.mjs", import.meta.url)).replaceAll("\\", "/");
-		const script = `const m = await import(${JSON.stringify(`file://${module}`)}); console.log(JSON.stringify([m.profileDirName, m.profileSelection, m.brand.stateDir === m.productBrand.stateDir]));`;
+		const module = new URL("../../extensions/lib/profile/brand.mjs", import.meta.url).href;
+		const script = `const m = await import(${JSON.stringify(module)}); console.log(JSON.stringify([m.profileDirName, m.profileSelection, m.brand.stateDir === m.productBrand.stateDir]));`;
 		const env: NodeJS.ProcessEnv = { ...process.env };
 		delete env[`${productBrand.envPrefix}_PROFILE`];
 		const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" });
