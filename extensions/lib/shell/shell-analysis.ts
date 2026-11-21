@@ -236,12 +236,12 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	builtin: { contained: true },
 	// Runs its argument as the command of that name (`busybox rm x`).
 	busybox: { contained: false, denyFormsOnly: true },
-	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
+	caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], contained: true, denyFormsOnly: true },
 	command: { flags: ["-p", "-v", "-V"], contained: true },
-	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
+	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], flags: ["-n", "-s", "-L"], contained: false, denyFormsOnly: true },
 	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
 	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"], contained: true },
-	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], fileFirst: true, contained: false },
+	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], fileFirst: true, contained: false },
 	ionice: { values: ["-c", "--class", "-n", "--classdata"], flags: ["-t", "--ignore"], contained: true },
 	nice: { values: ["-n", "--adjustment"], contained: true },
 	nohup: { contained: true },
@@ -257,15 +257,17 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	sudo: {
 		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
 		unsafeValues: ["-C", "-D", "-R", "--close-from", "--chdir", "--chroot"],
+		flags: ["-n", "-E", "-H", "-i", "-s", "-k", "-K", "-S", "-b", "-A", "-P", "-B", "--non-interactive", "--preserve-env", "--set-home", "--login", "--shell", "--stdin", "--background", "--askpass", "--reset-timestamp", "--preserve-groups", "--bell"],
 		contained: false,
 		denyFormsOnly: true,
 	},
 	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], flags: ["-p", "-l", "-v", "--portability", "--verbose"], contained: true },
 	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
-	watch: { values: ["-n", "--interval", "-q", "--equexit"], contained: false, denyFormsOnly: true },
+	watch: { values: ["-n", "--interval", "-q", "--equexit"], flags: ["-d", "-t", "-b", "-e", "-g", "-c", "-x", "-p", "-w", "--differences", "--no-title", "--beep", "--errexit", "--chgexit", "--color", "--exec", "--precise", "--no-wrap"], contained: false, denyFormsOnly: true },
 	xargs: {
 		values: ["-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
 		unsafeValues: ["-a", "--arg-file"],
+		flags: ["-0", "-r", "-t", "-p", "-x", "-o", "--null", "--no-run-if-empty", "--verbose", "--interactive", "--exit", "--open-tty"],
 		contained: false,
 	},
 };
@@ -566,7 +568,7 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			skipOptions(spec);
 		}
 		// Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`.
-		if (spec.durationFirst && index < tokens.length && /^\+?(0x[0-9a-f.]+|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
+		if (spec.durationFirst && index < tokens.length && /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
 	}
 }
 
@@ -598,7 +600,8 @@ const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init
  * git status`), when they are a command line too. The one reader of `-c` for
  * the deny forms and the worktree guard.
  */
-export function inlineShellScripts(args: readonly string[]): string[] | undefined {
+export function inlineShellScripts(args: readonly string[], reading: "strict" | "wide" = "strict"): string[] | undefined {
+	const cluster = (value: string) => /^-[A-Za-z]+$/.test(value) && value.includes("c");
 	let command = false;
 	let i = 0;
 	for (; i < args.length; i++) {
@@ -608,10 +611,17 @@ export function inlineShellScripts(args: readonly string[]): string[] | undefine
 			break;
 		}
 		if (!/^[-+]/.test(value)) break;
-		if (SHELL_VALUE_OPTIONS.has(value)) i++;
-		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
+		if (cluster(value)) command = true;
+		// `-o`/`-O` take the next word, last in a cluster too: `-euo pipefail`.
+		if (SHELL_VALUE_OPTIONS.has(value) || /^[-+][A-Za-z]*[oO]$/.test(value)) i++;
 	}
-	if (!command) return undefined;
+	if (!command) {
+		// The wide reading (deny forms, which may only widen) also takes a `-c`
+		// past the first operand, which bash hands to the script it names.
+		const late = reading === "wide" ? args.findIndex(cluster) : -1;
+		if (late < 0) return undefined;
+		i = late + 1;
+	}
 	const [script, ...positional] = args.slice(i);
 	if (script === undefined) return [];
 	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.

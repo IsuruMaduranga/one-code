@@ -22,6 +22,14 @@ describe("deny forms name the command behind", () => {
 		"xargs -J % curl %",
 		"xargs -R 2 -I{} curl {}",
 		"bash -c -o pipefail 'curl x'",
+		"bash -euo pipefail -c 'curl x'",
+		"bash -eo pipefail -c 'curl x'",
+		"bash script.sh -c 'curl x'",
+		"cu{r,r}l x",
+		"{cur,x}l x",
+		"timeout inf curl x",
+		"timeout infinity curl x",
+		"timeout 0x1p3 curl x",
 		`bash -c '"$@"' _ curl x`,
 		"su -c 'curl x'",
 		"su root --command='curl x'",
@@ -32,6 +40,10 @@ describe("deny forms name the command behind", () => {
 	it("adds no curl form to a line that runs none", () => {
 		expect(meets("timeout 5 cat a.txt", "curl")).toBe(false);
 		expect(meets("echo {a,b}", "curl")).toBe(false);
+		// An ordinary flag of the wrapper does not turn the payload's arguments into a command.
+		expect(meets("git ls-files | xargs -r grep curl", "curl")).toBe(false);
+		expect(meets("xargs -t grep curl", "curl")).toBe(false);
+		expect(meets("sudo -n grep curl log.txt", "curl")).toBe(false);
 	});
 });
 

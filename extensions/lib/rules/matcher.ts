@@ -289,7 +289,7 @@ function firstCommaBraceGroup(line: string): { index: number; 0: string; 1: stri
 
 /**
  * `line` with its comma brace groups expanded as bash does before it picks
- * the command word (`{curl,x}` runs `curl x`), at most 32 spellings. Textual
+ * the command word (`{curl,x}` runs `curl x`, `cu{r,r}l` runs `curl`), at most 32 spellings. Textual
  * and blind to quotes on purpose: a deny form may only widen.
  */
 function braceExpansions(line: string): string[] {
@@ -306,8 +306,11 @@ function braceExpansions(line: string): string[] {
 			expanded = true;
 			const before = each.slice(0, group.index);
 			const after = each.slice(group.index + group[0].length);
-			// bash writes one word per part: `{curl,x}` is `curl x`.
-			next.push(`${before}${group[1].split(",").join(" ")}${after}`);
+			// bash writes one word per part, each with the text around the group:
+			// `{curl,x}` is `curl x`, and `cu{r,r}l` is `curl curl`. The parts side
+			// by side, and the line with each part alone, cover both.
+			const parts = group[1].split(",");
+			next.push(`${before}${parts.join(" ")}${after}`, ...parts.map((part) => `${before}${part}${after}`));
 		}
 		lines = next.slice(0, 32);
 		if (!expanded) break;
@@ -387,7 +390,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 			if (script) nested.push(script);
 		}
 		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
-			nested.push(...(inlineShellScripts(args) ?? []).filter(Boolean));
+			nested.push(...(inlineShellScripts(args, "wide") ?? []).filter(Boolean));
 		}
 		// `eval` runs its arguments joined into one command line.
 		if (payload.command === "eval") nested.push(args.join(" "));
