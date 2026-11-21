@@ -36,13 +36,12 @@ const LFS_FILTERS = new Set(["git-lfs clean -- %f", "git-lfs smudge -- %f", "git
 /** Keys whose value git runs during a read, by section (subsections included). */
 const PROGRAM_KEYS: Record<string, (key: string, value: string | undefined) => boolean> = {
 	// `core.fsmonitor=true` is git's own daemon; any other value is a hook command.
-	core: (key, value) => (key === "fsmonitor" && !BOOLEAN.test(value ?? "")) || key === "pager" || key === "sshcommand",
+	core: (key, value) => (key === "fsmonitor" && !BOOLEAN.test(value ?? "")) || key === "pager",
 	diff: (key) => key === "external" || key === "command" || key === "textconv",
-	// A promisor remote's `uploadpack` runs when a read meets a missing object,
-	// and such a read reaches the network besides. (A merge driver runs only
-	// under `--remerge-diff`, which the read-only tables do not list.)
-	remote: (key) => key === "uploadpack" || key === "promisor" || key === "partialclonefilter" || key === "vcs",
-	extensions: (key) => key === "partialclone",
+	// A remote's `uploadpack` runs when a read of a partial clone meets a missing
+	// object. (A merge driver runs only under `--remerge-diff`, which the
+	// read-only tables do not list.)
+	remote: (key) => key === "uploadpack" || key === "vcs",
 	filter: (key, value) => (key === "clean" || key === "smudge" || key === "process") && !LFS_FILTERS.has(value ?? ""),
 	pager: (_key, value) => !BOOLEAN.test(value ?? ""),
 	gpg: (key) => key === "program",
@@ -72,16 +71,23 @@ function configEntries(text: string): { section: string; key: string; value: str
 
 /**
  * What one git config file's text names: the first program-valued key, as
- * `section.key`, and every `core.hooksPath`. A hooks path is not a program by
- * itself (husky sets one); the caller looks there for the hook a read runs.
+ * `section.key`, every `core.hooksPath`, and the key that makes the checkout
+ * a partial clone. A hooks path is not a program by itself (husky sets one);
+ * the caller looks there for the hook a read runs.
  */
-export function configRunsProgram(text: string): { program?: string; hooksPaths: string[] } {
+export function configRunsProgram(text: string): { program?: string; hooksPaths: string[]; promisor?: string } {
 	const hooksPaths: string[] = [];
+	let promisor: string | undefined;
+	let ssh = false;
 	for (const { section, key, value } of configEntries(text)) {
 		if (section === "core" && key === "hookspath" && value) hooksPaths.push(value);
 		else if (PROGRAM_KEYS[section]?.(key, value)) return { program: `${section}.${key}`, hooksPaths };
+		else if ((section === "remote" && (key === "promisor" || key === "partialclonefilter")) || (section === "extensions" && key === "partialclone")) promisor ??= `${section}.${key}`;
+		else if (section === "core" && key === "sshcommand") ssh = true;
 	}
-	return { hooksPaths };
+	// A partial clone: a read of a missing object fetches it, through
+	// `core.sshCommand` when one is set. Nothing else reads that key on a read.
+	return promisor ? { hooksPaths, promisor: ssh ? "core.sshcommand" : promisor } : { hooksPaths };
 }
 
 /** The checkout holding `dir`: its worktree root, git dir and common dir, or undefined outside one. */
@@ -161,6 +167,8 @@ export type CheckoutProgram =
 	| { kind: "submoduleConfig"; key?: string }
 	/** `dir` has a repository's own layout (`HEAD`, `objects`, `refs`), so git reads the config beside them. */
 	| { kind: "bareRepository"; dir: string }
+	/** The checkout is a partial clone (`key`): a read of a missing object fetches from its remote. */
+	| { kind: "promisorRemote"; key: string }
 	/** The checkout has this hook, which git runs. */
 	| { kind: "hook"; hook: string };
 
@@ -189,10 +197,12 @@ export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonl
 	// `status` rewrites the index, which runs `post-index-change`; it recurses
 	// into submodules, each with its own hooks directory.
 	const hooksDirs = [join(commonDir, "hooks"), ...modules.map((module) => join(module, "hooks"))];
+	let promisor: string | undefined;
 	for (const file of new Set([join(commonDir, "config"), join(commonDir, "config.worktree"), join(gitDir, "config.worktree")])) {
 		const found = readConfig(file);
 		if (!found) return { kind: "configUnreadable" };
 		if (found.program) return { kind: "configSetsProgram", key: found.program };
+		promisor ??= found.promisor;
 		for (const path of found.hooksPaths) hooksDirs.push(resolve(root, expandTilde(path, home)));
 	}
 	for (const module of modules) {
@@ -201,13 +211,24 @@ export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonl
 		if (!found || found.program || found.hooksPaths.length > 0) {
 			return found ? { kind: "submoduleConfig", key: found.program ?? "core.hookspath" } : { kind: "submoduleConfig" };
 		}
+		promisor ??= found.promisor;
 	}
 	const hook = hooks.find((name) => hooksDirs.some((dir) => existsSync(join(dir, name))));
-	return hook ? { kind: "hook", hook } : undefined;
+	if (hook) return { kind: "hook", hook };
+	return promisor ? { kind: "promisorRemote", key: promisor } : undefined;
+}
+
+/**
+ * `checkoutGitRunsProgram` for a caller that runs git itself and only needs
+ * to know whether the checkout names a program: a partial clone names none.
+ */
+export function checkoutRunsOwnProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): CheckoutProgram | undefined {
+	const program = checkoutGitRunsProgram(dir, home, hooks);
+	return program?.kind === "promisorRemote" ? undefined : program;
 }
 
 /** What a config file names; empty when it does not exist, undefined when it cannot be read. */
-function readConfig(file: string): { program?: string; hooksPaths: string[] } | undefined {
+function readConfig(file: string): ReturnType<typeof configRunsProgram> | undefined {
 	try {
 		return configRunsProgram(readFileSync(file, "utf-8"));
 	} catch (error) {

@@ -23,7 +23,7 @@ import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
-import { checkoutGitRunsProgram } from "../../lib/shell/git-checkout-programs.ts";
+import { checkoutRunsOwnProgram } from "../../lib/shell/git-checkout-programs.ts";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { absoluteFrom, comparablePath, tryRealpath } from "../../lib/profile/paths.ts";
@@ -271,7 +271,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 
 			// Hooks are disabled by the git wrapper; checkout filters must go through
 			// the normal shell permission gate rather than execute implicitly here.
-			const program = checkoutGitRunsProgram(repoRoot, homedir(), []);
+			const program = checkoutRunsOwnProgram(repoRoot, homedir(), []);
 			if (program) return fail({ kind: "checkoutRunsProgram", program });
 
 			// `.onecode/worktrees` in independent mode (lib/profile/sources.ts).

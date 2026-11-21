@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkoutGitRunsProgram, configRunsProgram } from "../../extensions/lib/shell/git-checkout-programs.ts";
+import { checkoutGitRunsProgram, checkoutRunsOwnProgram, configRunsProgram } from "../../extensions/lib/shell/git-checkout-programs.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 
 let cwd: string;
@@ -38,13 +38,31 @@ describe("a repository layout in a subdirectory", () => {
 });
 
 describe("config keys a read runs", () => {
+	it("counts a remote's uploadpack as a program", () => {
+		expect(configRunsProgram('[remote "origin"]\n\tuploadpack = ./tool.sh\n').program).toBe("remote.uploadpack");
+	});
+
+	// A partial clone runs nothing the checkout names, but a read of a missing object
+	// reaches the network: its own kind, which a read escalates on and a worktree does not refuse.
 	it.each([
-		['[remote "origin"]\n\tuploadpack = ./tool.sh\n', "remote.uploadpack"],
 		['[remote "origin"]\n\tpromisor = true\n', "remote.promisor"],
 		["[extensions]\n\tpartialClone = origin\n", "extensions.partialclone"],
-		["[core]\n\tsshCommand = ./tool.sh\n", "core.sshcommand"],
-	])("%s", (text, key) => {
-		expect(configRunsProgram(text).program).toBe(key);
+		['[core]\n\tsshCommand = ./tool.sh\n[remote "origin"]\n\tpromisor = true\n', "core.sshcommand"],
+	])("reports a promisor remote apart from a program: %s", (text, key) => {
+		expect(configRunsProgram(text)).toEqual({ hooksPaths: [], promisor: key });
+	});
+
+	it("ignores core.sshCommand without a promisor remote", () => {
+		expect(configRunsProgram("[core]\n\tsshCommand = ssh -i key\n")).toEqual({ hooksPaths: [] });
+	});
+
+	it("escalates a read in a partial clone and names no program for a worktree", () => {
+		execFileSync("git", ["config", "remote.origin.promisor", "true"], { cwd });
+		expect(checkoutGitRunsProgram(cwd, "/home/dana")).toEqual({ kind: "promisorRemote", key: "remote.promisor" });
+		expect(analyzeShellCommand({ command: "git status", cwd, home: "/home/dana" }).verdict).not.toBe("safe");
+		expect(checkoutRunsOwnProgram(cwd, "/home/dana")).toBeUndefined();
+		execFileSync("git", ["config", "core.fsmonitor", "touch pwned"], { cwd });
+		expect(checkoutRunsOwnProgram(cwd, "/home/dana")).toEqual({ kind: "configSetsProgram", key: "core.fsmonitor" });
 	});
 
 	it("no longer lists --remerge-diff as a read", () => {
