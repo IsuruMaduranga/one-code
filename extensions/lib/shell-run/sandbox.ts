@@ -120,6 +120,14 @@ export function sandboxConfigured(): boolean {
 	return sandboxSettings().enabled && sandboxPlatform() !== undefined;
 }
 
+/** Why no sandbox runs on a platform the runtime does not cover. */
+export const SANDBOX_UNSUPPORTED = "this platform has no command sandbox";
+
+/** Whether the settings ask for a sandbox on a platform that has none (native Windows). */
+export function sandboxUnsupported(platform: NodeJS.Platform = process.platform): boolean {
+	return sandboxSettings().enabled && sandboxPlatform(platform) === undefined;
+}
+
 /** The running sandbox, or undefined. */
 export function activeSandbox(): ActiveSandbox | undefined {
 	return state().active;
@@ -284,9 +292,11 @@ function leavesSandbox(settings: SandboxSettings, call: { disable: boolean; orig
  * leave it and may (the permission gate has judged that request by then,
  * lib/rules/matcher.ts `unsandboxed`).
  */
-export async function sandboxedCommand(request: SandboxRequest): Promise<SandboxedCommand> {
-	if (!sandboxConfigured()) return { command: request.command };
+export async function sandboxedCommand(request: SandboxRequest, platform: NodeJS.Platform = process.platform): Promise<SandboxedCommand> {
 	const settings = sandboxSettings();
+	// A platform with no sandbox is an unavailable one: the user who required it gets a refusal, not a silent plain run.
+	if (sandboxUnsupported(platform)) return settings.failIfUnavailable ? { refused: { kind: "unavailable", reason: SANDBOX_UNSUPPORTED } } : { command: request.command };
+	if (!sandboxConfigured()) return { command: request.command };
 	const slot = state();
 	await slot.starting?.catch(() => undefined);
 	const hosts = slot.grantedHosts?.get(request.id) ?? [];

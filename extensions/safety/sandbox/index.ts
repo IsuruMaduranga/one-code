@@ -29,7 +29,7 @@ import { projectConfigDir } from "../../lib/profile/sources.ts";
 import { gateControlFiles } from "../../lib/profile/settings-files.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { activeSandbox, reloadSandboxSettings, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, startSandbox, stopSandbox, useSandboxSettingsFor } from "../../lib/shell-run/sandbox.ts";
+import { activeSandbox, reloadSandboxSettings, SANDBOX_UNSUPPORTED, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, sandboxUnsupported, startSandbox, stopSandbox, useSandboxSettingsFor } from "../../lib/shell-run/sandbox.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
@@ -52,6 +52,11 @@ import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLi
  */
 const PROTECTED_CONFIG_CHILDREN = ["skills", "hooks", "commands", "agents", "rules", "workflows"];
 const protectedConfig = (dir: string): string[] => PROTECTED_CONFIG_CHILDREN.map((child) => join(projectConfigDir(dir), child));
+
+/** What a session is told when its settings ask for a sandbox the platform does not have. */
+export function unsupportedSandboxMessage(required: boolean): string {
+	return `The command sandbox is turned on, but ${SANDBOX_UNSUPPORTED}. ${required ? "Shell commands are refused (sandbox.failIfUnavailable)." : "Shell commands run without it."}`;
+}
 
 /** The told fact of the sandbox section. */
 const SANDBOX_FACT = "sandbox:section";
@@ -192,6 +197,13 @@ function sandboxExtension(pi: ExtensionAPI) {
 		useSandboxSettingsFor(ctx.cwd);
 		if (!sandboxConfigured()) {
 			void stopSandbox();
+			// Asked for where the runtime has none: say so once, as a failed start does.
+			if (sandboxUnsupported() && !warned) {
+				warned = true;
+				const message = unsupportedSandboxMessage(sandboxSettings().failIfUnavailable);
+				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+				else process.stderr.write(`${message}\n`);
+			}
 			return;
 		}
 		const home = homedir();

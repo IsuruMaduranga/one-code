@@ -802,3 +802,16 @@ describe("/doctor and the Linux sandbox's programs", () => {
 		expect(mac.checks.some((check) => check.name === "bwrap")).toBe(false);
 	});
 });
+
+describe("a sandbox turned on where the platform has none", () => {
+	const call = { command: "npm test", original: "npm test", disable: false, cwd: "/work", bash: "/bin/bash", id: "call-1" };
+
+	it("refuses the command when the settings require the sandbox, and runs it plainly otherwise", async () => {
+		setSandboxForTest({ ...ON, failIfUnavailable: true });
+		expect(await sandboxedCommand(call, "win32")).toEqual({ refused: { kind: "unavailable", reason: "this platform has no command sandbox" } });
+		setSandboxForTest(ON);
+		expect(await sandboxedCommand(call, "win32")).toEqual({ command: "npm test" });
+		setSandboxForTest({ ...SANDBOX_OFF, failIfUnavailable: true });
+		expect(await sandboxedCommand(call, "win32")).toEqual({ command: "npm test" });
+	});
+});
