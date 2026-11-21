@@ -216,6 +216,8 @@ interface WrapperSpec {
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
+	/** Options that take no value and leave the payload and where it runs unchanged. */
+	flags?: readonly string[];
 	/** Peeled only for deny/ask forms; the pre-gate treats it as an unknown command. */
 	denyFormsOnly?: boolean;
 }
@@ -235,12 +237,12 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	// Runs its argument as the command of that name (`busybox rm x`).
 	busybox: { contained: false, denyFormsOnly: true },
 	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
-	command: { contained: true },
+	command: { flags: ["-p", "-v", "-V"], contained: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
 	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
-	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], contained: true },
+	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"], contained: true },
 	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], fileFirst: true, contained: false },
-	ionice: { values: ["-c", "--class", "-n", "--classdata"], contained: true },
+	ionice: { values: ["-c", "--class", "-n", "--classdata"], flags: ["-t", "--ignore"], contained: true },
 	nice: { values: ["-n", "--adjustment"], contained: true },
 	nohup: { contained: true },
 	script: {
@@ -250,7 +252,7 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 		fileFirst: true,
 		contained: false,
 	},
-	setsid: { contained: true },
+	setsid: { flags: ["-w", "--wait", "-f", "--fork", "-c", "--ctty"], contained: true },
 	stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], contained: true },
 	sudo: {
 		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
@@ -258,8 +260,8 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 		contained: false,
 		denyFormsOnly: true,
 	},
-	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], contained: true },
-	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], durationFirst: true, contained: true },
+	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], flags: ["-p", "-l", "-v", "--portability", "--verbose"], contained: true },
+	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
 	watch: { values: ["-n", "--interval", "-q", "--equexit"], contained: false, denyFormsOnly: true },
 	xargs: {
 		values: ["-I", "-L", "-n", "-P", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
@@ -452,6 +454,13 @@ export interface Payload {
 	pathNamed: string[];
 	/** Wide reading only: command lines a wrapper option runs (`flock -c '…'`, `env -S '…'`). */
 	scripts: string[];
+	/**
+	 * Words skipped after a wrapper without knowing what they do: an option its
+	 * spec does not list (`env -a`, `env --chd=/tmp`) and an assignment that is
+	 * not inert (`env PATH=./bin`). The payload named may not be what runs, or
+	 * not where, so the pre-gate proves nothing about such a line.
+	 */
+	opaque: string[];
 }
 
 /**
@@ -466,7 +475,7 @@ export interface Payload {
  */
 export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "strict"): Payload {
 	const wide = reading === "wide";
-	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [] };
+	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [], opaque: [] };
 	let index = 0;
 
 	const kind = (spec: WrapperSpec, option: string) =>
@@ -505,6 +514,8 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			// stays in command position, so the command escalates uncontained.
 			if (!wide && attached !== undefined && (type === "unsafe" || type === "script")) return;
 			index++;
+			// `nice -10` is an adjustment; any other unlisted option is unknown.
+			if (type === undefined && !knownFlags(spec, word) && !/^-\d+$/.test(word)) payload.opaque.push(word);
 			if (type === undefined || attached !== undefined) {
 				if (wide && type === "script" && attached !== undefined) payload.scripts.push(attached);
 				continue;
@@ -518,7 +529,13 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 
 	for (;;) {
 		// Leading `VAR=value` assignments are not the command.
-		while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index].value)) index++;
+		for (; index < tokens.length; index++) {
+			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(tokens[index].value);
+			if (!assigned) break;
+			// Before the first word the caller judges it; after a wrapper (`env NAME=value cmd`) nothing else does.
+			const inert = INERT_ASSIGNMENTS.test(assigned[1]) && isInertValue(assigned[1], tokens[index].value.slice(assigned[0].length));
+			if (payload.peeled.length > 0 && !inert) payload.opaque.push(tokens[index].value);
+		}
 		if (index >= tokens.length) return payload;
 
 		if (/[\\/]/.test(tokens[index].value)) payload.pathNamed.push(tokens[index].value);
@@ -540,6 +557,13 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 		}
 		if (spec.durationFirst && index < tokens.length && /^[0-9.]+[smhd]?$/.test(tokens[index].value)) index++;
 	}
+}
+
+/** Whether `word` is made only of the wrapper's listed flags (`-i`, `--null`, or a cluster such as `-iv`). */
+function knownFlags(spec: WrapperSpec, word: string): boolean {
+	const flags = spec.flags ?? [];
+	if (word.startsWith("--")) return flags.includes(word);
+	return word.length > 1 && [...word.slice(1)].every((letter) => flags.includes(`-${letter}`));
 }
 
 /** Whether every peeled wrapper keeps an in-project payload contained (see `WrapperSpec.contained`). */
@@ -1117,7 +1141,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			if (!inert) escalate(`sets ${assigned}, which can change what the command runs or reads`);
 		}
 
-		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
+		const { command: name, args, peeled, pathNamed, opaque } = resolvePayload(segment.tokens);
+		for (const word of opaque) escalate(`passes ${word} to ${peeled.join(" → ")}, which can change what runs or where`);
 		if (!PIPE_FILTERS.has(name) && !NO_FILE_OPERANDS.has(name)) readsNoFile = false;
 		if (dynamicKinds.has("substitution") && !PURE_OUTPUT.has(name)) {
 			escalate(`passes a command substitution's output to ${name || "the shell"}, and its words are unknown here`);
