@@ -146,7 +146,7 @@ export const TEXT_GROUP_READERS: Readonly<Record<OptionalGroup, readonly Feature
 	toolStyle: ["tool-style"],
 	compaction: ["compaction"],
 	workflow: ["workflow"],
-	shell: ["bash", "powershell"],
+	shell: ["bash", "powershell", "sandbox", "background"],
 	doctor: ["doctor"],
 	handback: ["subagents", "workflow"],
 	subagents: ["subagents", "workflow"],

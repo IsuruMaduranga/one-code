@@ -28,6 +28,7 @@ If you've never run One Code, read these in order:
 | [The terminal interface](terminal-interface.md) | The banner, status line, working indicator, panels, dialogs, and themes. |
 | [Configure One Code](configuration.md) | Settings-file locations, the `~/.onecode` layout, every One Code settings key, full-screen mode, and language servers. |
 | [Permissions, modes, and auto mode](permissions-modes-and-auto-mode.md) | How decisions are made, rules, modes, the approval prompt, protected paths, project trust, plan mode, auto mode, and the security model. |
+| [The command sandbox](sandbox.md) | Turning on the operating-system sandbox for shell commands, what it limits, how each mode treats it, and its settings. |
 | [Hooks](hooks.md) | Supported events, the input and output contract, approval, and debugging. |
 | [Subagents and workflows](subagents-and-workflows.md) | Delegating to subagents, forks, worktrees, the live panel, `ultracode` workflows, and reasoning effort. |
 | [Skills, plugins, and MCP](skills-plugins-and-mcp.md) | Skills and their states, custom commands, plugins and marketplaces, and MCP servers. |

@@ -89,6 +89,8 @@ export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append
  * moves into that message instead (`movesToSystemRole`, lib/request/system-role.ts).
  */
 export const CONTEXT_ORDER = {
+	/** The shell sandbox's section, in front of the environment block as in Claude Code (safety/sandbox). */
+	sandbox: 0,
 	environment: 1,
 	modelLine: 2,
 	/** One Code's note that a `-p`/json run ends with its turn (`lib/notify/notifications.ts oneShotSessionNote`); not Claude Code's. */

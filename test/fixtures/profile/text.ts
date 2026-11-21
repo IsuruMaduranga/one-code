@@ -367,6 +367,15 @@ export const shell: NonNullable<ProfileText["shell"]> = {
 		description: "[shell.powershellParams.description]",
 		run_in_background: "[shell.powershellParams.run_in_background]",
 	},
+	sandbox: {
+		disableParam: "[shell.sandbox.disableParam]",
+		allowedDomainsParam: "[shell.sandbox.allowedDomainsParam]",
+		hostNotListed: "[shell.sandbox.hostNotListed]",
+		section: (p) => mark("shell.sandbox.section", p),
+		turnedOff: "[shell.sandbox.turnedOff]",
+		unavailable: (p) => mark("shell.sandbox.unavailable", p),
+		refused: (p) => mark("shell.sandbox.refused", p),
+	},
 };
 
 export const doctor: NonNullable<ProfileText["doctor"]> = {

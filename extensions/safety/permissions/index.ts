@@ -19,7 +19,7 @@
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
 import { desktopNotificationText } from "../../lib/notify/desktop.ts";
-import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { bindGatePrompt, GATE_PROMPT_REQUEST_CHANNEL, type GatePromptRequest, openGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
@@ -73,6 +73,7 @@ import { analyzeShellCommand } from "../../lib/shell/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../../lib/shell/bash-parser.ts";
 import type { PowerShellParse } from "../../lib/shell/powershell-parser.ts";
 import { powerShellParser } from "../../lib/shell-run/shell-spawn.ts";
+import { grantCommandHosts, sandboxGateFacts } from "../../lib/shell-run/sandbox.ts";
 import { powershellReadOnly } from "../../lib/shell/powershell-rules.ts";
 import { isShellTool } from "../../lib/rules/matcher.ts";
 import { gitStatusOutput } from "../../lib/context/git.ts";
@@ -773,7 +774,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; history?: HistoryCursor; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; history?: HistoryCursor; signal?: AbortSignal; powershellParse?: PowerShellParse; skipPreGate?: boolean },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -781,7 +782,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
 
-		if (normalizeToolName(toolName) === "bash" && subject) {
+		// A call that asks to leave the shell sandbox, or names hosts for itself,
+		// is never cleared by the pre-gate: the classifier reads it.
+		if (opts?.skipPreGate) {
+			// falls through to the classifier
+		} else if (normalizeToolName(toolName) === "bash" && subject) {
 			if (analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots }).verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -1290,6 +1295,16 @@ function permissionsExtension(pi: ExtensionAPI) {
 	const gatePrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
 		serializePrompt(() => bindGatePrompt(pi.events, ctx)(attention, signal, open), signal);
 
+	// A prompt another extension raises (the sandbox's host question) takes its turn in the same queue.
+	pi.events.on(GATE_PROMPT_REQUEST_CHANNEL, (data) => {
+		const request = data as GatePromptRequest;
+		request.taken = true;
+		void serializePrompt(() => openGatePrompt({ events: pi.events, attention: request.attention, signal: request.signal, hasUI: request.hasUI, open: request.open }), request.signal).then(
+			(answer) => request.settle(answer),
+			() => request.settle(undefined),
+		);
+	});
+
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {
 		if (!ctx.hasUI || ctx.mode === "print") {
@@ -1427,6 +1442,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		currentMainToolCallId = event.toolCallId;
 		inFlightMainCalls.push(event.toolCallId);
 
+		// What the sandbox changes for this call (lib/shell-run/sandbox.ts `sandboxGateFacts`): a call that asks to leave it
+		// takes no fast path (`unsandboxed`), hosts the call names for itself count in auto mode only, where the classifier
+		// reads them (`commandHosts`), and where the user turned auto-allow on, a command the sandbox will hold needs no
+		// prompt in the manual modes (`sandboxed`).
+		const { unsandboxed, hosts, sandboxed } = sandboxGateFacts(normalizedTool, event.input as Record<string, unknown>, matchSubject, mode);
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
 				toolName: event.toolName,
@@ -1437,6 +1457,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 				ask,
 				allow: allowRules,
 				classifyAllShell: classifyAllShell(),
+				unsandboxed,
+				commandHosts: hosts.length > 0,
+				sandboxed,
 				resolvedSubject,
 				resolvedCwd: resolvedCallCwd,
 				planFilePath,
@@ -1565,13 +1588,15 @@ function permissionsExtension(pi: ExtensionAPI) {
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
 					{
-						cwd: callCwd, powershellParse, toolCallId: event.toolCallId,
-						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command),
+						cwd: callCwd, powershellParse, toolCallId: event.toolCallId, skipPreGate: unsandboxed || hosts.length > 0,
+						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command, hosts),
 					},
 				);
 				if (outcome.decision === "allow") {
 					noteAllow();
 					denials.settle(inputKey);
+					// The classifier read the call's own hosts with the command: they hold for this one run.
+					grantCommandHosts(event.toolCallId, hosts);
 					return undefined;
 				}
 
@@ -1631,7 +1656,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Reaching a prompt from the classify branch only happens when auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
-		const title = askTitle(event.toolName, preview, result.cause, pausedResume);
+		const title = askTitle(unsandboxed ? `${event.toolName} (unsandboxed)` : event.toolName, preview, result.cause, pausedResume);
 		const grant = sessionGrant({
 			toolName: normalizedTool,
 			subject: matchSubject,
@@ -1724,6 +1749,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, subject, mode);
+		const { unsandboxed, hosts, sandboxed } = sandboxGateFacts(normalizedTool, input, subject, mode);
 
 		const result = decide({
 			toolName,
@@ -1737,6 +1763,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// denied) for a call the parent would allow (SUBAGENT-REVIEW L5).
 			allow: [...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])],
 			classifyAllShell: classifyAllShell(),
+			unsandboxed,
+			commandHosts: hosts.length > 0,
+			sandboxed,
 			resolvedSubject,
 			// The child's own cwd (a worktree, if isolated) is its working directory.
 			resolvedCwd: resolveForContainment(cwd),
@@ -1799,7 +1828,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (!ctx) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
-				appendEntry: toolCallEntry(normalizedTool, input),
+				appendEntry: toolCallEntry(normalizedTool, input, undefined, hosts),
 				// The main session as far as the call that started this child's turn.
 				history: childCursor(call.parentToolCallId),
 				// The child's own turn signal, so an aborted child turn cancels the
@@ -1807,8 +1836,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 				// didn't supply one, so classify() still gets the signal it expects.
 				signal: call.signal ?? new AbortController().signal,
 				powershellParse,
+				skipPreGate: unsandboxed || hosts.length > 0,
 			});
-			if (outcome.decision === "allow") return undefined;
+			if (outcome.decision === "allow") {
+				if (call.toolCallId) grantCommandHosts(call.toolCallId, hosts);
+				return undefined;
+			}
 			if (outcome.transcriptTooLong) return transcriptOverflow(ctx, toolName, subject, call.signal);
 			return { block: true, reason: classifierBlockReason(outcome) };
 		}
@@ -1822,7 +1855,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// Name the asking agent: two children prompting back-to-back are otherwise
 		// indistinguishable on screen.
 		const who = call.agent ? `subagent ${call.agent}'s` : "a subagent's";
-		const title = askTitle(`${who} ${toolName}`, preview, result.cause, pausedResume);
+		const title = askTitle(`${who} ${toolName}${unsandboxed ? " (unsandboxed)" : ""}`, preview, result.cause, pausedResume);
 		// The child's turn signal dismisses the dialog (as a denial) when the child
 		// is stopped mid-prompt; a prompt whose child is already gone by the time
 		// its turn in the chain comes is skipped outright (bindGatePrompt). Otherwise a

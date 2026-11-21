@@ -910,6 +910,33 @@ export interface DecideInput {
 	/** Auto mode: route every shell command through the classifier, ignoring narrow Bash allow rules. */
 	classifyAllShell?: boolean;
 	/**
+	 * A shell call that asks to run outside the shell sandbox
+	 * (`dangerouslyDisableSandbox`, where a sandbox runs and the settings let
+	 * the model ask): the shell tools' own fast paths do not clear it, so it
+	 * reaches the user's rules, then a prompt or the classifier, as Claude
+	 * Code's unsandboxed retry does. The flag is the model's to write and only
+	 * ever makes the gate stricter.
+	 */
+	unsandboxed?: boolean;
+	/**
+	 * Auto mode, a shell call that names hosts for itself (`allowed_domains`)
+	 * under a running sandbox: allowing the call grants it those hosts, so
+	 * only the classifier's review of the list with the command can allow it.
+	 * No shell fast path and no allow rule clears it. Like `unsandboxed`, the
+	 * list is the model's to write and only ever makes the gate stricter.
+	 */
+	commandHosts?: boolean;
+	/**
+	 * A bash call that will run inside the shell sandbox, where the user's
+	 * settings let a sandboxed command skip the prompt (Claude Code's
+	 * `autoAllowBashIfSandboxed`): in default and acceptEdits modes it runs without one. Deny
+	 * rules, ask rules and the outside-read question still apply, and a write
+	 * the gate can see landing on a protected path still asks. The caller
+	 * derives it from the session's sandbox and the absence of a request to
+	 * leave it, never from a field that asks for it.
+	 */
+	sandboxed?: boolean;
+	/**
 	 * The subject with symlinks resolved (see lib/shell/paths.ts), when the
 	 * caller could resolve it. The protected-path check consults it as well as
 	 * the literal spelling, so writing through `ln -s .git/hooks build` is as
@@ -1043,6 +1070,8 @@ export interface Decision {
 		| "protected-path"
 		/** A shell command the read-only check proves reads only inside the working space. */
 		| "read-only"
+		/** A command that will run inside the shell sandbox, in a manual mode (`DecideInput.sandboxed`). */
+		| "sandboxed"
 		/** A read tool outside the working space, allowed unclassified in auto mode (Claude Code's safe allowlist). */
 		| "outside-read"
 		/** A read tool outside the working space, refused by `blockReadsOutsideWorkingDirectories`. */
@@ -1521,6 +1550,8 @@ export function decide(params: DecideInput): Decision {
 			? allow.filter((rule) => {
 					if (isBroadExecutionRule(rule)) return false;
 					if (params.classifyAllShell && isShellTool(rule.tool)) return false;
+					// The shell tools and monitor take a host list: no rule for a command clears one.
+					if (params.commandHosts && subjectKind(rule.tool) === "command") return false;
 					return true;
 				})
 			: allow;
@@ -1559,7 +1590,9 @@ export function decide(params: DecideInput): Decision {
 	 * working space for its writes. Cheap and tiny models keep the stricter path.
 	 */
 	const fastPaths = params.claudeCodeFastPaths === true;
-	if (subject && tool === "bash") {
+	// A call that asks for more than the sandbox gives (to leave it, or hosts of its own) takes no fast path.
+	const sandboxException = params.unsandboxed === true || params.commandHosts === true;
+	if (subject && tool === "bash" && !sandboxException) {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
@@ -1567,7 +1600,7 @@ export function decide(params: DecideInput): Decision {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
-	if (subject && tool === "powershell" && params.powershellParse) {
+	if (subject && tool === "powershell" && params.powershellParse && !sandboxException) {
 		if (powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
 			return { decision: "allow", cause: "read-only" };
 		}
@@ -1580,6 +1613,14 @@ export function decide(params: DecideInput): Decision {
 		) {
 			return { decision: "allow", cause: "mode" };
 		}
+	}
+
+	// Claude Code's sandbox auto-allow, where the user turned it on: the sandbox
+	// bounds what the command can write and reach, so the manual modes do not ask first. Auto mode keeps
+	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
+	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
+		const seen = shellEvidence(subject).writes;
+		if (!seen.some((write) => isProtected(write.absolute, write.resolved))) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

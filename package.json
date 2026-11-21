@@ -44,6 +44,7 @@
 			"extensions/safety/file-tracker/index.ts",
 			"extensions/context/memory/index.ts",
 			"extensions/safety/permissions/index.ts",
+			"extensions/safety/sandbox/index.ts",
 			"extensions/tools/ask-user/index.ts",
 			"extensions/tools/skill/index.ts",
 			"extensions/tools/background/index.ts",
@@ -106,6 +107,7 @@
 		"sync:app-readme": "node scripts/app-readme.mjs"
 	},
 	"dependencies": {
+		"@anthropic-ai/sandbox-runtime": "0.0.83",
 		"@modelcontextprotocol/sdk": "^1.30.0",
 		"@mozilla/readability": "^0.6.0",
 		"acorn": "^8.18.0",

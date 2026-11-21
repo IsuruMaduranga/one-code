@@ -3,7 +3,7 @@
  * the cells that encode a decision, and how a process is tied to its spawner.
  */
 import { describe, expect, it } from "vitest";
-import { cellOutcome, ENDINGS, expectation, keptOutcome, parsePs, SPAWNERS, spawnerOf } from "../e2e/exit-probe-policy.mjs";
+import { cellOutcome, DAEMONS, ENDINGS, endingsFor, expectation, keptOutcome, parsePs, SPAWNERS, spawnerOf } from "../e2e/exit-probe-policy.mjs";
 
 const TAG = "xp0123456789abcdef";
 
@@ -15,6 +15,15 @@ describe("the exit probe's expectations", () => {
 				expect(verdict, `${id} / ${ending.id}`).toBe(id === "hook" ? "may survive" : "gone");
 			}
 		}
+	});
+
+	it("does not wait for a finished command's workers under the Linux sandbox, which ends them with the command", () => {
+		expect(endingsFor({ sandbox: false, platform: "linux" })).toBe(ENDINGS);
+		expect(endingsFor({ sandbox: true, platform: "darwin" })).toBe(ENDINGS);
+		const sandboxed = endingsFor({ sandbox: true, platform: "linux" });
+		expect(sandboxed.map((ending) => ending.id)).toEqual(ENDINGS.map((ending) => ending.id));
+		for (const ending of sandboxed) expect(ending.starts.some((id) => DAEMONS.has(id)), ending.id).toBe(false);
+		expect(sandboxed.find((ending) => ending.id === "rpc-sigterm")?.starts).toContain("bg-running");
 	});
 
 	it("lets a hook's and a background shell's leftovers outlive a session switch, and nothing else", () => {

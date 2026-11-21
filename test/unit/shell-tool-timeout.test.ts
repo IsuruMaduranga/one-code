@@ -48,6 +48,7 @@ function mount() {
 		base: { label: "Bash" },
 		foreground: () => ({ execute: foreground }),
 		guard: () => undefined,
+			sandboxText: () => ({ disableParam: "", allowedDomainsParam: "", hostNotListed: "", section: () => "", turnedOff: "", unavailable: () => "", refused: () => "refused" }),
 		backgroundShell: () => ({ shell: "/bin/bash", args: ["-c"] }) as never,
 	});
 	return { tool: fake.tools.get("bash")!, foreground };

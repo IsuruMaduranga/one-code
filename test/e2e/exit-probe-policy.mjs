@@ -51,7 +51,19 @@ export const ENDINGS = [
 	{ id: "resume", label: "resume another session with pi still running (old session's processes)", alive: true, starts: ALL },
 ];
 
-const DAEMONS = new Set(["bg-daemon", "bg-noterm", "sub-daemon"]);
+/** The workers a finished background bash leaves behind. */
+export const DAEMONS = new Set(["bg-daemon", "bg-noterm", "sub-daemon"]);
+
+/**
+ * The endings as a run with the command sandbox on must judge them. On Linux
+ * the sandbox gives each command its own process namespace, which ends with
+ * the command, so a finished command leaves no worker: those fixtures cannot
+ * start and are not waited for (one that did survive is still judged).
+ */
+export function endingsFor({ sandbox, platform }) {
+	if (!sandbox || platform !== "linux") return ENDINGS;
+	return ENDINGS.map((ending) => ({ ...ending, starts: ending.starts.filter((id) => !DAEMONS.has(id)) }));
+}
 
 /**
  * Whether `spawner`'s process may outlive `ending` on `platform`:

@@ -675,15 +675,16 @@ One Code's security model is the permission gate plus auto mode, not an
 assumption that the model behaves. Read these facts before you leave a
 session unattended:
 
-- **There's no operating-system sandbox.** The gate decides whether a
-  command runs; nothing constrains what an approved command can touch. For
-  an OS-level wall, run One Code inside a container. The gate and the
-  container work together.
+- **The operating-system sandbox is off until you turn it on.** The gate
+  decides whether a command runs. Without the
+  [command sandbox](sandbox.md), nothing constrains what an approved command
+  can touch. The sandbox covers shell commands on macOS and Linux; for a
+  wall around the whole agent, run One Code inside a container.
 - **Bypass mode bypasses everything**, including protected paths. Claude
   Code keeps its protected-path checks active even under
   `--dangerously-skip-permissions`; One Code doesn't.
 - **Auto mode is the default without a first-run consent step**, and
-  without the OS sandbox Claude Code pairs its own auto default with.
+  with the [command sandbox](sandbox.md) off unless you turn it on.
 - **A weak classifier is a weaker boundary.** Automatic selection applies a
   floor, but a provider whose catalog has nothing stronger is screened by
   what it has. One tested model family (GLM-5.3 and GLM-5.3 Flash) approved a

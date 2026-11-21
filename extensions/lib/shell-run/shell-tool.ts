@@ -14,14 +14,16 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Static, TObject } from "typebox";
+import { type Static, type TObject, type TProperties, Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
-import type { ShellBlock, ShellEnd, ShellResultText } from "./shell-text.ts";
+import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
+import { sandboxConfigured, sandboxedCommand } from "./sandbox.ts";
+import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "./sandbox-settings.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -50,6 +52,10 @@ export interface ShellToolParams {
 	timeout?: number;
 	description?: string;
 	run_in_background?: boolean;
+	/** Only in a session whose settings turn the shell sandbox on. */
+	dangerouslyDisableSandbox?: boolean;
+	/** Only there too: hosts this one command needs, honoured in auto mode after the classifier read them. */
+	allowed_domains?: string[];
 }
 
 /** The parts of pi's shell tool definition the shared body reads (structural, so the concrete generic types assign). */
@@ -66,6 +72,19 @@ export interface ShellToolBase {
 /** pi's shell tool executor: `execute(toolCallId, { command, timeout: seconds }, signal, onUpdate, ctx)`. */
 export interface ShellToolExecutor {
 	execute: (toolCallId: string, params: { command: string; timeout?: number }, signal: AbortSignal | undefined, onUpdate: any, ctx: ExtensionToolContext) => Promise<any>;
+}
+
+/**
+ * The parameters the shell sandbox adds to a tool that runs commands, where
+ * the settings turn it on (and none otherwise): the host list a command names
+ * for itself, and with `leave` the request to run outside the sandbox. Both
+ * stay in the schema when the settings forbid leaving the sandbox, as in
+ * Claude Code: the section tells the model the request is off.
+ */
+export function sandboxParams(text: Pick<ShellSandboxText, "disableParam" | "allowedDomainsParam">, opts: { leave: boolean }): TProperties {
+	if (!sandboxConfigured()) return {};
+	const allowed_domains = Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: text.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX }));
+	return opts.leave ? { dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: text.disableParam })), allowed_domains } : { allowed_domains };
 }
 
 /** What one shell tool's definition supplies; everything else is shared. */
@@ -87,6 +106,16 @@ export interface ShellToolSpec<P extends TObject> {
 	words?: () => ShellResultText;
 	/** The spawn for a background run, or undefined when the shell is unavailable. */
 	backgroundShell: () => ShellSpawn | undefined;
+	/** The sandbox's words, for a call it refuses. */
+	sandboxText: () => ShellSandboxText;
+	/**
+	 * For a tool whose own shell is not bash: how its command runs inside the
+	 * sandbox, which runs everything through a bash. `bash` is that bash,
+	 * `line` the bash line that runs the command in the tool's shell, and
+	 * `foreground` runs such a line with the tool's own result shape. Without
+	 * it the tool's own shell (`backgroundShell`) is the sandbox's bash.
+	 */
+	sandboxed?: { bash(): ShellSpawn | undefined; line(command: string): string; foreground(cwd: string): ShellToolExecutor };
 	/** Rewrites the command for a background spawn (PowerShell prepends its UTF-8 prefix). Default: identity. */
 	wrapBackgroundCommand?: (command: string) => string;
 }
@@ -180,6 +209,20 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
 			// 33 hours (review T11). A command that names none gets Claude Code's
 			// default, which is what the descriptions promise.
+			// The session's sandbox wraps what runs; guards, rules and the transcript keep the model's command.
+			const sandboxed = await sandboxedCommand({
+				command: params.command,
+				original: originalCommand,
+				disable: params.dangerouslyDisableSandbox === true,
+				// A worktree session's command runs in the worktree, which is published with its original; pi's own cwd stays the checkout's.
+				cwd: originalCommands.get(toolCallId)?.cwd ?? ctx.cwd,
+				bash: (spec.sandboxed?.bash ?? spec.backgroundShell)()?.shell,
+				...(spec.sandboxed ? { line: () => spec.sandboxed!.line(params.command) } : {}),
+				id: toolCallId,
+			});
+			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: {} };
+			// A wrapped command of a tool whose shell is not bash is a bash line: bash runs it.
+			const viaBash = sandboxed.run ? spec.sandboxed : undefined;
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
 			const timeoutSeconds = (explicitTimeout ? Math.min(params.timeout!, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS) / 1000;
 
@@ -189,16 +232,27 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				// cut the output Claude Code's way (its head, not pi's tail). Then
 				// Claude Code's result text (`Exit code N` first, trimmed output).
 				const result = await keepSpillReadable(
-					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
+					() => (viaBash ? viaBash.foreground(ctx.cwd) : spec.foreground(ctx.cwd)).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
-				);
+				)
+					.catch((error: unknown) => {
+						// A command that timed out or was stopped still says what the sandbox denied it (a host retried until the deadline).
+						if (sandboxed.run && error instanceof Error) error.message = sandboxed.run.withViolations(error.message);
+						throw error;
+					})
+					.finally(() => sandboxed.run?.finish());
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();
-				return withClaudeCodeShellText(result, spec.name, originalCommand);
+				const shaped = withClaudeCodeShellText(result, spec.name, originalCommand);
+				// What the sandbox denied (a host its proxy refused) follows the output.
+				const first = shaped.content?.[0];
+				if (!sandboxed.run || first?.type !== "text" || typeof first.text !== "string") return shaped;
+				return { ...shaped, content: [{ ...first, text: sandboxed.run.withViolations(first.text) }, ...shaped.content.slice(1)] };
 			}
 
-			const shell = spec.backgroundShell();
+			// A wrapped command has its bash already (`sandboxedCommand` refuses without one), so nothing is held here.
+			const shell = viaBash ? viaBash.bash() : spec.backgroundShell();
 			if (!shell) {
 				return {
 					content: [{ type: "text" as const, text: words().noBackgroundShell({ label: spec.ccLabel }) }],
@@ -209,7 +263,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const id = generateTaskId();
 			const logPath = taskLogPath(ctx, id);
 			const description = params.description || params.command.slice(0, 80);
-			const command = wrap(params.command);
+			const command = viaBash ? sandboxed.command : wrap(sandboxed.command);
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: a
 			// detached task would be orphaned, and its completion callback would
@@ -221,11 +275,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// server started this way hung the run forever. A detached shell below
 			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
-				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: words() }, signal);
+				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell, text: words() }, signal).finally(() => sandboxed.run?.finish());
 				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
-				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
+				const shown = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
+				const output = sandboxed.run ? sandboxed.run.withViolations(shown) : shown;
 				return {
 					content: [
 						{
@@ -264,10 +319,15 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				logPath,
 				shell,
 				onFinished: (finishedTask, summary) => {
+					// The command's own host list ends with the command.
+					sandboxed.run?.finish();
 					// Claude Code's shell completion names the output file and nothing
 					// else — the model reads it (or task_output) when it needs the text.
 					// Without a spool file the tail rides `<result>` so nothing is lost.
 					const { status, detail } = shellFinish(summary);
+					// What the sandbox denied the command rides its completion: the log holds only the command's own words.
+					const denied = sandboxed.run?.withViolations("").trim() ?? "";
+					const tail = finishedTask.logPath ? "" : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim();
 					notify(
 						taskNotification({
 							kind: "shell",
@@ -276,7 +336,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim() || undefined,
+							result: [tail, denied].filter(Boolean).join("\n") || undefined,
 						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath, [TASK_COMPLETION_KEY]: true },
 					);

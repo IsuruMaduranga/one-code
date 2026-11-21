@@ -57,6 +57,7 @@ describe("registerShellTool: the foreground result reads as Claude Code's", () =
 			base: { label: "Bash" },
 			foreground: () => ({ execute: vi.fn(async () => result) }),
 			guard: () => undefined,
+			sandboxText: () => ({ disableParam: "", allowedDomainsParam: "", hostNotListed: "", section: () => "", turnedOff: "", unavailable: () => "", refused: () => "refused" }),
 			backgroundShell: () => undefined,
 		});
 		return (command: string) => fake.tools.get(name)!.execute("c1", { command }, undefined, undefined, createFakeCtx({ mode: "tui" })) as Promise<{
@@ -143,6 +144,7 @@ describe("registerShellTool: PowerShell's semantic exit codes, as Claude Code's"
 			base: { label: "PowerShell" },
 			foreground: () => ({ execute: vi.fn(async () => ({ content: [{ type: "text", text: text ? `${text}\n\n\nCommand exited with code ${code}` : `(no output)\n\nCommand exited with code ${code}` }], structuredContent: { output: text, exit_code: code }, isError: true })) }),
 			guard: () => undefined,
+			sandboxText: () => ({ disableParam: "", allowedDomainsParam: "", hostNotListed: "", section: () => "", turnedOff: "", unavailable: () => "", refused: () => "refused" }),
 			backgroundShell: () => undefined,
 		});
 		return (command: string) => fake.tools.get("powershell")!.execute("c1", { command }, undefined, undefined, createFakeCtx({ mode: "tui" })) as Promise<{ content: Array<{ text: string }>; isError?: boolean }>;

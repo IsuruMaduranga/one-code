@@ -10,7 +10,18 @@ declare module "*/exit-probe-policy.mjs" {
 		reason: string;
 	}
 	export const SPAWNERS: Array<{ id: string; what: string }>;
-	export const ENDINGS: Array<{ id: string; label: string; starts: string[]; posix?: boolean; tui?: boolean; alive?: boolean; keeps?: boolean }>;
+	export interface Ending {
+		id: string;
+		label: string;
+		starts: string[];
+		posix?: boolean;
+		tui?: boolean;
+		alive?: boolean;
+		keeps?: boolean;
+	}
+	export const ENDINGS: Ending[];
+	export const DAEMONS: Set<string>;
+	export function endingsFor(run: { sandbox: boolean; platform: string }): Ending[];
 	export function expectation(spawner: string, ending: string, platform?: string): Expectation;
 	export function spawnerOf(commandLine: string, tag: string): string;
 	export function parsePs(output: string, tag: string): ProbeProcess[];

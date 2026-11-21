@@ -101,7 +101,7 @@ describe("resolveProfile", () => {
 		expect(() => resolveProfile({ ...empty, features: { subagents: false, workflow: false }, text: without("subagentModels") }, {}, "/p")).toThrow(/no text for "subagentModels", which "doctor" reads/);
 		// A workflow agent's worktree and tool-list errors are worded by the subagents group.
 		expect(() => resolveProfile({ ...empty, features: { subagents: false }, text: without("subagents") }, {}, "/p")).toThrow(/no text for "subagents", which "workflow" reads/);
-		expect(() => resolveProfile({ ...empty, text: without("notebook", "shell") }, {}, "/p")).toThrow(/no text for "notebook", which "notebook" reads; it has no text for "shell", which "bash", "powershell" read/);
+		expect(() => resolveProfile({ ...empty, text: without("notebook", "shell") }, {}, "/p")).toThrow(/no text for "notebook", which "notebook" reads; it has no text for "shell", which "bash", "powershell", "sandbox", "background" read/);
 		const off = { worktree: false, subagents: false, workflow: false, doctor: false, notebook: false } as const;
 		expect(resolveProfile({ ...empty, features: off, text: without("subagentModels", "handback", "notebook", "worktree", "subagents", "workflow", "doctor") }, {}, "/p").text.notebook).toBeUndefined();
 	});

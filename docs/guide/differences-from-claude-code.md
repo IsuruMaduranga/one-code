@@ -41,7 +41,7 @@ so nothing surprises you.
 | Workspace directories | Reads, edits in accept-edits mode, and auto-mode writes. | The same, except that credential files there still prompt. With cheap and tiny models, auto-mode writes there go to the classifier. |
 | Bypass mode | Protected paths stay protected. | Bypass mode bypasses everything, including protected paths. |
 | First-run consent for auto mode | Asked once. | Not asked. Auto mode is on from the first session. |
-| OS sandbox | Paired with auto mode. | None. Run One Code in a container for OS-level isolation. |
+| OS sandbox | Paired with auto mode. | The same sandbox for shell commands, off until you turn it on. A project's settings can only tighten it, changes apply from the next start, and PowerShell commands are refused while it runs. See [The command sandbox](sandbox.md). |
 | Cost display | Main conversation. | All-in: subagents, classifier, reader, and recap calls included. |
 | Web search | Anthropic's search. | The provider's own search when it has one, else Brave, Tavily, or a keyless fallback. |
 | Reasoning effort | Fixed per model. | A slider from `off` to `max`, plus `ultracode`. |

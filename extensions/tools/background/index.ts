@@ -27,6 +27,10 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
+import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.ts";
+import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
+import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
+import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -199,6 +203,7 @@ function foldEntry(entry: { type: string; timestamp?: string; customType?: strin
 
 function backgroundExtension(pi: ExtensionAPI) {
 	const text = backgroundWords(requireText("background"));
+	const originalCommands = trackOriginalCommands(pi);
 	const cronParameters = cronToolParameters(text.cron);
 	const created = (job: CronJob) => text.cron.created({ job: shownJob(job), maxAgeDays: RECURRING_MAX_AGE_DAYS });
 	const jobList = (jobs: CronJob[]) => text.cron.list({ jobs: jobs.map(shownJob) });
@@ -416,6 +421,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			command: Type.Optional(Type.String({ description: monitorParams.command })),
 			description: Type.String({ description: monitorParams.description }),
 			timeout_ms: Type.Number({ minimum: 1000, maximum: MONITOR_TIMEOUT_SCHEMA_MAX_MS, default: DEFAULT_MONITOR_TIMEOUT_MS, description: monitorParams.timeoutMs }),
+			// A command monitor may name hosts for itself, as a shell command may; it never asks to leave the sandbox.
+			...sandboxParams(requireText("shell").sandbox, { leave: false }),
 			ws: Type.Optional(
 				Type.Object(
 					{
@@ -430,6 +437,24 @@ function backgroundExtension(pi: ExtensionAPI) {
 			lastCtx = ctx;
 			const startFailed = (failure: MonitorStartFailure) => ({ content: [{ type: "text" as const, text: text.monitor.startFailed(failure) }], details: {}, isError: true });
 			if (Boolean(params.command) === Boolean(params.ws)) return startFailed({ kind: "commandOrSocket" });
+			if (params.ws && commandHosts(params).length > 0) return startFailed({ kind: "hostsNeedCommand" });
+			// A monitor's command runs in the session's shell sandbox like any command the model starts.
+			let command = params.command;
+			const sandboxBash = bashSpawn().spawn?.shell;
+			let sandboxRun: SandboxRun | undefined;
+			if (command && sandboxBash) {
+				// In a worktree session the command arrives wrapped for the worktree: the excluded patterns are matched
+				// against the model's own command, and the sandbox is scoped to the directory it runs in.
+				const original = originalCommands.get(toolCallId);
+				const sandboxed = await sandboxedCommand({ command, original: original?.command ?? command, disable: false, cwd: original?.cwd ?? ctx.cwd, bash: sandboxBash, id: toolCallId });
+				if ("refused" in sandboxed) {
+					if (sandboxed.refused.kind === "hosts") return startFailed({ kind: "hostsRejected", reason: sandboxed.refused.reason });
+					// `noBash` cannot happen here: the call above is made only with a bash.
+					return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "it has not started" });
+				}
+				command = sandboxed.command;
+				sandboxRun = sandboxed.run;
+			}
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: the
 			// notifier goes inert, shutdown kills the monitor, and nothing it saw
@@ -474,8 +499,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const finished = new Promise<void>((resolve) => {
 				finish = resolve;
 			});
+			// The command's own host list ends with the monitor.
+			void finished.then(() => sandboxRun?.finish());
 
-			const flush = (force = false) => {
+			// `after` follows the batch's events: what the sandbox denied, on the batch that ends the monitor.
+			const flush = (force = false, after = "") => {
 				flushTimer = undefined;
 				if (batchSize(pending) === 0) return;
 				if (!force && notify.holding()) {
@@ -492,7 +520,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// end's own recent tail and task_output's result hold those lines.
 				notify(
 					"task-notification",
-					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch, (more) => text.monitor.moreLines({ ...more, logPath: task.logPath })) }),
+					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: [formatMonitorEvents(id, batch, (more) => text.monitor.moreLines({ ...more, logPath: task.logPath })), after].filter(Boolean).join("\n") }),
 					{ taskId: id, events: batchSize(batch), ...(force ? { [TASK_COMPLETION_KEY]: true } : {}) },
 				);
 			};
@@ -531,11 +559,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 					finish();
 					// After shutdown or inside a one-shot run, report through `finished` alone.
 					if (!alive() || oneShot) return;
+					// What the sandbox denied the command rides its end, as a background shell's completion carries it.
+					const denied = sandboxRun?.withViolations("").trim() ?? "";
 					if (expired) {
 						// The expiry line rides the monitor's last batch and is no event.
 						const duration = formatDuration(0, timeoutMs).replace(/ 0[sm]$/, "");
 						pushEvent(pending, text.monitor.expired({ duration, events: eventCount, stderrPath: stderrWritten ? task.logPath : undefined }));
-						flush(true);
+						flush(true, denied);
 						return;
 					}
 					flush(true);
@@ -550,7 +580,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							toolUseId: toolCallId,
 							status: ccStatus,
 							summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
-							result: recent || undefined,
+							result: [recent, denied].filter(Boolean).join("\n") || undefined,
 						}),
 						{ taskId: id, status: finalStatus, [TASK_COMPLETION_KEY]: true },
 					);
@@ -583,7 +613,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// The session's bash (Git Bash on Windows) — lib/shell-run/shell-spawn.ts.
 				const bash = bashSpawn();
 				if (!bash.spawn) return startFailed({ kind: "noShell", osMessage: bash.error });
-				const tree = spawnOwnedShell({ shell: bash.spawn, command: params.command, cwd: ctx.cwd });
+				const tree = spawnOwnedShell({ shell: bash.spawn, command: command ?? params.command, cwd: ctx.cwd });
 				const child = tree.child;
 				const lines = new MonitorLineSplitter();
 				// Streaming decoders: a UTF-8 character split across reads stays whole.
@@ -671,7 +701,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// than persist the tail. Without one, say what was lost.
 				const spooled = overflowed && task.logPath ? persistedFilePreview(task.logPath) : undefined;
 				const kept = overflowed && !spooled ? `${spoolLost}${stored.trim()}` : stored.trim() || text.monitor.noEvents;
-				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				const shown = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				// What the sandbox denied the command follows its events.
+				const output = sandboxRun ? sandboxRun.withViolations(shown) : shown;
 				const finalStatus = task.status;
 				const end: MonitorEnd =
 					finalStatus !== "stopped"

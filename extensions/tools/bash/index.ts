@@ -27,22 +27,23 @@ import { Type } from "typebox";
 import { childProcessEnv, LAUNCHER_ENV_VAR } from "../../lib/app/app-launch.mjs";
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../../lib/shell-run/shell-spawn.ts";
-import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
+import { registerShellTool, sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
+import type { ShellParams, ShellSandboxText } from "../../lib/shell-run/shell-text.ts";
 import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
 import { shellResultText } from "../../lib/shell-run/shell-text.ts";
 import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
 import { turnAfterBashAllowed, USER_BASH_CHANNEL, type UserBashTurnRequest, withTurnAfterRun } from "../../lib/shell-run/user-bash-turn.ts";
 
 /** The tool's parameters, described in the profile's words. */
-const bashParams = (d: ShellParams) =>
+const bashParams = (d: ShellParams, sandbox: ShellSandboxText) =>
 	Type.Object({
 		command: Type.String({ description: d.command }),
 		timeout: Type.Optional(Type.Number({ description: d.timeout })),
 		description: Type.Optional(Type.String({ description: d.description })),
 		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
+		...sandboxParams(sandbox, { leave: true }),
 	});
 
 function bashExtension(pi: ExtensionAPI) {
@@ -94,7 +95,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		name: "bash",
 		ccLabel: "Bash",
 		description: describe(),
-		parameters: bashParams(text.bashParams),
+		parameters: bashParams(text.bashParams, text.sandbox),
+		sandboxText: () => text.sandbox,
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardBlock,

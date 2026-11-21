@@ -45,6 +45,7 @@ import { claudeConfigDir, claudeJsonPath, productStateDir } from "../profile/pat
 import { gateControlFiles } from "../profile/settings-files.ts";
 import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
+import { sandboxGateFacts } from "../shell-run/sandbox.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../rules/matcher.ts";
 import { projectAllowApproved } from "../consent/project-trust.ts";
@@ -220,6 +221,7 @@ export function permissionGateFactory(
 						const input = (event.input ?? {}) as Record<string, unknown>;
 						return await bridge({
 							toolName: event.toolName,
+							toolCallId: event.toolCallId,
 							input,
 							cwd: runCwd,
 							signal: ctx?.signal,
@@ -251,6 +253,8 @@ export function permissionGateFactory(
 				// PowerShell is judged from its own parse, as in the parent's gate;
 				// without one it clears nothing and the call is denied here.
 				const powershellParse = await parsePowerShell(tool, subject, mode);
+				// Never auto here, so the call's own hosts do not count (`sandboxGateFacts`).
+				const { unsandboxed, sandboxed } = sandboxGateFacts(tool, event.input as Record<string, unknown>, subject, mode);
 				const result = decide({
 					toolName: event.toolName,
 					subject,
@@ -272,6 +276,8 @@ export function permissionGateFactory(
 					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
 					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,
 					powershellParse,
+					unsandboxed,
+					sandboxed,
 				});
 				if (result.decision === "allow") return undefined;
 				const outsideWorkingDir = result.cause === "working-dir";

@@ -38,6 +38,7 @@ that explains it.
 | `/lsp` | Show language-server status. | [Language servers](configuration.md#language-server-diagnostics) |
 | `/permissions` | Open the permissions panel: approve calls auto mode denied, and manage rules, auto-mode rules, and workspace directories. | [Manage permissions in the panel](permissions-modes-and-auto-mode.md#manage-permissions-in-the-panel) |
 | `/add-dir [path]` | Add a workspace directory, for this session or remembered. | [Workspace directories](permissions-modes-and-auto-mode.md#workspace-directories) |
+| `/sandbox` | Open the sandbox panel: choose how shell commands are sandboxed and see the rules in force. | [The /sandbox panel](sandbox.md#the-sandbox-panel) |
 | `/allow <rule> [global]` | Save an allow rule for this repository, or for every repository with `global`. | [Add a rule](permissions-modes-and-auto-mode.md#add-a-rule-during-a-session) |
 | `/auto-mode`, `/auto-mode config` | Show the effective auto-mode configuration. | [Auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode) |
 | `/auto-mode setup` | Draft and save an auto-mode configuration for this environment. | |

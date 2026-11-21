@@ -28,6 +28,12 @@ export type MonitorStartFailure =
 	| { kind: "commandOrSocket" }
 	/** No bash shell to run the command; `osMessage` says why, when known. */
 	| { kind: "noShell"; osMessage?: string }
+	/** The shell sandbox is required by the settings and is not running. */
+	| { kind: "sandboxRequired"; reason: string }
+	/** A WebSocket monitor was given a host list, which only a command takes. */
+	| { kind: "hostsNeedCommand" }
+	/** The command's own host list has an entry the sandbox rejects. */
+	| { kind: "hostsRejected"; reason: string }
 	| { kind: "socketFailed"; url: string; osMessage: string };
 
 /** How a monitor in a one-shot run ended. */
@@ -226,6 +232,12 @@ function startFailed(failure: MonitorStartFailure): string {
 			return "Pass exactly one of `command` or `ws`.";
 		case "noShell":
 			return `Cannot start the monitor: ${failure.osMessage ?? "no bash shell was found"}`;
+		case "sandboxRequired":
+			return `Cannot start the monitor: the user's settings require the command sandbox (sandbox.failIfUnavailable) and it is not running: ${failure.reason}. Tell the user what is missing.`;
+		case "hostsNeedCommand":
+			return "allowed_domains applies only to a command monitor";
+		case "hostsRejected":
+			return `Cannot start the monitor: its \`allowed_domains\` list has an entry the sandbox rejects (${failure.reason}). Name each host as a domain, a wildcard ("*.example.com") or an address, each with an optional ":port".`;
 		case "socketFailed":
 			return `Could not open the WebSocket — check \`ws.url\` ("${failure.url}"): ${failure.osMessage}`;
 	}

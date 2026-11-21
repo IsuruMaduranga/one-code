@@ -26,22 +26,22 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { perCwd } from "../../lib/core/per-cwd.ts";
-import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
-import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
+import { bashSpawn, createPowerShellOperations, createSandboxedPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellBashLine, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
+import { registerShellTool, sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
 import { followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { shellResultText, type ShellText } from "../../lib/shell-run/shell-text.ts";
 import { powershellGuardBlock } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 
-/** Claude Code's PowerShell schema (captured), minus `dangerouslyDisableSandbox` — One Code has no sandbox to disable. */
-/** The tool's parameters, described in the profile's words. */
-const powerShellParams = (d: ShellText["powershellParams"]) => {
+/** The tool's parameters, described in the profile's words; the sandbox's two only where the settings turn it on, as on the bash tool. */
+const powerShellParams = (d: ShellText["powershellParams"], sandbox: ShellText["sandbox"]) => {
 	return Type.Object({
 		command: Type.String({ description: d.command }),
 		timeout: Type.Optional(Type.Number({ description: d.timeout })),
 		description: Type.Optional(Type.String({ description: d.description })),
 		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
+		...sandboxParams(sandbox, { leave: true }),
 	});
 };
 
@@ -65,7 +65,18 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		name: "powershell",
 		ccLabel: "PowerShell",
 		description: text.powershellDescription({ edition: powerShellEdition(spec) }),
-		parameters: powerShellParams(text.powershellParams),
+		parameters: powerShellParams(text.powershellParams, text.sandbox),
+		sandboxText: () => text.sandbox,
+		// The sandbox runs every command through a bash, so a sandboxed PowerShell command is a bash line that runs pwsh.
+		...(spec
+			? {
+					sandboxed: {
+						bash: () => bashSpawn().spawn,
+						line: (command: string) => powerShellBashLine(spec, command),
+						foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: createSandboxedPowerShellOperations() })),
+					},
+				}
+			: {}),
 		base,
 		// The guideline joins the system prompt's tool guidelines at registration
 		// (before the first request), so it is part of the cached prefix, never a

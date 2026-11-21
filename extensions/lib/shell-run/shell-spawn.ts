@@ -35,6 +35,7 @@ import { getAgentDir, getPowerShellConfig, getShellConfig } from "@earendil-work
 import { childProcessEnv } from "../app/app-launch.mjs";
 import { readSettingsEnv } from "../profile/settings-files.ts";
 import { PowerShellParser, sharedPowerShellParser } from "../shell/powershell-parser.ts";
+import { shellQuote } from "../shell/shell-quote.ts";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "./process-tree.ts";
 import { whichOnPath } from "./which.ts";
 
@@ -314,24 +315,43 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
  * — `aborted`, `timeout:<seconds>` — which the tool definition formats.
  */
 export function createPowerShellOperations(resolve: () => ShellSpawn | undefined = powerShellSpawn): ShellOperations {
+	return shellOperations(resolve, {
+		prefix: POWERSHELL_TOOL_PREFIX,
+		missing: () =>
+			process.platform === "win32"
+				? "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH."
+				: "No PowerShell executable found. Install PowerShell 7 (pwsh) and put it on PATH.",
+	});
+}
+
+/**
+ * The same operations for a PowerShell command the shell sandbox has wrapped:
+ * the wrapped command is a bash line that runs `pwsh` inside the sandbox
+ * (`powerShellBashLine`), so bash runs it and the tool's prefix is already in
+ * the line.
+ */
+export function createSandboxedPowerShellOperations(): ShellOperations {
+	return shellOperations(() => bashSpawn().spawn, { prefix: "", missing: () => "No bash was found to run the sandboxed PowerShell command." });
+}
+
+/** The bash line that runs `command` in the PowerShell `spec` names, as the PowerShell tool itself would. */
+export function powerShellBashLine(spec: ShellSpawn, command: string): string {
+	return [spec.shell, ...spec.args, `${POWERSHELL_TOOL_PREFIX}${command}`].map(shellQuote).join(" ");
+}
+
+function shellOperations(resolve: () => ShellSpawn | undefined, opts: { prefix: string; missing: () => string }): ShellOperations {
 	return {
 		exec: async (command, cwd, { onData, signal, timeout, env }) => {
 			const timeoutMs = resolveTimeoutMs(timeout);
 			if (signal?.aborted) throw new Error("aborted");
 			const spec = resolve();
-			if (!spec) {
-				throw new Error(
-					process.platform === "win32"
-						? "No PowerShell executable found. Install PowerShell or add powershell.exe/pwsh.exe to PATH."
-						: "No PowerShell executable found. Install PowerShell 7 (pwsh) and put it on PATH.",
-				);
-			}
+			if (!spec) throw new Error(opts.missing());
 			try {
 				await access(cwd, constants.F_OK);
 			} catch {
 				throw new Error(`Working directory does not exist: ${cwd}\nCannot execute PowerShell commands.`);
 			}
-			const child = spawnShellCommand(spec, `${POWERSHELL_TOOL_PREFIX}${command}`, {
+			const child = spawnShellCommand(spec, `${opts.prefix}${command}`, {
 				cwd,
 				...detachedSpawnOptions(),
 				env: env ?? process.env,
