@@ -7,7 +7,7 @@ import { adjustsOpenRouter, openRouterAdjust } from "../../extensions/request/ca
 import { openRouterRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
 import { resolveProfile } from "../../extensions/lib/profile/profile.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
-import { profile as shippedProfile } from "../../profile/index.ts";
+import { profile as shippedProfile } from "./helpers/default-profile.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const FLOOR = ["fp8", "bf16", "fp16", "fp32", "unknown"];

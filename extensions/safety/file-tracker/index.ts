@@ -2,8 +2,9 @@
  * file-tracker extension — Claude Code's read-before-write discipline.
  *
  * - `edit`/`write`/`notebook_edit` on a file that exists but was never read is
- *   blocked with an instruction to read it first, except a `write` over an
- *   empty regular file, which has nothing to lose (`writeDiscardsNothing`).
+ *   blocked with an instruction to read it first, except a `write` over a
+ *   blank regular file (empty, or only spaces, tabs and line breaks), which
+ *   has nothing to lose (`writeDiscardsNothing`).
  *   A file that exists but cannot be read is refused the same way, and a
  *   device, FIFO or socket is refused outright (opening one can block).
  * - An edit to a file that changed since we last saw it is blocked, so the model

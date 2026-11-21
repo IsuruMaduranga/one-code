@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { persistExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
 import { resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
-import { profile } from "../../profile/index.ts";
+import { profile } from "./helpers/default-profile.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
 
 let root: string;

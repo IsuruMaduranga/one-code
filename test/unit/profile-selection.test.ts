@@ -16,11 +16,13 @@ import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { loadUserProfile, type UserProfile, wordedByUser } from "../../extensions/lib/profile/user-profile.ts";
 import { requestIdentity } from "../../extensions/lib/request/anthropic-auth.ts";
 import systemPromptExtension from "../../extensions/request/system-prompt/index.ts";
-import { profile as shippedProfile } from "../../profile/index.ts";
+import { profile as shippedProfile } from "./helpers/default-profile.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { tempHome } from "./helpers/temp-home.ts";
 
 const product = { envPrefix: "X", profiles: ["QA", "lab"] };
+/** The product in this checkout with `profile/` itself as its default profile, whatever its brand names. */
+const { defaultProfile: _default, ...rootDefault } = data as typeof data & { defaultProfile?: string };
 const argv = (...args: string[]) => ["node", "bin", ...args];
 
 afterEach(() => setActiveProfileForTest(undefined));
@@ -46,7 +48,7 @@ describe("the profile a launch names", () => {
 		expect(selectedProfileName(product, argv("--profile="), {})).toBe("");
 		// The flag after it is still pi's to read.
 		expect(withoutProfileFlags(["--profile", "-p", "hi"], product)).toEqual(["-p", "hi"]);
-		const resolved = resolveBrand(data, { name: "", profileRoot: "/p", sharedStateDir: "/s", read: () => ({}) });
+		const resolved = resolveBrand(rootDefault, { name: "", profileRoot: "/p", sharedStateDir: "/s", read: () => ({}) });
 		expect(resolved.selection).toEqual({ userProfile: "" });
 		expect(loadUserProfile("", "/s/profiles").problems).toEqual(["--profile needs a name: the profile's folder name, or one of the product's profiles"]);
 	});
@@ -61,7 +63,7 @@ describe("the profile a launch names", () => {
 });
 
 describe("a product profile's brand", () => {
-	const brand = { ...data, profiles: ["QA"] };
+	const brand = { ...rootDefault, profiles: ["QA"] };
 	const files: Record<string, unknown> = {
 		[join("/pkg/profile", "profiles", "QA", "brand.json")]: { name: "QA Agent", stateDir: ".qa" },
 		[join("/state", "profiles", "lean", "profile.json")]: { base: "qa" },
@@ -104,15 +106,69 @@ describe("a product profile's brand", () => {
 		expect(resolve("missing").profileDir).toBe("profile");
 	});
 
+	describe("with a default profile in a folder of its own", () => {
+		const withDefault = { ...rootDefault, profiles: ["Main", "QA"], defaultProfile: "Main" };
+		const missing = (path: string) => {
+			if (path in files) return files[path];
+			throw Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
+		};
+		const resolveDefault = (name: string | undefined, product: unknown = withDefault) => resolveBrand(product, { name, profileRoot: "/pkg/profile", sharedStateDir: "/state", read: missing });
+
+		it("runs that profile's folder with no choice, as its flag would, under the product's names when it has none of its own", () => {
+			for (const name of [undefined, "main", "Main"]) {
+				const resolved = resolveDefault(name);
+				expect(resolved.selection).toEqual({ productProfile: "Main" });
+				expect(resolved.profileDir).toBe("profile/profiles/Main");
+				expect(resolved.brand).toEqual(resolved.product);
+			}
+			files[join("/pkg/profile", "profiles", "Main", "brand.json")] = { subtitle: "the main one" };
+			try {
+				expect(resolveDefault(undefined).brand.subtitle).toBe("the main one");
+				// The shared folder keeps the product's name: sign-in and users' profiles are the product's.
+				expect(resolveDefault(undefined).product.subtitle).toBe(rootDefault.subtitle);
+			} finally {
+				delete files[join("/pkg/profile", "profiles", "Main", "brand.json")];
+			}
+		});
+
+		it("still runs the other profiles by their flag, each needing its own names", () => {
+			expect(resolveDefault("QA").selection).toEqual({ productProfile: "QA" });
+			expect(resolveDefault("QA").brand.stateDir).toBe(".qa");
+			const noNames = { ...withDefault, profiles: ["Main", "Lab"] };
+			expect(() => resolveDefault("lab", noNames)).toThrow(/profile "Lab": cannot read .*ENOENT/);
+		});
+
+		it("puts a user's profile on it unless the profile names another", () => {
+			expect(resolveDefault("lean").selection).toEqual({ productProfile: "QA", userProfile: "lean" });
+			expect(resolveDefault("plain").selection).toEqual({ productProfile: "Main", userProfile: "plain" });
+			expect(resolveDefault("missing").profileDir).toBe("profile/profiles/Main");
+		});
+
+		it("refuses a default that is not one of the profiles as the list spells it", () => {
+			expect(() => resolveDefault(undefined, { ...withDefault, defaultProfile: "Other" })).toThrow(/"defaultProfile" must be one of the ids in "profiles"/);
+			expect(() => resolveDefault(undefined, { ...withDefault, defaultProfile: "main" })).toThrow(/"defaultProfile" must be one of/);
+			expect(() => resolveDefault(undefined, { ...rootDefault, profiles: undefined, defaultProfile: "Main" })).toThrow(/"defaultProfile" must be one of/);
+		});
+
+		it("still refuses a default profile's brand.json that cannot be read for another reason", () => {
+			const broken = (path: string) => {
+				if (path.endsWith(join("Main", "brand.json"))) throw new SyntaxError("Unexpected token");
+				return missing(path);
+			};
+			expect(() => resolveBrand(withDefault, { name: undefined, profileRoot: "/pkg/profile", sharedStateDir: "/state", read: broken })).toThrow(/profile "Main": cannot read .*Unexpected token/);
+		});
+	});
+
 	it("refuses a profiles list with a repeated id or the id \"profile\"", () => {
 		expect(() => resolveBrand({ ...data, profiles: ["qa", "QA"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/twice/);
 		expect(() => resolveBrand({ ...data, profiles: ["profile"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/--profile/);
 		expect(() => resolveBrand({ ...data, profiles: ["QA", "Resume"] }, { name: undefined, profileRoot: "/p", sharedStateDir: "/s", read })).toThrow(/must not use "Resume": `--Resume` is already a launch flag/);
 	});
 
-	// The product in this checkout: One Code ships one profile, the fixture product two.
-	it.skipIf((productBrand.profiles ?? []).length === 0)("is in force in a process launched with the profile's flag", () => {
-		const id = productBrand.profiles![0];
+	// The product in this checkout: One Code ships one profile, the fixture product two (its default in a folder of its own).
+	const other = (productBrand.profiles ?? []).find((id) => id !== productBrand.defaultProfile);
+	it.skipIf(other === undefined)("is in force in a process launched with the profile's flag", () => {
+		const id = other!;
 		const module = fileURLToPath(new URL("../../extensions/lib/profile/brand.mjs", import.meta.url));
 		const launch = fileURLToPath(new URL("../../extensions/lib/app/app-launch.mjs", import.meta.url)).replaceAll("\\", "/");
 		const script = `const m = await import(${JSON.stringify(`file://${module.replaceAll("\\", "/")}`)}); const l = await import(${JSON.stringify(`file://${launch}`)}); const env = {}; const agent = l.applyLauncherEnv(env, { home: "/h", appVersion: "1", installMethod: "npm" }); console.log(JSON.stringify([m.brand.stateDir, m.productBrand.stateDir, m.profileDirName, m.profileSelection, agent, env[l.SESSION_DIR_VAR], m.sharedStateDir({}, "/h"), m.sharedStateDir({ [m.productBrand.envPrefix + "_STATE_DIR"]: "/run" }, "/h")]));`;
@@ -132,6 +188,17 @@ describe("a product profile's brand", () => {
 		expect(stateDir).not.toBe(shared);
 		expect(dir).toBe(`profile/profiles/${id}`);
 		expect(selection).toEqual({ productProfile: id });
+	});
+
+	it("is the default profile in a process launched with no choice", () => {
+		const module = fileURLToPath(new URL("../../extensions/lib/profile/brand.mjs", import.meta.url)).replaceAll("\\", "/");
+		const script = `const m = await import(${JSON.stringify(`file://${module}`)}); console.log(JSON.stringify([m.profileDirName, m.profileSelection, m.brand.stateDir === m.productBrand.stateDir]));`;
+		const env: NodeJS.ProcessEnv = { ...process.env };
+		delete env[`${productBrand.envPrefix}_PROFILE`];
+		const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], { env, encoding: "utf8" });
+		const def = productBrand.defaultProfile;
+		// The fixture's default has no brand.json of its own, so it keeps the product's state folder, as `profile/` does.
+		expect(JSON.parse(run.stdout)).toEqual(def === undefined ? ["profile", {}, true] : [`profile/profiles/${def}`, { productProfile: def }, true]);
 	});
 });
 
@@ -252,14 +319,17 @@ describe("the profile resolved with a user's own over it", () => {
 
 	it("is part of a request's identity, so a session resumed under another profile renders again", () => {
 		const model = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };
-		expect(requestIdentity(model as never)).not.toHaveProperty("profile");
+		// A brand's default profile is a product profile like any other: its id is part of the key.
+		const def = productBrand.defaultProfile;
+		if (def === undefined) expect(requestIdentity(model as never)).not.toHaveProperty("profile");
+		else expect(requestIdentity(model as never)?.profile).toBe(def);
 		setActiveProfileForTest({ ...activeProfile(), user: user({ hash: "abc" }) });
-		expect(requestIdentity(model as never)?.profile).toBe(":lean:abc");
+		expect(requestIdentity(model as never)?.profile).toBe(`${def ?? ""}:lean:abc`);
 		// The environment's off-switches shape the head too, in any order they are written.
 		setActiveProfileForTest(undefined);
 		const off = (tools: string) => profileKey({ [`${productBrand.envPrefix}_TOOLS_OFF`]: tools });
 		expect(off("web_fetch, notebook_edit")).toBe(off("notebook_edit,web_fetch"));
 		expect(off("web_fetch")).not.toBe(off("notebook_edit"));
-		expect(profileKey({})).toBeUndefined();
+		expect(profileKey({})).toBe(def);
 	});
 });

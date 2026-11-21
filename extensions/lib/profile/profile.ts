@@ -1,7 +1,8 @@
 /**
  * The profile in force: `profile/index.ts` at the repo root (One Code's, or a
- * product's in its place), or the product profile the launch chose
- * (`profile/profiles/<id>/index.ts`, lib/profile/brand.mjs), resolved and
+ * product's in its place), or the product profile the launch chose or the
+ * brand names as its default (`profile/profiles/<id>/index.ts`,
+ * lib/profile/brand.mjs), resolved and
  * checked once per module instance (pure, apart from reading the environment
  * and the profile module).
  *
@@ -21,14 +22,14 @@
 
 import { brandedId, envName, productBrand, profileDirName, profileSelection, userProfilesDir } from "./brand.mjs";
 import { describeUserProfile, loadUserProfile, type UserProfile } from "./user-profile.ts";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { isRelativeInside, tildify } from "./paths.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { processState } from "./process-state.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, isProductExtensionFolder, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
@@ -43,7 +44,7 @@ import { parseToolFlags, type PiToolFilter, piRegisters, piToolFilter, piToolFil
 import { launchSetsThinking, parseThinkingFlags } from "./pi-thinking-flags.ts";
 import { type ThinkingDefaults, thinkingDefaultProblems } from "./thinking-defaults.ts";
 
-/** The product's folder: the default profile, and what every profile of the product shares (`extensions/`, `themes/`). */
+/** The product's folder: what every profile of the product shares (`extensions/`, `themes/`), and the default profile unless the brand names one (`defaultProfile`). */
 export const PRODUCT_DIR = join(PACKAGE_ROOT, "profile");
 
 /** The folder of the profile in force: `PRODUCT_DIR`, or the chosen product profile's folder under it. */
@@ -167,6 +168,7 @@ const REQUIRED_GROUPS: Readonly<Record<Exclude<keyof ProfileText, OptionalGroup>
 const PROFILE_FIELDS: Readonly<Record<keyof Profile, true>> = {
 	features: true,
 	tools: true,
+	extensions: true,
 	childExtensions: true,
 	text: true,
 	providers: true,
@@ -202,6 +204,14 @@ export interface ResolvedProfile {
 	live: LiveTools;
 	/** The registry filter pi's `--tools`, `--exclude-tools` and `--no-tools` make for this process (lib/profile/pi-tool-flags.ts); absent when they filter nothing. */
 	launchTools?: PiToolFilter;
+	/**
+	 * Every product extension folder (`<product>/extensions/<name>/index.ts`), by
+	 * name, and whether this profile runs it (`Profile.extensions`); the
+	 * `productExtension` wrapper reads it (lib/profile/feature.ts).
+	 */
+	productExtensions: ReadonlyMap<string, boolean>;
+	/** The product profile in force, as the brand's `profiles` list spells it; undefined on a product whose default profile is `profile/` itself, when the launch chose none. */
+	productProfile: string | undefined;
 	/** Absolute entry files child sessions load after the base's own. */
 	childExtensionPaths: readonly string[];
 	/** The profile's model-facing text, built for `live`. */
@@ -238,20 +248,56 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 }
 
 /**
- * A child extension entry must be a file under the profile's extensions
- * folder: a misspelled one would otherwise fail only when the first subagent
- * starts, and one outside the folder escapes the import-surface check.
+ * The product's extension folders the manifest's glob loads: every folder,
+ * a linked one included, with an `index.ts`. Read on each resolve, not once
+ * per process: /reload globs the entries again, and a folder added since must
+ * not stop the wrapper (a few file checks per extension copy at startup).
  */
-function childExtensionProblems(entries: readonly string[], profileDir: string): string[] {
-	const root = resolve(profileDir, PRODUCT_EXTENSIONS_DIR);
+export function productExtensionFolders(productDir: string): string[] {
+	const root = resolve(productDir, PRODUCT_EXTENSIONS_DIR);
+	if (!existsSync(root)) return [];
+	return readdirSync(root)
+		.filter((name) => isProductExtensionFolder(name) && existsSync(join(root, name, "index.ts")))
+		.sort();
+}
+
+/**
+ * The product extensions a profile runs, folder by folder, and what is
+ * wrong with its `extensions` list: a name with no folder would otherwise
+ * leave the extension it meant off in silence.
+ */
+function productExtensionChoice(listed: unknown, folders: readonly string[]): { choice: Map<string, boolean>; problems: string[] } {
+	if (listed !== undefined && (!Array.isArray(listed) || listed.some((name) => typeof name !== "string"))) {
+		return { choice: new Map(folders.map((name) => [name, false])), problems: [`its "extensions" must be an array of folder names under ${PRODUCT_EXTENSIONS_DIR}/`] };
+	}
+	const names = listed as readonly string[] | undefined;
+	const problems = (names ?? []).filter((name) => !folders.includes(name)).map((name) => `it lists the extension "${name}", which has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts`);
+	return { choice: new Map(folders.map((name) => [name, names === undefined || names.includes(name)])), problems };
+}
+
+/**
+ * A child extension entry must be a file in one of the product's extension
+ * folders (one with an `index.ts`), a folder the profile runs: a misspelled
+ * one would otherwise fail only when the first subagent starts, one outside
+ * the folder escapes the import-surface check, one outside an extension
+ * folder has no name for its `productExtension` wrapper (which would stop the
+ * process mid-session), and one the profile leaves out would never run.
+ */
+function childExtensionProblems(entries: readonly string[], productDir: string, choice: ReadonlyMap<string, boolean>): string[] {
+	const root = resolve(productDir, PRODUCT_EXTENSIONS_DIR);
 	const problems: string[] = [];
 	for (const entry of entries) {
-		const path = resolve(profileDir, entry);
+		const path = resolve(productDir, entry);
 		const inside = relative(root, path);
+		const folder = inside.split(/[\\/]/)[0];
 		if (!isRelativeInside(inside)) {
 			problems.push(`child extension "${entry}" must be a file under ${PRODUCT_EXTENSIONS_DIR}/ in the profile folder`);
 		} else if (!existsSync(path)) {
 			problems.push(`child extension "${entry}" does not exist (${path})`);
+		} else if (!choice.has(folder)) {
+			problems.push(`child extension "${entry}" must sit in a product extension folder, one with an index.ts (${PRODUCT_EXTENSIONS_DIR}/<name>/), whose name its productExtension wrapper carries`);
+		} else if (choice.get(folder) === false) {
+			problems.push(`child extension "${entry}" is in the folder "${folder}", which the profile's extensions list leaves out`);
 		}
 	}
 	return problems;
@@ -269,14 +315,18 @@ function childExtensionProblems(entries: readonly string[], profileDir: string):
  * declares an OpenRouter routing default OpenRouter would not take, turns
  * off a tool its feature or another live tool cannot do without, or leaves
  * out a text group a feature that is on reads.
- * `extensionsRoot` is the folder child extension entries are relative to: the
- * product's, which every product profile shares (default: `profileDir`).
+ * `extensionsRoot` is the product's folder, which every product profile
+ * shares: its `extensions/` holds the product extensions, and child extension
+ * entries are relative to it (default: `PRODUCT_DIR`, whichever profile
+ * `profileDir` is).
  * `user` is the user's own profile over it: its switches join the
  * environment's, under the same limits. `launchTools` is the filter pi's
  * tool flags make (`launchToolFilter`): it narrows `live` and the text built
  * for it, and is never checked, since pi applies it whatever the profile needs.
+ * `productProfile` is the product profile's id it runs as (default: the
+ * launch's, lib/profile/brand.mjs).
  */
-export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = profileDir, user?: UserProfile, launchTools?: PiToolFilter): ResolvedProfile {
+export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = PRODUCT_DIR, user?: UserProfile, launchTools?: PiToolFilter, productProfile: string | undefined = profileSelection.productProfile): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
@@ -303,7 +353,9 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		if (sw?.enabled === false) problems.push(`"${name}" cannot be turned off`);
 		if (sw?.deferred === true) problems.push(`"${name}" cannot be deferred`);
 	}
-	problems.push(...childExtensionProblems(profile.childExtensions, extensionsRoot));
+	const extensions = productExtensionChoice(profile.extensions, productExtensionFolders(extensionsRoot));
+	problems.push(...extensions.problems);
+	problems.push(...childExtensionProblems(profile.childExtensions, extensionsRoot, extensions.choice));
 	problems.push(...providerProblems(profile.providers ?? {}));
 	problems.push(...secretFileProblems(profile.secretFiles ?? []));
 	problems.push(...readOnlyCommandProblems(profile.readOnlyCommands ?? {}));
@@ -352,6 +404,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		disabledTools,
 		live,
 		...(launchTools ? { launchTools } : {}),
+		productExtensions: extensions.choice,
+		productProfile,
 		childExtensionPaths: profile.childExtensions.map((entry) => resolve(extensionsRoot, entry)),
 		text,
 		textFor: (other) => profile.text({ live: other }),
@@ -383,14 +437,15 @@ function chosenUserProfile(): UserProfile | undefined {
  * What a session records of the launch choices that shape its system prompt
  * and tools: the product profile's id, the user's profile with its content
  * hash, the environment's off-switches, and pi's tool flags. Undefined when the launch chose
- * none of them. A session resumed under other choices renders its system
+ * none of them and the default profile is `profile/` itself (a brand's
+ * `defaultProfile` is a product profile, so its id is recorded). A session resumed under other choices renders its system
  * prompt and tools again (lib/request/ledger/fold.ts, the "profile" epoch);
  * without that it would go on sending the recorded ones.
  */
 export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const user = activeProfile().user;
 	const off = [envName("FEATURES_OFF"), envName("TOOLS_OFF")].map((name) => envList(env, name).sort().join(","));
-	const parts = [profileSelection.productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : "", piToolFilterKey(activeProfile().launchTools) ?? ""];
+	const parts = [activeProfile().productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : "", piToolFilterKey(activeProfile().launchTools) ?? ""];
 	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
 }
 
@@ -399,29 +454,32 @@ export function wordedTools(): Set<string> {
 	return processState("profile:worded-tools", () => new Set<string>());
 }
 
-/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder (shown from `home`) and what it changes. Undefined on the default profile alone. */
+/** The profile the launch chose, as /doctor names it: the product profile's id, the user's own with its folder (shown from `home`) and what it changes. Undefined on the default profile alone, when it is `profile/` itself. */
 export function profileSummary(home: string): string | undefined {
 	const user = activeProfile().user;
 	// A worded tool no extension has registered by now: a misspelled name, or a server that is not connected.
 	const unused = user ? [...user.toolWording.keys()].filter((name) => !wordedTools().has(name)) : [];
 	const note = unused.length > 0 ? `; no tool named ${unused.join(", ")} is registered, so that wording is unused` : "";
-	const parts = [...(profileSelection.productProfile !== undefined ? [profileSelection.productProfile] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}${note}`] : [])];
+	const id = activeProfile().productProfile;
+	const parts = [...(id !== undefined ? [id] : []), ...(user ? [`${user.name} (${tildify(user.dir, home)}): ${describeUserProfile(user)}${note}`] : [])];
 	return parts.length > 0 ? parts.join(", with your own profile ") : undefined;
 }
 
 /** The slot the evaluated profile module is shared under (lib/profile/shared-module.ts). */
 const SHIPPED_PROFILE = brandedId("shipped-profile");
-const PROFILE_MODULE = resolve(PROFILE_DIR, "index.ts");
+/** The chosen profile's module (its folder's `index.ts`). */
+export const PROFILE_MODULE = resolve(PROFILE_DIR, "index.ts");
 
 /**
- * The shipped profile (`profile/index.ts`), evaluated by the first copy of
+ * The shipped profile (the chosen folder's `index.ts`), evaluated by the first copy of
  * this module that needs it and shared with the rest (see the header). It is
  * loaded on demand rather than imported, so a copy that finds it in the slot
  * never evaluates it. Sharing is safe because the module holds no state: its
  * text is constant, and its code (the source provider) loads on first use.
  */
 function shippedProfile(): Profile {
-	return sharedModule<typeof import("../../../profile/index.ts")>(SHIPPED_PROFILE, PROFILE_MODULE).profile;
+	// Typed by the contract, not by a path: a product whose brand names a default profile has no `profile/index.ts`.
+	return sharedModule<{ profile: Profile }>(SHIPPED_PROFILE, PROFILE_MODULE).profile;
 }
 
 /** Test seam: the profile the slot shares, from the test run's own import of it. */
@@ -540,6 +598,24 @@ export function secretFileNames(): ReadonlySet<string> {
  */
 export function isToolDisabled(name: string): boolean {
 	return activeProfile().disabledTools.has(name);
+}
+
+/**
+ * The product profile in force, as the brand's `profiles` list spells it:
+ * the one the launch chose, the one a user's own profile sits on, or the
+ * brand's `defaultProfile`. Undefined on the default profile of a product
+ * whose default is `profile/` itself. Fixed for the process.
+ */
+export function productProfile(): string | undefined {
+	return activeProfile().productProfile;
+}
+
+/**
+ * Whether the profile runs the product extension in folder `name`; undefined
+ * when the product has no such folder (lib/profile/feature.ts fails closed).
+ */
+export function productExtensionEnabled(name: string): boolean | undefined {
+	return activeProfile().productExtensions.get(name);
 }
 
 /**

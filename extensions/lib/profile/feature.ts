@@ -24,9 +24,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { FeatureId } from "./features.ts";
-import { activeProfile, failClosed, featureEnabled, isToolDisabled, wordedTools } from "./profile.ts";
+import { type FeatureId, PRODUCT_EXTENSIONS_DIR } from "./features.ts";
+import { activeProfile, failClosed, featureEnabled, isToolDisabled, productExtensionEnabled, wordedTools } from "./profile.ts";
 import { wordedByUser } from "./user-profile.ts";
+import { brandedId } from "./brand.mjs";
 
 /** `pi` as the profile lets an extension register tools: see the header. */
 export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
@@ -51,14 +52,43 @@ export function profiledPi(pi: ExtensionAPI): ExtensionAPI {
 	});
 }
 
+/** The profile in force, or the process stopped with the reason (see the header). */
+function requireProfile(): void {
+	try {
+		activeProfile();
+	} catch (error) {
+		failClosed(error);
+	}
+}
+
 export function feature<R>(id: FeatureId, factory: (pi: ExtensionAPI) => R): (pi: ExtensionAPI) => R | undefined {
 	return (pi: ExtensionAPI) => {
-		try {
-			activeProfile();
-		} catch (error) {
-			failClosed(error);
-		}
+		requireProfile();
 		if (!featureEnabled(id)) return undefined;
 		return factory(profiledPi(pi));
 	};
+}
+
+/** The property a `productExtension` factory carries its name under, for the base suite's check that every product extension is wrapped. */
+export const PRODUCT_EXTENSION_NAME = Symbol.for(brandedId("product-extension-name"));
+
+/**
+ * `productExtension(name, factory)`: the wrapper a product extension's entry
+ * files export (`extensions/sdk/extension.ts`), `feature()` for the
+ * product's own extensions. `name` is the extension's folder under the
+ * product's `extensions/`. The factory runs only when the profile in force
+ * runs that folder (`Profile.extensions`), in the main session and in child
+ * sessions alike, and gets the same `profiledPi` view a base feature gets: a
+ * tool the profile turns off is never registered. A name with no folder
+ * stops the process, as an invalid profile does.
+ */
+export function productExtension<R>(name: string, factory: (pi: ExtensionAPI) => R): ((pi: ExtensionAPI) => R | undefined) & { readonly [PRODUCT_EXTENSION_NAME]: string } {
+	const wrapped = (pi: ExtensionAPI) => {
+		requireProfile();
+		const enabled = productExtensionEnabled(name);
+		if (enabled === undefined) failClosed(new Error(`productExtension("${name}"): the product has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts; the name must be the extension's folder.`));
+		if (!enabled) return undefined;
+		return factory(profiledPi(pi));
+	};
+	return Object.assign(wrapped, { [PRODUCT_EXTENSION_NAME]: name });
 }

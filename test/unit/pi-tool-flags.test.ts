@@ -17,7 +17,7 @@ import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
 import { childLive } from "../../extensions/lib/agents/child-extensions.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/request/system-prompt/template.ts";
 import { PROMPT_TIERS } from "../../extensions/lib/models/model-tier.ts";
-import { profile as shipped } from "../../profile/index.ts";
+import { profile as shipped } from "./helpers/default-profile.ts";
 import { mentions } from "./helpers/tool-mentions.ts";
 
 /** The flag forms pi's help and parser accept, short ones and patterns included. */

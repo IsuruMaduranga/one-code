@@ -12,7 +12,7 @@ import { feature, profiledPi } from "../../extensions/lib/profile/feature.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest, TEXT_GROUP_READERS } from "../../extensions/lib/profile/profile.ts";
 import { BUNDLED_SKILL_TOOLS, FEATURE_CORE_TOOLS, isFeatureId, TOOL_FEATURES, TOOL_NEEDS } from "../../extensions/lib/profile/features.ts";
 import type { Profile } from "../../extensions/lib/profile/profile-contract.ts";
-import { profile as shippedProfile } from "../../profile/index.ts";
+import { profile as shippedProfile } from "./helpers/default-profile.ts";
 import { discoverPlugins, invalidatePluginsCache } from "../../extensions/lib/plugins/plugins.ts";
 import { autoMemoryEnabled, resetAutoMemoryForTest } from "../../extensions/lib/context/auto-memory.ts";
 import { DEFER_CHANNEL } from "../../extensions/lib/request/deferred.ts";
@@ -203,13 +203,15 @@ describe("resolveProfile", () => {
 		const dir = mkdtempSync(join(tmpdir(), "profile-child-"));
 		try {
 			mkdirSync(join(dir, "extensions", "sample"), { recursive: true });
+			// A child entry sits in a product extension folder, one with an index.ts.
+			writeFileSync(join(dir, "extensions", "sample", "index.ts"), "");
 			writeFileSync(join(dir, "extensions", "sample", "child.ts"), "");
-			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/sample/child.ts"] }, {}, dir));
+			setActiveProfileForTest(resolveProfile({ ...empty, childExtensions: ["extensions/sample/child.ts"] }, {}, dir, dir));
 			const paths = childExtensionPaths();
 			// Before the secret redaction, which loads last of all (secrets.test.ts).
 			expect(paths.at(-2)).toBe(join(dir, "extensions", "sample", "child.ts"));
 			expect(endsWith(paths, "tools/notebook/index.ts")).toBe(true);
-			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/sample/chlid.ts"] }, {}, dir)).toThrow(/child extension "extensions\/sample\/chlid.ts" does not exist/);
+			expect(() => resolveProfile({ ...empty, childExtensions: ["extensions/sample/chlid.ts"] }, {}, dir, dir)).toThrow(/child extension "extensions\/sample\/chlid.ts" does not exist/);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -217,7 +219,7 @@ describe("resolveProfile", () => {
 
 	it("refuses a child extension outside the profile's extensions folder", () => {
 		for (const entry of ["sample/index.ts", "extensions/../index.ts", "../extensions/x/index.ts", "extensions"]) {
-			expect(() => resolveProfile({ ...empty, childExtensions: [entry] }, {}, "/p"), entry).toThrow(/must be a file under extensions\/ in the profile folder/);
+			expect(() => resolveProfile({ ...empty, childExtensions: [entry] }, {}, "/p", "/p"), entry).toThrow(/must be a file under extensions\/ in the profile folder/);
 		}
 	});
 

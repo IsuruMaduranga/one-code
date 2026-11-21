@@ -7,6 +7,21 @@
  * lists (`Profile.childExtensions`). Everything else in `extensions/` is
  * internal and may move between releases (`profile-import-surface.test.ts`).
  *
+ * Every entry file exports its factory through `productExtension(name,
+ * factory)`, `name` being its folder: `export default
+ * productExtension("ballerina", (pi) => { … })`. The factory runs only under
+ * a profile that runs the folder (`Profile.extensions`; every one when the
+ * profile lists none), and gets the view of `pi` the base's own features get,
+ * which never registers a tool the profile turns off. The base suite fails
+ * on an entry that is not wrapped (`product-extension.test.ts`): pi loads
+ * every folder whatever the profile, so an unwrapped one would run under a
+ * profile that leaves it out. `productProfile()` names the product profile
+ * in force (the id from the brand's `profiles` list: the launch's choice,
+ * the one a user's own profile sits on, or the brand's `defaultProfile`), or
+ * undefined on a product whose default profile is `profile/` itself; an
+ * extension that several profiles run picks its wording by it. It is fixed
+ * for the process.
+ *
  * A product extension loads after the request pipeline, so it never shapes a
  * request in a `context` or payload hook. It registers tools and commands
  * through pi, and reaches the request only through these channels:
@@ -145,3 +160,5 @@ export { type ModelCapability, modelCapability, tiersBelow } from "../lib/models
 export { type NoticeLevel, queueNotice } from "../lib/notify/notices.ts";
 export { notifyOrPrint } from "../lib/notify/headless-output.ts";
 export { productSetting, type ProductSettingValue } from "../lib/profile/declared-settings.ts";
+export { productExtension } from "../lib/profile/feature.ts";
+export { productProfile } from "../lib/profile/profile.ts";

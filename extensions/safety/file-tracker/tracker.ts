@@ -156,15 +156,20 @@ export class FileTracker {
 /**
  * Whether a `write` may replace an `unread` file anyway: the target is a
  * regular file itself (not a symlink, device, FIFO or directory) whose
- * content is exactly empty, so like an absent file it holds nothing the
- * write could discard. Not `edit` (pi's edit cannot match anything in an
- * empty file) and not the notebook tool (an empty notebook does not parse).
- * A file the model read while empty and that was filled since is `stale`,
- * never `unread`, so this never lets that write through.
+ * content is blank: empty, or only ASCII spaces, tabs and line breaks
+ * (`BLANK`). Like an absent file it holds nothing the write could discard;
+ * scaffolding tools commonly create a "new empty" source file as one line
+ * break. Not `edit` (pi's edit cannot match anything in an empty file) and
+ * not the notebook tool (an empty notebook does not parse). A file the model
+ * read while blank and that was filled since is `stale`, never `unread`, so
+ * this never lets that write through.
  */
 export function writeDiscardsNothing(tool: string, target: { plainFile: boolean; content: string }): boolean {
-	return tool === "write" && target.plainFile && target.content === "";
+	return tool === "write" && target.plainFile && BLANK.test(target.content);
 }
+
+/** Blank content: nothing, or only ASCII spaces, tabs, carriage returns and line feeds. Not `\s`: a BOM or other Unicode space is content. */
+const BLANK = /^[ \t\r\n]*$/;
 
 /** What a path is on disk (`files.ts fileKind`): "other" is a device, FIFO or socket, or a symlink when not followed. */
 export type FileKind = "absent" | "file" | "directory" | "other";

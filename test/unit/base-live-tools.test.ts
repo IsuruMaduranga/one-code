@@ -14,7 +14,7 @@ import { planModeResultWords } from "../../extensions/safety/plan-mode/text.ts";
 import { subagentResultWords } from "../../extensions/lib/agents/subagent-text.ts";
 import { permissionWords } from "../../extensions/lib/rules/permission-text.ts";
 import { subagentModelWords } from "../../extensions/lib/models/subagent-model-text.ts";
-import { profile } from "../../profile/index.ts";
+import { profile } from "./helpers/default-profile.ts";
 import { ALL_LIVE } from "./helpers/live.ts";
 import { type EnglishPhrases, type NamedText, stalePassages, toolLeaks } from "./helpers/tool-mentions.ts";
 

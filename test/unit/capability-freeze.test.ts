@@ -20,7 +20,7 @@ import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import { subagentWords } from "../../extensions/agents/subagents/words.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { activeProfile, launchToolFilter, PRODUCT_DIR, PROFILE_DIR, type ResolvedProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
-import { profile as shippedProfile } from "../../profile/index.ts";
+import { profile as shippedProfile } from "./helpers/default-profile.ts";
 import { createFakeCtx, createFakePi, type FakePi, renderRequest } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import type { Reminder } from "./helpers/tool-search-fake-pi.ts";

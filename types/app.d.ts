@@ -133,12 +133,14 @@ declare module "*/brand.mjs" {
 			readonly app: PackageInfo;
 			readonly extension: PackageInfo;
 		};
-		/** The ids of the product's other profiles, each a folder `profile/profiles/<id>/`; `--<id>` in any case launches one. */
+		/** The ids of the product's profiles, each a folder `profile/profiles/<id>/`; `--<id>` in any case launches one. */
 		readonly profiles?: readonly string[];
+		/** The profile a launch with no choice runs, one of `profiles` as spelled there; left out, `profile/` itself is the default profile. */
+		readonly defaultProfile?: string;
 	}
 	/** What the launch chose (`--profile <name>`, `--<id>`, `<envPrefix>_PROFILE`). */
 	export interface ProfileSelection {
-		/** A product profile's id, as the brand's `profiles` list spells it. */
+		/** A product profile's id, as the brand's `profiles` list spells it: the default one's (`defaultProfile`) when the launch chose none. */
 		readonly productProfile?: string;
 		/** A user's own profile's name (lib/profile/user-profile.ts). */
 		readonly userProfile?: string;

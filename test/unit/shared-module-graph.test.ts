@@ -11,7 +11,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
 import { describe, expect, it } from "vitest";
-import { profile } from "../../profile/index.ts";
+import { profile } from "./helpers/default-profile.ts";
+import { PROFILE_DIR, PROFILE_MODULE } from "../../extensions/lib/profile/profile.ts";
 import { valueImports } from "./helpers/import-graph.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
@@ -57,13 +58,15 @@ describe("modules loaded through sharedModule", () => {
 	});
 
 	it("import no pi package as a value: the profile", () => {
-		expect(piValueImports(join(ROOT, "profile", "index.ts"))).toEqual([]);
+		// The profile in force (a brand's default may sit in a folder of its own): a missing file would pass with nothing walked.
+		expect(existsSync(PROFILE_MODULE)).toBe(true);
+		expect(piValueImports(PROFILE_MODULE)).toEqual([]);
 	});
 
 	it("the profile's text loads only the SDK's leaf constants from the base, never a base loader", () => {
 		// The text is evaluated while the base resolves the profile; a base
 		// module in its graph that read the profile at load would re-enter that.
-		const loaded = baseValueModules(join(ROOT, "profile", "index.ts"));
+		const loaded = baseValueModules(PROFILE_MODULE);
 		const leaves = ["extensions/lib/profile/brand.mjs", "extensions/lib/profile/live-tools.ts", "extensions/lib/profile/settings-display.ts", "extensions/lib/rules/worktree-guard-text.ts", "extensions/tools/background/loop-sentinels.ts", "extensions/tools/web/backend-names.ts"];
 		// A profile that names none of the constants loads none of them.
 		expect(loaded.filter((path) => !path.startsWith("extensions/sdk/") && !leaves.includes(path))).toEqual([]);
@@ -71,6 +74,6 @@ describe("modules loaded through sharedModule", () => {
 
 	it("import no pi package as a value: the profile's source provider, when it has one", () => {
 		// A source provider is optional (lib/profile/sources.ts); a profile without one has no graph here.
-		expect(profile.sources === undefined ? [] : piValueImports(join(ROOT, "profile", profile.sources))).toEqual([]);
+		expect(profile.sources === undefined ? [] : piValueImports(join(PROFILE_DIR, profile.sources))).toEqual([]);
 	});
 });
