@@ -24,6 +24,7 @@ const SENSITIVE_DIR_SEGMENTS = new Set([
 	".kube",
 	".m2", // Maven settings.xml holds plaintext repository credentials
 	".npm",
+	".password-store", // pass: one GPG-encrypted file per secret
 	".ssh",
 	".terraform.d",
 	"gcloud", // under .config/
@@ -35,6 +36,15 @@ const SENSITIVE_DIR_SEGMENTS = new Set([
 const SENSITIVE_DIR_PAIRS = [
 	[".config", "gcloud"],
 	[".config", "gh"],
+	[".config", "hub"], // GitHub's older CLI: an OAuth token
+	[".config", "op"], // 1Password CLI: account and device keys
+	[".config", "rclone"], // rclone.conf: remote passwords and tokens
+	[".config", "sops"], // sops/age/keys.txt: age private keys
+	[".config", "google-chrome"], // browser profiles: cookies, saved logins
+	[".config", "chromium"],
+	["google", "chrome"], // macOS: ~/Library/Application Support/Google/Chrome
+	// A project's own gradle.properties is ordinary; the user-level one holds signing and repository credentials.
+	[".gradle", "gradle.properties"],
 	[".local", "share"],
 	[".huggingface", "token"],
 	["library", "keychains"], // macOS keychain databases
@@ -50,6 +60,11 @@ const SENSITIVE_BASENAMES = new Set([
 	"credentials.toml", // cargo
 	".vault-token",
 	".gitconfig", // credential helpers, embedded tokens
+	".boto", // gsutil and boto: access keys
+	".my.cnf", // MySQL client password
+	".s3cfg", // s3cmd access keys
+	"oauth_creds.json", // Gemini CLI's login
+	"rclone.conf",
 	".bash_history",
 	".bash_profile",
 	".bashrc",
