@@ -150,6 +150,25 @@ export function referencedEnvVars(...values: string[]): string[] {
 	return [...new Set(values.flatMap(envVarNames))];
 }
 
+/** The `type` values an entry with a `url` connects by; anything else is tried as Streamable HTTP. */
+const URL_TYPES: ReadonlySet<string> = new Set(["http", "sse", "streamable-http", "streamableHttp"]);
+
+/**
+ * What is wrong with an entry that still loads, or loads as nothing, for
+ * `/mcp` to say: a `type` this client has no transport for (`ws`), which is
+ * tried as Streamable HTTP and then fails with a transport error that names
+ * nothing, and an entry with neither a `url` nor a `command`, which is
+ * dropped like a disabled one. Undefined for a sound or a disabled entry.
+ */
+export function serverEntryNote(raw: RawServer, pi = false): string | undefined {
+	if (raw.disabled === true || (pi && raw.enabled === false)) return undefined;
+	const hasUrl = typeof raw.url === "string" && raw.url.trim() !== "";
+	const hasCommand = typeof raw.command === "string" && raw.command.trim() !== "";
+	if (!hasUrl && !hasCommand) return "has neither a url nor a command, so it is ignored";
+	if (hasUrl && typeof raw.type === "string" && !URL_TYPES.has(raw.type)) return `has type "${raw.type}", which is not supported; it is tried as Streamable HTTP`;
+	return undefined;
+}
+
 export function parseServer(
 	name: string,
 	raw: RawServer,
@@ -355,6 +374,8 @@ export function loadServers(
 				options.onNote?.(`MCP server "${name}" in ${path} is skipped: ${problem}.`);
 				continue;
 			}
+			const note = serverEntryNote(raw ?? {}, piOrigin !== undefined);
+			if (note) options.onNote?.(`MCP server "${name}" in ${path} ${note}.`);
 			const server = parseServer(name, raw ?? {}, path, env, piOrigin ? piFormat : undefined);
 			const inherited = byName.get(name);
 			// The same server kept in both (common while moving between the two) is not worth a warning.
