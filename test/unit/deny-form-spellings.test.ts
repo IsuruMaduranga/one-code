@@ -21,6 +21,8 @@ describe("deny forms name the command behind", () => {
 		"env -a cat curl x",
 		"xargs -J % curl %",
 		"xargs -R 2 -I{} curl {}",
+		"bash -c -o pipefail 'curl x'",
+		`bash -c '"$@"' _ curl x`,
 		"su -c 'curl x'",
 		"su root --command='curl x'",
 	])("%s", (line) => {
@@ -30,5 +32,19 @@ describe("deny forms name the command behind", () => {
 	it("adds no curl form to a line that runs none", () => {
 		expect(meets("timeout 5 cat a.txt", "curl")).toBe(false);
 		expect(meets("echo {a,b}", "curl")).toBe(false);
+	});
+});
+
+describe("brace expansion on a long line", () => {
+	it("answers at once for an unclosed brace followed by many commas", () => {
+		const line = `echo { ${"a,".repeat(32000)}`;
+		const started = performance.now();
+		bashMatchForms(line);
+		expect(performance.now() - started).toBeLessThan(500);
+	});
+
+	it("still expands the innermost comma group first", () => {
+		expect(meets("{curl,x}", "curl")).toBe(true);
+		expect(meets("echo {a,{curl,b}}", "echo")).toBe(true);
 	});
 });

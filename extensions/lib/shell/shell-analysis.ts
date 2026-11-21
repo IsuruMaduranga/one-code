@@ -586,6 +586,40 @@ function wrappersContained(peeled: readonly string[]): boolean {
 /** Shells whose `-c` argument is a command line of its own. */
 export const INLINE_SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
 
+/** Shell options that take the next word as their value. */
+const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+
+/**
+ * The command lines a shell invocation's `-c` runs, given the shell's
+ * arguments, or undefined when it has no `-c` (alone or in a cluster such as
+ * `-lc` or `-ce`, anywhere among the leading options, whose values are
+ * skipped: `bash -c -o pipefail 'x'` runs `x`). The script is the first
+ * operand; the words after it are `$0`, `$1`, … (`bash -c 'echo ok' 'git
+ * status'` runs no git), unless the script expands them (`bash -c '"$@"' _
+ * git status`), when they are a command line too. The one reader of `-c` for
+ * the deny forms and the worktree guard.
+ */
+export function inlineShellScripts(args: readonly string[]): string[] | undefined {
+	let command = false;
+	let i = 0;
+	for (; i < args.length; i++) {
+		const value = args[i];
+		if (value === "--" || value === "-") {
+			i++;
+			break;
+		}
+		if (!/^[-+]/.test(value)) break;
+		if (SHELL_VALUE_OPTIONS.has(value)) i++;
+		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
+	}
+	if (!command) return undefined;
+	const [script, ...positional] = args.slice(i);
+	if (script === undefined) return [];
+	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.
+	if (!/\$(?:[0-9@*]|\{[0-9@*])/.test(script) || positional.length === 0) return [script];
+	return [script, positional.join(" "), positional.slice(1).join(" ")];
+}
+
 /** Commands that change the shell's working directory. */
 export const DIRECTORY_MOVERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
 

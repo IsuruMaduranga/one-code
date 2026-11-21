@@ -14,7 +14,7 @@ import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { domainToASCII } from "node:url";
-import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, programName, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
+import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, inlineShellScripts, isUnknownTilde, leadTokens, movesDirectory, namesWrite, parseCommand, programName, resolvePayload, type ShellEvidence } from "../shell/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -255,25 +255,34 @@ export function bashSubcommands(command: string): string[] | undefined {
 /** Redirect targets that are devices, never files: always fine under an allow rule. */
 const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"]);
 
-/** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
-function inlineShellScript(args: string[]): string | undefined {
-	for (let i = 0; i < args.length - 1; i++) {
-		// `c` anywhere in a short cluster (`-ce`, `-lc`); the script is the first
-		// word after it that is not an option, past a `--` (`-c -e 'x'`, `-c -- 'x'`).
-		if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(args[i])) continue;
-		for (let at = i + 1; at < args.length; at++) {
-			if (args[at] === "--") return args[at + 1];
-			if (!/^[-+][a-zA-Z]/.test(args[at])) return args[at];
-		}
-	}
-	return undefined;
-}
-
 /** The command line `su -c '…'` / `su --command='…'` runs, if any. */
 function suScript(args: string[]): string | undefined {
 	for (const [index, arg] of args.entries()) {
 		if (arg.startsWith("--command=")) return arg.slice("--command=".length);
 		if (arg === "-c" || arg === "--command" || arg === "--session-command") return args[index + 1];
+	}
+	return undefined;
+}
+
+/**
+ * The first innermost `{…}` group of `line` that holds a comma, in the shape
+ * of a regex match (`index`, the whole group, its inside). One pass: a regex
+ * for it backtracks from every `{` and stalls the gate on a long line with an
+ * unclosed brace (a heredoc of CSV after `{`).
+ */
+function firstCommaBraceGroup(line: string): { index: number; 0: string; 1: string } | undefined {
+	let open = -1;
+	let comma = false;
+	for (let i = 0; i < line.length; i++) {
+		const ch = line[i];
+		if (ch === "{") {
+			open = i;
+			comma = false;
+		} else if (ch === "," && open >= 0) comma = true;
+		else if (ch === "}") {
+			if (open >= 0 && comma) return { index: open, 0: line.slice(open, i + 1), 1: line.slice(open + 1, i) };
+			open = -1;
+		}
 	}
 	return undefined;
 }
@@ -289,7 +298,7 @@ function braceExpansions(line: string): string[] {
 		const next: string[] = [];
 		let expanded = false;
 		for (const each of lines) {
-			const group = /\{([^{}]*,[^{}]*)\}/.exec(each);
+			const group = firstCommaBraceGroup(each);
 			if (!group) {
 				next.push(each);
 				continue;
@@ -298,7 +307,7 @@ function braceExpansions(line: string): string[] {
 			const before = each.slice(0, group.index);
 			const after = each.slice(group.index + group[0].length);
 			// bash writes one word per part: `{curl,x}` is `curl x`.
-			next.push(`${before}${group[1].split(",").map((part) => `${part}`).join(" ")}${after}`);
+			next.push(`${before}${group[1].split(",").join(" ")}${after}`);
 		}
 		lines = next.slice(0, 32);
 		if (!expanded) break;
@@ -378,8 +387,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 			if (script) nested.push(script);
 		}
 		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
-			const script = inlineShellScript(args);
-			if (script) nested.push(script);
+			nested.push(...(inlineShellScripts(args) ?? []).filter(Boolean));
 		}
 		// `eval` runs its arguments joined into one command line.
 		if (payload.command === "eval") nested.push(args.join(" "));
@@ -862,8 +870,6 @@ export type ToolTier = "safe" | "edit" | "execute" | "custom";
 
 const SAFE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const EDIT_TOOLS = new Set(["edit", "write", "notebook_edit"]);
-/** The file-writing tools a path deny or ask rule on any one of them binds together (`decide`). */
-const WRITE_FAMILY: ReadonlySet<string> = EDIT_TOOLS;
 
 export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);
@@ -1379,7 +1385,8 @@ export function decide(params: DecideInput): Decision {
 		rules.find(
 			(r) =>
 				ruleMatches(r, toolName, subject, cwd) ||
-				(!!r.pattern && WRITE_FAMILY.has(r.tool) && WRITE_FAMILY.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
+				// The rule's own tool was just tried; only another tool of the family is read again.
+				(!!r.pattern && r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
 		);
 	/**
 	 * Whether a shell line writes a path that such a rule names, by the
@@ -1387,15 +1394,21 @@ export function decide(params: DecideInput): Decision {
 	 * is classified in auto mode, asked in acceptEdits and refused in dontAsk.
 	 * This only withholds an allow; the pre-gate itself gains no deny path.
 	 */
-	const writesBlockedPath = (evidence: ShellEvidence): boolean =>
-		evidence.writes.some((write) =>
-			[...deny, ...ask].some(
-				(r) =>
-					!!r.pattern &&
-					WRITE_FAMILY.has(r.tool) &&
-					[write.absolute, write.resolved].some((path) => path !== undefined && matchesPathPattern(r.pattern as string, path, cwd)),
-			),
-		);
+	let familyPatterns: string[] | undefined;
+	const blockedPaths = new WeakMap<ShellEvidence, boolean>();
+	const writesBlockedPath = (evidence: ShellEvidence): boolean => {
+		familyPatterns ??= [...deny, ...ask].filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool)).map((r) => r.pattern as string);
+		if (familyPatterns.length === 0) return false;
+		let blocked = blockedPaths.get(evidence);
+		if (blocked === undefined) {
+			const patterns = familyPatterns;
+			blocked = evidence.writes.some((write) =>
+				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => patterns.some((pattern) => matchesPathPattern(pattern, path, cwd))),
+			);
+			blockedPaths.set(evidence, blocked);
+		}
+		return blocked;
+	};
 
 	const denyRule = blockingRule(deny);
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
