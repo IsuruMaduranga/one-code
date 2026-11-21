@@ -144,8 +144,6 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		// the ledger's payload hook (`LEDGER_EPOCH_BODY_CHANNEL`), so the record
 		// holds the capture and the tail and the next request extends both.
 		let ledgerExtends = false;
-		/** The model of the request being shaped, for the epoch-body listener. */
-		let shapedFor: ModelRef | undefined;
 		pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
 			ledgerExtends = (data as RequestPlan).epoch === false;
 		});
@@ -154,7 +152,8 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 			return forkRequestPayload(capture, payload, baseline);
 		};
 		pi.events.on(LEDGER_EPOCH_BODY_CHANNEL, (data) => {
-			if (!shaped || !captureMatches(capture, shapedFor)) return;
+			// `shaped` is set only for a request whose model the capture matches.
+			if (!shaped) return;
 			shaped = false;
 			const body = data as LedgerEpochBody;
 			body.payload = splice(body.payload);
@@ -163,7 +162,6 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		pi.on("context_with_system", (event, ctx) => {
 			shaped = false;
 			if (ledgerExtends) return undefined;
-			shapedFor = ctx.model as ModelRef | undefined;
 			const covers = capture.covers;
 			// Bedrock and Google nest their tools and need joined turns and the
 			// fork's own abort signal, which the fork splice does not handle: their

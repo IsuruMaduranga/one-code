@@ -335,9 +335,8 @@ function sameInput(a: unknown, b: unknown): boolean {
 	const left = inputSchemaOf(a);
 	const right = inputSchemaOf(b);
 	if (!isPlainObject(left) || !isPlainObject(right)) return contentHash(left) === contentHash(right);
-	const onOneSide = ROOT_KEYWORDS.filter((key) => (left[key] === undefined) !== (right[key] === undefined));
-	if (onOneSide.length === 0) return contentHash(left) === contentHash(right);
-	const without = (schema: Record<string, unknown>) => Object.fromEntries(Object.entries(schema).filter(([key]) => !(onOneSide as readonly string[]).includes(key)));
+	const onOneSide: string[] = ROOT_KEYWORDS.filter((key) => (left[key] === undefined) !== (right[key] === undefined));
+	const without = (schema: Record<string, unknown>) => Object.fromEntries(Object.entries(schema).filter(([key]) => !onOneSide.includes(key)));
 	return contentHash(without(left)) === contentHash(without(right));
 }
 

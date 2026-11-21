@@ -44,8 +44,7 @@ export type ReplayApi =
 /**
  * Where the output cap lives, first match in the captured body wins: a
  * top-level field, or one level down (Bedrock's `inferenceConfig.maxTokens`,
- * Google's `config.maxOutputTokens`). Codex sends one from pi 1.6.0; on an
- * older pi the field is absent from the captured body and nothing is written.
+ * Google's `config.maxOutputTokens`).
  */
 const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"anthropic-messages": [["max_tokens"]],
@@ -57,6 +56,12 @@ const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"google-generative-ai": [["config", "maxOutputTokens"]],
 	"google-vertex": [["config", "maxOutputTokens"]],
 };
+
+/**
+ * APIs whose cap is written only where the captured body carries one. Codex
+ * sends one from pi 1.6.0 and took none before, so on an older pi nothing is written.
+ */
+const CAP_ONLY_WHERE_SENT: ReadonlySet<ReplayApi> = new Set<ReplayApi>(["openai-codex-responses"]);
 
 const REPLAY_APIS: ReadonlySet<string> = new Set<ReplayApi>([
 	"anthropic-messages",
@@ -80,8 +85,7 @@ function capAt(payload: Record<string, unknown>, path: readonly string[]): numbe
 function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly string[] | undefined {
 	const paths = CAP_PATHS[api];
 	const found = paths.find((path) => capAt(payload, path) !== undefined);
-	// Codex took no cap before pi 1.6.0: write one only where pi sent one.
-	return found ?? (api === "openai-codex-responses" ? undefined : paths[0]);
+	return found ?? (CAP_ONLY_WHERE_SENT.has(api) ? undefined : paths[0]);
 }
 
 /** `payload` with `value` at `path`, copying only the objects on the way. */

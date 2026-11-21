@@ -135,6 +135,26 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		// No context pass in this instance and not a warm: leave pi's request alone.
 		if (!current) return undefined;
 
+		/**
+		 * Record `sent` as this plan's request and tell the listeners. The same
+		 * request again under this plan (pi-ai re-sending an identical body)
+		 * records nothing new. `covers` is absent for a body the ledger did not cut.
+		 */
+		const record = (sent: WirePayload, request: ReturnType<typeof recordedRequest>, delivered: { consumed: string[]; facts: ToldFact[] }, covers: RequestPlan["covers"] | undefined) => {
+			lastSent = sent;
+			sentIn = call;
+			if (recorded && encodeRequest(recorded.request, request, { has: () => true }) === undefined) return;
+			const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
+			const delta = encodeRequest(current.fold.lastRequest, request, known);
+			if (!delta) return;
+			const sessionId = ctx.sessionManager.getSessionId();
+			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
+			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, ...(covers === undefined ? {} : { covers }), consumed: delivered.consumed, routing: routingOf(current, sessionId) }));
+			if (delivered.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: delivered.facts }));
+			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
+			pi.events.emit(LEDGER_SENT_CHANNEL, { payload: sent, model, sessionId, plan: current } satisfies LedgerSent);
+		};
+
 		// A body that keeps its conversation somewhere else than this API's list
 		// key (pi-ai's `pi-messages` sends it at `context.messages`): there is no
 		// list to cut or splice, so the request goes out as pi built it, and its
@@ -143,20 +163,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		// `covers` made every later request carry only its tail. What was
 		// consumed and told is still recorded.
 		if (!Array.isArray(live[listKey(api)])) {
-			const request = recordedRequest(live, identity);
-			lastSent = live;
-			sentIn = call;
-			if (recorded && encodeRequest(recorded.request, request, { has: () => true }) === undefined) return undefined;
-			const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
-			const delta = encodeRequest(current.fold.lastRequest, request, known);
-			if (delta) {
-				if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
-				pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, consumed: current.consumed, routing: routingOf(current, ctx.sessionManager.getSessionId()) }));
-				const facts = current.carried.flatMap((block) => block.facts);
-				if (facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts }));
-				recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
-				pi.events.emit(LEDGER_SENT_CHANNEL, { payload: live, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
-			}
+			record(live, recordedRequest(live, identity), { consumed: current.consumed, facts: current.carried.flatMap((block) => block.facts) }, undefined);
 			return undefined;
 		}
 
@@ -195,20 +202,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 
 		// The recorded prefix is known, unless the layout pass or a repair moved its elements.
 		const request = recordedRequest(payload, identity, base && samePrefix(spliced, payload, listKey(api), end) ? { base, end } : undefined);
-		lastSent = payload;
-		sentIn = call;
-		// The same request again under this plan (pi-ai re-sending an identical body) records nothing new.
-		if (recorded && encodeRequest(recorded.request, request, { has: () => true }) === undefined) return payload === live ? undefined : payload;
-		const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
-		const delta = encodeRequest(current.fold.lastRequest, request, known);
-		if (delta) {
-			if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
-			const routing = routingOf(current, ctx.sessionManager.getSessionId());
-			pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, covers: current.covers, consumed: delivered.consumed, routing }));
-			if (delivered.facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts: delivered.facts }));
-			recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
-			pi.events.emit(LEDGER_SENT_CHANNEL, { payload, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
-		}
+		record(payload, request, delivered, current.covers);
 		return payload === live ? undefined : payload;
 	});
 }
