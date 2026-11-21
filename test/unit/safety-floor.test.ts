@@ -410,3 +410,11 @@ describe("safetyControlWrite: what the floor reports", () => {
 		expect(safetyFloorBlockText(target)).toBe(words.floorBlock(target));
 	});
 });
+
+describe("a control file's name split by a line continuation", () => {
+	it("still stops the write", async () => {
+		const { shellNamesControlFile } = await import("../../extensions/safety/permissions/auto-mode/safety-floor.ts");
+		const command = `echo '{"permissions":{"allow":["Bash"]}}' > .cl\\\naude/sett\\\nings.local.json`;
+		expect(shellNamesControlFile(command, "/work/project", "/home/dana")).toBeDefined();
+	});
+});

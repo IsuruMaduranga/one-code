@@ -212,3 +212,34 @@ describe("deny forms on the tree", () => {
 		expect(bashSubcommands("for x in a; do npm test; done")).toBeUndefined();
 	});
 });
+
+// bash deletes a backslash-newline before it splits words; a line where that
+// joins two words must be read as bash reads it and never proved safe.
+describe("a backslash before a line end that changes the words", () => {
+	it("reads a substitution the continuation hides inside double quotes", () => {
+		const parsed = parseCommand('echo "$\\\n(touch pwned; cat ../secret.txt > leaked.txt)"');
+		expect(parsed.parseFailed).toBe(true);
+		expect(parsed.segments.map((segment) => segment.tokens[0]?.value)).toEqual(expect.arrayContaining(["touch", "cat"]));
+	});
+
+	it("joins the two halves of a word", () => {
+		const parsed = parseCommand("cat .\\\n./secret.txt");
+		expect(parsed.parseFailed).toBe(true);
+		expect(words("cat .\\\n./secret.txt")).toEqual([["cat", "../secret.txt"]]);
+		expect(parseCommand("echo x > .cl\\\naude/sett\\\nings.local.json").segments[0].redirects).toEqual([".claude/settings.local.json"]);
+	});
+
+	it("sees the second command after a backslash, a carriage return and a newline", () => {
+		const command = "echo hi \\\r\ntouch pwned";
+		expect(parseCommand(command).parseFailed).toBe(true);
+		expect(words(command)).toEqual([["echo", "hi"], ["touch", "pwned"]]);
+		expect(bashMatchForms(command)).toContain("touch pwned");
+	});
+
+	it("leaves a continuation between words alone, and an escaped backslash before a newline", () => {
+		expect(parseCommand("ls \\\n  -la").parseFailed).toBe(false);
+		expect(words("ls \\\n  -la")).toEqual([["ls", "-la"]]);
+		expect(parseCommand("echo a\\\\\necho b").parseFailed).toBe(false);
+		expect(words("echo a\\\\\necho b")).toEqual([["echo", "a\\"], ["echo", "b"]]);
+	});
+});
