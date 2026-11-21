@@ -263,9 +263,10 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 		process.stdout.write = (chunk, ...rest) => {
 			if (typeof chunk === "string") {
 				// The label may carry ANSI styling (chalk.dim), so match the command
-				// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
+				// part: "…To resume this session:</dim>" then `pi --session <id>[ --session-dir …]`,
+				// after a space (pi before 1.6.0) or on its own line (pi 1.6.0 on).
 				if (chunk.includes("To resume this session:")) {
-					chunk = chunk.replaceAll(" pi --session ", ` ${brand.bin} --session `);
+					chunk = chunk.replace(/(\s)pi --session /g, `$1${brand.bin} --session `);
 				}
 				if (rewriteHelp) {
 					// Standalone word "pi" only: preceded by start/whitespace/quote, and

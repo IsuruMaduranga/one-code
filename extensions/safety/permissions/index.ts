@@ -1720,7 +1720,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// which every reader of the run's outcome treats as the user's interrupt.
 		// `terminate` ends pi's loop after the batch: otherwise it sent one more
 		// request on the aborted signal, which came back as an error and printed
-		// "Error: This operation was aborted" above the Interrupted line.
+		// "Error: This operation was aborted" above the Interrupted line. From
+		// pi 1.6.0 that holds for a call rejected alone: its siblings in one reply
+		// get pi's "Operation aborted" result without `terminate`, and pi asks
+		// for one more reply, which ends as aborted before any request is sent.
 		const stop = !feedback?.trim();
 		if (stop) abortAfterResult.add(event.toolCallId);
 		return { block: true, reason: userDenialText(feedback), terminate: stop };

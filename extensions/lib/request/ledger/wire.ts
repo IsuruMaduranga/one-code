@@ -295,6 +295,21 @@ function inputSchemaOf(tool: unknown): unknown {
 	return tool.input_schema ?? tool.parameters ?? tool.parametersJsonSchema;
 }
 
+/**
+ * A declaration's input schema as the merge compares it: without the root
+ * `additionalProperties`. pi 1.6 began sending that keyword on Anthropic
+ * (earlier versions dropped it), so a declaration recorded before it, or a
+ * deferred one built here, differs from pi's live one in that keyword alone.
+ * That is not a changed tool: the recorded bytes stay, and pi validates a call
+ * against the tool's own schema either way.
+ */
+function comparableSchema(tool: unknown): unknown {
+	const schema = inputSchemaOf(tool);
+	if (!isPlainObject(schema) || schema.additionalProperties === undefined) return schema;
+	const { additionalProperties: _root, ...rest } = schema;
+	return rest;
+}
+
 /** The live declaration with the recorded one's `defer_loading`: a load or a deferral moves that flag, never the tool. */
 function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
 	if (!isPlainObject(live) || !isPlainObject(recorded)) return live;
@@ -308,7 +323,7 @@ function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
  * as pi built it (its cache marker included); one that differs only in its
  * text or its deferral takes the recorded bytes, so a description variant or a
  * load never moves the tools array. One whose input schema changed (an
- * upgrade, an MCP server's new schema) takes the live
+ * upgrade, an MCP server's new schema; `comparableSchema`) takes the live
  * declaration, with the recorded deferral: pi validates and runs a call
  * against the live schema, so the wire must offer that one. Nameless markers
  * that end the live list (Bedrock `cachePoint`) end it.
@@ -327,7 +342,7 @@ export function mergeDeclarations(recorded: readonly unknown[], live: readonly u
 		seen.add(name);
 		const current = liveByName.get(name);
 		if (current !== undefined && contentHash(current) === contentHash(tool)) out.push(current);
-		else if (current !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool))) out.push(withRecordedDeferral(current, tool));
+		else if (current !== undefined && contentHash(comparableSchema(current)) !== contentHash(comparableSchema(tool))) out.push(withRecordedDeferral(current, tool));
 		else out.push(structuredClone(tool));
 	}
 	for (const tool of live) {
@@ -574,7 +589,7 @@ function withLiveDeclarations(out: WirePayload, live: WirePayload, api: string, 
 	const sent = responsesDeclarations(out, api);
 	const needed = [...responsesDeclarations(live, api)].filter(([name, tool]) => {
 		const current = sent.get(name);
-		return current === undefined || (recordItem !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool)));
+		return current === undefined || (recordItem !== undefined && contentHash(comparableSchema(current)) !== contentHash(comparableSchema(tool)));
 	});
 	if (needed.length === 0) return out;
 	const tools = needed.map(([, tool]) => stripMarkers(tool));

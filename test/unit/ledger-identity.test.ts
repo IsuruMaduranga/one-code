@@ -72,6 +72,22 @@ describe("mergeDeclarations", () => {
 		const live = tool("v2", { id: { type: "string" }, project: { type: "string" } });
 		expect(mergeDeclarations([recorded], [live])).toEqual([{ ...live, defer_loading: true }]);
 	});
+
+	// pi 1.6 sends the root `additionalProperties` on Anthropic; a deferred
+	// declaration and one recorded on an earlier pi lack it. A load must not
+	// move the tools array for that keyword alone.
+	it.each([true, false])("keeps the recorded bytes when only the root additionalProperties (%s) differs", (additionalProperties) => {
+		const recorded = tool("text", { id: { type: "string" } }, { defer_loading: true });
+		const live = { name: "lookup", description: "text", eager_input_streaming: true, input_schema: { type: "object", properties: { id: { type: "string" } }, additionalProperties } };
+		expect(mergeDeclarations([recorded], [live])).toEqual([recorded]);
+		expect(mergeDeclarations([live], [recorded])).toEqual([live]);
+	});
+
+	it("still takes the live declaration when a nested additionalProperties changed", () => {
+		const recorded = tool("v1", { opts: { type: "object", properties: {} } });
+		const live = tool("v1", { opts: { type: "object", properties: {}, additionalProperties: false } });
+		expect(mergeDeclarations([recorded], [live])).toEqual([live]);
+	});
 });
 
 // Transition probe, deepseek-v4-flash to qwen3.6-27b and back: pi's tools come
