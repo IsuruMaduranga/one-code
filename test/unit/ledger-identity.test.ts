@@ -47,6 +47,13 @@ describe("the request identity", () => {
 		expect(requestIdentity({ ...sonnet, compat: {} }, "off")).not.toHaveProperty("effortMarkers");
 	});
 
+	it("keeps the markers on Codex while thinking is off, where pi sends off as an effort of its own", () => {
+		const codex = { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-6.1-sol", reasoning: true, compat: { supportsMidConvoEffort: true } };
+		expect(requestIdentity(codex, "high")?.effortMarkers).toBe(true);
+		expect(requestIdentity(codex, "off")?.effortMarkers).toBe(true);
+		expect(requestIdentity({ ...codex, thinkingLevelMap: { off: null } }, "off")?.effortMarkers).toBe(false);
+	});
+
 	it("opens an epoch when thinking turns off where pi marks effort per message", () => {
 		const on = requestIdentity(sonnet, "high") as RequestIdentity;
 		const branch = [

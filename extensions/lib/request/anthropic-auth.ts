@@ -76,7 +76,12 @@ interface IdentityModel {
  */
 function effortMarkers(model: IdentityModel, thinkingLevel: string | undefined): boolean | undefined {
 	if ((model.compat as { supportsMidConvoEffort?: boolean } | undefined)?.supportsMidConvoEffort !== true || thinkingLevel === undefined) return undefined;
-	return !(thinkingLevel === "off" && model.reasoning === true && model.thinkingLevelMap?.off !== null);
+	const offTakesEffort = model.reasoning === true && model.thinkingLevelMap?.off !== null;
+	// Codex on pi 1.6.0 sends off as effort "none" in the markers themselves
+	// (openai-codex-responses.js streamSimple), so turning thinking off there
+	// changes no earlier byte and must not open an epoch.
+	if (model.api === "openai-codex-responses") return thinkingLevel !== "off" || offTakesEffort;
+	return !(thinkingLevel === "off" && offTakesEffort);
 }
 
 /**

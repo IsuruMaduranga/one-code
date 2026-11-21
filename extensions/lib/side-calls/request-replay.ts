@@ -44,14 +44,15 @@ export type ReplayApi =
 /**
  * Where the output cap lives, first match in the captured body wins: a
  * top-level field, or one level down (Bedrock's `inferenceConfig.maxTokens`,
- * Google's `config.maxOutputTokens`). Codex sends none.
+ * Google's `config.maxOutputTokens`). Codex sends one from pi 1.6.0; on an
+ * older pi the field is absent from the captured body and nothing is written.
  */
 const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"anthropic-messages": [["max_tokens"]],
 	"openai-completions": [["max_completion_tokens"], ["max_tokens"]],
 	"openai-responses": [["max_output_tokens"]],
 	"azure-openai-responses": [["max_output_tokens"]],
-	"openai-codex-responses": [],
+	"openai-codex-responses": [["max_output_tokens"]],
 	"bedrock-converse-stream": [["inferenceConfig", "maxTokens"]],
 	"google-generative-ai": [["config", "maxOutputTokens"]],
 	"google-vertex": [["config", "maxOutputTokens"]],
@@ -78,7 +79,9 @@ function capAt(payload: Record<string, unknown>, path: readonly string[]): numbe
 /** The path of the cap `payload` carries for `api`, or the first one the API takes. */
 function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly string[] | undefined {
 	const paths = CAP_PATHS[api];
-	return paths.find((path) => capAt(payload, path) !== undefined) ?? paths[0];
+	const found = paths.find((path) => capAt(payload, path) !== undefined);
+	// Codex took no cap before pi 1.6.0: write one only where pi sent one.
+	return found ?? (api === "openai-codex-responses" ? undefined : paths[0]);
 }
 
 /** `payload` with `value` at `path`, copying only the objects on the way. */
