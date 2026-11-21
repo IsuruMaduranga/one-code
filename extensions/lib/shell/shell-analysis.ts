@@ -544,8 +544,7 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(tokens[index].value);
 			if (!assigned) break;
 			// Before the first word the caller judges it; after a wrapper (`env NAME=value cmd`) nothing else does.
-			const inert = INERT_ASSIGNMENTS.test(assigned[1]) && isInertValue(assigned[1], tokens[index].value.slice(assigned[0].length));
-			if (payload.peeled.length > 0 && !inert) payload.opaque.push(tokens[index].value);
+			if (payload.peeled.length > 0 && !isInertAssignment(tokens[index].value)) payload.opaque.push(tokens[index].value);
 		}
 		if (index >= tokens.length) return payload;
 
@@ -709,6 +708,13 @@ function isInertValue(name: string, value: string): boolean {
 	return /^[A-Za-z0-9_.,@:+-]*$/.test(value);
 }
 
+/** Whether a `NAME=value` word sets an inert variable to a value that keeps it inert. */
+function isInertAssignment(word: string): boolean {
+	const eq = word.indexOf("=");
+	const name = word.slice(0, eq);
+	return INERT_ASSIGNMENTS.test(name) && isInertValue(name, word.slice(eq + 1));
+}
+
 /**
  * A `~` word other than `~` and `~/…`: bash expands `~name` to that user's
  * home and `~-`/`~+` to `$OLDPWD`/`$PWD`, which `toAbsolute` would read as a
@@ -844,10 +850,10 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean, onFileReads: (words: Token[]) => void): string | undefined {
+function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string }, onFileReads: (words: Token[]) => void): string | undefined {
 	let index = 0;
 	/** Where git stands after the `-C` options read so far: git applies each one from the one before. */
-	let chained = "";
+	let chained: string | undefined;
 	while (index < args.length) {
 		const token = args[index].value;
 		if (!token.startsWith("-")) break;
@@ -860,9 +866,9 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 			// `-C` retargets git at another directory; outside the working directory
 			// the operation is no longer provably in-project (was review gap: `git
 			// -C /etc status` classified safe).
-			if (!dir) return "runs git -C , which points outside the working directory";
-			chained = chained && !/^([/~]|[A-Za-z]:)/.test(dir) ? `${chained}/${dir}` : dir;
-			if (isDirOutsideCwd(chained)) return `runs git -C ${dir}, which points outside the working directory`;
+			const judged = dir ? dirOutsideCwd(dir, chained) : undefined;
+			if (!judged || judged.outside) return `runs git -C ${dir ?? ""}, which points outside the working directory`;
+			chained = judged.at;
 			index += 2;
 			continue;
 		}
@@ -876,7 +882,7 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 		const eq = token.indexOf("=");
 		const flag = eq > 0 ? token.slice(0, eq) : token;
 		const value = eq > 0 ? token.slice(eq + 1) : undefined;
-		if ((flag === "--git-dir" || flag === "--work-tree") && value !== undefined && isDirOutsideCwd(value)) {
+		if ((flag === "--git-dir" || flag === "--work-tree") && value !== undefined && dirOutsideCwd(value).outside) {
 			return `runs git ${flag} ${value}, which points outside the working directory`;
 		}
 		return `passes git ${flag}, which can point git at another repository or configuration`;
@@ -1189,8 +1195,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of segment.tokens) {
 			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(token.value)?.[1];
 			if (!assigned) break;
-			const inert = INERT_ASSIGNMENTS.test(assigned) && isInertValue(assigned, token.value.slice(assigned.length + 1));
-			if (!inert) escalate(`sets ${assigned}, which can change what the command runs or reads`);
+			if (!isInertAssignment(token.value)) escalate(`sets ${assigned}, which can change what the command runs or reads`);
 		}
 
 		const { command: name, args, peeled, pathNamed, opaque } = resolvePayload(segment.tokens);
@@ -1281,10 +1286,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			const reason =
 				gitEscalationReason(
 					args,
-					(dir) => {
-						if (isUnknownTilde(dir)) return true;
-						const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-						return resolved === undefined || !isWithin(containmentRoot, resolved);
+					(dir, from) => {
+						const at = toAbsoluteBash(from ?? effectiveCwd, dir, home);
+						if (isUnknownTilde(dir)) return { outside: true, at };
+						const resolved = resolveForContainment(at);
+						return { outside: resolved === undefined || !isWithin(containmentRoot, resolved), at };
 					},
 					(words) => fileReads.push(...words),
 				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
