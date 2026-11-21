@@ -126,6 +126,17 @@ const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 1_800_000;
 const MONITOR_TIMEOUT_SCHEMA_MAX_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
+/**
+ * Claude Code's monitor schema lists `timeout_ms` as required with a default,
+ * and its validator fills a missing one, so its text says "default 5 minutes"
+ * and its ws example leaves the field out. pi's validator treats `default` as
+ * an annotation and rejects the call; this fills the default before
+ * validation, keeping the schema's bytes.
+ */
+function withDefaultMonitorTimeout(args: unknown): unknown {
+	if (!args || typeof args !== "object" || Array.isArray(args) || (args as { timeout_ms?: unknown }).timeout_ms !== undefined) return args;
+	return { ...args, timeout_ms: DEFAULT_MONITOR_TIMEOUT_MS };
+}
 /** A binary WebSocket frame's size, for Claude Code's `[binary frame, N bytes]` event line. */
 function binaryFrameBytes(data: unknown): number {
 	if (data instanceof ArrayBuffer) return data.byteLength;
@@ -433,6 +444,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				),
 			),
 		}),
+		prepareArguments: withDefaultMonitorTimeout as never,
 		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			const startFailed = (failure: MonitorStartFailure) => ({ content: [{ type: "text" as const, text: text.monitor.startFailed(failure) }], details: {}, isError: true });
@@ -534,6 +546,10 @@ function backgroundExtension(pi: ExtensionAPI) {
 			// Set by the deadline: the end is Claude Code's expiry notice in the last
 			// batch, not a "stopped" notification (findings §94).
 			let expired = false;
+			// The deadline timer, cleared the moment the monitor ends or is stopped:
+			// `task.status` turns terminal only once the spool closes or the kill
+			// grace ends, and an end or stop in that gap is not an expiry.
+			let deadline: NodeJS.Timeout | undefined;
 			let stderrWritten = false;
 			const onEvent = (line: string) => {
 				if (stopRequested) return;
@@ -550,6 +566,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const end = (finalStatus: BackgroundTask["status"], note?: string) => {
 				if (status !== "running") return;
 				status = finalStatus;
+				clearTimeout(deadline);
 				if (flushTimer) clearTimeout(flushTimer);
 				const complete = () => {
 					if (task.status !== "running") return;
@@ -647,6 +664,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				);
 				stop = () => {
 					stopRequested = true;
+					clearTimeout(deadline);
 					tree.stop(KILL_GRACE_MS);
 				};
 			} else {
@@ -663,6 +681,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				ws.addEventListener("close", () => end(stopRequested ? "stopped" : "completed", "socket closed"));
 				stop = () => {
 					stopRequested = true;
+					clearTimeout(deadline);
 					ws.close();
 				};
 			}
@@ -683,12 +702,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 			if (!oneShot) registry.register(task);
 
 			const timeoutMs = Math.min(params.timeout_ms ?? DEFAULT_MONITOR_TIMEOUT_MS, MAX_MONITOR_TIMEOUT_MS);
-			const timer = setTimeout(() => {
-				if (task.status !== "running") return;
-				expired = true;
+			deadline = setTimeout(() => {
+				if (status !== "running" || stopRequested) return;
+				// stop() clears the timer: mark the expiry after it.
 				stop();
+				expired = true;
 			}, timeoutMs);
-			timer.unref?.();
+			deadline.unref?.();
 
 			if (oneShot) {
 				const unhook = whenAborted(signal, stop);

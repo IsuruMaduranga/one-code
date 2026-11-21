@@ -122,6 +122,14 @@ export interface ShellResultText {
 	spoolLost(p: { keptChars: number }): string;
 }
 
+/** What a background run gives instead of a detached process, one clause per live tool that serves it. */
+function detachedRunPromises(live: LiveTools): string {
+	const clauses = ["it returns a task id immediately", "completion arrives as a task notification"];
+	if (live.has("task_output")) clauses.push("output stays readable with task_output");
+	if (live.has("task_stop")) clauses.push("it can be stopped with task_stop");
+	return clauses.length === 2 ? clauses.join(" and ") : `${clauses.slice(0, -1).join(", ")}, and ${clauses.at(-1)}`;
+}
+
 function blocked(block: ShellBlock, live: LiveTools): string {
 	switch (block.kind) {
 		case "sleep": {
@@ -145,9 +153,7 @@ function blocked(block: ShellBlock, live: LiveTools): string {
 		case "detach":
 			return (
 				`Blocked: this command detaches a process with ${block.via}, leaving an orphan this session cannot manage — its output and exit status would be lost. ` +
-				(live.has("task_output") && live.has("task_stop")
-					? "Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a task notification, output stays readable with task_output, and it can be stopped with task_stop. "
-					: "Run it with run_in_background: true instead: it returns a task id immediately and completion arrives as a task notification. ") +
+				`Run it with run_in_background: true instead: ${detachedRunPromises(live)}. ` +
 				"If you need shell-level parallelism inside one command, end it with `wait` so the children are reaped."
 			);
 		case "editor":

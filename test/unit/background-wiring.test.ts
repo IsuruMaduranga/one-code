@@ -6,6 +6,7 @@
  * around a still-running task, and the /loop, schedule_wakeup and cron
  * timers (fake timers, no external process).
  */
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Cron job ids feed Claude Code's jitter (cron.ts JITTER); ids whose first 8 hex
@@ -771,6 +772,42 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(all).toContain(escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 })));
 		expect(all).not.toContain(summaryTag(monitorEndedSummary("slow", "killed", true)));
 		expect(all).not.toContain("<status>");
+	});
+
+	it("B4: a monitor stopped before its deadline whose kill grace runs past it is reported stopped, not expired", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		// The ignored SIGTERM is inherited by `sleep`, so the tree dies only at the SIGKILL after the grace (2 s), past the 1 s deadline.
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "trap '' TERM; echo one; while :; do sleep 0.1; done", description: "stubborn", timeout_ms: 1000 },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		// No task_output here: reading the end would withdraw its notification.
+		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
+		const ended = summaryTag(monitorEndedSummary("stubborn", "killed", true));
+		const expiry = escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 }));
+		for (let waited = 0; !all().includes(ended) && !all().includes(expiry) && waited < 6000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 300));
+		expect(all()).toContain(ended);
+		expect(all()).not.toContain(expiry);
+	}, 10_000);
+
+	it("B2: a monitor call without timeout_ms passes validation with the 5-minute default the description names", () => {
+		const fake = mount();
+		const tool = fake.tools.get("monitor") as unknown as { name: string; parameters: unknown; prepareArguments?: (a: unknown) => unknown };
+		const args = { ws: { url: "wss://events.example.com/stream", protocols: ["v1"] }, description: "deploy events" };
+		const prepared = tool.prepareArguments ? tool.prepareArguments(args) : args;
+		expect(validateToolArguments(tool as never, { type: "toolCall", id: "c1", name: "monitor", arguments: prepared } as never)).toMatchObject({ timeout_ms: 300_000 });
+		// A given deadline is kept, and the schema still lists the field as required, as Claude Code's does.
+		expect(tool.prepareArguments!({ ...args, timeout_ms: 1000 })).toMatchObject({ timeout_ms: 1000 });
+		expect((tool.parameters as { required: string[] }).required).toContain("timeout_ms");
 	});
 
 	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {
