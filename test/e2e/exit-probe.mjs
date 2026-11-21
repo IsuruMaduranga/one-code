@@ -76,10 +76,21 @@ const EXIT_GRACE_MS = 3_000;
 const SWITCH_GRACE_MS = 8_000;
 /** The most an interactive pi gets to take the terminal and start its session before the prompt is typed. */
 const TUI_START_MS = 6_000;
+/** Before a command is typed into the TUI: how long its output must stay quiet (the turn settled), and the most that wait takes. */
+const TUI_QUIET_MS = 1_000;
+const TUI_SETTLE_MS = 6_000;
+/** A command typed into the TUI is typed again when it shows no effect within this long, at most this many times. */
+const TUI_COMMAND_MS = 5_000;
+const TUI_COMMAND_TRIES = 4;
 /** Between two polls of the process table. */
 const POLL_MS = isWin ? 500 : 100;
 
+/** What the fixture's `/probe-crash` throws (exit-probe-fixture.ts). */
+const CRASH_TEXT = "exit-probe: deliberate crash";
+
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+/** `text` as a terminal sends a paste once the program turned bracketed paste on. */
+const bracketedPaste = (text) => `\x1b[200~${text}\x1b[201~`;
 
 /** Poll `condition` until it holds or `deadline` (a Date.now() value) passes. */
 async function pollUntil(condition, deadline) {
@@ -258,17 +269,42 @@ function startPi(world, args, { tui = false } = {}) {
 	return withOutput(child, { child, get pid() { return pid; }, exited, kill, write: (keys) => child.stdin.write(keys), running: () => pid !== undefined && alive(pid) });
 }
 
-/** `pi` with `output()`: what its child wrote so far, the tail kept. */
+/** `pi` with `output()`: what its child wrote so far, the tail kept; `lastOutputAt()`: when it last wrote. */
 function withOutput(child, pi) {
 	let output = "";
+	let lastOutputAt = Date.now();
 	child.stdout.on("data", (chunk) => {
 		output += chunk;
+		lastOutputAt = Date.now();
 		if (output.length > 400_000) output = output.slice(-200_000);
 	});
 	child.stderr.on("data", (chunk) => {
 		output += chunk;
+		lastOutputAt = Date.now();
 	});
-	return Object.assign(pi, { output: () => output });
+	return Object.assign(pi, { output: () => output, lastOutputAt: () => lastOutputAt });
+}
+
+/**
+ * Submit `command` in the TUI until `tookEffect()` holds; resolves with the
+ * number of tries, or 0 if it never did. It waits for the turn to settle (the
+ * output quiet for TUI_QUIET_MS) first. The command goes in as a bracketed
+ * paste: a single pasted line opens no slash-command completion, whereas typed
+ * keys do, and an Enter that lands while the completion is still catching up
+ * submits the stale highlighted entry instead of the command. Each try clears
+ * the editor first (ctrl+u), so a try that left text behind cannot garble the
+ * next one.
+ */
+async function submitTuiCommand(pi, command, tookEffect) {
+	await pollUntil(() => Date.now() - pi.lastOutputAt() >= TUI_QUIET_MS, Date.now() + TUI_SETTLE_MS);
+	for (let attempt = 1; attempt <= TUI_COMMAND_TRIES; attempt++) {
+		pi.write(`\x15${bracketedPaste(command)}`);
+		await sleep(200);
+		pi.write("\r");
+		await pollUntil(tookEffect, Date.now() + TUI_COMMAND_MS);
+		if (tookEffect()) return attempt;
+	}
+	return 0;
 }
 
 /**
@@ -287,6 +323,16 @@ function probeRpc(child) {
 		return undefined;
 	});
 	return { ...rpc, dialogs };
+}
+
+/**
+ * Send `message` as a prompt and wait for its turn to end. Both waits are
+ * joined at once: one that rejects (an RPC timeout) fails the run through
+ * runEnding's catch, and the other's later rejection is already handled
+ * instead of ending the whole probe as an unhandled rejection.
+ */
+async function promptAndSettle(rpc, message) {
+	await Promise.all([rpc.waitFor((event) => event.type === "agent_end"), rpc.send({ type: "prompt", message })]);
 }
 
 const PROMPT = "PROBE_TOOLS: make the scripted calls.";
@@ -391,11 +437,9 @@ async function runEnding(ending) {
 			pi.write(`${PROMPT}\r`);
 			const seen = await waitForSpawners(tag, ending.starts, pi.pid);
 			if (ending.id === "tui-crash") {
-				// Let the turn settle first, so the command runs as a command, not a steer.
-				await sleep(3_000);
-				pi.write("/probe-crash");
-				await sleep(500);
-				pi.write("\r");
+				// The command took effect once pi crashed or exited; finish judges which.
+				const tries = await submitTuiCommand(pi, "/probe-crash", () => !pi.running() || pi.output().includes(CRASH_TEXT));
+				if (tries === 0) result.problems.push(`tui-crash: /probe-crash showed no effect after ${TUI_COMMAND_TRIES} tries`);
 			} else {
 				pi.write("\x03");
 				await sleep(200);
@@ -409,15 +453,11 @@ async function runEnding(ending) {
 			let resumeTo;
 			if (ending.id === "resume") {
 				// A first session to come back to, then a fresh one for the fixtures.
-				const first = rpc.waitFor((event) => event.type === "agent_end");
-				await rpc.send({ type: "prompt", message: "Reply with OK." });
-				await first;
+				await promptAndSettle(rpc, "Reply with OK.");
 				resumeTo = (await rpc.send({ type: "get_state" })).data?.sessionFile;
 				await rpc.send({ type: "new_session" });
 			}
-			const settled = rpc.waitFor((event) => event.type === "agent_end");
-			await rpc.send({ type: "prompt", message: PROMPT });
-			await settled;
+			await promptAndSettle(rpc, PROMPT);
 			const seen = await waitForSpawners(tag, ending.starts, pi.child.pid);
 			if (rpc.dialogs.length > 0) result.problems.push(`dialogs cancelled: ${rpc.dialogs.join("; ")}`);
 			if (ending.keeps) {
@@ -494,7 +534,7 @@ async function finish(result, pi, ending, tag, seen) {
 		result.tail = pi.output().slice(-3000);
 	}
 	// A crash ending must have crashed, not quit some other way.
-	if (ending.id.endsWith("-crash") && !pi.output().includes("exit-probe: deliberate crash")) result.problems.push(`${ending.id}: pi exited without the deliberate crash`);
+	if (ending.id.endsWith("-crash") && !pi.output().includes(CRASH_TEXT)) result.problems.push(`${ending.id}: pi exited without the deliberate crash`);
 	const { cells } = await settleAndJudge({ tag, ending: ending.id, starts: ending.starts, seen, piPid: undefined }, EXIT_GRACE_MS);
 	for (const cell of cells) cell.via = ending.via;
 	result.cells.push(...cells);
