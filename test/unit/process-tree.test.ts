@@ -197,7 +197,9 @@ describe("killProcessTree", { timeout: LOADED_MS }, () => {
 		const survivors: number[] = [];
 		for (let round = 0; round < rounds; round++) {
 			const children = Array.from({ length: perRound }, () =>
-				spawn("/bin/sh", ["-c", "while :; do sleep 5 & done"], { ...detachedSpawnOptions(), stdio: "ignore" }),
+				// Forks for long enough to be mid-loop when the kill lands, and no further: a late timer on a
+				// loaded machine must not let a shell fill the process table.
+				spawn("/bin/sh", ["-c", "i=0; while [ $i -lt 300 ]; do sleep 5 & i=$((i+1)); done; wait"], { ...detachedSpawnOptions(), stdio: "ignore" }),
 			);
 			await new Promise((r) => setTimeout(r, 20)); // every shell is mid-loop
 			const exited = children.map((child) => (child.exitCode === null && child.signalCode === null ? once(child, "exit") : Promise.resolve()));
