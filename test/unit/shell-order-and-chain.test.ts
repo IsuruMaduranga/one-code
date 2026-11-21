@@ -40,6 +40,18 @@ describe("a contained move with another path on the line", () => {
 	});
 });
 
+describe("two moves on one line", () => {
+	// The first move retargets the link; the second writes through it at its new place.
+	posixOnly("is not contained when both may carry a link", () => {
+		mkdirSync(join(cwd, "sub", "deep"));
+		mkdirSync(join(cwd, "dir"));
+		symlinkSync("../x", join(cwd, "sub", "deep", "rel"));
+		const evidence = analyze("mv sub/deep/rel link && cp -r dir link");
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.containedNonNetwork).toBe(false);
+	});
+});
+
 describe("chained git -C", () => {
 	posixOnly("resolves each -C from the one before", () => {
 		symlinkSync(join(root, "outside"), join(cwd, "sub", "out"));

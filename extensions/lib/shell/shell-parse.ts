@@ -893,7 +893,13 @@ function continuationReading(command: string): string | undefined {
 			const before = command[i - 1];
 			const after = command[i + 2];
 			const blank = (c: string | undefined) => c === undefined || c === " " || c === "\t" || c === "\n";
-			if (!blank(before) && !blank(after)) suspicious = true;
+			// A list or pipe operator ends a word as blank space does (`a &&\<nl>b`,
+			// `a\<nl>| b`). Redirect operators and `$(` do not count: the next word
+			// belongs to them (`>&\<nl>1`, `"$\<nl>(cmd)"`).
+			const two = command.slice(i - 2, i);
+			const endsWord = before === ";" || before === "(" || two === "&&" || two === "||" || (before === "|" && command[i - 2] !== ">");
+			const startsOperator = before !== ">" && before !== "<" && (after === ";" || after === ")" || after === "|" || command.slice(i + 2, i + 4) === "&&");
+			if (!blank(before) && !blank(after) && !endsWord && !startsOperator) suspicious = true;
 			i++;
 			continue;
 		}

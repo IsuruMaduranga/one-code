@@ -236,6 +236,17 @@ describe("a backslash before a line end that changes the words", () => {
 		expect(bashMatchForms(command)).toContain("touch pwned");
 	});
 
+	it("leaves a continuation next to a list or pipe operator alone", () => {
+		for (const command of ["npm run build &&\\\nnpm test", "cat a.txt |\\\nwc -l", "make;\\\nmake test", "npm run build\\\n&& npm test", "(\\\ncd sub && ls)"]) {
+			expect(parseCommand(command).parseFailed, command).toBe(false);
+		}
+		expect(words("npm run build &&\\\nnpm test")).toEqual([["npm", "run", "build"], ["npm", "test"]]);
+		// A redirect operator is no such neighbour: the word after it is joined to it.
+		expect(parseCommand("echo x >&\\\n1").parseFailed).toBe(true);
+		expect(parseCommand('echo "$\\\n(id)"').parseFailed).toBe(true);
+		expect(parseCommand("echo x >\\\n|out.txt").parseFailed).toBe(true);
+	});
+
 	it("leaves a continuation between words alone, and an escaped backslash before a newline", () => {
 		expect(parseCommand("ls \\\n  -la").parseFailed).toBe(false);
 		expect(words("ls \\\n  -la")).toEqual([["ls", "-la"]]);

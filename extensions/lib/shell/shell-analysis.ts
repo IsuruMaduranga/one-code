@@ -1500,7 +1500,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	// from its new place. So a line that moves what may be a link is contained
 	// only when the move is all it does. A source that does not exist yet was
 	// made earlier on the line by a command judged here, and is no link.
-	if (relocating.size > 0 && segments.some((segment) => !relocating.has(segment) && (segment.redirects.length > 0 || segment.inputs.length > 0 || segment.tokens.length > 1))) {
+	// Two such moves retarget each other the same way, so neither exempts the other.
+	if (relocating.size > 1 || (relocating.size > 0 && segments.some((segment) => !relocating.has(segment) && (segment.redirects.length > 0 || segment.inputs.length > 0 || segment.tokens.length > 1)))) {
 		escalate("moves or copies a file and names another path on the same line, which the move can retarget");
 	}
 	if ([...relocating].some((segment) => segment.redirects.length > 0)) {
