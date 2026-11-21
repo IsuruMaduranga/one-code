@@ -24,7 +24,7 @@
  */
 
 import { type Dirent, existsSync, readdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { findGitRoot, gitdirFileTarget } from "../context/git.ts";
 import { expandTilde } from "../profile/paths.ts";
 
@@ -36,8 +36,13 @@ const LFS_FILTERS = new Set(["git-lfs clean -- %f", "git-lfs smudge -- %f", "git
 /** Keys whose value git runs during a read, by section (subsections included). */
 const PROGRAM_KEYS: Record<string, (key: string, value: string | undefined) => boolean> = {
 	// `core.fsmonitor=true` is git's own daemon; any other value is a hook command.
-	core: (key, value) => (key === "fsmonitor" && !BOOLEAN.test(value ?? "")) || key === "pager",
+	core: (key, value) => (key === "fsmonitor" && !BOOLEAN.test(value ?? "")) || key === "pager" || key === "sshcommand",
 	diff: (key) => key === "external" || key === "command" || key === "textconv",
+	// A promisor remote's `uploadpack` runs when a read meets a missing object,
+	// and such a read reaches the network besides. (A merge driver runs only
+	// under `--remerge-diff`, which the read-only tables do not list.)
+	remote: (key) => key === "uploadpack" || key === "promisor" || key === "partialclonefilter" || key === "vcs",
+	extensions: (key) => key === "partialclone",
 	filter: (key, value) => (key === "clean" || key === "smudge" || key === "process") && !LFS_FILTERS.has(value ?? ""),
 	pager: (_key, value) => !BOOLEAN.test(value ?? ""),
 	gpg: (key) => key === "program",
@@ -154,6 +159,8 @@ export type CheckoutProgram =
 	| { kind: "configSetsProgram"; key: string }
 	/** A submodule's config sets `key`, or cannot be read (`key` absent). */
 	| { kind: "submoduleConfig"; key?: string }
+	/** `dir` has a repository's own layout (`HEAD`, `objects`, `refs`), so git reads the config beside them. */
+	| { kind: "bareRepository"; dir: string }
 	/** The checkout has this hook, which git runs. */
 	| { kind: "hook"; hook: string };
 
@@ -165,6 +172,16 @@ export type CheckoutProgram =
  */
 export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): CheckoutProgram | undefined {
 	const checkout = checkoutOf(dir);
+	// git takes a directory holding `HEAD`, `objects` and `refs` as a repository
+	// before it looks further up, and runs what the `config` beside them names.
+	// Those are ordinary names a clone can carry in any subdirectory, so one on
+	// the way up to the checkout found is a program, unread.
+	for (let at = resolve(dir); ; at = dirname(at)) {
+		if (at !== checkout?.gitDir && at !== checkout?.commonDir && ["HEAD", "objects", "refs"].every((name) => existsSync(join(at, name)))) {
+			return { kind: "bareRepository", dir: at };
+		}
+		if (at === checkout?.root || dirname(at) === at) break;
+	}
 	if (!checkout) return undefined;
 	const { root, gitDir, commonDir } = checkout;
 	const modules = submoduleGitDirs(root, commonDir);
