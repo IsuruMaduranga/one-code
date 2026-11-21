@@ -68,7 +68,7 @@ import { decodePanelKey } from "./panel/keys.ts";
 import { type DiscoverDetail, renderPanel, type PanelPaint } from "./panel/render.ts";
 import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type DiscoverRow } from "./panel/rows.ts";
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
-import { expandTemplate, runPlaceholderCommand } from "./shell-expand.ts";
+import { expandTemplate, runSandboxedPlaceholder } from "./shell-expand.ts";
 import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
@@ -585,7 +585,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 						if (!decide) throw new Error("The permission gate is unavailable. Load the permissions extension before running shell placeholders.");
 						const decision = await decide({ toolName: "bash", input: { command }, cwd, model: ctx.model });
 						if (decision?.block) throw new Error(`Shell placeholder blocked: ${decision.reason}`);
-						return runPlaceholderCommand(command, cwd);
+						return runSandboxedPlaceholder(command, cwd);
 					},
 				});
 			} catch (error) {

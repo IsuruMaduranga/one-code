@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { expandTemplate, runPlaceholderCommand } from "../../extensions/tools/plugins/shell-expand.ts";
+import { expandTemplate, runPlaceholderCommand, runSandboxedPlaceholder } from "../../extensions/tools/plugins/shell-expand.ts";
 
 const cwd = mkdtempSync(join(tmpdir(), "plugin-expand-"));
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
@@ -54,5 +54,25 @@ describe("runPlaceholderCommand", () => {
 		expect(await runPlaceholderCommand("echo oops >&2; exit 3", cwd)).toBe("oops");
 		// Nothing printed before the timeout: the result is the timeout notice alone.
 		expect(await runPlaceholderCommand("sleep 5", cwd, { timeoutMs: 200 })).toBe("command timed out after 0 seconds");
+	});
+});
+
+describe("runSandboxedPlaceholder", () => {
+	it("runs what the sandbox wrapper returns, adds what it denied and ends the run", async () => {
+		if (process.platform === "win32") return;
+		const seen: string[] = [];
+		let finished = 0;
+		const wrap = async (request: { original: string; disable: boolean }) => {
+			seen.push(`${request.original}|${request.disable}`);
+			return { command: "echo wrapped", run: { withViolations: (text: string) => `${text} +denied`, finish: () => void finished++ } };
+		};
+		expect(await runSandboxedPlaceholder("echo plain", process.cwd(), { wrap: wrap as never })).toBe("wrapped +denied");
+		expect(seen).toEqual(["echo plain|false"]);
+		expect(finished).toBe(1);
+	});
+
+	it("fails the placeholder when the sandbox refuses the call", async () => {
+		const wrap = async () => ({ refused: { kind: "unavailable" as const, reason: "it has not started" } });
+		expect(await runSandboxedPlaceholder("echo plain", process.cwd(), { wrap: wrap as never })).toContain("the command sandbox refused it (it has not started)");
 	});
 });
