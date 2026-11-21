@@ -13,6 +13,7 @@ import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
@@ -421,7 +422,7 @@ describe("subagent task_stop", () => {
 		let finish!: (value: ChildOutcome) => void;
 		const handle = {
 			result: new Promise<ChildOutcome>((resolve) => { finish = resolve; }),
-			kill: vi.fn(() => finish(outcome())),
+			kill: vi.fn(() => finish({ ...outcome(), aborted: "stopped" })),
 			snapshot: () => ({ text: "Agent output", toolCalls: 0, usage: emptyUsage() }),
 		};
 		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({ run: () => handle } as unknown as SubagentRuntime);
@@ -810,10 +811,11 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 	let options: Parameters<SubagentRuntime["runResident"]>[0];
 	let busy = false;
 	let exited = false;
-	const finish = (actions: ChildOutcome["actions"] = [], output?: string) => {
+	/** End the turn; `aborted` marks one a kill cut short, as the runner's kill() does. */
+	const finish = (actions: ChildOutcome["actions"] = [], output?: string, aborted?: ChildOutcome["aborted"]) => {
 		if (!busy) return;
 		busy = false;
-		options.onTurnEnd?.({ ...outcome(failed), actions, ...(output === undefined ? {} : { output }) });
+		options.onTurnEnd?.({ ...outcome(failed), actions, ...(output === undefined ? {} : { output }), ...(aborted ? { aborted } : {}) });
 	};
 	const handle = {
 		send: vi.fn(async () => { busy = true; return "started" as const; }),
@@ -821,7 +823,7 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 		exited: () => exited,
 		snapshot: () => ({ text: "Agent output", toolCalls: 0, usage: emptyUsage() }),
 		release: vi.fn(),
-		kill: vi.fn(async () => { if (exited) return; finish(stoppedActions); exited = true; options.onExit?.(); }),
+		kill: vi.fn(async () => { if (exited) return; finish(stoppedActions, undefined, "stopped"); exited = true; options.onExit?.(); }),
 	};
 	const runner = {
 		runResident: async (opts: typeof options) => { options = opts; return handle; },
@@ -1246,6 +1248,21 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		expect(after).not.toContain("was stopped by user");
 	});
 
+	// The stop lands as the agent finishes on its own: the runner's kill() finds
+	// a turn pi already ended and reports it as it ended, not as stopped.
+	it("delivers the report of an agent that finished as the stop landed", async () => {
+		const { runtime, input, sent } = await launched();
+		runtime.handle.kill.mockImplementationOnce(async () => runtime.finish([], "The integration is built."));
+		input(CTRL_X);
+		input(CTRL_K);
+		input(CTRL_X);
+		input(CTRL_K);
+		expect(runtime.handle.kill).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sent()).toContain("The integration is built.");
+		expect(sent()).toContain("<status>completed</status>");
+	});
+
 	it("lets send now's ctrl+x ctrl+s through while the strip has focus", async () => {
 		const { h, input } = await launched();
 		let sent = 0;
@@ -1264,5 +1281,31 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		await vi.advanceTimersByTimeAsync(2000);
 		expect(input(CTRL_X)).toBeUndefined();
 		expect(runtime.handle.kill).not.toHaveBeenCalled();
+	});
+});
+
+// /tasks says what quitting would stop. Monitors, workflows and scheduled jobs
+// count too, and their changes do not rebuild the dialog's rows, so the line is
+// read when the dialog paints and its ticker repaints on a change.
+describe("/tasks quit note", () => {
+	it("follows background work that starts while the dialog is open", async () => {
+		const h = await mount([], session, "tui", undefined, { hasUI: true });
+		let monitorRunning = false;
+		h.fake.events.on(SESSION_WORK_CHANNEL, (data) => {
+			if (monitorRunning) (data as SessionWorkQuery).tasks.push({ id: "m1", type: "monitor", status: "running", description: "watch the build" });
+		});
+		let dialog: { render(width: number): string[] } | undefined;
+		const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 80 } };
+		(h.ctx.ui as { custom: unknown }).custom = vi.fn((factory: (...args: unknown[]) => { render(width: number): string[] }) => {
+			dialog = factory(tui, {}, {}, () => {});
+			return new Promise(() => {});
+		});
+		void h.fake.commands.get("tasks")!.handler("", h.ctx);
+		await vi.waitFor(() => expect(dialog).toBeDefined());
+		expect(dialog!.render(80).join("\n")).not.toContain("Quitting");
+		monitorRunning = true;
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(tui.requestRender).toHaveBeenCalled();
+		expect(dialog!.render(80).join("\n")).toContain("Quitting or /reload stops running background work.");
 	});
 });

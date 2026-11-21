@@ -21,23 +21,41 @@ export const STOP_ALL_HINT = "ctrl+x ctrl+k to stop agents";
 /** The first press's prompt, Claude Code's wording. */
 export const STOP_ALL_CONFIRM = "Press ctrl+x ctrl+k again to stop background agents";
 
-/** The two presses: the first asks, a second inside the window stops. */
+/**
+ * The two presses: the first asks, a second inside the window stops. The
+ * question is about the agents running when it was asked, so it holds only
+ * while every agent running now was among them: an agent that started since
+ * (one finished and another began inside the three seconds) makes the next
+ * press ask again instead of stopping an agent the user was never asked
+ * about, and with none running nothing is being asked.
+ */
 export class StopAllPresses {
-	private askedAt: number | undefined;
+	private asked: { at: number; agents: ReadonlySet<string> } | undefined;
 
-	press(now: number): "confirm" | "stop" {
-		if (this.askedAt !== undefined && now - this.askedAt <= STOP_ALL_CONFIRM_MS) {
-			this.askedAt = undefined;
+	/** One press, given the task ids of the agents the stop would stop now. */
+	press(now: number, running: readonly string[]): "confirm" | "stop" {
+		if (this.asking(now, running)) {
+			this.asked = undefined;
 			return "stop";
 		}
-		this.askedAt = now;
+		this.asked = { at: now, agents: new Set(running) };
 		return "confirm";
 	}
 
-	/** Whether the first press's prompt still shows. */
-	asking(now: number): boolean {
-		return this.askedAt !== undefined && now - this.askedAt <= STOP_ALL_CONFIRM_MS;
+	/** Whether the first press's question still stands for the agents running now. */
+	asking(now: number, running: readonly string[]): boolean {
+		const asked = this.asked;
+		if (asked === undefined || now - asked.at > STOP_ALL_CONFIRM_MS) return false;
+		return running.length > 0 && running.every((taskId) => asked.agents.has(taskId));
 	}
+}
+
+/** What the strip reads about the chord at each render (index.ts owns the predicate). */
+export interface StopAllState {
+	/** The chord would act now: an agent it stops is running (the same predicate the key's `applies` uses). */
+	applies: boolean;
+	/** The first press's question still stands. */
+	asking: boolean;
 }
 
 /**

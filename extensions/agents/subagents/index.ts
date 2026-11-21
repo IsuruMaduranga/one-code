@@ -117,7 +117,7 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-chann
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
-import { StopAllPresses, stopAllNote } from "./stop-all.ts";
+import { StopAllPresses } from "./stop-all.ts";
 import { claimChordKey, CtrlXPrefix } from "../../lib/ui/ctrl-x-chord.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent, viewportScrollFor } from "../../lib/agents/agent-view.ts";
@@ -887,6 +887,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
+	/**
+	 * The stop that ended a turn, read when it ends: a stop counts only when the
+	 * turn was cut short. One that lands as the agent finishes on its own (the
+	 * kill finds a turn pi already ended) leaves a completed turn, whose report
+	 * is delivered; a stop of every agent drops only the notifications of the
+	 * turns it really stopped (notifyHandBack).
+	 */
+	const stopThatEnded = (taskId: string, outcome: ChildOutcome): StopKind | undefined =>
+		outcome.aborted ? stoppedTaskIds.get(taskId) : undefined;
+
 	/** Stop an agent, recording its persistent id before kill can settle its turn. */
 	const stopAgent = (taskId: string, handle = liveHandles.get(taskId), how: StopKind = "one") => {
 		// An old task can still await review after the agent has resumed. Its
@@ -914,8 +924,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * handle yet).
 	 */
 	const runningAgents = () => liveRuns.list().filter((run) => run.status === "running" && run.depth === 0 && liveHandles.has(run.taskId));
+	const runningAgentIds = () => runningAgents().map((run) => run.taskId);
 	const stopAllPresses = new StopAllPresses();
-	panel.setMainNote((now, focused) => stopAllNote(stopAllPresses.asking(now), runningAgents().length > 0, focused));
+	// The strip's note and hint read the chord's own predicate, so they name the
+	// key exactly while it would act.
+	panel.setStopAll((now) => {
+		const running = runningAgentIds();
+		return { applies: running.length > 0, asking: stopAllPresses.asking(now, running) };
+	});
 	/**
 	 * Stop every running agent at the user's word, as Claude Code does: idle
 	 * residents stay, and the agents' own notifications are dropped
@@ -929,7 +945,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 	/** One press of the chord: the first asks (the strip's ticker takes the prompt down), a second inside the window stops. */
 	const pressStopAll = () => {
-		if (stopAllPresses.press(Date.now()) === "stop") stopAllByUser();
+		if (stopAllPresses.press(Date.now(), runningAgentIds()) === "stop") stopAllByUser();
 		else panel.refresh();
 	};
 	// ctrl+x ctrl+k, from the prompt (lib/ui/ctrl-x-chord.ts); the focused strip decodes its own.
@@ -1410,7 +1426,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		outputFile?: string;
 		/** The turn's outcome: its status, tool count and tokens come from here. */
 		outcome: ChildOutcome;
-		/** The turn ended because the user or the model stopped the agent (CC's `killed`); "all" when every agent was stopped at once. */
+		/** The turn ended because the user or the model stopped the agent (CC's `killed`); "all" when every agent was stopped at once. Set only when the stop cut the turn short (stopThatEnded). */
 		stopped?: StopKind;
 		/** Start of the span `outcome`'s tokens and tool uses cover, for CC's `<duration_ms>`. */
 		startedAt: number;
@@ -1861,7 +1877,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		liveHandles.set(record.taskId, handle);
 
 		try {
-			const { actions, ...outcome }: ChildOutcome = await handle.result;
+			// `aborted` steers the stop bookkeeping only; the reported result never carries it.
+			const { actions, aborted: _aborted, ...outcome }: ChildOutcome = await handle.result;
 			registry.sessionFileFor(record); // resolve now that the child has written it
 			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
@@ -2051,7 +2068,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// answered synchronously when auto mode is off.
 				const handler = resident.turnHandlers.shift();
 				// A stop or resume during review must not change this turn's outcome.
-				const stopped = stoppedTaskIds.get(p.record.taskId);
+				const stopped = stopThatEnded(p.record.taskId, outcome);
 				armReaper();
 				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
@@ -2775,7 +2792,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		void handle.result.then(async (outcome) => {
 			runningIds.delete(record.taskId);
 			// Read before the review: a stop or resume during it must not change this turn's outcome.
-			const stopped = stoppedTaskIds.get(record.taskId);
+			const stopped = stopThatEnded(record.taskId, outcome);
 			live.finish(stopped ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews this turn's actions before the reply goes out, as it
 			// does for a resident's turn; a resumed turn once skipped it
@@ -2910,9 +2927,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				...runs.filter((run) => run.status === "running"),
 				...runs.filter((run) => run.status !== "running" && run.viewed),
 			].map((run) => ({ kind: "agent" as const, taskId: run.taskId, text: run.label, model: modelLabel(ctx, run.model), running: run.status === "running" }));
-			const work = querySessionWork(pi.events);
-			return { shells, agents, quitNote: quitNote(work.tasks.filter((task) => task.status === "running").length, work.crons.length) };
+			return { shells, agents };
 		};
+		/**
+		 * What quitting would stop, read when the dialog paints and on its ticker:
+		 * it counts monitors, workflows and scheduled jobs, whose changes do not
+		 * rebuild the snapshot.
+		 */
+		const currentQuitNote = () => {
+			const work = querySessionWork(pi.events);
+			return quitNote(work.tasks.filter((task) => task.status === "running").length, work.crons.length);
+		};
+		let shownQuitNote = currentQuitNote();
 		let selected = 0;
 		// Rebuilt when a run or shell changes, not per frame or keystroke.
 		let snapshot = build();
@@ -2945,6 +2971,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 					if (shellById(dialogView.id)?.status === "running") tui.requestRender();
 				} else if (snapshot.shells.some((shell) => !shell.running) && shellRows(shellTasks.list(), Date.now()).length !== snapshot.shells.length) {
 					refresh();
+				} else if (currentQuitNote() !== shownQuitNote) {
+					tui.requestRender();
 				}
 			}, 1000);
 			ticker.unref?.();
@@ -2963,7 +2991,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 					}
 					shown = tasksItems(snapshot);
 					selected = Math.max(0, Math.min(selected, shown.length - 1));
-					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
+					shownQuitNote = currentQuitNote();
+					return ["", ...renderTasksDialog({ ...snapshot, selected, width, quitNote: shownQuitNote }, paint), ""].map((line) => truncateLine(line, width));
 				},
 				handleInput: (data: string) => {
 					if (isKeyRelease(data)) return;

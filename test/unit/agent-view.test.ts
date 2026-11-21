@@ -102,6 +102,15 @@ describe("renderTasksDialog", () => {
 		]);
 	});
 
+	it("wraps the longest quit note on an 80-column terminal instead of cutting it", () => {
+		const note = quitNote(1, 2)!;
+		const out = renderTasksDialog({ shells: [], agents: [], selected: 0, width: 80, quitNote: note }, paint);
+		const noteLines = out.filter((line) => /Quitting|running work\./.test(line));
+		expect(noteLines.length).toBeGreaterThan(1);
+		expect(noteLines.every((line) => line.length <= 80 && line.startsWith("  "))).toBe(true);
+		expect(noteLines.map((line) => line.trim()).join(" ")).toBe(note);
+	});
+
 	it("offers x only on a running row, and says so when nothing is listed", () => {
 		expect(renderTasksDialog({ shells, agents, selected: 2, width: 100 }, paint).at(-1)).toBe("  ↑/↓ to select · Enter to view · Esc to close");
 		expect(renderTasksDialog({ shells: [], agents: [], selected: 0, width: 100 }, paint)).toEqual([

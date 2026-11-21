@@ -7,6 +7,7 @@
 import type { ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import type { FireConversation } from "../../lib/agents/agent-cron.ts";
 import type { UsageTotals } from "../../lib/agents/usage.ts";
+import type { AbortReason } from "./session-turns.ts";
 import { subagentWords } from "./words.ts";
 
 export const OUTPUT_CAP = 50_000;
@@ -41,6 +42,13 @@ export interface ChildOutcome {
 	failed?: boolean;
 	/** Why a failed turn failed, in a sentence, when a guard in the child said (the parent's notification summary carries it). */
 	failureReason?: string;
+	/**
+	 * Set when the turn was cut short (a kill, a cancelled signal, the
+	 * wall-clock cap): only such a turn was stopped by a stop that marked it.
+	 * A turn that finished in the same tick as a stop is not, and keeps its
+	 * report (index.ts `stopThatEnded`).
+	 */
+	aborted?: AbortReason;
 	/**
 	 * What the child actually did: each call's name and whole input. Auto mode
 	 * reviews this when the child returns, to catch a sequence whose individual

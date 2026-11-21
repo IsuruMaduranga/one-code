@@ -136,6 +136,8 @@ export interface StripInput {
 	now: number;
 	/** Dim text on the right of the `main` row (the stop-all hint or its prompt, stop-all.ts). */
 	mainNote?: string;
+	/** The stop-all chord would act now (stop-all.ts StopAllState), so the focused hint names it. */
+	stopAll?: boolean;
 }
 
 /**
@@ -143,15 +145,17 @@ export interface StripInput {
  * while an agent is viewed, `Enter to view` when the selected row is not the
  * one on screen, `x to stop` on a running agent. One Code adds the keys
  * Claude Code leaves unhinted, so every panel key is discoverable: `esc back`,
- * and `ctrl+x ctrl+k stop all` while any agent runs.
+ * and `ctrl+x ctrl+k stop all` while the chord would act (`stopAll`, the
+ * chord's own predicate: a running row can be a nested run or an agent still
+ * starting, which the chord does not stop, and then `ctrl+x` is pi's copy key).
  */
-export function stripHint(rows: PanelRow[], selected: number, viewedId: string | undefined): string {
+export function stripHint(rows: PanelRow[], selected: number, viewedId: string | undefined, stopAll = false): string {
 	const row = rows[selected];
 	const parts: string[] = [];
 	if (viewedId !== undefined || (row?.run?.taskId ?? "main") === "main") parts.push("↑/↓ to select");
 	if ((row?.run?.taskId ?? "main") !== (viewedId ?? "main")) parts.push("Enter to view");
 	if (row?.run?.status === "running") parts.push("x to stop");
-	if (rows.some((r) => r.run?.status === "running")) parts.push("ctrl+x ctrl+k stop all");
+	if (stopAll) parts.push("ctrl+x ctrl+k stop all");
 	parts.push("esc back");
 	return parts.join(" · ");
 }
@@ -166,7 +170,7 @@ export function stripHint(rows: PanelRow[], selected: number, viewedId: string |
 export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
-	if (input.selected !== undefined) out.push(paint.fg("dim", cut(stripHint(input.rows, input.selected, input.viewedId), width)));
+	if (input.selected !== undefined) out.push(paint.fg("dim", cut(stripHint(input.rows, input.selected, input.viewedId, input.stopAll), width)));
 	const current = input.viewedId ?? "main";
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {

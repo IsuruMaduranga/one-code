@@ -62,6 +62,13 @@ export class SessionTurnTracker implements HandbackSlot, TurnFailureSink {
 	handback: string | undefined;
 	/** Why a guard in the child stopped this turn, when one did (`TURN_FAILED_CHANNEL` on the child's bus). */
 	harnessStop: string | undefined;
+	/**
+	 * pi started this turn's run (`agent_start`). With the session idle again
+	 * the run has ended, even before `agent_settled` reaches this tracker (pi
+	 * awaits the child's extension handlers first): a kill then finds a turn
+	 * that finished on its own (runner.ts `settledInPi`).
+	 */
+	runStarted = false;
 
 	/** Call when a new turn is started (a prompt sent while idle). */
 	beginTurn(): void {
@@ -70,6 +77,7 @@ export class SessionTurnTracker implements HandbackSlot, TurnFailureSink {
 		this.aborted = undefined;
 		this.handback = undefined;
 		this.harnessStop = undefined;
+		this.runStarted = false;
 		// Per turn, not per session: the review that reads this judges the turn just finished.
 		this.actions = [];
 	}
@@ -100,6 +108,9 @@ export class SessionTurnTracker implements HandbackSlot, TurnFailureSink {
 	/** Feed one subscribed event. Returns true when a turn just settled. */
 	process(event: TrackedEvent): boolean {
 		switch (event.type) {
+			case "agent_start":
+				this.runStarted = true;
+				return false;
 			case "tool_execution_start": {
 				this.toolCalls++;
 				// The hand-back call's message is the report, which the review gets
@@ -167,6 +178,7 @@ export function finishOutcome(
 			actions,
 			failed: true,
 			failureReason: harnessStop.replace(/\.$/, ""),
+			...(aborted ? { aborted } : {}),
 		};
 	}
 	if (aborted) {
@@ -176,6 +188,7 @@ export function finishOutcome(
 			usage,
 			actions,
 			failed: true,
+			aborted,
 		};
 	}
 	if (providerError) {
