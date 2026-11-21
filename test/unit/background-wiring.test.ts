@@ -607,7 +607,6 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			ctx,
 		)) as { details: { taskId: string } };
-		expect(setWidget).toHaveBeenCalledTimes(1);
 		fake.sentMessages.length = 0;
 
 		await fake.fire("session_shutdown", { reason: "new" }, ctx);
@@ -628,7 +627,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		)) as { details: { status: string } };
 		expect(out.details.status).toBe("stopped");
 		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
-		expect(setWidget).toHaveBeenCalledTimes(1); // no repaint after shutdown
+		expect(setWidget).not.toHaveBeenCalled(); // no repaint, before shutdown or after
 		expect(fake.sentMessages).toHaveLength(0); // no completion notification
 	});
 

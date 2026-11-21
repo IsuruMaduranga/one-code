@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentViewTarget, applyBorderBadge, fitBadge, scrolledView, unwrapUserMessage, userMessageForAgent, viewportScrollFor } from "../../extensions/lib/agents/agent-view.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
-import { moveTasksSelection, renderTasksDialog, tasksItems } from "../../extensions/agents/subagents/tasks-dialog.ts";
+import { moveTasksSelection, quitNote, renderTasksDialog, tasksItems } from "../../extensions/agents/subagents/tasks-dialog.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 
 const paint = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
@@ -75,7 +75,7 @@ describe("renderTasksDialog", () => {
 	});
 
 	it("groups shells, local agents and completed agents under Claude Code's headers", () => {
-		const out = renderTasksDialog({ shells, agents, selected: 0, width: 100 }, paint);
+		const out = renderTasksDialog({ shells, agents, selected: 0, width: 100, quitNote: quitNote(2, 0) }, paint);
 		expect(out).toEqual([
 			"  Background",
 			"  1 active shell · 1 active agent",
@@ -85,7 +85,20 @@ describe("renderTasksDialog", () => {
 			"    ⏺ Read notes.txt and report after delay   running · Sonnet 5",
 			"    Completed (1)",
 			"    ✔ write a 300-word poem   done · Haiku 4.5",
+			"  Quitting or /reload stops running background work.",
 			"  ↑/↓ to select · Enter to view · x to stop · Esc to close",
+		]);
+	});
+
+	it("says what quitting stops: running work, scheduled jobs, or both, even when the list is empty", () => {
+		expect(quitNote(0, 0)).toBeUndefined();
+		expect(quitNote(0, 1)).toBe("Quitting stops scheduled jobs.");
+		expect(quitNote(1, 2)).toBe("Quitting stops running background work and scheduled jobs; /reload stops the running work.");
+		expect(renderTasksDialog({ shells: [], agents: [], selected: 0, width: 100, quitNote: quitNote(1, 0) }, paint)).toEqual([
+			"  Background",
+			"  No tasks currently running",
+			"  Quitting or /reload stops running background work.",
+			"  ↑/↓ to select · Enter to view · Esc to close",
 		]);
 	});
 

@@ -92,9 +92,10 @@ when there isn't.
   the first **↓** lands on the shells chip; a second **↓** moves to the
   subagent rows. Otherwise the first **↓** lands on the first subagent.
 - In the subagent rows, **↑** and **↓** select, **Enter** views the
-  selected agent (or `main`), **x** stops it, **ctrl+x** then **ctrl+k**
-  stops every agent, and **Esc** hands focus back to the editor. Typing
-  any other key does the same, with the key included.
+  selected agent (or `main`), **x** stops it, and **Esc** hands focus back
+  to the editor. Typing any other key does the same, with the key
+  included. **ctrl+x** then **ctrl+k**, pressed twice, stops every running
+  agent, here or from the prompt.
 - While you view an agent, the editor talks to it: the border shows which
   agent, and what you send goes to that agent instead of the main
   conversation. **PgUp** and **PgDn** scroll its transcript, and **Esc** in

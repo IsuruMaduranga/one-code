@@ -225,6 +225,7 @@ export function permissionGateFactory(
 							signal: ctx?.signal,
 							sessionId,
 							model: ctx?.model,
+							resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
 						});
 					}
 				} catch (error) {

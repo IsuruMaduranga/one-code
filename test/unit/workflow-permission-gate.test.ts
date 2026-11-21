@@ -210,6 +210,8 @@ describe("permissionGateFactory — what the bridge call carries (SUBAGENT-REVIE
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toMatchObject({ toolName: "bash", cwd: "/tmp/child", sessionId: "sess-123" });
 		expect(calls[0].signal).toBe(controller.signal);
+		// The child's own persisted-output directory, from its session and not the parent's.
+		expect(calls[0].resultsDirPath).toBe(realpathSync(sessionResultsDir(ctx)));
 	});
 });
 

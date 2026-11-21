@@ -98,6 +98,19 @@ export class SubagentWidget {
 		return this.focusIndex === undefined ? undefined : rows[this.focusIndex]?.run;
 	}
 
+	/** The `main` row's note (stop-all.ts stopAllNote), read at each render. */
+	private mainNote: ((now: number, focused: boolean) => string | undefined) | undefined;
+
+	setMainNote(note: (now: number, focused: boolean) => string | undefined): void {
+		this.mainNote = note;
+		this.render();
+	}
+
+	/** Paint again now (a note changed). */
+	refresh(): void {
+		this.render();
+	}
+
 	setFocus(index: number | undefined): void {
 		this.focusIndex = index;
 		this.focusId = index === undefined ? undefined : (this.rows()[index]?.run?.taskId ?? "main");
@@ -270,7 +283,8 @@ export class SubagentWidget {
 				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 				return linesComponent((width) => {
 					const lines: string[] = [];
-					if (showStrip) lines.push(...renderStrip({ rows, selected, viewedId: this.viewedId, width: width - 1, now }, paint));
+					const mainNote = this.mainNote?.(now, selected !== undefined);
+					if (showStrip) lines.push(...renderStrip({ rows, selected, viewedId: this.viewedId, width: width - 1, now, mainNote }, paint));
 					else if (notice) lines.push(paint.fg("dim", TASKS_NOTICE));
 					if (shellVisible) {
 						if (lines.length) lines.push("");

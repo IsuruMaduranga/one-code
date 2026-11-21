@@ -22,7 +22,7 @@ import type { SubagentDefault } from "../../lib/models/subagent-default.ts";
 import { AgentRunner } from "./agent-session.ts";
 import { createRunAdmission, createScriptGlobals, MAX_CONCURRENCY, type ScriptRunState } from "./globals.ts";
 import { appendJournal, readJournal, ReplayCursor } from "./journal.ts";
-import { AgentRecordStore, previewValue } from "./records.ts";
+import { AgentRecordStore, valueText } from "./records.ts";
 import { findSavedWorkflow } from "./saved-workflows.ts";
 import { parseWorkflowScript } from "./script-source.ts";
 import { runWorkflowScript } from "./vm-runtime.ts";
@@ -30,11 +30,11 @@ import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 import type { DeferRequest } from "../../lib/request/deferred.ts";
+import { persistIfLarge } from "../../lib/request/persisted-output.ts";
 import { workflowResultText } from "./text.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 const RECENT_EVENTS_CAP = 200;
-const RESULT_CAP = 30_000;
 
 export interface StartRunOptions {
 	script: string;
@@ -350,7 +350,12 @@ function defaultConcurrency(): number {
 	return Math.min(MAX_CONCURRENCY, Math.max(1, os.cpus().length - 2));
 }
 
-/** Human/LLM-facing completion report, delivered as the followUp message. */
+/**
+ * Human/LLM-facing completion report, delivered as the followUp message. A
+ * script value too large to send whole is saved in the run's directory (under
+ * the session's, which the model may read) and the report carries its path
+ * and a preview.
+ */
 export function buildRunReport(handle: RunHandle): string {
 	const state = handle.state;
 	const seconds = handle.finishedAt ? Math.round((handle.finishedAt - handle.startedAt) / 1000) : 0;
@@ -368,7 +373,7 @@ export function buildRunReport(handle: RunHandle): string {
 		status: handle.status as "completed" | "failed" | "aborted",
 		...(state ? { stats: { agents: state.agentCount(), outputTokens: state.outputTokens(), cost: state.cost() } } : {}),
 		seconds,
-		...(completed && handle.result !== undefined ? { result: previewValue(handle.result, RESULT_CAP, workflowResultText.resultTruncated) } : {}),
+		...(completed && handle.result !== undefined ? { result: persistIfLarge(valueText(handle.result), { dir: handle.runDir, id: "result" }) } : {}),
 		...(completed ? {} : { reason: handle.errorMessage }),
 		progress: completed ? [] : handle.recentEvents.slice(-5),
 		keptWorktrees,

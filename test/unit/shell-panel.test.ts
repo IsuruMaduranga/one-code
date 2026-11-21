@@ -62,8 +62,8 @@ describe("reduceShellKey", () => {
 		expect(reduceShellKey(undefined)).toBe("passthrough");
 		expect(reduceShellKey("stop")).toBe("passthrough");
 		// ← and space are typing here: the chip lets go and the editor gets the byte.
-		expect(reduceShellKey(decodeStripKey("\x1b[D", false).key)).toBe("passthrough");
-		expect(reduceShellKey(decodeStripKey(" ", false).key)).toBe("passthrough");
+		expect(reduceShellKey(decodeStripKey("\x1b[D").key)).toBe("passthrough");
+		expect(reduceShellKey(decodeStripKey(" ").key)).toBe("passthrough");
 	});
 });
 

@@ -18,21 +18,21 @@ function recordKey(callIndex: number, source?: string): string {
 export const ACTIVITY_CAP = 100;
 export const PREVIEW_CAP = 2000;
 
-/** Human-readable preview of an agent's returned value, hard-capped. */
-export function previewValue(value: unknown, cap = PREVIEW_CAP, truncationMarker = "…"): string {
-	let text: string;
-	if (typeof value === "string") {
-		text = value;
-	} else if (value === undefined) {
-		text = "(no value)";
-	} else {
-		try {
-			text = JSON.stringify(value, null, 2);
-		} catch {
-			text = String(value);
-		}
+/** A returned value as text: a string as it is, anything else as indented JSON. */
+export function valueText(value: unknown): string {
+	if (typeof value === "string") return value;
+	if (value === undefined) return "(no value)";
+	try {
+		return JSON.stringify(value, null, 2);
+	} catch {
+		return String(value);
 	}
-	return text.length > cap ? `${text.slice(0, cap)}${truncationMarker}` : text;
+}
+
+/** Human-readable preview of an agent's returned value, hard-capped (for the viewer and the journal, never the model). */
+export function previewValue(value: unknown, cap = PREVIEW_CAP): string {
+	const text = valueText(value);
+	return text.length > cap ? `${text.slice(0, cap)}…` : text;
 }
 
 export class AgentRecordStore {

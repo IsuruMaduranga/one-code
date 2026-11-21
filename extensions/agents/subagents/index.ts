@@ -77,11 +77,12 @@ import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../../lib/agents/task-registry.ts";
-import { SESSION_WORK_CHANNEL, sessionBackgroundTask, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
+import { querySessionWork, SESSION_WORK_CHANNEL, sessionBackgroundTask, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
+import { agentResultDisplay, sendMessageResultDisplay } from "./result-display.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
 import type { SubagentsText } from "./text.ts";
@@ -107,7 +108,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { ClickToggles, clickToExpand, toolRenderers, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -116,10 +117,12 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-chann
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
+import { StopAllPresses, stopAllNote } from "./stop-all.ts";
+import { claimChordKey, CtrlXPrefix } from "../../lib/ui/ctrl-x-chord.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent, viewportScrollFor } from "../../lib/agents/agent-view.ts";
 import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
-import { moveTasksSelection, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
+import { moveTasksSelection, quitNote, renderShellDetail, renderTasksDialog, settleTasksView, shellDetailKey, tasksItems, type TasksView } from "./tasks-dialog.ts";
 import { reduceShellKey, shellRows } from "./shell-panel.ts";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
 import { createMarkdownProse } from "../../lib/ui/prose.ts";
@@ -244,6 +247,9 @@ const LOG_WRITE_INTERVAL_MS = 250;
 const RESIDENT_IDLE_MS = 15 * 60_000;
 
 /** A background agent's process, kept alive after its run so it can be messaged. */
+/** How an agent was stopped: on its own (task_stop, the strip's x, teardown) or with every agent at once (stop-all.ts). */
+type StopKind = "one" | "all";
+
 interface Resident {
 	handle: RpcChildHandle;
 	/** When the resident was started: its hand-backs report tokens and tool uses cumulatively, so the duration is too. */
@@ -254,7 +260,8 @@ interface Resident {
 	 * that turn (undefined when clean or auto mode is off); the handler puts it
 	 * ahead of the report in its notification.
 	 */
-	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
+	/** `stopped`: how the user or the model stopped the turn (stoppedTaskIds), read when it ended. */
+	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: StopKind | undefined) => void>;
 	/** Finished turns whose hand-back is still waiting on auto mode's review, so not yet delivered. */
 	reviewing: number;
 }
@@ -364,8 +371,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * kill still surfaces as an exit, but it neither completed nor failed — so the
 	 * strip and the notification read this to say "Stopped" instead of the
 	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
+	 * "all" marks a stop of every agent at once, whose one notification names
+	 * them all, so the agent's own is dropped (stop-all.ts).
 	 */
-	const stoppedTaskIds = new Set<string>();
+	const stoppedTaskIds = new Map<string, StopKind>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
 	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks, dockRowsReporter(pi.events, "subagents"));
@@ -879,10 +888,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
 	/** Stop an agent, recording its persistent id before kill can settle its turn. */
-	const stopAgent = (taskId: string, handle = liveHandles.get(taskId)) => {
+	const stopAgent = (taskId: string, handle = liveHandles.get(taskId), how: StopKind = "one") => {
 		// An old task can still await review after the agent has resumed. Its
 		// captured handle must not mark the replacement run as stopped.
-		if (handle && liveHandles.get(taskId) === handle) stoppedTaskIds.add(taskId);
+		if (handle && liveHandles.get(taskId) === handle) stoppedTaskIds.set(taskId, how);
 		return handle?.kill();
 	};
 	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
@@ -895,6 +904,36 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 		return exits;
 	};
+
+	// --- ctrl+x ctrl+k: stop every background agent, from the prompt or the strip (stop-all.ts) ---
+
+	/**
+	 * The agents a stop of every agent stops and names: the main conversation's
+	 * own (a nested run goes with its parent, and the model never launched it)
+	 * that are running and can be stopped (a resident still starting has no
+	 * handle yet).
+	 */
+	const runningAgents = () => liveRuns.list().filter((run) => run.status === "running" && run.depth === 0 && liveHandles.has(run.taskId));
+	const stopAllPresses = new StopAllPresses();
+	panel.setMainNote((now, focused) => stopAllNote(stopAllPresses.asking(now), runningAgents().length > 0, focused));
+	/**
+	 * Stop every running agent at the user's word, as Claude Code does: idle
+	 * residents stay, and the agents' own notifications are dropped
+	 * (notifyHandBack) for one line naming them all.
+	 */
+	const stopAllByUser = () => {
+		const running = runningAgents();
+		for (const run of running) void stopAgent(run.taskId, undefined, "all");
+		notify("subagent-result", subagentResultText().stoppedByUser({ descriptions: running.map((run) => registry.resolve(run.taskId)?.description ?? run.name) }));
+		panel.refresh();
+	};
+	/** One press of the chord: the first asks (the strip's ticker takes the prompt down), a second inside the window stops. */
+	const pressStopAll = () => {
+		if (stopAllPresses.press(Date.now()) === "stop") stopAllByUser();
+		else panel.refresh();
+	};
+	// ctrl+x ctrl+k, from the prompt (lib/ui/ctrl-x-chord.ts); the focused strip decodes its own.
+	claimChordKey(pi.events, "ctrl+k", { applies: () => panel.editorFocused() && runningAgents().length > 0, act: pressStopAll });
 
 	/**
 	 * Markdown prose for the transcript views — pi-tui's real renderer, loaded
@@ -1102,7 +1141,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const registerPanelInputHook = (registerCtx: ExtensionContext) => {
 		if (panelHookRegistered || !registerCtx.hasUI) return;
 		panelHookRegistered = true;
-		let chordArmed = false;
 		// Leaving the strip hands focus back to the editor and keeps any open view,
 		// as Claude Code's Esc does: the editor then addresses the viewed agent.
 		const leave = () => {
@@ -1125,21 +1163,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 			if (id) stopAgent(id);
 			return { consume: true };
 		};
-		const doStopAll = (): KeyResult => {
-			stopAllAgents();
-			return { consume: true };
-		};
-		/** Unrecognized key: ctrl+x keeps the stop-all chord armed, else drop focus
-		 * (any open view stays) and let the byte resume in the editor. */
+		// ctrl+x chords (lib/ui/ctrl-x-chord.ts), read ahead of every strip key so a
+		// focused strip or chip never holds the prefix for itself.
+		const prefix = new CtrlXPrefix(pi.events);
+		/** Unrecognized key: drop focus (any open view stays) and let the byte resume in the editor. */
 		const closeAndPassthrough = (): KeyResult => {
-			if (chordArmed) return { consume: true };
 			leave();
 			return undefined;
 		};
 		/** Keys the agents branch owns; any other decode (typing) drops focus and
 		 * passes through — stated positively so a future StripKey addition is
 		 * foreign here by default. */
-		const AGENT_KEYS = new Set<StripKey>(["up", "down", "open", "leave", "stop", "stopAll", "pageUp", "pageDown"]);
+		const AGENT_KEYS = new Set<StripKey>(["up", "down", "open", "leave", "stop", "pageUp", "pageDown"]);
 		/** Row 0 exists only past the synthetic `main` row. */
 		const focusFirstAgentRow = (): boolean => {
 			if (panel.rowCount() <= 1) return false;
@@ -1154,10 +1189,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				panel.setShellChipFocus(false);
 				return undefined;
 			}
-			const decoded = decodeStripKey(data, false);
-			// ctrl+x (the agents stop-all chord arm) means nothing on the chip:
-			// swallow it rather than leaking the raw \x18 into the editor.
-			if (decoded.chordArmed) return { consume: true };
+			const decoded = decodeStripKey(data);
 			const effect = reduceShellKey(decoded.key);
 			panel.setShellChipFocus(false);
 			if (effect === "passthrough") return undefined; // typing resumes in the editor, byte included
@@ -1186,6 +1218,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// kitty terminal sends one after every press: a release is never a
 				// key here (it used to read as typing and drop focus).
 				if (isKeyRelease(data)) return undefined;
+				const chord = prefix.feed(data);
+				if (chord) return chord;
 				const ctx = lastCtx ?? registerCtx;
 				// Enter focus: down-arrow while the editor holds real focus. Unlike the
 				// workflow strip we do NOT require the editor to be idle — the whole
@@ -1236,8 +1270,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					leave();
 					return undefined;
 				}
-				const decoded = decodeStripKey(data, chordArmed);
-				chordArmed = decoded.chordArmed;
+				const decoded = decodeStripKey(data);
 				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) return closeAndPassthrough();
 				switch (decoded.key) {
 					case "up":
@@ -1264,8 +1297,6 @@ function subagentsExtension(pi: ExtensionAPI) {
 					}
 					case "stop":
 						return doStop();
-					case "stopAll":
-						return doStopAll();
 					case "pageUp":
 					case "pageDown":
 						// Scroll an open view; with none open, swallow so the page keys
@@ -1379,8 +1410,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		outputFile?: string;
 		/** The turn's outcome: its status, tool count and tokens come from here. */
 		outcome: ChildOutcome;
-		/** The turn ended because the user or the model stopped the agent (CC's `killed`). */
-		stopped?: boolean;
+		/** The turn ended because the user or the model stopped the agent (CC's `killed`); "all" when every agent was stopped at once. */
+		stopped?: StopKind;
 		/** Start of the span `outcome`'s tokens and tool uses cover, for CC's `<duration_ms>`. */
 		startedAt: number;
 		/** The bounded report text (a failed turn's output rides `<result>` instead). */
@@ -1388,6 +1419,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 		review: HandBackVerdict | undefined;
 		details?: Record<string, unknown>;
 	}) => {
+		// A stop of every agent sends one line naming them all (stop-all.ts); the
+		// kind was read when the turn ended, as `stopped` is, so a resume during
+		// the hand-back review cannot change it.
+		if (opts.stopped === "all") return;
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
 		const record = registry.resolve(opts.from);
@@ -2016,7 +2051,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// answered synchronously when auto mode is off.
 				const handler = resident.turnHandlers.shift();
 				// A stop or resume during review must not change this turn's outcome.
-				const stopped = stoppedTaskIds.has(p.record.taskId);
+				const stopped = stoppedTaskIds.get(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
@@ -2172,9 +2207,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const agentTool = defineTool({
 		name: "Agent",
 		label: "Agent",
-		...toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
-			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
-		}),
+		...withResultDisplay(
+			toolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
+				title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
+			}),
+			(result, expanded, context) => agentResultDisplay(result.details, { expanded, prompt: context.args?.task ?? context.args?.prompt, expandHint: expandHintFor(context) }),
+		),
 		description: words.agentDescription({ form: "short", configDir: projectConfigDirName() }),
 		promptSnippet: words.agentPromptSnippet,
 		parameters: agentParams,
@@ -2455,7 +2493,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						text: subagentResultText().launched({ lines, running: launchedRecords.length, outputFile }),
 					},
 				],
-				details: { agentRuns: launchedRecords, background: true },
+				details: { agentRuns: launchedRecords, background: true, lines },
 			};
 		},
 	});
@@ -2524,7 +2562,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 								text: subagentResultText().steered({ name: record.name }),
 							},
 						],
-						details: { agentRuns: [record], steered: true },
+						details: { agentRuns: [record], steered: true, pending: true },
 					};
 				}
 				// The turn had just ended (settle window): the message rides the next
@@ -2536,7 +2574,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 							text: subagentResultText().nextTurn({ name: record.name }),
 						},
 					],
-					details: { agentRuns: [record] },
+					details: { agentRuns: [record], pending: true },
 				};
 			}
 
@@ -2594,7 +2632,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 						text: subagentResultText().sentToResident({ name: record.name, taskId }),
 					},
 				],
-				details: { agentRuns: [record], taskId },
+				details: { agentRuns: [record], taskId, pending: true },
 			};
 		}
 
@@ -2737,7 +2775,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		void handle.result.then(async (outcome) => {
 			runningIds.delete(record.taskId);
 			// Read before the review: a stop or resume during it must not change this turn's outcome.
-			const stopped = stoppedTaskIds.has(record.taskId);
+			const stopped = stoppedTaskIds.get(record.taskId);
 			live.finish(stopped ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews this turn's actions before the reply goes out, as it
 			// does for a resident's turn; a resumed turn once skipped it
@@ -2771,16 +2809,19 @@ function subagentsExtension(pi: ExtensionAPI) {
 					text: subagentResultText().sent({ name: record.name, taskId }),
 				},
 			],
-			details: { agentRuns: [record], taskId },
+			details: { agentRuns: [record], taskId, pending: true },
 		};
 	};
 
 	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
-		...toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
-			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
-		}),
+		...withResultDisplay(
+			toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
+				title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
+			}),
+			(result) => sendMessageResultDisplay(result.details),
+		),
 		description: words.sendMessageDescription,
 		parameters: SendMessageParams,
 		execute: (toolCallId, params, signal, _onUpdate, ctx) => sendMessage(toolCallId, params, signal, ctx),
@@ -2869,7 +2910,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 				...runs.filter((run) => run.status === "running"),
 				...runs.filter((run) => run.status !== "running" && run.viewed),
 			].map((run) => ({ kind: "agent" as const, taskId: run.taskId, text: run.label, model: modelLabel(ctx, run.model), running: run.status === "running" }));
-			return { shells, agents };
+			const work = querySessionWork(pi.events);
+			return { shells, agents, quitNote: quitNote(work.tasks.filter((task) => task.status === "running").length, work.crons.length) };
 		};
 		let selected = 0;
 		// Rebuilt when a run or shell changes, not per frame or keystroke.

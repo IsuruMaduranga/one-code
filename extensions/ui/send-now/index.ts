@@ -11,8 +11,9 @@
  * above the editor while anything is queued.
  *
  * pi binds `ctrl+x` alone to copy; while send now applies, `ctrl+x` is only the
- * chord's prefix (chord.ts), and one the chord does not complete (another key,
- * or CHORD_TIMEOUT_MS without one) is dropped. Only public extension API.
+ * prefix of the chord (lib/ui/ctrl-x-chord.ts, shared with the stop-agents
+ * chord), and one no chord completes (another key, or the timeout) is dropped.
+ * Only public extension API.
  *
  * pi exposes no read of its queue to extensions, only `hasPendingMessages()`,
  * so the hint asks on every render rather than tracking queue events (a
@@ -22,13 +23,14 @@
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SEND_NOW_CHANNEL } from "../../lib/notify/send-now-channel.ts";
+import { claimChordKey, CtrlXPrefix } from "../../lib/ui/ctrl-x-chord.ts";
 import { safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
-import { SEND_NOW_HINT, SendNowChord } from "./chord.ts";
+
+/** The hint under the queued messages, Claude Code's wording (its `chat:sendNow`). */
+export const SEND_NOW_HINT = "ctrl+x ctrl+s to send now";
 
 /** How long send now waits for the aborted turn to settle before giving up. */
 const IDLE_WAIT_MS = 10_000;
-/** How long a held `ctrl+x` waits for its `ctrl+s` before the chord is dropped. */
-const CHORD_TIMEOUT_MS = 1_000;
 
 function sendNowExtension(pi: ExtensionAPI) {
 	let unsubscribe: (() => void) | undefined;
@@ -92,25 +94,13 @@ function sendNowExtension(pi: ExtensionAPI) {
 			}
 		};
 
-		const chord = new SendNowChord();
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const stopUnsubscribe = ctx.ui.onTerminalInput((data) => {
-			clearTimeout(timer);
-			switch (chord.feed(data, active())) {
-				case "hold":
-					timer = setTimeout(() => chord.expire(), CHORD_TIMEOUT_MS);
-					timer.unref?.();
-					return { consume: true };
-				case "send":
-					void sendNow(ctx);
-					return { consume: true };
-				default:
-					return undefined;
-			}
-		});
+		const prefix = new CtrlXPrefix(pi.events);
+		const stopListening = ctx.ui.onTerminalInput((data) => prefix.feed(data));
+		const stopClaiming = claimChordKey(pi.events, "ctrl+s", { applies: active, act: () => void sendNow(ctx) });
 		unsubscribe = () => {
-			clearTimeout(timer);
-			stopUnsubscribe();
+			prefix.disarm();
+			stopListening();
+			stopClaiming();
 		};
 
 		ctx.ui.setWidget("send-now", (_tui, theme) => {

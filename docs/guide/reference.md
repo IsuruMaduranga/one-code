@@ -91,7 +91,7 @@ These come from pi and are available in every One Code session.
 |---|---|
 | **ctrl+q** (**alt+m** on Windows and WSL) | Cycle the permission mode: manual, accept edits, plan, auto. |
 | **↓** (empty editor) | Focus the panel below the editor: background shells, then subagents, then workflows. |
-| **ctrl+x** then **ctrl+k** | Stop every running agent (in the subagent panel). |
+| **ctrl+x** then **ctrl+k**, twice | Stop every running background agent. Works from the prompt; the first press asks, a second within three seconds stops them. |
 | **x** | Stop the selected agent, shell, or workflow (in a panel). |
 | **Esc** | Leave a panel, or cancel a dialog. |
 | **ctrl+c** | Close any panel. |
@@ -121,7 +121,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+g** | Edit the prompt in your external editor. |
 | **ctrl+v** | Paste an image or text. |
 | **shift+enter**, **ctrl+j** | Insert a newline. |
-| **ctrl+x** | Copy the last reply. While the model works with a message queued or typed, it starts **ctrl+x ctrl+s** instead. |
+| **ctrl+x** | Copy the last reply. While a background agent runs, or the model works with a message queued or typed, it starts **ctrl+x ctrl+k** or **ctrl+x ctrl+s** instead. |
 | **PgUp**, **PgDn**, **ctrl+home**, **ctrl+end** | Scroll the transcript in full-screen mode. On pi before 1.0.3, **Home** and **End** jump to the top and bottom instead. |
 | **ctrl+shift+f** | Search the transcript in full-screen mode. |
 | **!** at the start of a line | Run a shell command yourself. In the `onecode` app the model answers it right away when idle; as a pi package the output goes with your next message. **!!** keeps the output out of the context and starts no turn. See [Shell commands you type](terminal-interface.md#shell-commands-you-type). |

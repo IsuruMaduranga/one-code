@@ -1,18 +1,19 @@
 /**
  * Pure key decoding for the below-editor panel — Claude Code's agent-tree
  * keys: arrows select, Enter views the selected agent (or `main`), PageUp and
- * PageDown scroll an open view, `x` stops, the `ctrl+x ctrl+k` chord stops
- * all, esc hands focus back to the editor (index.ts owns what each does; an
+ * PageDown scroll an open view, `x` stops, esc hands focus back to the editor (index.ts owns what each does; an
  * open view stays open while the editor addresses its agent). Raw terminal
  * bytes in, intents out — no side effects, fully unit-testable. Keys are named
  * through `lib/ui/key-input.ts`, so the legacy, kitty and modifyOtherKeys
  * encodings decode alike, and a kitty key release (sent after every press) is
- * never mistaken for typing.
+ * never mistaken for typing. The `ctrl+x ctrl+k` chord that stops every agent
+ * is read ahead of these keys, on the shared prefix (stop-all.ts,
+ * lib/ui/ctrl-x-chord.ts).
  */
 
 import { isKeyRelease, keyId, keyText } from "../../lib/ui/key-input.ts";
 
-export type StripKey = "up" | "down" | "open" | "leave" | "stop" | "stopAll" | "pageUp" | "pageDown";
+export type StripKey = "up" | "down" | "open" | "leave" | "stop" | "pageUp" | "pageDown";
 
 const STRIP_KEYS: Record<string, StripKey> = {
 	up: "up",
@@ -24,23 +25,19 @@ const STRIP_KEYS: Record<string, StripKey> = {
 };
 
 /**
- * Decoder with chord state: `ctrl+x` arms the chord (consumed, no key); a
- * following `ctrl+k` completes it into `stopAll`; any other key cancels the
- * chord and is decoded normally. A key release decodes to `release`, which
- * changes nothing (the caller lets it through). Any other chunk that decodes
- * to nothing (typing) is the caller's signal to drop focus and let the byte
- * through.
+ * One chunk of raw input as a strip key. A key release decodes to `release`,
+ * which changes nothing (the caller lets it through). Any other chunk that
+ * decodes to nothing (typing) is the caller's signal to drop focus and let the
+ * byte through.
  */
-export function decodeStripKey(data: string, chordArmed: boolean): { key?: StripKey; chordArmed: boolean; release?: true } {
-	if (isKeyRelease(data)) return { chordArmed, release: true };
+export function decodeStripKey(data: string): { key?: StripKey; release?: true } {
+	if (isKeyRelease(data)) return { release: true };
 	const id = keyId(data);
-	if (chordArmed && id === "ctrl+k") return { key: "stopAll", chordArmed: false };
-	if (id === "ctrl+x") return { chordArmed: true };
 	const key = id ? STRIP_KEYS[id] : undefined;
-	if (key) return { key, chordArmed: false };
+	if (key) return { key };
 	const text = keyText(data);
-	if (text === "x" || text === "X") return { key: "stop", chordArmed: false };
-	return { chordArmed: false };
+	if (text === "x" || text === "X") return { key: "stop" };
+	return {};
 }
 
 /** A ↓ press (in any encoding, never its release): the key that enters the strip. */

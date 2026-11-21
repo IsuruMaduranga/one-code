@@ -9,7 +9,6 @@ import { decodeMemoryKey } from "../../extensions/context/memory/panel.ts";
 import { decodePanelKey as decodePermissionsKey } from "../../extensions/safety/permissions/panel/keys.ts";
 import { decodeViewerKey as decodePlanKey } from "../../extensions/safety/plan-mode/viewer.ts";
 import { decodePanelKey as decodePluginsKey } from "../../extensions/tools/plugins/panel/keys.ts";
-import { classifyKey, SendNowChord } from "../../extensions/ui/send-now/chord.ts";
 import { decodeSkillsKey } from "../../extensions/tools/skill/panel/keys.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey } from "../../extensions/agents/subagents/panel-keys.ts";
 import { decodeViewerKey as decodeWorkflowKey } from "../../extensions/agents/workflow/viewer.ts";
@@ -97,34 +96,14 @@ describe("letter shortcuts in every encoding", () => {
 describe("the subagent strip under the kitty protocol", () => {
 	it("ignores key releases instead of reading them as typing", () => {
 		for (const d of ["\x1b[1;1:3B", "\x1b[1;1:3A", "\x1b[120;5:3u", "\x1b[13;1:3u"]) {
-			expect(decodeStripKey(d, false), JSON.stringify(d)).toEqual({ chordArmed: false, release: true });
-			expect(decodeStripKey(d, true)).toEqual({ chordArmed: true, release: true });
+			expect(decodeStripKey(d), JSON.stringify(d)).toEqual({ release: true });
 		}
 		expect(isStripEntryKey("\x1b[1;1:3B")).toBe(false);
 		each(DOWN, (d) => expect(isStripEntryKey(d)).toBe(true));
 	});
-	it("arms and completes ctrl+x ctrl+k in every encoding", () => {
-		for (const x of ["\x18", "\x1b[120;5u", "\x1b[27;5;120~"]) {
-			for (const k of ["\x0b", "\x1b[107;5u", "\x1b[27;5;107~"]) {
-				expect(decodeStripKey(x, false)).toEqual({ chordArmed: true });
-				expect(decodeStripKey(k, true), `${JSON.stringify(x)} ${JSON.stringify(k)}`).toEqual({ key: "stopAll", chordArmed: false });
-			}
-		}
-	});
 	it("leaves on Esc and repeats keys the terminal auto-repeats", () => {
-		each(ESC, (d) => expect(decodeStripKey(d, false).key).toBe("leave"));
-		expect(decodeStripKey("\x1b[1;1:2B", false).key).toBe("down");
-	});
-});
-
-describe("send now under modifyOtherKeys", () => {
-	it("classifies tmux's extended-keys ctrl+x and ctrl+s", () => {
-		expect(classifyKey("\x1b[27;5;120~")).toBe("ctrl+x");
-		expect(classifyKey("\x1b[27;5;115~")).toBe("ctrl+s");
-		expect(classifyKey("\x1b[27;5;107~")).toBe("other");
-		const chord = new SendNowChord();
-		expect(chord.feed("\x1b[27;5;120~", true)).toBe("hold");
-		expect(chord.feed("\x1b[27;5;115~", true)).toBe("send");
+		each(ESC, (d) => expect(decodeStripKey(d).key).toBe("leave"));
+		expect(decodeStripKey("\x1b[1;1:2B").key).toBe("down");
 	});
 });
 

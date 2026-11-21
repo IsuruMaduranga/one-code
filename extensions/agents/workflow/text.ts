@@ -97,7 +97,7 @@ interface RunReport {
 	/** Absent when the run never got going. */
 	stats?: { agents: number; outputTokens: number; cost: number };
 	seconds: number;
-	/** The script's value as previewed (already cut, with `resultTruncated` at the cut); undefined when it returned none. */
+	/** The script's value as text, or the persisted-output block for one too large to send whole; undefined when it returned none. */
 	result?: string;
 	/** Why it stopped, for a run that did not complete. */
 	reason?: string;
@@ -133,8 +133,6 @@ export interface WorkflowResultText {
 	/** A run that ran to its end in the call; `note` is the shared one-shot note, when the run was forced to the foreground. */
 	ranToEnd(p: { note?: string; report: string; scriptPath: string }): string;
 	report(report: RunReport): string;
-	/** Marks where a long result preview was cut. */
-	resultTruncated: string;
 	/** An agent call with no label: the n-th call (1-based). */
 	defaultAgentLabel(p: { n: number }): string;
 	notice(notice: AgentNotice): string;
@@ -327,7 +325,6 @@ export const workflowResultText: WorkflowResultText = {
 		"The user can watch with /workflows and stop with /workflows stop.",
 	ranToEnd: ({ note, report: text, scriptPath }) => `${note ? `${note}\n\n` : ""}${text}\nscript: ${scriptPath}`,
 	report,
-	resultTruncated: "\n… (truncated)",
 	defaultAgentLabel: ({ n }) => `agent ${n}`,
 	notice,
 	progress: {

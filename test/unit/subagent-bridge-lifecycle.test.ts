@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -140,6 +140,28 @@ describe("subagent permission bridge lifecycle", () => {
 		answer.resolve("Yes");
 		expect(await pending).toMatchObject({ block: true });
 		expect(signal?.aborted).toBe(true);
+	});
+
+	// A child in a worktree persists oversized output under its own session
+	// directory, not the parent's, and is told to read the file back.
+	it("lets a child read its own persisted output, and still the parent's", async () => {
+		const childResults = join(root, "child-session");
+		const own = join(childResults, "tool-results", "call-1.txt");
+		const parents = join(root, "session", "tool-results", "call-2.txt");
+		for (const file of [own, parents]) {
+			mkdirSync(dirname(file), { recursive: true });
+			writeFileSync(file, "persisted output");
+		}
+		const worktree = join(root, "worktree");
+		mkdirSync(worktree);
+		// Resolved, as the child's gate sends it (the temp dir sits under a symlink on macOS).
+		const childResultsPath = realpathSync(childResults);
+		const read = (path: string, resultsDirPath?: string) => bridge({ toolName: "read", input: { path }, cwd: worktree, resultsDirPath });
+
+		expect(await read(own, childResultsPath)).toBeUndefined();
+		expect(await read(parents, childResultsPath)).toBeUndefined();
+		// Without the child's directory the same read is an outside read, which nobody can approve here.
+		expect(await read(own)).toMatchObject({ block: true });
 	});
 
 	it("cancels the first outside-read consent dialog with the child's signal, not the parent's turn", async () => {

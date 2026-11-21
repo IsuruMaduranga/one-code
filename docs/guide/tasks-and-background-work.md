@@ -66,13 +66,12 @@ The turn-duration line reports how many shells are still running when a
 turn ends. When a session ends, running shells are stopped and the next
 session is told which ones.
 
-Background work belongs to the session. While a shell, monitor, background
-agent, or scheduled job is active, a line under the prompt counts them and
-reminds you that `/clear` or quitting stops them. Before `/clear`, `/new`,
+Background work belongs to the session. Before `/clear`, `/new`,
 `/resume`, or a fork stops anything, One Code lists what's running and asks
 first. **Cancel** is the default (Esc does the same), so you can let the work
-finish or stop it from `/tasks` before switching. Quitting can't be paused,
-so the line under the prompt is the only warning you get there. A process
+finish or stop it from `/tasks` before switching. Quitting and `/reload`
+can't be paused: they stop running work without asking, as Claude Code
+does, and `/tasks` says so while anything is running. A process
 that a finished shell left behind, such as a dev server started with `&`,
 keeps running until you quit.
 

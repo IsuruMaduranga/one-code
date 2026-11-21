@@ -6,16 +6,11 @@
  * token-budget suffix is CC's separate /budget feature and is not replicated.
  */
 
+import { type PendingWork, waitingForText } from "../../lib/notify/session-work.ts";
 import { countNoun, formatDuration } from "../../lib/ui/tui-render.ts";
 
 /** CC's TEARDROP_ASTERISK (figures.ts), the mark leading the duration line. */
 export const TURN_MARK = "✻";
-
-/** Background agents and workflows still running when the turn ended (Claude Code's pending counts). */
-export interface PendingWork {
-	agents: number;
-	workflows: number;
-}
 
 /**
  * `<Verb> for <duration>` — duration formatted like the spinner's elapsed
@@ -25,12 +20,11 @@ export interface PendingWork {
  * Code 2.1.327 shows "Waiting for 1 background agent to finish" in its place
  * (findings §94), so the user sees the main agent is waiting, not done.
  */
-export function turnDurationText(verb: string, durationMs: number, runningShells = 0, doneAt?: string, pending?: PendingWork): string {
+export function turnDurationText(verb: string, durationMs: number, runningShells = 0, doneAt?: string, pending?: Pick<PendingWork, "agents" | "workflows">): string {
 	const shells = runningShells > 0 ? ` · ${countNoun(runningShells, "shell")} still running` : "";
-	if (pending && (pending.agents > 0 || pending.workflows > 0)) {
-		const what = [pending.agents > 0 ? countNoun(pending.agents, "background agent") : "", pending.workflows > 0 ? countNoun(pending.workflows, "workflow") : ""].filter(Boolean).join(" and ");
-		return `Waiting for ${what} to finish${shells}`;
-	}
+	// Shells have their own tail here; only agents and workflows are waited for.
+	const waiting = pending && waitingForText({ ...pending, others: 0 });
+	if (waiting) return `${waiting}${shells}`;
 	const done = doneAt ? ` · done ${doneAt}` : "";
 	return `${verb} for ${formatDuration(0, durationMs)}${done}${shells}`;
 }
