@@ -339,7 +339,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
 		const query = data as SessionWorkQuery;
 		for (const [taskId, resident] of residents) {
-			if (resident.handle.exited() || !resident.handle.busy() || tasks.get(taskId)?.status === "running" || resident.turnTask?.status === "running") continue;
+			if (!residentPending(resident) || tasks.get(taskId)?.status === "running" || resident.turnTask?.status === "running") continue;
 			query.tasks.push(sessionBackgroundTask({ id: taskId, kind: "subagent", status: "running", description: tasks.get(taskId)?.description ?? taskId }));
 		}
 	});
@@ -1441,9 +1441,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 		// A stop of every agent sends one line naming them all (stop-all.ts); the
 		// kind was read when the turn ended, as `stopped` is, so a resume during
 		// the hand-back review cannot change it.
-		if (opts.stopped === "all") return;
-		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
+		// Auto mode's flag on the stopped turn still goes out, as it does after a
+		// single stop: the flag must reach the model by every route.
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
+		if (opts.stopped === "all" && warning === undefined) return;
+		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const record = registry.resolve(opts.from);
 		// task_output may withdraw only a hand-back its own result repeats: not
 		// one carrying auto mode's flag, and not a later turn's update, since
