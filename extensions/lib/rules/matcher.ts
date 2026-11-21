@@ -811,6 +811,8 @@ export type ToolTier = "safe" | "edit" | "execute" | "custom";
 
 const SAFE_TOOLS = new Set(["read", "grep", "find", "ls"]);
 const EDIT_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+/** The file-writing tools a path deny or ask rule on any one of them binds together (`decide`). */
+const WRITE_FAMILY: ReadonlySet<string> = EDIT_TOOLS;
 
 export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);
@@ -1315,7 +1317,36 @@ export function decide(params: DecideInput): Decision {
 		if (named) return { decision: "deny", cause: "secret-file" };
 	}
 
-	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
+	/**
+	 * The deny or ask rule that binds this call. A rule with a path on one of
+	 * the file-writing tools binds the other two for that path, as Claude Code
+	 * applies its Edit rules to every tool that edits files: `Edit(config/prod.yaml)`
+	 * denied must not leave `write` or `notebook_edit` free to replace the file.
+	 * Allow rules stay exact (`ruleCoversTool`): widening one would be a grant.
+	 */
+	const blockingRule = (rules: readonly PermissionRule[]): PermissionRule | undefined =>
+		rules.find(
+			(r) =>
+				ruleMatches(r, toolName, subject, cwd) ||
+				(!!r.pattern && WRITE_FAMILY.has(r.tool) && WRITE_FAMILY.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
+		);
+	/**
+	 * Whether a shell line writes a path that such a rule names, by the
+	 * pre-gate's recorded write targets. The line then takes no fast path: it
+	 * is classified in auto mode, asked in acceptEdits and refused in dontAsk.
+	 * This only withholds an allow; the pre-gate itself gains no deny path.
+	 */
+	const writesBlockedPath = (evidence: ShellEvidence): boolean =>
+		evidence.writes.some((write) =>
+			[...deny, ...ask].some(
+				(r) =>
+					!!r.pattern &&
+					WRITE_FAMILY.has(r.tool) &&
+					[write.absolute, write.resolved].some((path) => path !== undefined && matchesPathPattern(r.pattern as string, path, cwd)),
+			),
+		);
+
+	const denyRule = blockingRule(deny);
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
 
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
@@ -1487,7 +1518,7 @@ export function decide(params: DecideInput): Decision {
 			});
 		}
 		if (isPlanReadOnlyTool(toolName, tool)) {
-			const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+			const askRule = blockingRule(ask);
 			return askRule ? askOrDeny(askRule) : { decision: "allow", cause: "plan-readonly" };
 		}
 		return { decision: "deny", cause: "plan-mode" };
@@ -1503,7 +1534,7 @@ export function decide(params: DecideInput): Decision {
 
 	// An explicit ask rule is the user's stated intent to be prompted, so it wins
 	// over auto mode too: the classifier never gets to auto-approve a match.
-	const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+	const askRule = blockingRule(ask);
 	if (askRule) return askOrDeny(askRule);
 
 	/**
@@ -1603,7 +1634,7 @@ export function decide(params: DecideInput): Decision {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
-		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork)) {
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesBlockedPath(evidence)) {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
@@ -1626,8 +1657,8 @@ export function decide(params: DecideInput): Decision {
 	// bounds what the command can write and reach, so the manual modes do not ask first. Auto mode keeps
 	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
 	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
-		const seen = shellEvidence(subject).writes;
-		if (!seen.some((write) => isProtected(write.absolute, write.resolved))) return { decision: "allow", cause: "sandboxed" };
+		const evidence = shellEvidence(subject);
+		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesBlockedPath(evidence)) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {
