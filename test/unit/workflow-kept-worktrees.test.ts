@@ -3,7 +3,7 @@
  * reaches the progress line, the viewer's agent record and the run report,
  * for a finished agent and for a failed one alike.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -93,5 +93,9 @@ describe("kept workflow worktrees", () => {
 		expect(report.length).toBeLessThan(PERSIST_MAX_BYTES / 2);
 		expect(readFileSync(file, "utf8")).toBe("r".repeat(PERSIST_MAX_BYTES + 1));
 		expect(handle.runDir.startsWith(sessionDir)).toBe(true);
+		// Built once: the notification and the tool result carry the same block, and the file is not written again.
+		rmSync(file);
+		expect(buildRunReport(handle)).toBe(report);
+		expect(existsSync(file)).toBe(false);
 	});
 });

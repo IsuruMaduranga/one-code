@@ -295,7 +295,9 @@ function childExtensionProblems(entries: readonly string[], productDir: string, 
 		} else if (!existsSync(path)) {
 			problems.push(`child extension "${entry}" does not exist (${path})`);
 		} else if (!choice.has(folder)) {
-			problems.push(`child extension "${entry}" must sit in a product extension folder, one with an index.ts (${PRODUCT_EXTENSIONS_DIR}/<name>/), whose name its productExtension wrapper carries`);
+			// A child-only folder was legal before each profile chose its extensions (decisions/bi-fork.md): name the move.
+			const fix = folder !== inside && isProductExtensionFolder(folder) ? `give ${PRODUCT_EXTENSIONS_DIR}/${folder}/ an index.ts (one exporting productExtension("${folder}", () => {}) registers nothing in the main session) or move the file into a folder that has one` : `move it into a folder that has one`;
+			problems.push(`child extension "${entry}" must sit in a product extension folder, one with an index.ts (${PRODUCT_EXTENSIONS_DIR}/<name>/), whose name its productExtension wrapper carries: ${fix}`);
 		} else if (choice.get(folder) === false) {
 			problems.push(`child extension "${entry}" is in the folder "${folder}", which the profile's extensions list leaves out`);
 		}
@@ -558,10 +560,14 @@ export function profileText(): ProfileText {
 	return activeProfile().text;
 }
 
-/** Stop the process: an invalid profile must never run degraded or without its gate. */
-export function failClosed(error: unknown): never {
+/**
+ * Stop the process: an invalid profile must never run degraded or without its
+ * gate. `subject` names what is invalid when it is not the profile itself (a
+ * product extension's entry file).
+ */
+export function failClosed(error: unknown, subject = `The profile in ${profileDirName}/, or a switch over it,`): never {
 	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in ${profileDirName}/, or a switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
+	process.stderr.write(`\n${subject} is invalid, so the harness will not start: ${reason}\n\n`);
 	process.exit(1);
 }
 

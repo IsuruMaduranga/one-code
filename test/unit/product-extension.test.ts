@@ -272,6 +272,9 @@ describe("the product extensions a profile runs", () => {
 		writeFileSync(join(dir, PRODUCT_EXTENSIONS_DIR, "loose.ts"), "");
 		writeFileSync(join(dir, PRODUCT_EXTENSIONS_DIR, "shared", "child.ts"), "");
 		for (const entry of ["extensions/loose.ts", "extensions/shared/child.ts"]) expect(() => useProfile({ childExtensions: [entry] }, dir), entry).toThrow(/must sit in a product extension folder, one with an index.ts/);
+		// A child-only folder was legal before each profile chose its extensions: the error names the move.
+		expect(() => useProfile({ childExtensions: ["extensions/shared/child.ts"] }, dir)).toThrow(/give extensions\/shared\/ an index\.ts \(one exporting productExtension\("shared", \(\) => \{\}\) registers nothing in the main session\) or move the file into a folder that has one/);
+		expect(() => useProfile({ childExtensions: ["extensions/loose.ts"] }, dir)).toThrow(/whose name its productExtension wrapper carries: move it into a folder that has one/);
 		expect(() => useProfile({ extensions: "lookup" as never }, dir)).toThrow(/its "extensions" must be an array of folder names/);
 	});
 
@@ -303,6 +306,9 @@ describe("the product extensions a profile runs", () => {
 			useProfile({}, dir);
 			expect(() => sdk.productExtension("lokup", () => undefined)(createFakePi().pi as never)).toThrow("exit");
 			expect(String(stderr.mock.calls[0]?.[0])).toContain(`productExtension("lokup"): the product has no folder extensions/lokup/`);
+			// The entry file that misspelled the name is to blame, not the profile folder.
+			expect(String(stderr.mock.calls[0]?.[0])).toContain(`The product extension ${join(import.meta.dirname, "product-extension.test.ts")} is invalid`);
+			expect(String(stderr.mock.calls[0]?.[0])).not.toContain("The profile in");
 		} finally {
 			exit.mockRestore();
 			stderr.mockRestore();

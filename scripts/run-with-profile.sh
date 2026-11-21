@@ -18,12 +18,13 @@
 #        scripts/run-with-profile.sh ~/wso2/bi-copilot/profile
 set -euo pipefail
 
-if [ $# -lt 1 ] || [ ! -f "$1/index.ts" ] || [ ! -f "$1/brand.json" ]; then
-	echo "usage: $0 <profile-dir> [pi args…]   (the folder must hold index.ts and brand.json)" >&2
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The folder holds brand.json and the default profile's index.ts: its own, or profiles/<defaultProfile>/index.ts when the brand names one.
+if [ $# -lt 1 ] || ! node "$repo/scripts/lib/profile-folder.mjs" "$1"; then
+	echo "usage: $0 <profile-dir> [pi args…]   (the folder must hold brand.json, and index.ts or, when brand.json names a defaultProfile, profiles/<defaultProfile>/index.ts)" >&2
 	exit 2
 fi
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$repo/scripts/lib/checkout-copy.sh"
 profile="$(cd "$1" && pwd)"
 shift

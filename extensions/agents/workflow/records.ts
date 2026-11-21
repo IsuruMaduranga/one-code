@@ -18,12 +18,17 @@ function recordKey(callIndex: number, source?: string): string {
 export const ACTIVITY_CAP = 100;
 export const PREVIEW_CAP = 2000;
 
-/** A returned value as text: a string as it is, anything else as indented JSON. */
+/**
+ * A returned value as text: a string as it is, anything else as indented
+ * JSON, or `String(value)` where JSON has no text for it (a function or a
+ * symbol, which `JSON.stringify` turns into undefined, or a cycle or a
+ * BigInt, which make it throw).
+ */
 export function valueText(value: unknown): string {
 	if (typeof value === "string") return value;
 	if (value === undefined) return "(no value)";
 	try {
-		return JSON.stringify(value, null, 2);
+		return JSON.stringify(value, null, 2) ?? String(value);
 	} catch {
 		return String(value);
 	}

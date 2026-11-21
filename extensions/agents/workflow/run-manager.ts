@@ -78,6 +78,8 @@ export class RunHandle extends EventEmitter {
 	finished!: Promise<RunHandle>;
 	private controller = new AbortController();
 	private resolveFinished!: (handle: RunHandle) => void;
+	/** The script's value as the report carries it, built on first use (see `reportedResult`). */
+	private resultBlock?: string;
 
 	readonly runId: string;
 	readonly meta: WorkflowMeta;
@@ -122,6 +124,18 @@ export class RunHandle extends EventEmitter {
 		// consequent "aborted" error.
 		this.errorMessage ??= reason;
 		this.stopWork();
+	}
+
+	/**
+	 * The completed run's value as its report carries it, or undefined when
+	 * there is none. Built once: a value too large to send whole is saved in the
+	 * run's directory on the first call, and the notification and the tool
+	 * result then carry the same block without writing the file again.
+	 */
+	reportedResult(): string | undefined {
+		if (this.status !== "completed" || this.result === undefined) return undefined;
+		this.resultBlock ??= persistIfLarge(valueText(this.result), { dir: this.runDir, id: "result" });
+		return this.resultBlock;
 	}
 
 	finish(status: RunStatus, result?: unknown, errorMessage?: string): void {
@@ -367,13 +381,14 @@ export function buildRunReport(handle: RunHandle): string {
 		.filter((agent) => agent.worktree)
 		.map((agent) => ({ label: agent.label, path: agent.worktree!.path, ...(agent.worktree!.branch ? { branch: agent.worktree!.branch } : {}) }));
 	const completed = handle.status === "completed";
+	const result = handle.reportedResult();
 	return workflowResultText.report({
 		name: handle.meta.name,
 		runId: handle.runId,
 		status: handle.status as "completed" | "failed" | "aborted",
 		...(state ? { stats: { agents: state.agentCount(), outputTokens: state.outputTokens(), cost: state.cost() } } : {}),
 		seconds,
-		...(completed && handle.result !== undefined ? { result: persistIfLarge(valueText(handle.result), { dir: handle.runDir, id: "result" }) } : {}),
+		...(result !== undefined ? { result } : {}),
 		...(completed ? {} : { reason: handle.errorMessage }),
 		progress: completed ? [] : handle.recentEvents.slice(-5),
 		keptWorktrees,

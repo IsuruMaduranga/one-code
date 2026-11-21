@@ -159,8 +159,10 @@ export class FileTracker {
  * content is blank: empty, or only ASCII spaces, tabs and line breaks
  * (`BLANK`). Like an absent file it holds nothing the write could discard;
  * scaffolding tools commonly create a "new empty" source file as one line
- * break. Not `edit` (pi's edit cannot match anything in an empty file) and
- * not the notebook tool (an empty notebook does not parse). A file the model
+ * break. Not `edit`: it changes text in place rather than replacing the
+ * file, and in a whitespace-only file its old text can match blank runs the
+ * model never saw, so it needs a read first. Not the notebook tool either (a
+ * blank notebook does not parse). A file the model
  * read while blank and that was filled since is `stale`, never `unread`, so
  * this never lets that write through.
  */
@@ -196,7 +198,8 @@ export interface GuardFacts {
  * Esc cannot end it. A regular file that exists but could not be read is not
  * absent: the model cannot have seen it. A directory goes through to the
  * tool, which fails on it. Otherwise the freshness status decides, with the
- * empty-file exemption for an unread write (`writeDiscardsNothing`).
+ * blank-file exemption (empty or whitespace-only) for an unread write
+ * (`writeDiscardsNothing`).
  */
 export function guardDecision(facts: GuardFacts): GuardOutcome {
 	if (facts.kind === "other") return "notRegularFile";
