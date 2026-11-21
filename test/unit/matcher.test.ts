@@ -1543,3 +1543,22 @@ describe("an allow rule never covers a redirect outside the working space (PR #1
 		}
 	});
 });
+
+// pi's file tools strip one leading `@`, convert a `file://` URL and expand `~`
+// before they open the path; the subject every rule and containment check
+// judges must be that same file.
+describe("a file tool's subject is the path pi opens", () => {
+	it.each([
+		["@/etc/hosts", "/etc/hosts"],
+		["file:///etc/hosts", "/etc/hosts"],
+		["@.git/hooks/pre-commit", ".git/hooks/pre-commit"],
+		["src/a.ts", "src/a.ts"],
+	])("%s is judged as %s", (raw, expected) => {
+		if (process.platform === "win32" && raw.startsWith("file:")) return;
+		for (const tool of ["read", "write", "edit"]) expect(extractSubject(tool, { path: raw })).toBe(expected);
+	});
+
+	it("matches a deny rule through the @ spelling", () => {
+		expect(ruleMatches(parseRules(["Read(//etc/**)"])[0], "read", extractSubject("read", { path: "@/etc/hosts" }), "/work")).toBe(true);
+	});
+});

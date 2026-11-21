@@ -18,6 +18,7 @@ import { analyzeShellCommand, gateKnowsCommand, INLINE_SCRIPT_SHELLS, isUnknownT
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../shell/paths.ts";
 import { isSensitivePath } from "../shell/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
+import { normalizeToolPath } from "./tool-path.ts";
 import { powershellTreeContainedEdits, powershellTreeNamesWrite, powershellTreeUnlistedOnly } from "../shell/powershell-tree.ts";
 import type { PowerShellParse } from "../shell/powershell-parser.ts";
 import {
@@ -663,7 +664,13 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 			// publish names its source; list, open and delete show their arguments.
 			return pathArgument(input) ?? compactArguments(input);
 	}
-	if (isPathSubjectTool(name)) return pathArgument(input) ?? "";
+	if (isPathSubjectTool(name)) {
+		// The path as pi's file tools read it (`@x`, `file:///x`, `~/x`, a Unicode
+		// space): a rule or a containment check on the raw spelling would judge
+		// `@/etc/hosts` as a file under the working directory while the tool opens `/etc/hosts`.
+		const path = pathArgument(input);
+		return path === undefined ? "" : normalizeToolPath(path);
+	}
 	return pathArgument(input) ?? compactArguments(input);
 }
 
