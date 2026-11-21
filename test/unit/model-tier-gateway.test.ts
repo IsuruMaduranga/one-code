@@ -64,14 +64,19 @@ const GATEWAY_FRONTIER = new Set([
 	...["5", "5.1", "5.2"].map((v) => `openrouter/anthropic/claude-fable-${v}`),
 	...["4.8", "5", "5.5"].map((v) => `openrouter/anthropic/claude-opus-${v}`),
 	"openrouter/anthropic/claude-sonnet-5.5",
-	...["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6.1-sol", "gpt-6.1-sol-pro"].map((id) => `openrouter/openai/${id}`),
+	...["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6.1-sol", "gpt-6.1-sol-pro", "gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.2-sol", "gpt-6.2-sol-pro"].map(
+		(id) => `openrouter/openai/${id}`,
+	),
 	...["fable-5", "fable-5.1", "fable-5.2", "fable-5.2-fast", "opus-4.8", "opus-4.8-fast", "opus-5", "opus-5-fast", "opus-5.5", "opus-5.5-fast", "sonnet-5.5"].map(
 		(id) => `vercel-ai-gateway/anthropic/claude-${id}`,
 	),
-	...["gpt-6-astra", "gpt-6-astra-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast"].map((id) => `vercel-ai-gateway/openai/${id}`),
-	...["claude-fable-5", "claude-fable-5-1", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].map(
+	...["gpt-6-astra", "gpt-6-astra-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast", "gpt-6.2-astra", "gpt-6.2-astra-fast", "gpt-6.2-sol", "gpt-6.2-sol-fast"].map(
+		(id) => `vercel-ai-gateway/openai/${id}`,
+	),
+	...["claude-fable-5", "claude-fable-5-1", "claude-fable-5-2", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6.2-sol"].map(
 		(id) => `cloudflare-ai-gateway/${id}`,
 	),
+	...["openrouter", "vercel-ai-gateway"].flatMap((gateway) => ["gemini-4-carbon", "gemini-4-hydrogen"].map((id) => `${gateway}/google/${id}`)),
 ]);
 
 const labRows = () => catalog.filter((model) => GATEWAYS.includes(model.provider) && LABS.has(modelIdentity(model).profile ?? ""));
@@ -165,15 +170,10 @@ describe("frontier on a known gateway", () => {
 
 /**
  * Gateway rows that pass the gate and that the pairing table (PAIRINGS_AS_OF)
- * does not know: released after it (GPT-6.2), or first listed by pi after it
- * (Gemini 4 Carbon and Hydrogen, Fable 5.2 on Cloudflare).
+ * does not know yet: a model released after it goes here until the table is
+ * refreshed. Empty since the 2026-11-22 refresh.
  */
-const GATEWAY_FRONTIER_AFTER_TABLE = new Set([
-	...["claude-fable-5-2", "gpt-6.2-astra", "gpt-6.2-sol"].map((id) => `cloudflare-ai-gateway/${id}`),
-	...["gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.2-sol", "gpt-6.2-sol-pro"].map((id) => `openrouter/openai/${id}`),
-	...["gpt-6.2-astra", "gpt-6.2-astra-fast", "gpt-6.2-sol", "gpt-6.2-sol-fast"].map((id) => `vercel-ai-gateway/openai/${id}`),
-	...["openrouter", "vercel-ai-gateway"].flatMap((gateway) => ["gemini-4-carbon", "gemini-4-hydrogen"].map((id) => `${gateway}/google/${id}`)),
-]);
+const GATEWAY_FRONTIER_AFTER_TABLE = new Set<string>([]);
 
 describe("Google's frontier rule", () => {
 	// pi's catalog has only Gemini 4 Argon of the Gemini 4 line; Carbon and Hydrogen are built from its record.
@@ -302,8 +302,10 @@ describe("every gateway row the frontier rule lifts keeps a paired classifier an
 		const head = (spec: string) => modelSpec(classifierCandidates({ available: knownToTable(), sessionModel: row(spec) }).candidates[0].model);
 		expect(head("openrouter/openai/gpt-6.1-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
 		expect(head("openrouter/openai/gpt-6-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
-		expect(head("openrouter/openai/gpt-6-astra-pro")).toBe("openrouter/openai/gpt-6.1-sol");
-		expect(head("vercel-ai-gateway/openai/gpt-6-astra-fast")).toBe("vercel-ai-gateway/openai/gpt-6.1-sol");
+		// GPT-6.1 Sol is deprecated since the 2026-11-22 read: both Astra lines screen with GPT-6.2 Sol.
+		expect(head("openrouter/openai/gpt-6-astra-pro")).toBe("openrouter/openai/gpt-6.2-sol");
+		expect(head("vercel-ai-gateway/openai/gpt-6-astra-fast")).toBe("vercel-ai-gateway/openai/gpt-6.2-sol");
+		expect(head("openrouter/openai/gpt-6.2-astra-pro")).toBe("openrouter/openai/gpt-6.2-sol");
 		for (const spec of ["openrouter/openai/gpt-6-sol-pro", "openrouter/openai/gpt-6-astra-pro", "vercel-ai-gateway/openai/gpt-6-astra-fast", "openrouter/openai/gpt-6.1-sol-pro"]) {
 			const resolved = resolveSubagentModel({ sessionModel: row(spec), available: knownToTable() });
 			expect(resolved.model && modelSpec(resolved.model), spec).toBe(`${spec.slice(0, spec.indexOf("/openai/"))}/openai/gpt-6.1-terra`);
