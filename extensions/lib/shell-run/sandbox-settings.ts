@@ -11,6 +11,7 @@
  * a repository's permission mode does (lib/rules/settings.ts).
  */
 
+import { isPlainObject } from "../core/plain-object.ts";
 import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settings-files.ts";
 
 export interface SandboxSettings {
@@ -42,7 +43,7 @@ export const SANDBOX_OFF: SandboxSettings = {
 };
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry !== "") : []);
-const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
+const record = (value: unknown): Record<string, unknown> => (isPlainObject(value) ? value : {});
 const add = (into: string[], more: string[]): void => {
 	for (const entry of more) if (!into.includes(entry)) into.push(entry);
 };

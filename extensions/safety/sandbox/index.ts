@@ -37,6 +37,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
+import type { SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
 
@@ -100,7 +101,11 @@ function sandboxExtension(pi: ExtensionAPI) {
 	pi.events.on(WORKSPACE_CHANNEL, (data) => {
 		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
 		workspace = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
+		scopes = new Map();
 	});
+	// What a command run in a directory may and may never write, kept per directory: it is asked for on every
+	// command, every request and every turn, and finding the gate's files walks the directory's parents.
+	let scopes = new Map<string, SandboxScope>();
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		mode = (data as PermissionStatus).mode;
 	});
@@ -136,7 +141,7 @@ function sandboxExtension(pi: ExtensionAPI) {
 				const state = openSandboxPanel(loaded);
 				const height = () => boundedDockHeight((tui as { terminal?: { rows?: number } }).terminal?.rows ?? SANDBOX_PANEL_MAX_HEIGHT, SANDBOX_PANEL_MAX_HEIGHT);
 				return {
-					render: (width: number) => renderSandboxPanel({ state, mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded), config: statusLines(ctx), width, height: height() }, paint, bold).map((line) => truncateLine(line, width)),
+					render: (width: number) => renderSandboxPanel({ state, mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded), config: state.tab === "config" ? statusLines(ctx) : [], width, height: height() }, paint, bold).map((line) => truncateLine(line, width)),
 					handleInput: (data: string) => {
 						const key = decodeSandboxPanelKey(data);
 						if (!key) return;
@@ -166,17 +171,22 @@ function sandboxExtension(pi: ExtensionAPI) {
 
 	if (!sandboxConfigured()) return;
 
-	let starting: Promise<unknown> = Promise.resolve();
 	let warned = false;
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		liveCtx = ctx;
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		scopes = new Map();
+		const scopeFor = (dir: string): SandboxScope => {
+			let scope = scopes.get(dir);
+			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }));
+			return scope;
+		};
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).
-		starting = startSandbox({
+		void startSandbox({
 			cwd: ctx.cwd,
 			...(tempDir ? { tempDir } : {}),
-			scopeFor: (dir) => ({ cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }),
+			scopeFor,
 			// A host the settings do not list (hosts.ts).
 			ask: hosts.ask,
 		}).then((failure) => {
@@ -187,10 +197,8 @@ function sandboxExtension(pi: ExtensionAPI) {
 			else process.stderr.write(`${message}\n`);
 		});
 	});
-	pi.on("session_shutdown", async () => {
-		await starting;
-		await stopSandbox();
-	});
+	// `stopSandbox` waits for a start under way.
+	pi.on("session_shutdown", () => stopSandbox());
 	pi.on("turn_start", (_event, ctx) => {
 		liveCtx = ctx;
 	});

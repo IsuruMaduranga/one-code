@@ -41,7 +41,6 @@ function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox 
 	const wrapped: Array<{ command: string; cwd: string; shell: string; id: string; text: string }> = [];
 	const hosts = new Map<string, string[]>();
 	return {
-		settings,
 		wrapped,
 		hosts,
 		allowHosts: (id, list) => {
@@ -180,7 +179,7 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		const line = powerShellBashLine({ shell: "/usr/local/bin/pwsh", args: ["-NoProfile", "-Command"] }, "Write-Output hi");
 		expect(line.startsWith("'/usr/local/bin/pwsh' '-NoProfile' '-Command' '")).toBe(true);
 		expect(line.endsWith("Write-Output hi'")).toBe(true);
-		await sandboxedCommand({ ...request, command: "Get-ChildItem", original: "Get-ChildItem", line: "'pwsh' '-Command' 'Get-ChildItem'" });
+		await sandboxedCommand({ ...request, command: "Get-ChildItem", original: "Get-ChildItem", line: () => "'pwsh' '-Command' 'Get-ChildItem'" });
 		expect(sandbox.wrapped[0]).toMatchObject({ command: "'pwsh' '-Command' 'Get-ChildItem'", shell: "/bin/bash", text: "Get-ChildItem" });
 	});
 
@@ -261,7 +260,8 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 });
 
 describe.skipIf(!supported)("the shell tool under a sandbox", () => {
-	function mount(sandboxBash?: () => string | undefined) {
+	const BASH = { shell: "/bin/bash", args: ["-c"] };
+	function mount(bash?: typeof BASH) {
 		const fake = createFakePi();
 		const foreground = vi.fn(async (..._args: unknown[]) => ({ content: [{ type: "text", text: "curl: (56) CONNECT tunnel failed\n\nCommand exited with code 56" }], structuredContent: { exit_code: 56 }, isError: true, details: {} }));
 		registerShellTool(fake.pi as never, {
@@ -273,8 +273,7 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 			foreground: () => ({ execute: foreground }),
 			guard: () => undefined,
 			sandboxText: () => text,
-			...(sandboxBash ? { sandboxBash } : {}),
-			backgroundShell: () => undefined,
+			backgroundShell: () => bash,
 		});
 		return { tool: fake.tools.get("bash")!, foreground };
 	}
@@ -282,7 +281,7 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 	it("executes the wrapped command and appends what the sandbox denied", async () => {
 		const sandbox = fakeSandbox(ON, "\n<sandbox_violations>\ndeny network-outbound example.com:443\n</sandbox_violations>");
 		setSandboxForTest(ON, sandbox);
-		const { tool, foreground } = mount(() => "/bin/bash");
+		const { tool, foreground } = mount(BASH);
 		const result = (await tool.execute("c1", { command: "curl https://example.com" }, undefined, undefined, createFakeCtx({ mode: "tui", cwd: "/work" }))) as { content: Array<{ text: string }> };
 		expect((foreground.mock.calls[0][1] as { command: string }).command).toBe("SANDBOX(curl https://example.com)");
 		expect(result.content[0].text).toBe("Exit code 56\ncurl: (56) CONNECT tunnel failed\n<sandbox_violations>\ndeny network-outbound example.com:443\n</sandbox_violations>");
@@ -290,7 +289,7 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 
 	it("executes the model's command as written when it may leave the sandbox", async () => {
 		setSandboxForTest(ON, fakeSandbox(ON));
-		const { tool, foreground } = mount(() => "/bin/bash");
+		const { tool, foreground } = mount(BASH);
 		await tool.execute("c1", { command: "curl https://example.com", dangerouslyDisableSandbox: true }, undefined, undefined, createFakeCtx({ mode: "tui" }));
 		expect((foreground.mock.calls[0][1] as { command: string }).command).toBe("curl https://example.com");
 	});
@@ -311,8 +310,7 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 			foreground: () => ({ execute: own }),
 			guard: () => undefined,
 			sandboxText: () => text,
-			sandboxBash: () => "/bin/bash",
-			sandboxed: { line: (command: string) => `pwsh -Command ${command}`, foreground: () => ({ execute: viaBash }), spawn: () => undefined },
+			sandboxed: { bash: () => BASH, line: (command: string) => `pwsh -Command ${command}`, foreground: () => ({ execute: viaBash }) },
 			backgroundShell: () => undefined,
 		} as never);
 		const tool = fake.tools.get("powershell")!;
@@ -322,17 +320,6 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 		expect(own).not.toHaveBeenCalled();
 		await tool.execute("c2", { command: "Get-Date", dangerouslyDisableSandbox: true }, undefined, undefined, createFakeCtx({ mode: "tui", cwd: "/work" }));
 		expect((own.mock.calls[0][1] as { command: string }).command).toBe("Get-Date");
-	});
-
-	it("releases a background command's hosts when no shell can start it", async () => {
-		const sandbox = fakeSandbox(ON);
-		setSandboxForTest(ON, sandbox);
-		grantCommandHosts("c1", ["registry.npmjs.org"]);
-		const { tool } = mount(() => "/bin/bash");
-		const result = await tool.execute("c1", { command: "npm install", run_in_background: true }, undefined, undefined, createFakeCtx({ mode: "tui", cwd: "/work" }));
-		expect(result).toMatchObject({ isError: true });
-		expect(sandbox.wrapped).toHaveLength(1);
-		expect(sandbox.hosts.size).toBe(0);
 	});
 
 	it("refuses a call the sandbox cannot run, loudly, and runs nothing", async () => {

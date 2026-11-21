@@ -5,7 +5,7 @@
  * one with `allowUnsandboxedCommands: false`). Two corrections: the `.git/worktrees` rule is left out (this sandbox has no
  * such rule), and local binding "applies from the next start" (the settings
  * are read once per process). The unavailable and refused notes are One
- * Code's own. Generated: regenerate the rules, do not edit them by hand.
+ * Code's own. The rules are copied as a whole: replace them as a whole from a new copy, do not edit one by hand.
  */
 
 import type { ShellSandboxText } from "../../../extensions/sdk/profile.ts";

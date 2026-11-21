@@ -27,9 +27,7 @@ import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent"
 import { Type } from "typebox";
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, createPowerShellOperations, createSandboxedPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellBashLine, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
-import { sandboxConfigured } from "../../lib/shell-run/sandbox.ts";
-import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "../../lib/shell-run/sandbox-settings.ts";
-import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
+import { registerShellTool, sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
 import { followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { shellResultText, type ShellText } from "../../lib/shell-run/shell-text.ts";
@@ -37,18 +35,13 @@ import { powershellGuardBlock } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
 
 /** The tool's parameters, described in the profile's words; the sandbox's two only where the settings turn it on, as on the bash tool. */
-const powerShellParams = (d: ShellText["powershellParams"], sandbox?: { disableParam: string; allowedDomainsParam: string }) => {
+const powerShellParams = (d: ShellText["powershellParams"], sandbox: ShellText["sandbox"]) => {
 	return Type.Object({
 		command: Type.String({ description: d.command }),
 		timeout: Type.Optional(Type.Number({ description: d.timeout })),
 		description: Type.Optional(Type.String({ description: d.description })),
 		run_in_background: Type.Optional(Type.Boolean({ description: d.run_in_background })),
-		...(sandbox
-			? {
-					dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: sandbox.disableParam })),
-					allowed_domains: Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: sandbox.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX })),
-				}
-			: {}),
+		...sandboxParams(sandbox, { leave: true }),
 	});
 };
 
@@ -64,7 +57,6 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 	const spec = powerShellSpawn();
 	const operations = createPowerShellOperations(() => spec);
 	const base = createPowerShellToolDefinition(process.cwd(), { operations });
-	const sandboxedOperations = createSandboxedPowerShellOperations(() => bashSpawn().spawn);
 	const policy = () =>
 		shellToolPolicy({ platform: process.platform, env: process.env, bash: !!bashSpawn().spawn, powershell: spec !== undefined });
 	const startupPolicy = policy();
@@ -73,16 +65,15 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		name: "powershell",
 		ccLabel: "PowerShell",
 		description: text.powershellDescription({ edition: powerShellEdition(spec) }),
-		parameters: powerShellParams(text.powershellParams, sandboxConfigured() ? text.sandbox : undefined),
+		parameters: powerShellParams(text.powershellParams, text.sandbox),
 		sandboxText: () => text.sandbox,
 		// The sandbox runs every command through a bash, so a sandboxed PowerShell command is a bash line that runs pwsh.
-		sandboxBash: () => bashSpawn().spawn?.shell,
 		...(spec
 			? {
 					sandboxed: {
+						bash: () => bashSpawn().spawn,
 						line: (command: string) => powerShellBashLine(spec, command),
-						foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: sandboxedOperations })),
-						spawn: () => bashSpawn().spawn,
+						foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: createSandboxedPowerShellOperations() })),
 					},
 				}
 			: {}),

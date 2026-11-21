@@ -237,7 +237,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	sections.push(mcpSection(compat, session, env.home));
 
 	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(productSettingsPath(env.home, env.env))?.webSearch);
-	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform), sandbox: sandboxAsked(env.cwd, env.home, env.platform) });
+	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform), sandbox: sandboxAsked(env.cwd, env.home) });
 	findings.push(...deps.findings);
 	sections.push(dependenciesSection(deps));
 
@@ -282,9 +282,10 @@ export function productVersion(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** What the settings ask of the command sandbox, for the dependency check. */
-function sandboxAsked(cwd: string, home: string, platform: string): { enabled: boolean; required: boolean; usernsRestricted: boolean } {
+function sandboxAsked(cwd: string, home: string): { enabled: boolean; required: boolean; usernsRestricted: boolean } {
 	const settings = loadSandboxSettings(cwd, home);
-	return { enabled: settings.enabled, required: settings.failIfUnavailable, usernsRestricted: platform === "linux" && usernsRestricted() };
+	// The dependency check reads the kernel switch on Linux only, and it exists nowhere else.
+	return { enabled: settings.enabled, required: settings.failIfUnavailable, usernsRestricted: usernsRestricted() };
 }
 
 /** The shell tools exactly as a session resolves them (tools/bash/index.ts, tools/powershell/index.ts). */

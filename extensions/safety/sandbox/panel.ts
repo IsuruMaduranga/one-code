@@ -8,9 +8,10 @@
  * undiscoverable key).
  */
 
+import { isPlainObject } from "../../lib/core/plain-object.ts";
 import type { SandboxSettings } from "../../lib/shell-run/sandbox-settings.ts";
 import { keyId, keyText } from "../../lib/ui/key-input.ts";
-import { panelTopRule, wrapHints } from "../../lib/ui/tui-render.ts";
+import { panelTopRule, wrapHints, wrapProse } from "../../lib/ui/tui-render.ts";
 
 export type SandboxTab = "mode" | "overrides" | "config";
 export type SandboxMode = "auto-allow" | "regular" | "off";
@@ -152,24 +153,6 @@ export interface SandboxPanelInput {
 	height: number;
 }
 
-/** Break `text` at spaces into lines of at most `width` columns; a longer word (a path) is cut across lines. */
-function wrapWords(text: string, width: number): string[] {
-	const lines: string[] = [];
-	let current = "";
-	const words = text.split(" ").flatMap((word) => (word.length <= width ? [word] : (word.match(new RegExp(`.{1,${width}}`, "g")) ?? [word])));
-	for (const word of words) {
-		const joined = current ? `${current} ${word}` : word;
-		if (!current || joined.length <= width) {
-			current = joined;
-			continue;
-		}
-		lines.push(current);
-		current = word;
-	}
-	if (current) lines.push(current);
-	return lines;
-}
-
 /** The Config tab's body rows at `height`, for the wiring's scroll bound. */
 export const sandboxConfigRows = (height: number): number => Math.max(1, height - SANDBOX_PANEL_CHROME_ROWS);
 
@@ -183,7 +166,7 @@ export function renderSandboxPanel(input: SandboxPanelInput, paint: (color: stri
 			const text = `${index === state.row ? "❯" : " "} ${entry.value === current ? "✔" : " "} ${entry.label}`;
 			return `  ${index === state.row ? paint("accent", text) : text}`;
 		});
-	const help = (paragraphs: readonly string[]) => paragraphs.flatMap((paragraph) => ["", ...wrapWords(paragraph, inner).map((line) => paint("dim", `  ${line}`))]);
+	const help = (paragraphs: readonly string[]) => paragraphs.flatMap((paragraph) => ["", ...wrapProse(paragraph, inner).map((line) => paint("dim", `  ${line}`))]);
 	let hints: string;
 	if (state.tab === "mode") {
 		lines.push(...list(MODES, input.mode), ...help(MODE_HELP));
@@ -192,7 +175,7 @@ export function renderSandboxPanel(input: SandboxPanelInput, paint: (color: stri
 		lines.push(...list(OVERRIDES, input.override), ...help(OVERRIDES_HELP));
 		hints = "↑/↓ to navigate · Enter to select · ←/→ to switch · Esc to close";
 	} else {
-		const body = input.config.flatMap((line) => wrapWords(line, inner));
+		const body = input.config.flatMap((line) => wrapProse(line, inner));
 		const visible = sandboxConfigRows(input.height);
 		state.configRows = body.length;
 		const max = Math.max(0, body.length - visible);
@@ -203,11 +186,9 @@ export function renderSandboxPanel(input: SandboxPanelInput, paint: (color: stri
 	return [...lines, "", ...wrapHints(hints, Math.max(1, width - 3)).map((line) => paint("dim", `  ${line}`))];
 }
 
-const record = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
-
 /** The user's settings file with `pick` written into its `sandbox` block; every other key is kept. */
 export function applySandboxPick(file: Record<string, unknown>, pick: SandboxPick): Record<string, unknown> {
-	const sandbox = { ...record(file.sandbox) };
+	const sandbox = isPlainObject(file.sandbox) ? { ...file.sandbox } : {};
 	if (pick.tab === "mode") {
 		sandbox.enabled = pick.value !== "off";
 		if (pick.value !== "off") sandbox.autoAllowBashIfSandboxed = pick.value === "auto-allow";

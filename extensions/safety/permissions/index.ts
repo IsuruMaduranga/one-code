@@ -73,7 +73,7 @@ import { analyzeShellCommand } from "../../lib/shell/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../../lib/shell/bash-parser.ts";
 import type { PowerShellParse } from "../../lib/shell/powershell-parser.ts";
 import { powerShellParser } from "../../lib/shell-run/shell-spawn.ts";
-import { grantCommandHosts, requestedHosts, runsSandboxed, unsandboxedRequest } from "../../lib/shell-run/sandbox.ts";
+import { grantCommandHosts, sandboxGateFacts } from "../../lib/shell-run/sandbox.ts";
 import { powershellReadOnly } from "../../lib/shell/powershell-rules.ts";
 import { isShellTool } from "../../lib/rules/matcher.ts";
 import { gitStatusOutput } from "../../lib/context/git.ts";
@@ -1432,12 +1432,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		currentMainToolCallId = event.toolCallId;
 		inFlightMainCalls.push(event.toolCallId);
 
-		// A shell call that asks to leave the sandbox takes no fast path (lib/rules/matcher.ts `unsandboxed`).
-		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(event.input as Record<string, unknown>);
-		// Hosts the call names for itself count in auto mode only, where the classifier reads them (`commandHosts`).
-		const hosts = mode === "auto" && (isShellTool(normalizedTool) || normalizedTool === "monitor") ? requestedHosts(event.input as Record<string, unknown>) : [];
-		// Where the user turned auto-allow on, a command the sandbox will hold needs no prompt in the manual modes (`sandboxed`).
-		const sandboxed = normalizedTool === "bash" && runsSandboxed(event.input as Record<string, unknown>, matchSubject);
+		// What the sandbox changes for this call (lib/shell-run/sandbox.ts `sandboxGateFacts`): a call that asks to leave it
+		// takes no fast path (`unsandboxed`), hosts the call names for itself count in auto mode only, where the classifier
+		// reads them (`commandHosts`), and where the user turned auto-allow on, a command the sandbox will hold needs no
+		// prompt in the manual modes (`sandboxed`).
+		const { unsandboxed, hosts, sandboxed } = sandboxGateFacts(normalizedTool, event.input as Record<string, unknown>, matchSubject, mode);
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
 				toolName: event.toolName,
@@ -1740,9 +1739,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, subject, mode);
-		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(input);
-		const hosts = mode === "auto" && (isShellTool(normalizedTool) || normalizedTool === "monitor") ? requestedHosts(input) : [];
-		const sandboxed = normalizedTool === "bash" && runsSandboxed(input, subject);
+		const { unsandboxed, hosts, sandboxed } = sandboxGateFacts(normalizedTool, input, subject, mode);
 
 		const result = decide({
 			toolName,

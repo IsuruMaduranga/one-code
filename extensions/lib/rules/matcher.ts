@@ -1549,9 +1549,9 @@ export function decide(params: DecideInput): Decision {
 		mode === "auto"
 			? allow.filter((rule) => {
 					if (isBroadExecutionRule(rule)) return false;
-					if ((params.classifyAllShell || params.commandHosts) && isShellTool(rule.tool)) return false;
-					// A monitor's command takes a host list too.
-					if (params.commandHosts && normalizeToolName(rule.tool) === "monitor") return false;
+					if (params.classifyAllShell && isShellTool(rule.tool)) return false;
+					// The shell tools and monitor take a host list: no rule for a command clears one.
+					if (params.commandHosts && subjectKind(rule.tool) === "command") return false;
 					return true;
 				})
 			: allow;

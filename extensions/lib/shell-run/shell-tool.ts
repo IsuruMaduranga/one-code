@@ -14,7 +14,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Static, TObject } from "typebox";
+import { type Static, type TObject, type TProperties, Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
@@ -22,7 +22,8 @@ import { commandToEvaluate, trackOriginalCommands } from "../shell/original-comm
 import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
-import { sandboxedCommand } from "./sandbox.ts";
+import { sandboxConfigured, sandboxedCommand } from "./sandbox.ts";
+import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "./sandbox-settings.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
@@ -73,6 +74,19 @@ export interface ShellToolExecutor {
 	execute: (toolCallId: string, params: { command: string; timeout?: number }, signal: AbortSignal | undefined, onUpdate: any, ctx: ExtensionToolContext) => Promise<any>;
 }
 
+/**
+ * The parameters the shell sandbox adds to a tool that runs commands, where
+ * the settings turn it on (and none otherwise): the host list a command names
+ * for itself, and with `leave` the request to run outside the sandbox. Both
+ * stay in the schema when the settings forbid leaving the sandbox, as in
+ * Claude Code: the section tells the model the request is off.
+ */
+export function sandboxParams(text: Pick<ShellSandboxText, "disableParam" | "allowedDomainsParam">, opts: { leave: boolean }): TProperties {
+	if (!sandboxConfigured()) return {};
+	const allowed_domains = Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: text.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX }));
+	return opts.leave ? { dangerouslyDisableSandbox: Type.Optional(Type.Boolean({ description: text.disableParam })), allowed_domains } : { allowed_domains };
+}
+
 /** What one shell tool's definition supplies; everything else is shared. */
 export interface ShellToolSpec<P extends TObject> {
 	/** pi tool name (`bash`, `powershell`). */
@@ -94,16 +108,14 @@ export interface ShellToolSpec<P extends TObject> {
 	backgroundShell: () => ShellSpawn | undefined;
 	/** The sandbox's words, for a call it refuses. */
 	sandboxText: () => ShellSandboxText;
-	/** The bash that runs commands inside the shell sandbox, or undefined when the machine has none. */
-	sandboxBash?: () => string | undefined;
 	/**
 	 * For a tool whose own shell is not bash: how its command runs inside the
-	 * sandbox, which runs everything through a bash. `line` is the bash line
-	 * that runs the command in the tool's shell, `foreground` runs such a line
-	 * with the tool's own result shape, and `spawn` is the bash a background
-	 * task runs it with.
+	 * sandbox, which runs everything through a bash. `bash` is that bash,
+	 * `line` the bash line that runs the command in the tool's shell, and
+	 * `foreground` runs such a line with the tool's own result shape. Without
+	 * it the tool's own shell (`backgroundShell`) is the sandbox's bash.
 	 */
-	sandboxed?: { line(command: string): string; foreground(cwd: string): ShellToolExecutor; spawn(): ShellSpawn | undefined };
+	sandboxed?: { bash(): ShellSpawn | undefined; line(command: string): string; foreground(cwd: string): ShellToolExecutor };
 	/** Rewrites the command for a background spawn (PowerShell prepends its UTF-8 prefix). Default: identity. */
 	wrapBackgroundCommand?: (command: string) => string;
 }
@@ -203,13 +215,13 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				original: originalCommand,
 				disable: params.dangerouslyDisableSandbox === true,
 				cwd: ctx.cwd,
-				bash: spec.sandboxBash?.(),
-				...(spec.sandboxed ? { line: spec.sandboxed.line(params.command) } : {}),
+				bash: (spec.sandboxed?.bash ?? spec.backgroundShell)()?.shell,
+				...(spec.sandboxed ? { line: () => spec.sandboxed!.line(params.command) } : {}),
 				id: toolCallId,
 			});
 			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: {} };
 			// A wrapped command of a tool whose shell is not bash is a bash line: bash runs it.
-			const viaBash = sandboxed.run && spec.sandboxed ? spec.sandboxed : undefined;
+			const viaBash = sandboxed.run ? spec.sandboxed : undefined;
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
 			const timeoutSeconds = (explicitTimeout ? Math.min(params.timeout!, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS) / 1000;
 
@@ -232,9 +244,9 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				return { ...shaped, content: [{ ...first, text: sandboxed.run.withViolations(first.text) }, ...shaped.content.slice(1)] };
 			}
 
-			const shell = viaBash ? viaBash.spawn() : spec.backgroundShell();
+			// A wrapped command has its bash already (`sandboxedCommand` refuses without one), so nothing is held here.
+			const shell = viaBash ? viaBash.bash() : spec.backgroundShell();
 			if (!shell) {
-				sandboxed.run?.finish();
 				return {
 					content: [{ type: "text" as const, text: words().noBackgroundShell({ label: spec.ccLabel }) }],
 					isError: true,

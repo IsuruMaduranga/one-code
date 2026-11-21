@@ -21,6 +21,7 @@ import { processState } from "../profile/process-state.ts";
 import { shellQuote } from "../shell/shell-quote.ts";
 import { probeSandbox } from "./sandbox-probe.ts";
 import { bashSpawn } from "./shell-spawn.ts";
+import { isShellToolName } from "./shell-tools.ts";
 import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
@@ -46,9 +47,6 @@ export interface SandboxCall {
 export type SandboxHostAsk = (request: { host: string; port?: number }) => Promise<boolean | { allow: false; reason: string }>;
 
 export interface ActiveSandbox {
-	settings: SandboxSettings;
-	/** The directory `TMPDIR` names inside the sandbox, when the session has a private one. */
-	tempDir?: string;
 	/** The command to hand the shell in place of `command`. */
 	wrap(command: string, call: SandboxCall): Promise<string>;
 	/** `output` with the runtime's `<sandbox_violations>` block for this run, when it denied something. */
@@ -85,8 +83,7 @@ export function sandboxPlatform(platform: NodeJS.Platform = process.platform): "
 /** The process's sandbox settings, read once. */
 export function sandboxSettings(): SandboxSettings {
 	const slot = state();
-	// A copy: `reloadSandboxSettings` writes to it, and a session with no sandbox block gets the shared default.
-	slot.settings ??= { ...loadSandboxSettings(process.cwd(), homedir()) };
+	slot.settings ??= loadSandboxSettings(process.cwd(), homedir());
 	return slot.settings;
 }
 
@@ -115,9 +112,7 @@ export function sandboxSettled(): Promise<void> {
  */
 export function reloadSandboxSettings(): SandboxSettings {
 	const loaded = loadSandboxSettings(process.cwd(), homedir());
-	const current = sandboxSettings();
-	current.autoAllowBashIfSandboxed = loaded.autoAllowBashIfSandboxed;
-	current.allowUnsandboxedCommands = loaded.allowUnsandboxedCommands;
+	state().settings = { ...sandboxSettings(), autoAllowBashIfSandboxed: loaded.autoAllowBashIfSandboxed, allowUnsandboxedCommands: loaded.allowUnsandboxedCommands };
 	return loaded;
 }
 
@@ -134,12 +129,12 @@ export function sandboxUnavailable(): string | undefined {
  */
 export function startSandbox(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }): Promise<string | undefined> {
 	const slot = state();
-	const start = start1(opts, slot.starting);
+	const start = startRuntime(opts, slot.starting);
 	slot.starting = start;
 	return start;
 }
 
-async function start1(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
+async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
 	const slot = state();
 	const settings = sandboxSettings();
 	// One manager per process: an earlier session's sandbox is stopped first.
@@ -168,8 +163,6 @@ async function start1(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: stri
 		// the session's own private directory replaces it.
 		const prefix = opts.tempDir ? `export TMPDIR=${shellQuote(opts.tempDir)}; ` : "";
 		slot.active = {
-			settings,
-			...(opts.tempDir ? { tempDir: opts.tempDir } : {}),
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) =>
 				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
@@ -246,9 +239,10 @@ export interface SandboxRequest {
 	bash: string | undefined;
 	/**
 	 * What that bash runs for this call, when the tool's own shell is not bash
-	 * (the PowerShell tool's `pwsh -Command '…'` line). Default: `command`.
+	 * (the PowerShell tool's `pwsh -Command '…'` line), built only when the
+	 * call is wrapped. Default: `command`.
 	 */
-	line?: string;
+	line?: () => string;
 	/** The tool call's id: the permission gate grants a call its hosts under it. */
 	id: string;
 }
@@ -291,7 +285,7 @@ export async function sandboxedCommand(request: SandboxRequest): Promise<Sandbox
 		listed = false;
 	};
 	try {
-		const command = await sandbox.wrap(request.line ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });
+		const command = await sandbox.wrap(request.line?.() ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });
 		return {
 			command,
 			run: {
@@ -344,6 +338,24 @@ export function grantCommandHosts(toolCallId: string, hosts: readonly string[]):
 	const slot = state();
 	slot.grantedHosts ??= new Map();
 	slot.grantedHosts.set(toolCallId, [...hosts]);
+}
+
+/**
+ * What the permission gate needs to know about one tool call under the
+ * sandbox, for `decide()` (lib/rules/matcher.ts `unsandboxed`,
+ * `commandHosts`, `sandboxed`). `tool` is the normalized tool name, `subject`
+ * the model's own command, and `mode` the permission mode: the hosts a call
+ * names count in auto mode only, where the classifier reads them, and for
+ * the tools that take the list (the shell tools and monitor). One place, so
+ * the main gate, the child bridge and a child's own gate cannot drift apart.
+ */
+export function sandboxGateFacts(tool: string, input: ShellInput, subject: string, mode: string): { unsandboxed: boolean; hosts: string[]; sandboxed: boolean } {
+	const shell = isShellToolName(tool);
+	return {
+		unsandboxed: shell && unsandboxedRequest(input),
+		hosts: mode === "auto" && (shell || tool === "monitor") ? requestedHosts(input) : [],
+		sandboxed: tool === "bash" && runsSandboxed(input, subject),
+	};
 }
 
 /**

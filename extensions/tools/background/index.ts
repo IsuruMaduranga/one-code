@@ -27,8 +27,9 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
-import { sandboxConfigured, sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.ts";
-import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX, commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
+import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.ts";
+import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
+import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -418,10 +419,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			command: Type.Optional(Type.String({ description: monitorParams.command })),
 			description: Type.String({ description: monitorParams.description }),
 			timeout_ms: Type.Number({ minimum: 1000, maximum: MONITOR_TIMEOUT_SCHEMA_MAX_MS, default: DEFAULT_MONITOR_TIMEOUT_MS, description: monitorParams.timeoutMs }),
-			// Only where the settings turn the shell sandbox on, as on the bash tool (tools/bash/index.ts).
-			...(sandboxConfigured()
-				? { allowed_domains: Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: requireText("shell").sandbox.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX })) }
-				: {}),
+			// A command monitor may name hosts for itself, as a shell command may; it never asks to leave the sandbox.
+			...sandboxParams(requireText("shell").sandbox, { leave: false }),
 			ws: Type.Optional(
 				Type.Object(
 					{
@@ -445,7 +444,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId });
 				if ("refused" in sandboxed) {
 					if (sandboxed.refused.kind === "hosts") return startFailed({ kind: "hostsRejected", reason: sandboxed.refused.reason });
-					return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "no bash was found to run it in" });
+					// `noBash` cannot happen here: the call above is made only with a bash.
+					return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "it has not started" });
 				}
 				command = sandboxed.command;
 				sandboxRun = sandboxed.run;

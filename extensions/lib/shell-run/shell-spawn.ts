@@ -330,8 +330,8 @@ export function createPowerShellOperations(resolve: () => ShellSpawn | undefined
  * (`powerShellBashLine`), so bash runs it and the tool's prefix is already in
  * the line.
  */
-export function createSandboxedPowerShellOperations(resolve: () => ShellSpawn | undefined): ShellOperations {
-	return shellOperations(resolve, { prefix: "", missing: () => "No bash was found to run the sandboxed PowerShell command." });
+export function createSandboxedPowerShellOperations(): ShellOperations {
+	return shellOperations(() => bashSpawn().spawn, { prefix: "", missing: () => "No bash was found to run the sandboxed PowerShell command." });
 }
 
 /** The bash line that runs `command` in the PowerShell `spec` names, as the PowerShell tool itself would. */
