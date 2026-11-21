@@ -96,6 +96,23 @@ function mount(): FakePi {
  */
 const liveSessionCtx = (overrides: Record<string, unknown> = {}) => createFakeCtx({ hasUI: true, mode: "tui", ...overrides });
 
+/**
+ * Wait, up to `withinMs`, until a running task's output holds the line `line` (the header that names the command
+ * does not count), reading it without blocking (a running task's read withdraws no notification). Fails loud when
+ * the line never shows.
+ */
+async function waitForTaskOutput(fake: FakePi, ctx: unknown, taskId: string, line: string, withinMs = 5000): Promise<void> {
+	const deadline = Date.now() + withinMs;
+	for (;;) {
+		const out = (await fake.tools.get("task_output")!.execute("wait", { task_id: taskId, block: false }, undefined, undefined, ctx as never)) as {
+			content: Array<{ text: string }>;
+		};
+		if (out.content.some((part) => part.text.split("\n").some((row) => row.trim() === line))) return;
+		if (Date.now() >= deadline) throw new Error(`task ${taskId} never showed ${JSON.stringify(line)}; last output:\n${out.content.map((part) => part.text).join("\n")}`);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+}
+
 describe("background wiring: monitor batching", () => {
 	it("flushes a batch (capped, with overflow count) as soon as the command exits", async () => {
 		const fake = mount();
@@ -778,6 +795,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const fake = mount();
 		const ctx = liveSessionCtx();
 		// The ignored SIGTERM is inherited by `sleep`, so the tree dies only at the SIGKILL after the grace (2 s), past the 1 s deadline.
+		const startedAt = Date.now();
 		const start = (await fake.tools.get("monitor")!.execute(
 			"c1",
 			{ command: "trap '' TERM; echo one; while :; do sleep 0.1; done", description: "stubborn", timeout_ms: 1000 },
@@ -785,9 +803,11 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			ctx,
 		)) as { details: { taskId: string } };
-		await new Promise((resolve) => setTimeout(resolve, 300));
+		// Stop once the command has printed, and before the deadline, so only the kill grace runs past it.
+		await waitForTaskOutput(fake, ctx, start.details.taskId, "one", 900);
 		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
-		// No task_output here: reading the end would withdraw its notification.
+		expect(Date.now() - startedAt).toBeLessThan(1000);
+		// No task_output from here: reading the end would withdraw its notification.
 		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
 		const ended = summaryTag(monitorEndedSummary("stubborn", "killed", true));
 		const expiry = escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 }));
@@ -810,7 +830,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			undefined,
 			ctx,
 		)) as { details: { taskId: string } };
-		await new Promise((resolve) => setTimeout(resolve, 300));
+		await waitForTaskOutput(fake, ctx, start.details.taskId, "one");
 		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
 		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
 		const ended = summaryTag(monitorEndedSummary("trapped", "killed", true));

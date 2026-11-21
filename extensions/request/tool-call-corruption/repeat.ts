@@ -93,15 +93,55 @@ export function repeatingUnit(text: string): string | undefined {
 }
 
 /**
- * Whether a unit is a whole row: it holds a line break (JSON-escaped, as
- * arguments stream, or raw) and text besides blank space and escapes. The
- * unit can start anywhere in the repeat, inside an escape too ("n…ok\\"), so
- * it is read from its first backslash on.
+ * Whether a unit is a whole row: once its JSON escapes are read (arguments
+ * stream escaped: `\n`, `\u000a`, an escaped backslash `\\` that is no line
+ * break), it holds a line break and text besides blank space.
+ *
+ * The unit can start anywhere in the repeat, inside an escape too ("n…ok\\"),
+ * so it is read from an escape boundary: the first backslash of a run, which
+ * follows a character that is not a backslash. Every period starts at that same
+ * boundary, so no escape crosses the unit's end. A unit of backslashes alone
+ * holds no boundary and is no row.
  */
 export function isRowUnit(unit: string): boolean {
-	const escape = unit.indexOf("\\");
-	const row = escape <= 0 ? unit : unit.slice(escape) + unit.slice(0, escape);
-	return /\\n|\n/.test(row) && !/^(?:\s|\\[nrt])*$/.test(row);
+	let start = 0;
+	if (unit.includes("\\")) {
+		start = -1;
+		for (let i = 0; i < unit.length; i++) {
+			if (unit[i] === "\\" && unit[(i - 1 + unit.length) % unit.length] !== "\\") {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0) return false;
+	}
+	const row = decodeEscapes(unit.slice(start) + unit.slice(0, start));
+	return row.includes("\n") && !/^\s*$/.test(row);
+}
+
+const SIMPLE_ESCAPES: Readonly<Record<string, string>> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", '"': '"', "/": "/", "\\": "\\" };
+
+/** Read JSON string escapes; anything that is not a whole escape stays as written. */
+function decodeEscapes(text: string): string {
+	let out = "";
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (ch !== "\\" || i + 1 >= text.length) {
+			out += ch;
+			continue;
+		}
+		const next = text[i + 1];
+		if (next in SIMPLE_ESCAPES) {
+			out += SIMPLE_ESCAPES[next];
+			i++;
+		} else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(text.slice(i + 2, i + 6))) {
+			out += String.fromCharCode(Number.parseInt(text.slice(i + 2, i + 6), 16));
+			i += 5;
+		} else {
+			out += ch;
+		}
+	}
+	return out;
 }
 
 /**

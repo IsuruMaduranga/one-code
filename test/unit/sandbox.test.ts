@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
-import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
+import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
@@ -546,11 +546,30 @@ describe("the classifier's view and a user's approval of a call under the sandbo
 		expect(toolCallEntry("monitor", { command: "tail -f log", description: "d" }, undefined, ["a.example"])).toMatchObject({ input: { command: "tail -f log", allowed_domains: ["a.example"] } });
 	});
 
-	it("does not let an approval of a command cover the same command leaving the sandbox or naming hosts", () => {
-		const plain = denialInputKey("bash", { command: "curl https://a.example" }, "/work", true);
-		expect(denialInputKey("bash", { command: "curl https://a.example", description: "x", dangerouslyDisableSandbox: false }, "/work", true)).toBe(plain);
-		expect(denialInputKey("bash", { command: "curl https://a.example", dangerouslyDisableSandbox: true }, "/work", true)).not.toBe(plain);
-		expect(denialInputKey("bash", { command: "curl https://a.example", allowed_domains: ["a.example"] }, "/work", true)).not.toBe(plain);
+	it.skipIf(!supported)("does not let an approval of a command cover the same command leaving the sandbox or being granted hosts", () => {
+		// The key reads what the gate's facts say the call asks of the running sandbox.
+		const key = (input: Record<string, unknown>) => {
+			const { unsandboxed, hosts } = sandboxGateFacts("bash", input, String(input.command), "auto");
+			return denialInputKey("bash", input, "/work", true, { unsandboxed, hosts });
+		};
+		const plain = { command: "curl https://a.example" };
+		const leaving = { ...plain, dangerouslyDisableSandbox: true };
+		const naming = { ...plain, allowed_domains: ["a.example"] };
+		try {
+			const settings = { ...SANDBOX_OFF, enabled: true, allowUnsandboxedCommands: true };
+			setSandboxForTest(settings, fakeSandbox(settings));
+			expect(key({ ...plain, description: "x", dangerouslyDisableSandbox: false })).toBe(key(plain));
+			expect(key(leaving)).not.toBe(key(plain));
+			expect(key(naming)).not.toBe(key(plain));
+			const running = key(naming);
+			// No sandbox runs: the fields ask nothing of it, and an approval made then does not hold once one runs.
+			setSandboxForTest(undefined);
+			expect(key(leaving)).toBe(key(plain));
+			expect(key(naming)).toBe(key(plain));
+			expect(key(naming)).not.toBe(running);
+		} finally {
+			setSandboxForTest(undefined);
+		}
 	});
 });
 

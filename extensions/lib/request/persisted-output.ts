@@ -81,9 +81,19 @@ export interface PersistOptions {
  * context blowout this exists to prevent.
  */
 export function persistIfLarge(text: string, options: PersistOptions): string {
+	return persistIfLargeOutcome(text, options).text;
+}
+
+/**
+ * `persistIfLarge` with whether the text is settled: `saved` is false only
+ * when the write failed, so a caller that keeps the block (a run report built
+ * once) keeps only a block whose file exists and retries the write otherwise.
+ * The text is the same either way.
+ */
+export function persistIfLargeOutcome(text: string, options: PersistOptions): { text: string; saved: boolean } {
 	const maxBytes = options.maxBytes ?? PERSIST_MAX_BYTES;
 	const size = Buffer.byteLength(text, "utf-8");
-	if (size <= maxBytes) return text;
+	if (size <= maxBytes) return { text, saved: true };
 
 	const previewBytes = options.previewBytes ?? PREVIEW_BYTES;
 	// Character slice, not byte slice: close enough to the target size, and it
@@ -91,16 +101,14 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
 	const preview = text.slice(0, previewBytes);
 
 	const file = join(options.dir, "tool-results", `${options.id.replace(/[^A-Za-z0-9._-]/g, "_")}.txt`);
-	let saved: string;
 	try {
 		mkdirSync(join(options.dir, "tool-results"), { recursive: true });
 		writeFileSync(file, text);
-		saved = toolResultsText.persisted({ size: formatSize(size), file });
+		return { text: persistedBlock(toolResultsText.persisted({ size: formatSize(size), file }), preview, previewBytes), saved: true };
 	} catch (error) {
-		saved = toolResultsText.persisted({ size: formatSize(size), file, saveError: (error as Error).message });
+		const saved = toolResultsText.persisted({ size: formatSize(size), file, saveError: (error as Error).message });
+		return { text: persistedBlock(saved, preview, previewBytes), saved: false };
 	}
-
-	return persistedBlock(saved, preview, previewBytes);
 }
 
 /**

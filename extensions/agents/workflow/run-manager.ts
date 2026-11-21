@@ -30,7 +30,7 @@ import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 import type { DeferRequest } from "../../lib/request/deferred.ts";
-import { persistIfLarge } from "../../lib/request/persisted-output.ts";
+import { persistIfLargeOutcome } from "../../lib/request/persisted-output.ts";
 import { workflowResultText } from "./text.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
@@ -130,12 +130,16 @@ export class RunHandle extends EventEmitter {
 	 * The completed run's value as its report carries it, or undefined when
 	 * there is none. Built once: a value too large to send whole is saved in the
 	 * run's directory on the first call, and the notification and the tool
-	 * result then carry the same block without writing the file again.
+	 * result then carry the same block without writing the file again. A failed
+	 * write is not kept: the next report tries it again rather than point the
+	 * model at a file that was never written.
 	 */
 	reportedResult(): string | undefined {
 		if (this.status !== "completed" || this.result === undefined) return undefined;
-		this.resultBlock ??= persistIfLarge(valueText(this.result), { dir: this.runDir, id: "result" });
-		return this.resultBlock;
+		if (this.resultBlock !== undefined) return this.resultBlock;
+		const { text, saved } = persistIfLargeOutcome(valueText(this.result), { dir: this.runDir, id: "result" });
+		if (saved) this.resultBlock = text;
+		return text;
 	}
 
 	finish(status: RunStatus, result?: unknown, errorMessage?: string): void {

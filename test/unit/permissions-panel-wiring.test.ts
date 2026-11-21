@@ -289,7 +289,8 @@ describe("/permissions wiring", () => {
 		const call = (input: Record<string, unknown>, toolCallId: string) => fake.fireOne<GateResult>("tool_call", { toolName: "bash", input, toolCallId }, ctx);
 		const HOSTS = ["a.example", "b.example"];
 
-		it("keys a worktree-wrapped call by the model's command with its sandbox request, so approving the plain call does not cover leaving the sandbox", async () => {
+		it.skipIf(!sandboxSupported)("keys a worktree-wrapped call by the model's command with its sandbox request, so approving the plain call does not cover leaving the sandbox", async () => {
+			runningSandbox();
 			const worktree = join(home, "wt");
 			mkdirSync(worktree, { recursive: true });
 			const command = `rm -rf ${outside()}`;
@@ -339,6 +340,26 @@ describe("/permissions wiring", () => {
 			expect(completeMock).not.toHaveBeenCalled();
 			await sandboxedCommand({ command, original: command, disable: false, cwd, bash: "/bin/bash", id: "h2" });
 			expect([...granted.values()]).toEqual([HOSTS]);
+		});
+
+		// The panel showed no hosts for a call denied while no sandbox ran, so its approval grants none: once a sandbox
+		// runs, the same input would be granted hosts, which is another action, and the retry goes to the classifier.
+		const asking = (tool: string): Record<string, unknown> =>
+			tool === "bash" ? { command: `rm -rf ${outside()}`, allowed_domains: HOSTS } : { command: `tail -f ${outside()}/log`, description: "watch", allowed_domains: HOSTS };
+		it.skipIf(!sandboxSupported).each(["bash", "monitor"])("does not let an approval of a %s call made while no sandbox ran cover it once one runs and would grant it hosts", async (tool) => {
+			const input = asking(tool);
+			blockOnce();
+			expect((await fake.fireOne<GateResult>("tool_call", { toolName: tool, input, toolCallId: "c1" }, ctx))?.block).toBe(true);
+			await openPanel(ENTER);
+			const approved = screens.at(-1)!.split("\n").find((line) => line.includes("✔"));
+			expect(approved).toContain(`${tool}(`);
+			expect(approved).not.toContain("[hosts:");
+
+			runningSandbox();
+			completeMock.mockClear();
+			blockOnce();
+			expect((await fake.fireOne<GateResult>("tool_call", { toolName: tool, input, toolCallId: "c2" }, ctx))?.block).toBe(true);
+			expect(completeMock).toHaveBeenCalled();
 		});
 	});
 

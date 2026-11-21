@@ -90,4 +90,22 @@ describe("a tool call's arguments ending in one unit repeated", () => {
 		expect(isRowUnit("ok\\n")).toBe(true);
 		expect(isRowUnit("Lspnull ")).toBe(false);
 	});
+
+	it("reads a row's line break in any JSON escape, and an escaped backslash before n as none", () => {
+		// Rows whose line break streams as a Unicode escape are rows: past the short limit, not stopped there.
+		for (const escape of ["\\u000a", "\\u000A", "\\r\\n"]) {
+			const raw = `{"task":"Find why this repeats: ${`ok${escape}`.repeat(1_000)}"}`;
+			expect(raw.length).toBeGreaterThan(REPEAT_LIMITS.short + REPEAT_CHECK_EVERY);
+			expect(stream(raw, repeatLimit("Agent"))).toBeUndefined();
+			expect(isRowUnit(`ok${escape}`)).toBe(true);
+		}
+		expect(isRowUnit("u000aok\\")).toBe(true);
+		expect(isRowUnit("\\u0020\\u000a")).toBe(false);
+		// A backslash and an n, escaped as \\n in the arguments, holds no line break: still stopped at the short limit.
+		const literal = JSON.stringify({ pattern: String.raw`ok\n`.repeat(2_000) });
+		expect(stream(literal, repeatLimit("grep"))?.chars).toBe(REPEAT_LIMITS.short);
+		expect(isRowUnit(String.raw`ok\\n`)).toBe(false);
+		expect(isRowUnit("\\nok\\")).toBe(false);
+		expect(isRowUnit("\\\\")).toBe(false);
+	});
 });

@@ -20,7 +20,6 @@
  * starts empty.
  */
 
-import { commandHosts } from "../../../lib/shell-run/sandbox-settings.ts";
 import { autoModeResultText } from "./text.ts";
 
 /** Claude Code's `MAX_DENIALS`. */
@@ -57,20 +56,40 @@ function stableJson(value: unknown): string {
 }
 
 /**
- * The key a denial and its grant are matched by: the tool, the directory the
- * call runs in, and its whole input. For a shell tool only the command counts,
- * as in Claude Code (its `description` and `timeout` do not change what runs);
- * for every other tool the whole input does. The directory is part of the key
- * because the same command in another directory is another action.
+ * What a call asks of the sandbox at the moment it is judged
+ * (lib/shell-run/sandbox.ts `sandboxGateFacts`): to run outside it, and the
+ * hosts it would be granted. Both are empty while no sandbox runs, whatever
+ * the input says, since then nothing is asked of it.
  */
-export function denialInputKey(toolName: string, input: Record<string, unknown>, cwd: string, shell: boolean): string {
-	// A shell call is its command, plus what it asks of the sandbox: the same command asking to leave the
-	// sandbox, or naming hosts for itself, is another action than the one the user approved.
-	const hosts = commandHosts(input);
-	const counted = shell
-		? { command: input.command, ...(input.dangerouslyDisableSandbox === true ? { dangerouslyDisableSandbox: true } : {}), ...(hosts.length > 0 ? { allowed_domains: hosts } : {}) }
-		: input;
-	return `${toolName}\0${cwd}\0${stableJson(counted)}`;
+export interface SandboxAsk {
+	unsandboxed: boolean;
+	hosts: readonly string[];
+}
+
+/**
+ * The key a denial and its grant are matched by: the tool, the directory the
+ * call runs in, its input, and what it asks of the sandbox. For a shell tool
+ * only the command counts from the input, as in Claude Code (its `description`
+ * and `timeout` do not change what runs); for every other tool the whole input
+ * does. The directory is part of the key because the same command in another
+ * directory is another action.
+ *
+ * What the call asks of the sandbox comes from the gate's facts, not from the
+ * input's own fields: the panel shows those facts with the denied call
+ * (`sandboxAskSuffix`) and an approved retry is granted exactly those hosts.
+ * So an approval recorded while no sandbox ran does not cover the same call
+ * once a sandbox runs and it would leave it or be granted hosts, nor the
+ * reverse: the user approves only what they were shown.
+ */
+export function denialInputKey(toolName: string, input: Record<string, unknown>, cwd: string, shell: boolean, sandbox: SandboxAsk): string {
+	const counted = shell ? { command: input.command } : input;
+	const asked = { ...(sandbox.unsandboxed ? { unsandboxed: true } : {}), ...(sandbox.hosts.length > 0 ? { hosts: [...sandbox.hosts] } : {}) };
+	return `${toolName}\0${cwd}\0${stableJson(counted)}\0${stableJson(asked)}`;
+}
+
+/** What a call asks of the sandbox, as the panel shows it after the call: the same facts its key holds. */
+export function sandboxAskSuffix(sandbox: SandboxAsk): string {
+	return `${sandbox.unsandboxed ? " (unsandboxed)" : ""}${sandbox.hosts.length > 0 ? ` [hosts: ${sandbox.hosts.join(", ")}]` : ""}`;
 }
 
 export class DenialStore {

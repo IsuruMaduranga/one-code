@@ -64,7 +64,7 @@ import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/d
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
 import { describeCandidate, isSilentFallback } from "../../lib/models/classifier-model.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../../lib/shell/paths.ts";
-import { DenialStore, denialInputKey, permissionGrantedMessage } from "./auto-mode/denials.ts";
+import { DenialStore, denialInputKey, permissionGrantedMessage, sandboxAskSuffix } from "./auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
 import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "./auto-mode/safety-floor.ts";
 import type { FloorTarget } from "./auto-mode/text.ts";
@@ -1560,19 +1560,20 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// The exact call the user approved in /permissions after the classifier
 			// denied it runs once without the classifier (safety/permissions/auto-mode/denials.ts). Deny
 			// rules and the safety floor were checked above, so no grant reaches them.
+			// What the call asks of the sandbox right now keys the approval, is shown with the denied call, and is what an
+			// approved retry is granted: one set of facts, so the user approves exactly what runs (`denialInputKey`).
+			const sandboxAsk = { unsandboxed, hosts };
 			const inputKey = denialInputKey(
 				normalizedTool,
-				// A worktree session's call is keyed by the model's own command, with everything else it asked for:
-				// what it asks of the sandbox is part of the action (`denialInputKey`).
+				// A worktree session's call is keyed by the model's own command, with everything else it asked for.
 				original !== undefined ? { ...(event.input as Record<string, unknown>), command: original.command } : (event.input as Record<string, unknown>),
 				callCwd,
 				isShellTool(normalizedTool),
+				sandboxAsk,
 			);
-			// What the call asks of the sandbox, shown with the denied call so the user approves it knowingly.
-			const sandboxAsk = `${unsandboxed ? " (unsandboxed)" : ""}${hosts.length > 0 ? ` [hosts: ${hosts.join(", ")}]` : ""}`;
 			if (denials.takeGrant(inputKey)) {
 				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "user", reason: "approved in /permissions" });
-				// The approval was of this exact call, and the panel named the hosts it asked for: they hold for this one run.
+				// The approval was of this exact call under the same sandbox facts, and the panel named its hosts: they hold for this one run.
 				grantCommandHosts(event.toolCallId, hosts);
 				noteAllow();
 				return undefined;
@@ -1626,8 +1627,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 				if (!outcome.noVerdict) {
 					denials.record({
 						toolName: normalizedTool,
-						display: `${event.toolName}(${previewSubject(matchSubject)})${sandboxAsk}`,
-						fullDisplay: `${event.toolName}(${matchSubject})${sandboxAsk}`,
+						display: `${event.toolName}(${previewSubject(matchSubject)})${sandboxAskSuffix(sandboxAsk)}`,
+						fullDisplay: `${event.toolName}(${matchSubject})${sandboxAskSuffix(sandboxAsk)}`,
 						inputKey,
 						reason: outcome.reason,
 						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),

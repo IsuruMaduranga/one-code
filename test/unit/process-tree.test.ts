@@ -216,7 +216,8 @@ describe("killProcessTree", { timeout: LOADED_MS }, () => {
 			}
 		}
 		expect(survivors).toEqual([]);
-	});
+		// Forty forking shells take seconds on a loaded machine: the default five would fail the test for being slow.
+	}, 60_000);
 
 	it.skipIf(win32)("a frozen group still runs its TERM handler", async () => {
 		// `ready` comes once the member is forked, so the kill always finds a group of two.

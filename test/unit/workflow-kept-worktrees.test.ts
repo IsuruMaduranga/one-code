@@ -3,7 +3,7 @@
  * reaches the progress line, the viewer's agent record and the run report,
  * for a finished agent and for a failed one alike.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -97,5 +97,38 @@ describe("kept workflow worktrees", () => {
 		rmSync(file);
 		expect(buildRunReport(handle)).toBe(report);
 		expect(existsSync(file)).toBe(false);
+	});
+
+	// A failed save is not kept: the next report writes the file and is the one kept.
+	it("retries a failed save of the script value on the next report, then keeps the saved block", async () => {
+		const handle = manager.start({
+			script: `${META}return 'r'.repeat(${PERSIST_MAX_BYTES} + 1)`,
+			args: undefined,
+			tokenBudget: null,
+			cwd: sessionDir,
+			sessionDir,
+			defaultModel: undefined,
+		});
+		await handle.finished;
+		expect(handle.status).toBe("completed");
+
+		// A plain file where the tool-results folder goes makes the write fail.
+		const folder = join(handle.runDir, "tool-results");
+		const file = join(folder, "result.txt");
+		rmSync(folder, { recursive: true, force: true });
+		mkdirSync(handle.runDir, { recursive: true });
+		writeFileSync(folder, "blocker");
+		const failed = buildRunReport(handle);
+		expect(failed).toContain("could not be saved");
+
+		rmSync(folder);
+		const report = buildRunReport(handle);
+		expect(report).not.toContain("could not be saved");
+		expect(report).toContain(file);
+		expect(readFileSync(file, "utf8")).toBe("r".repeat(PERSIST_MAX_BYTES + 1));
+
+		rmSync(folder, { recursive: true });
+		expect(buildRunReport(handle)).toBe(report);
+		expect(existsSync(folder)).toBe(false);
 	});
 });
