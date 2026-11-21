@@ -54,6 +54,7 @@
  */
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
+import { LEDGER_EPOCH_BODY_CHANNEL, LEDGER_PLAN_CHANNEL, type LedgerEpochBody, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -134,8 +135,35 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */
 		let baseline: Set<string> | undefined;
 
+		// One mechanism shapes a fork's request. The fork's own ledger does when
+		// it extends a recorded request (its `context` hook, which runs first,
+		// has already cut the messages that record covers): cutting and splicing
+		// again here sent the record's list a second time after the capture, and
+		// the following requests lost the messages between the two. This
+		// extension does only when the ledger opens an epoch, and then inside
+		// the ledger's payload hook (`LEDGER_EPOCH_BODY_CHANNEL`), so the record
+		// holds the capture and the tail and the next request extends both.
+		let ledgerExtends = false;
+		/** The model of the request being shaped, for the epoch-body listener. */
+		let shapedFor: ModelRef | undefined;
+		pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+			ledgerExtends = (data as RequestPlan).epoch === false;
+		});
+		const splice = (payload: Record<string, unknown>): Record<string, unknown> => {
+			baseline ??= forkBaselineNames(payload, capture.api);
+			return forkRequestPayload(capture, payload, baseline);
+		};
+		pi.events.on(LEDGER_EPOCH_BODY_CHANNEL, (data) => {
+			if (!shaped || !captureMatches(capture, shapedFor)) return;
+			shaped = false;
+			const body = data as LedgerEpochBody;
+			body.payload = splice(body.payload);
+		});
+
 		pi.on("context_with_system", (event, ctx) => {
 			shaped = false;
+			if (ledgerExtends) return undefined;
+			shapedFor = ctx.model as ModelRef | undefined;
 			const covers = capture.covers;
 			// Bedrock and Google nest their tools and need joined turns and the
 			// fork's own abort signal, which the fork splice does not handle: their
@@ -162,9 +190,8 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		pi.on("before_provider_request", (event, ctx) => {
 			if (!shaped || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
 			shaped = false;
-			const payload = event.payload as Record<string, unknown>;
-			baseline ??= forkBaselineNames(payload, capture.api);
-			return forkRequestPayload(capture, payload, baseline);
+			// No ledger in this session took the body in its epoch: splice it here.
+			return splice(event.payload as Record<string, unknown>);
 		});
 	};
 }

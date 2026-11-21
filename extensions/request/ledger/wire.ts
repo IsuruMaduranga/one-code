@@ -47,7 +47,7 @@ import { cacheWarmingVeto, userCacheWarmingMode } from "../../lib/request/cache-
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
-import { LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerSent, type RequestPlan } from "../../lib/request/ledger/plan.ts";
+import { LEDGER_EPOCH_BODY_CHANNEL, LEDGER_PLAN_CHANNEL, LEDGER_SENT_CHANNEL, type LedgerEpochBody, type LedgerSent, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { makeRecord, RECORD, type ToldFact } from "../../lib/request/ledger/records.ts";
 import { deliveredAfterRepair, repairRequest, validateRequest } from "../../lib/request/ledger/validate.ts";
 import { settlePayload } from "../../lib/request/ledger/layout.ts";
@@ -165,7 +165,13 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		const end = base ? appendPoint(base.list, api) : 0;
 		if (base) payload = spliceRequest(base, payload, api);
 		// An epoch renders pi's tools again, in the order the branch first declared them.
-		else payload = withBranchToolOrder(payload, current.fold.toolOrder, api);
+		else {
+			payload = withBranchToolOrder(payload, current.fold.toolOrder, api);
+			// A fork's epoch starts from its parent's captured request (plan.ts).
+			const body: LedgerEpochBody = { payload };
+			pi.events.emit(LEDGER_EPOCH_BODY_CHANNEL, body);
+			payload = body.payload as WirePayload;
+		}
 		// A product's secret values leave the new tail here, before it is recorded
 		// (lib/request/ledger/redact.ts): the record, the cache and every side call
 		// that replays it see the redacted bytes. A no-op until a value is registered.
