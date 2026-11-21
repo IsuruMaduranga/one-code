@@ -35,6 +35,17 @@ describe("preludeLength on both Responses shapes", () => {
 		expect(preludeLength([userStack], codex)).toBe(0);
 	});
 
+	// pi 1.6.0 sends Codex's system prompt as the list's first developer item and no
+	// `instructions` field; before it, the prompt was that field and a leading
+	// developer item was a message of the conversation.
+	it("strips Codex's leading prompt only on a payload without the instructions field", () => {
+		expect(preludeLength([headItem, prompt, userStack], codex, { input: [] })).toBe(2);
+		expect(preludeLength([prompt, userStack], codex, { input: [] })).toBe(1);
+		expect(preludeLength([headItem, prompt, userStack], codex, { instructions: "p", input: [] })).toBe(1);
+		expect(preludeLength([prompt, userStack], codex, { instructions: "p", input: [] })).toBe(0);
+		expect(preludeLength([prompt, userStack], codex)).toBe(0);
+	});
+
 	it("leaves an element it does not recognize in the tail", () => {
 		expect(preludeLength([{ type: "tools_update", tools: [] }, prompt], api)).toBe(0);
 		// A typed developer item is not the prompt.

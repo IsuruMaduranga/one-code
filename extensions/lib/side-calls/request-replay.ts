@@ -360,7 +360,7 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const parentDeclared = captureDeclarations(capture);
 	// The child's own prelude and system messages go; a Responses load item its
 	// tool_search placed in the tail stays, less what the capture declares.
-	const tail = childList.slice(preludeLength(childList, capture.api)).flatMap((entry): WireMessage[] => {
+	const tail = childList.slice(preludeLength(childList, capture.api, child)).flatMap((entry): WireMessage[] => {
 		if (isToolsItem(entry)) {
 			const tools = entry.tools.filter((tool) => !parentDeclared.has(toolName(tool) ?? ""));
 			return tools.length > 0 ? [{ ...entry, tools } as WireMessage] : [];
