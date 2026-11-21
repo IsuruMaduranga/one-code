@@ -1301,3 +1301,36 @@ describe("background wiring: state across /reload, /tree and compaction", () => 
 		expect(notify.mock.calls[0][0]).toBe(`Stopped 1 background task on reload: ${start.details.taskId} (dev server).`);
 	});
 });
+
+// A running workflow and a resident agent's untracked turn never enter this
+// extension's registry; a switch stops them too, so the dialog and the notice
+// list what the session-work query reports.
+describe("work other extensions answer for, on a switch and a reload", () => {
+	const workflow = { id: "wf1", type: "workflow", status: "running", description: "nightly audit" };
+
+	it("asks before a switch that would stop a running workflow", async () => {
+		const fake = mount();
+		fake.events.on(SESSION_WORK_CHANNEL, (data) => void (data as SessionWorkQuery).tasks.push(workflow));
+		const select = vi.fn(async (_title: string, options: string[]) => options[0]);
+		const results = await fake.fire("session_before_switch", { reason: "new" }, liveSessionCtx({ ui: { select } }));
+		expect(select).toHaveBeenCalledTimes(1);
+		expect(select.mock.calls[0][0]).toContain("nightly audit");
+		expect(results).toContainEqual({ cancel: true });
+	});
+
+	it("names it in the notice after a reload", async () => {
+		resetProcessStateForTest();
+		const fake = mount();
+		fake.events.on(SESSION_WORK_CHANNEL, (data) => void (data as SessionWorkQuery).tasks.push(workflow));
+		await fake.fire("session_shutdown", { reason: "reload" }, liveSessionCtx());
+
+		vi.resetModules();
+		const { default: reloadedExtension } = await import("../../extensions/tools/background/index.ts");
+		const next = createFakePi();
+		reloadedExtension(next.pi as never);
+		const notify = vi.fn();
+		await next.fire("session_start", { reason: "reload" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+		await flushNotices();
+		expect(notify.mock.calls[0][0]).toBe("Stopped 1 background task on reload: wf1 (nightly audit).");
+	});
+});
