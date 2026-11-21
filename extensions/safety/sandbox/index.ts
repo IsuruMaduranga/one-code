@@ -54,7 +54,7 @@ const PROTECTED_CONFIG_CHILDREN = ["skills", "hooks", "commands", "agents", "rul
 const protectedConfig = (dir: string): string[] => PROTECTED_CONFIG_CHILDREN.map((child) => join(projectConfigDir(dir), child));
 
 /** What a session is told when its settings ask for a sandbox the platform does not have. */
-export function unsupportedSandboxMessage(required: boolean): string {
+function unsupportedSandboxMessage(required: boolean): string {
 	return `The command sandbox is turned on, but ${SANDBOX_UNSUPPORTED}. ${required ? "Shell commands are refused (sandbox.failIfUnavailable)." : "Shell commands run without it."}`;
 }
 
@@ -209,9 +209,16 @@ function sandboxExtension(pi: ExtensionAPI) {
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		scopes = new Map();
+		/** What a directory holds that must stay unwritable: its config folder's children and its checkout's files. */
+		const protectedIn = (dir: string): string[] => [...protectedConfig(dir), ...checkoutProtectedFiles(dir)];
+		// The workspace directories are the same for every scope until they change: read their checkouts once per set.
+		let workspaceProtected: { dirs: string[]; files: string[] } | undefined;
 		const scopeFor = (dir: string): SandboxScope => {
 			let scope = scopes.get(dir);
-			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig), ...[dir, ...workspace].flatMap((each) => checkoutProtectedFiles(each))] }));
+			if (!scope) {
+				if (workspaceProtected?.dirs !== workspace) workspaceProtected = { dirs: workspace, files: workspace.flatMap(protectedIn) };
+				scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...protectedIn(dir), ...workspaceProtected.files] }));
+			}
 			return scope;
 		};
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).
