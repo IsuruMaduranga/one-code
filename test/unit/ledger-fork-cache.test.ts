@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { forkCacheExtension } from "../../extensions/agents/subagents/fork-cache.ts";
 import type { RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
+import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
 import { LedgerSim, type SimMessage } from "./helpers/ledger-sim.ts";
 
 type Handlers = Record<string, ((event: unknown, ctx: unknown) => unknown)[]>;
@@ -98,7 +99,7 @@ describe("a fork child with the ledger and fork-cache", () => {
 		await parent.request("A1");
 		const u2 = parent.message("user", "U2");
 		const sent = await parent.request("A2");
-		parent.add({ type: "custom", customType: "one-code:epoch", data: { v: 1, by: "test", cause: "fold" } });
+		parent.add({ type: "custom", customType: RECORD.epoch, data: { v: 1, by: "test", cause: "fold" } });
 		const fork = await forkOf(parent, captureOf(sent, u2.message as SimMessage));
 
 		const first = await fork.request("fork reply 1");
