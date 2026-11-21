@@ -135,6 +135,31 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 		// No context pass in this instance and not a warm: leave pi's request alone.
 		if (!current) return undefined;
 
+		// A body that keeps its conversation somewhere else than this API's list
+		// key (pi-ai's `pi-messages` sends it at `context.messages`): there is no
+		// list to cut or splice, so the request goes out as pi built it, and its
+		// record covers nothing. The next request then opens a `coverage` epoch
+		// (plan.ts) and the `context` hook cuts nothing, where a record with
+		// `covers` made every later request carry only its tail. What was
+		// consumed and told is still recorded.
+		if (!Array.isArray(live[listKey(api)])) {
+			const request = recordedRequest(live, identity);
+			lastSent = live;
+			sentIn = call;
+			if (recorded && encodeRequest(recorded.request, request, { has: () => true }) === undefined) return undefined;
+			const known = { has: (hash: string) => current.fold.knownHashes.has(hash) || recorded?.hashes.has(hash) === true };
+			const delta = encodeRequest(current.fold.lastRequest, request, known);
+			if (delta) {
+				if (current.epoch) pi.appendEntry(RECORD.epoch, makeRecord("epoch", by, { cause: current.cause ?? "first" }));
+				pi.appendEntry(RECORD.request, makeRecord("request", by, { ...delta, consumed: current.consumed, routing: routingOf(current, ctx.sessionManager.getSessionId()) }));
+				const facts = current.carried.flatMap((block) => block.facts);
+				if (facts.length > 0) pi.appendEntry(RECORD.told, makeRecord("told", by, { facts }));
+				recorded = { request, hashes: new Set([...(recorded?.hashes ?? []), ...Object.keys(delta.blobs)]) };
+				pi.events.emit(LEDGER_SENT_CHANNEL, { payload: live, model, sessionId: ctx.sessionManager.getSessionId(), plan: current } satisfies LedgerSent);
+			}
+			return undefined;
+		}
+
 		let payload = live;
 		const base = current.epoch ? undefined : current.base;
 		const end = base ? appendPoint(base.list, api) : 0;
