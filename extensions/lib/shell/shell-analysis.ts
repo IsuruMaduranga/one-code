@@ -264,7 +264,7 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
 	watch: { values: ["-n", "--interval", "-q", "--equexit"], contained: false, denyFormsOnly: true },
 	xargs: {
-		values: ["-I", "-L", "-n", "-P", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
+		values: ["-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
 		unsafeValues: ["-a", "--arg-file"],
 		contained: false,
 	},
@@ -366,6 +366,17 @@ function acceptEditsOperands(name: string, args: Token[]): Token[] | undefined {
 	if (!spec) return undefined;
 	const check = checkOptions(spec, args);
 	return check.ok ? check.parsed.positionals : undefined;
+}
+
+/** Whether the file at `path` (written `word`) is a symbolic link, or a directory or glob that may hold one. */
+function mayCarryLink(path: string, word: string): boolean {
+	if (hasGlob(word)) return true;
+	try {
+		const stat = lstatSync(path);
+		return stat.isSymbolicLink() || stat.isDirectory();
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ENOENT";
+	}
 }
 
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
@@ -555,7 +566,8 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			// `flock LOCK -c '…'`: options may follow the file too.
 			skipOptions(spec);
 		}
-		if (spec.durationFirst && index < tokens.length && /^[0-9.]+[smhd]?$/.test(tokens[index].value)) index++;
+		// Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`.
+		if (spec.durationFirst && index < tokens.length && /^\+?(0x[0-9a-f.]+|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
 	}
 }
 
@@ -800,6 +812,8 @@ function outputFlagTarget(args: Token[]): string | undefined {
  */
 function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean, onFileReads: (words: Token[]) => void): string | undefined {
 	let index = 0;
+	/** Where git stands after the `-C` options read so far: git applies each one from the one before. */
+	let chained = "";
 	while (index < args.length) {
 		const token = args[index].value;
 		if (!token.startsWith("-")) break;
@@ -812,7 +826,9 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 			// `-C` retargets git at another directory; outside the working directory
 			// the operation is no longer provably in-project (was review gap: `git
 			// -C /etc status` classified safe).
-			if (!dir || isDirOutsideCwd(dir)) return `runs git -C ${dir ?? ""}, which points outside the working directory`;
+			if (!dir) return "runs git -C , which points outside the working directory";
+			chained = chained && !/^([/~]|[A-Za-z]:)/.test(dir) ? `${chained}/${dir}` : dir;
+			if (isDirOutsideCwd(chained)) return `runs git -C ${dir}, which points outside the working directory`;
 			index += 2;
 			continue;
 		}
@@ -964,6 +980,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	 * was in-project mutation (`containedNonNetwork`).
 	 */
 	let uncontained = false;
+	/** The segments whose contained `mv` or `cp` may move a symbolic link. */
+	const relocating = new Set<Segment>();
 	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
 	let escalatedBeyondReads = false;
 	/** Set by any escalation that is neither an outside-cwd read nor a read naming a guarded path (see readsOnly). */
@@ -1258,6 +1276,10 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// (tar/dd/ln/…) stays uncontained.
 		const fileOperands = acceptEditsOperands(name, args);
 		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: fileOperands !== undefined });
+		// A source that is a symbolic link, or a directory or glob that may hold one, carries the link to its new place.
+		if (fileOperands !== undefined && (name === "mv" || name === "cp") && fileOperands.slice(0, -1).some((source) => mayCarryLink(toAbsoluteBash(effectiveCwd, source.value, home), source.value))) {
+			relocating.add(segment);
+		}
 
 
 		// A read-only command is proved read-only by its options, not its name:
@@ -1420,6 +1442,19 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		for (const token of writeTokens) checkWriteTarget(token);
+	}
+
+	// A moved or copied relative symlink points somewhere else afterwards, and
+	// every path on the line was judged on the files as they were before it
+	// ran: `mv sub/rel link && echo x > link` writes where `sub/rel` pointed
+	// from its new place. So a line that moves what may be a link is contained
+	// only when the move is all it does. A source that does not exist yet was
+	// made earlier on the line by a command judged here, and is no link.
+	if (relocating.size > 0 && segments.some((segment) => !relocating.has(segment) && (segment.redirects.length > 0 || segment.inputs.length > 0 || segment.tokens.length > 1))) {
+		escalate("moves or copies a file and names another path on the same line, which the move can retarget");
+	}
+	if ([...relocating].some((segment) => segment.redirects.length > 0)) {
+		escalate("moves or copies a file and redirects on the same line, which the move can retarget");
 	}
 
 	// The command escalated, but every reason was an acceptEdits file command on

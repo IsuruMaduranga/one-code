@@ -258,9 +258,52 @@ const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev
 /** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
 function inlineShellScript(args: string[]): string | undefined {
 	for (let i = 0; i < args.length - 1; i++) {
-		if (/^-[a-zA-Z]*c$/.test(args[i])) return args[i + 1];
+		// `c` anywhere in a short cluster (`-ce`, `-lc`); the script is the first
+		// word after it that is not an option, past a `--` (`-c -e 'x'`, `-c -- 'x'`).
+		if (!/^-[a-zA-Z]*c[a-zA-Z]*$/.test(args[i])) continue;
+		for (let at = i + 1; at < args.length; at++) {
+			if (args[at] === "--") return args[at + 1];
+			if (!/^[-+][a-zA-Z]/.test(args[at])) return args[at];
+		}
 	}
 	return undefined;
+}
+
+/** The command line `su -c '…'` / `su --command='…'` runs, if any. */
+function suScript(args: string[]): string | undefined {
+	for (const [index, arg] of args.entries()) {
+		if (arg.startsWith("--command=")) return arg.slice("--command=".length);
+		if (arg === "-c" || arg === "--command" || arg === "--session-command") return args[index + 1];
+	}
+	return undefined;
+}
+
+/**
+ * `line` with its comma brace groups expanded as bash does before it picks
+ * the command word (`{curl,x}` runs `curl x`), at most 32 spellings. Textual
+ * and blind to quotes on purpose: a deny form may only widen.
+ */
+function braceExpansions(line: string): string[] {
+	let lines = [line];
+	for (let round = 0; round < 4; round++) {
+		const next: string[] = [];
+		let expanded = false;
+		for (const each of lines) {
+			const group = /\{([^{}]*,[^{}]*)\}/.exec(each);
+			if (!group) {
+				next.push(each);
+				continue;
+			}
+			expanded = true;
+			const before = each.slice(0, group.index);
+			const after = each.slice(group.index + group[0].length);
+			// bash writes one word per part: `{curl,x}` is `curl x`.
+			next.push(`${before}${group[1].split(",").map((part) => `${part}`).join(" ")}${after}`);
+		}
+		lines = next.slice(0, 32);
+		if (!expanded) break;
+	}
+	return lines.filter((each) => each !== line);
 }
 
 /**
@@ -302,6 +345,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	// its rough pieces besides.
 	const { segments, parseFailed } = parseCommand(trimmed);
 	if (parseFailed) nested.push(...roughPieces(trimmed));
+	nested.push(...braceExpansions(trimmed));
 	// A shell on the line may run its input, a `-c` script included (`sh -c
 	// 'eval "$(cat)"'`). Then every heredoc and here-string on the line, and
 	// the words an `echo`/`printf` prints, may be the script it reads
@@ -326,6 +370,13 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 		if (!payload.command) continue;
 		const args = payload.args.map((token) => token.value);
 		forms.add([payload.command, ...args].join(" "));
+		// A wrapper option the peel does not know may take the next word as its
+		// value (`env -P dir cmd`, `env -a name cmd`): then the command starts a word later.
+		if (payload.opaque.length > 0) nested.push(args.join(" "));
+		if (payload.command === "su") {
+			const script = suScript(args);
+			if (script) nested.push(script);
+		}
 		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
 			const script = inlineShellScript(args);
 			if (script) nested.push(script);

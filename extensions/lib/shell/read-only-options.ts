@@ -394,8 +394,14 @@ export const READ_ONLY_SPECS: Record<string, OptionSpec> = {
 	jq: JQ,
 	ls: {
 		...LENIENT,
-		optionsReason: (seen) =>
-			(seen.has("-L") || seen.has("--dereference")) && (seen.has("-R") || seen.has("--recursive")) ? `passes -L with -R, so it ${FOLLOWS_WHILE_RECURSING}` : undefined,
+		// GNU ls takes any unambiguous prefix of a long option (`--recurs`, `--deref`).
+		// `--dereference-command-line…` is a prefix match of neither spelling here, and counting it costs one escalation.
+		optionsReason: (seen) => {
+			const long = (name: string, shortest: string) => [...seen].some((option) => option.startsWith(shortest) && name.startsWith(option));
+			return (seen.has("-L") || long("--dereference", "--d")) && (seen.has("-R") || long("--recursive", "--rec"))
+				? `passes -L with -R, so it ${FOLLOWS_WHILE_RECURSING}`
+				: undefined;
+		},
 	},
 	md5sum: CHECKSUM,
 	nl: LENIENT,
