@@ -28,7 +28,7 @@ export const BASH_SHORT_DESCRIPTION = `Executes a bash command and returns its o
 - IMPORTANT: Avoid using this tool to run \`cat\`, \`head\`, \`tail\`, \`sed\`, \`awk\`, or \`echo\` commands, unless explicitly instructed or after you have verified that a dedicated tool cannot accomplish your task. Instead, use the appropriate dedicated tool as this will provide a much better experience for the user.
 - Command output is displayed to you, not reliably to the user.
 - \`timeout\` is in milliseconds: default 120000, max 600000 for a foreground command.
-- \`run_in_background\` runs the command detached: it keeps running across turns and re-invokes you when it exits. No \`&\` needed. You will be notified when it exits — do not poll its output file while waiting. Foreground \`sleep\` is blocked; use monitor with an until-loop to wait on a condition.
+- \`run_in_background\` runs the command detached: it keeps running across turns and re-invokes you when it exits. No \`&\` needed. You will be notified when it exits — do not poll its output file while waiting. Foreground \`sleep\` is blocked; use monitor with an until-loop to wait on a condition. To wait on background work, call yield.
 
 # Git
 - Interactive flags (\`-i\`, e.g. \`git rebase -i\`, \`git add -i\`) are not supported in this environment.
@@ -66,6 +66,7 @@ While the bash tool can do similar things, it’s better to use the built-in too
   - If your command is long running and you would like to be notified when it finishes — use \`run_in_background\`. No sleep needed.
   - Do not retry failing commands in a sleep loop — diagnose the root cause.
   - If waiting for a background task you started with \`run_in_background\`, you will be notified when it completes — do not poll.
+  - To wait on background work, call yield.
   - Long leading \`sleep\` commands are blocked. To poll until a condition is met, use monitor with an until-loop (e.g. \`until <check>; do sleep 2; done\`) — you get a notification when the loop exits. Do not chain shorter sleeps to work around the block.
  - When running \`find\`, search from \`.\` (or a specific path), not \`/\` — scanning the full filesystem can exhaust system resources on large trees.
  - When using \`find -regex\` with alternation, put the longest alternative first. Example: use \`'.*\\.\\(tsx\\|ts\\)'\` not \`'.*\\.\\(ts\\|tsx\\)'\` — the second form silently skips \`.tsx\` files.

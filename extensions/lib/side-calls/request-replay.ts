@@ -407,7 +407,7 @@ export function forkBaselineNames(payload: Record<string, unknown>, api: string)
 /** What each capture declares, computed once: every request of a fork splices the same capture. */
 const declaredByCapture = new WeakMap<RequestCapture, Set<string>>();
 
-function captureDeclarations(capture: RequestCapture): Set<string> {
+export function captureDeclarations(capture: RequestCapture): Set<string> {
 	let names = declaredByCapture.get(capture);
 	if (!names) declaredByCapture.set(capture, (names = forkBaselineNames(capture.payload, capture.api)));
 	return names;

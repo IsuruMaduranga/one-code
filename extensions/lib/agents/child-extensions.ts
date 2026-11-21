@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { EXTENSIONS_DIR } from "../core/package-root.ts";
 import { memoOn } from "../core/text-spans.ts";
 import { featureOfEntry, TOOL_FEATURES } from "../profile/features.ts";
-import type { LiveFeatures, LiveTools } from "../profile/live-tools.ts";
+import { type LiveFeatures, type LiveTools, withoutTools } from "../profile/live-tools.ts";
 import { brandedId } from "../profile/brand.mjs";
 import { activeProfile, requireText, type ResolvedProfile } from "../profile/profile.ts";
 import type { ProfileText } from "../profile/profile-contract.ts";
@@ -131,6 +131,27 @@ export function sessionView(pi: { events: { emit(channel: string, data: unknown)
 	if (!probe.child) return { child: false, live: activeProfile().live, features: activeProfile().features, text: requireText };
 	const view = childView(activeProfile());
 	return { child: true, live: view.live, features: view.features, text: (group) => view.text[group] ?? requireText(group) };
+}
+
+/** Per profile, the main session's text for its tools less a withheld set, by the set's names. */
+const withheldTexts = memoOn((_profile: ResolvedProfile) => new Map<string, ProfileText>());
+
+/**
+ * A text group as the session's model is offered the tools: with `withheld`
+ * tools (lib/models/model-family.ts toolsWithheldFrom), the text leaves out
+ * every passage naming them, as it does when the profile switches a tool off.
+ * A child never has a model-gated tool (the background feature does not load
+ * in one), so its text already leaves them out. `view` is the session's own
+ * (`sessionView`); without one, the main session's.
+ */
+export function textForModel<K extends keyof ProfileText>(group: K, withheld: readonly string[], view?: SessionView): NonNullable<ProfileText[K]> {
+	if (view?.child || withheld.length === 0) return view ? view.text(group) : requireText(group);
+	const profile = activeProfile();
+	const texts = withheldTexts(profile);
+	const key = withheld.join("\0");
+	let text = texts.get(key);
+	if (!text) texts.set(key, (text = profile.textFor(withoutTools(profile.live, withheld))));
+	return text[group] ?? requireText(group);
 }
 
 /**

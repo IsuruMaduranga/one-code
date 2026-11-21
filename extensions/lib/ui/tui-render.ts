@@ -729,6 +729,23 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 	};
 }
 
+/**
+ * Renderers that draw nothing while the call runs and succeeds, for a tool
+ * the user sees elsewhere (yield: the spinner and the agent rows show the
+ * wait, and the notification follows it). A failed call still shows, drawn
+ * as `toolRenderers(label)` draws it. pi drops a self-rendered tool with no
+ * lines, spacer included (tool-execution.js).
+ */
+export function hiddenToolRenderers(label: string): ReturnType<typeof toolRenderers> {
+	const shown = toolRenderers(label, { title: () => "" });
+	const none = () => linesComponent(() => []);
+	return {
+		renderShell: "self",
+		renderCall: (args, theme, context) => (context.isError ? shown.renderCall(args, theme, context) : none()),
+		renderResult: (result, options, theme, context) => (context.isError ? shown.renderResult(result, options, theme, context) : none()),
+	};
+}
+
 /** True when a line is visually empty — ANSI codes (Box padding paints) don't count as content. */
 export function isBlankLine(line: string): boolean {
 	return line.replace(/\x1b\[[0-9;]*m/g, "").trim() === "";

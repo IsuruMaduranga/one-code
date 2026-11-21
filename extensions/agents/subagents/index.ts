@@ -77,6 +77,7 @@ import { watchPermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import { watchHookBridge } from "../../lib/agents/hook-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, type ReminderPayload, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../../lib/agents/task-registry.ts";
+import { SESSION_WORK_CHANNEL, sessionBackgroundTask, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
 import { type ChildAction } from "../../lib/rules/auto-mode-actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
@@ -85,6 +86,8 @@ import { emptyUsage, formatStats, type UsageTotals } from "../../lib/agents/usag
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "../../lib/agents/agent-worktree.ts";
 import type { SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
+import { textForModel } from "../../lib/agents/child-extensions.ts";
+import type { ParentTool } from "./fork-cache.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";
 import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
@@ -277,6 +280,11 @@ const BLOCK_ORDER: Record<SubagentBlockKey, number> = {
 /** The `one-code:state` key of the models this account refused (lib/models/model-unusable.ts). */
 const REFUSED_MODELS_STATE = "subagents:refused-models";
 
+/** How the non-TUI notices name the task tools: task_output only while it is live (the profile may switch it off). */
+function taskToolsHint(): string {
+	return toolLive("task_output") ? "task_output and task_stop inspect or stop a task." : "task_stop stops a task.";
+}
+
 function subagentsExtension(pi: ExtensionAPI) {
 	/** The profile's subagent words (fails closed: every Agent call reads them). */
 	const words = subagentWords();
@@ -306,8 +314,25 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * routed a message addressed to the older task id to the newer agent (M1).
 	 */
 	const runningIds = new Set<string>();
+	/** Every task this extension registered, by task id: the latest for an agent resumed under the same id. */
+	const tasks = new Map<string, BackgroundTask>();
+	const registerTask = (task: BackgroundTask) => {
+		tasks.set(task.id, task);
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+	};
 	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
+	// A resident busy on a later turn (a SendMessage, its own cron fire) has no
+	// running task, yet it is still session work: yield waits for it and the
+	// turn-end line counts it (lib/notify/session-work.ts). One whose task still
+	// runs is reported by the background extension's registry.
+	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
+		const query = data as SessionWorkQuery;
+		for (const [taskId, resident] of residents) {
+			if (resident.handle.exited() || !resident.handle.busy() || tasks.get(taskId)?.status === "running") continue;
+			query.tasks.push(sessionBackgroundTask({ id: taskId, kind: "subagent", status: "running", description: tasks.get(taskId)?.description ?? taskId }));
+		}
+	});
 	/**
 	 * Task id → the main session's tool call that started the run's current
 	 * turn (its Agent call, or the latest SendMessage to it); a nested run
@@ -955,7 +980,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	const openView = (ctx: ExtensionContext, taskId: string) => {
 		if (ctx.mode !== "tui") {
-			ctx.ui.notify("The live subagent panel requires TUI mode. Use /tasks for task status; task_output and task_stop inspect or stop a task.", "warning");
+			ctx.ui.notify(`The live subagent panel requires TUI mode. Use /tasks for task status; ${taskToolsHint()}`, "warning");
 			return;
 		}
 		if (view) return view.retarget(taskId);
@@ -1385,7 +1410,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				toolUseId: opts.toolUseId,
 				outputFile: opts.outputFile,
 				status,
-				summary: agentSummary(record?.description ?? opts.name, status),
+				summary: agentSummary(record?.description ?? opts.name, status, status === "failed" ? opts.outcome.failureReason : undefined),
 				note: agentNote(),
 				result,
 				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
@@ -1472,6 +1497,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// The run still works; only a later resume loses the prompt (and says so).
 		}
 	};
+	/** This session's registered tools, for a fork to stub the ones only the main conversation has (fork-cache.ts). */
+	const parentTools = (): readonly ParentTool[] => pi.getAllTools();
 	/**
 	 * A fork's inputs from this conversation (its system prompt and the parent's
 	 * last request, for the cache), saved beside its session so a SendMessage
@@ -1560,13 +1587,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			// accepted as `task`, `description` is tolerated, and the agent name is
 			// matched case-insensitively — a nested subagent is just as likely to be
 			// CC-trained.
-			// A fork inherits the parent's tools block byte for byte (its first request
-			// extends the parent's recorded one, decisions/caching.md), so its spawn
-			// tool takes the parent's Agent schema: the ledger keeps the recorded
-			// declaration only while the live schema matches it, and pi validates the
-			// call against the live one. The options a nested run lacks are refused in
-			// execute() with the fix named.
-			parameters: (parentRecord.agent === FORK_AGENT ? subagentParams(words) : nestedAgentParams(words)) as never,
+			// In a fork it declares the parent's Agent schema (fork-cache.ts
+			// withParentParameters); execute() refuses the options a nested run lacks,
+			// with the fix named.
+			parameters: nestedAgentParams(words) as never,
 			prepareArguments: prepareAgentArguments as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
@@ -1578,7 +1602,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				if (!ctx) return refuseCall({ kind: "hostNotReady" });
 				if (agentName.toLowerCase() === FORK_AGENT) return refuseCall({ kind: "nestedFork" });
 				const agents = loadAgents(parentRecord.cwd);
-				// Only a fork's schema (the parent's) offers these; a nested run has none of them.
+				// Only the parent's schema, which a fork declares, offers these.
 				if (p.action === "list") return { content: [{ type: "text" as const, text: subagentResultText().catalogList({ rows: catalogLines(agents) }) }], details: {} };
 				const unsupported = (["model", "thinking", "isolation"] as const).filter((key) => p[key] != null);
 				if (unsupported.length > 0) return refuseCall({ kind: "nestedOptions", options: unsupported });
@@ -1783,6 +1807,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentTools: parentRequest ? parentTools() : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1958,6 +1983,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
+			parentTools: parentRequest ? parentTools() : undefined,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2058,7 +2084,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			resident: () => !handle.exited(),
 			finished,
 		};
-		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		registerTask(task);
 		void handle.send(frameTask(p.request, worktree, parentCwd));
 
 		return {
@@ -2433,8 +2459,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: words.agentDescription({ form, configDir: projectConfigDirName() }) }));
-	followDescriptionForm(pi, setAgentForm);
+	const describeAgent = (form: DescriptionForm, withheld: readonly string[]) => textForModel("subagents", withheld).agentDescription({ form, configDir: projectConfigDirName() });
+	const setAgentDescription = registerVariantTool<string>(pi, describeAgent("short", []), (description) => ({ ...agentTool, description }));
+	followDescriptionForm(pi, (form, _tier, withheld) => setAgentDescription(describeAgent(form, withheld)));
 
 	const SendMessageParams = Type.Object({
 		to: Type.String({ description: words.sendMessageParams.to }),
@@ -2558,7 +2585,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					review,
 				});
 			});
-			pi.events.emit(TASK_REGISTER_CHANNEL, task);
+			registerTask(task);
 			void resident.handle.send(params.message);
 			return {
 				content: [
@@ -2654,6 +2681,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			parentTools: record.agent === FORK_AGENT ? parentTools() : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
 			model: record.model,
@@ -2704,7 +2732,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			stop: () => stopAgent(record.taskId, handle),
 			finished,
 		};
-		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		registerTask(task);
 
 		void handle.result.then(async (outcome) => {
 			runningIds.delete(record.taskId);
@@ -2823,7 +2851,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify([
 				"The interactive task viewer requires TUI mode; showing a task snapshot instead.",
 				...(lines.length ? lines : ["No background tasks in this session."]),
-				"Use task_output to inspect a task and task_stop to stop it.",
+				taskToolsHint(),
 			].join("\n"), "info");
 			return;
 		}
@@ -2943,7 +2971,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	// first, then running, then a finished run resumable from its session.
 	const agentStatus = (record: AgentRunRecord): RunStatus => {
 		const resident = residents.get(record.taskId);
-		if (resident && !resident.handle.exited()) return "resident";
+		// A resident mid-turn is running; between turns it is idle, waiting for a message.
+		if (resident && !resident.handle.exited()) return resident.handle.busy() ? "running" : "resident";
 		if (runningIds.has(record.taskId)) return "running";
 		return record.inline ? "finishedInline" : "finished";
 	};
@@ -2990,11 +3019,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify([
 					"The live subagent panel requires TUI mode; showing spawned agents instead.",
 					...registry.list().map((run) => subagentResultText().agentRow({ name: run.name, agent: run.agent, taskId: run.taskId, status: agentStatus(run) })),
-					"Use /tasks for task status; task_output and task_stop inspect or stop a task.",
+					`Use /tasks for task status; ${taskToolsHint()}`,
 				].join("\n"), "info");
 				return;
 			}
-			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
+			ctx.ui.notify(subagentResultText().catalogList({ rows: describeAgents(ctx.cwd) }), "info");
 		},
 	});
 

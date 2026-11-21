@@ -9,6 +9,10 @@
  * execute() calls the parent's `onMessage` callback directly. The main
  * conversation's own `send_message`/`SendMessage` tool (agent→agent addressing)
  * is a different tool registered on the parent session.
+ *
+ * In a fork it declares the parent's SendMessage schema (fork-cache.ts
+ * withParentParameters), which requires `to`; execute() refuses anything but
+ * "main" either way.
  */
 
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -28,7 +32,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			to: Type.Optional(Type.String({ description: text.params.to })),
 			message: Type.String({ description: text.params.message }),
 			summary: Type.Optional(Type.String({ description: text.params.summary })),
-		}) as never,
+		}),
 		async execute(_toolCallId: string, params: unknown) {
 			const p = (params ?? {}) as { to?: unknown; message?: unknown; summary?: unknown };
 			// Fail loud (working-docs/decisions/tools.md): a wrong recipient or a missing

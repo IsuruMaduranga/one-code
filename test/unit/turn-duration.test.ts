@@ -53,6 +53,16 @@ const RAN = [{ role: "assistant", stopReason: "stop" }];
 const FAILED = [{ role: "assistant", stopReason: "error" }];
 const ABORTED = [{ role: "assistant", stopReason: "aborted" }];
 
+describe("turnDurationText while background agents still run", () => {
+	it("says the main agent is waiting, as Claude Code 2.1.327 does, in place of the duration and done time", () => {
+		expect(turnDurationText("Cooked", 12_000, 0, "2:33 PM", { agents: 1, workflows: 0 })).toBe("Waiting for 1 background agent to finish");
+		expect(turnDurationText("Cooked", 12_000, 2, "2:33 PM", { agents: 2, workflows: 0 })).toBe("Waiting for 2 background agents to finish · 2 shells still running");
+		expect(turnDurationText("Cooked", 12_000, 0, undefined, { agents: 1, workflows: 1 })).toBe("Waiting for 1 background agent and 1 workflow to finish");
+		expect(turnDurationText("Cooked", 12_000, 0, undefined, { agents: 0, workflows: 2 })).toBe("Waiting for 2 workflows to finish");
+		expect(turnDurationText("Cooked", 12_000, 0, "2:33 PM", { agents: 0, workflows: 0 })).toBe("Cooked for 12s · done 2:33 PM");
+	});
+});
+
 describe("TurnSpan", () => {
 	it("measures one plain run from start to settle", () => {
 		const span = new TurnSpan();

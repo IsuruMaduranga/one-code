@@ -3,6 +3,7 @@
 import { isCachePoint, MAX_SIDE_CALL_CACHE_MARKERS, payloadMarkers } from "../../../lib/side-calls/side-call-cache.ts";
 import { isPlainObject } from "../../../lib/core/plain-object.ts";
 import { takesOpenRouterCacheMarks } from "../../../lib/request/openrouter-cache-marks.ts";
+import { RESPONSES_BREAKPOINT, takesExplicitCacheBreakpoints } from "../../../lib/request/openai-cache-breakpoints.ts";
 
 type WireRecord = Record<string, unknown>;
 
@@ -38,7 +39,7 @@ export const MAX_RESPONSES_HISTORY_MARKS = 1000;
 export function classifierCarriesBreakpoints(model: { id?: string; provider?: string; api: string; compat?: unknown }): boolean {
 	if (classifierDropsBreakpoints(model)) return false;
 	return MARKER_APIS.has(model.api)
-		|| (model.api === "openai-responses" && isPlainObject(model.compat) && model.compat.supportsExplicitPromptCacheMode === true);
+		|| takesExplicitCacheBreakpoints(model);
 }
 
 /**
@@ -164,7 +165,7 @@ function cacheResponsesHistory(payload: WireRecord, input: unknown[], parts: rea
 	const [part] = message.content;
 	if (!isPlainObject(part) || Object.keys(part).length !== 2 || part.type !== "input_text" || part.text !== parts.join("")) return undefined;
 	const marked = (i: number) => i <= historyEnd && i < MAX_RESPONSES_HISTORY_MARKS;
-	message.content = parts.map((text, i) => ({ type: "input_text", text, ...(marked(i) ? { prompt_cache_breakpoint: { mode: "explicit" } } : {}) }));
+	message.content = parts.map((text, i) => ({ type: "input_text", text, ...(marked(i) ? { prompt_cache_breakpoint: RESPONSES_BREAKPOINT } : {}) }));
 	return countMarked(parts, marked);
 }
 

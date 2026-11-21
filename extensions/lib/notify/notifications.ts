@@ -463,6 +463,10 @@ export interface TaskNotifier {
 }
 
 /**
+ * Inert while a profile switches `task_output` off (One Code's does: Claude
+ * Code 2.1.327 has no output tool, findings §94); kept for profiles that turn
+ * it on.
+ *
  * `task_output` announces here that it returns a FINISHED task's output in a
  * tool result, which it always does. A notifier created with
  * `withdrawOnDelivery` then drops that task's completion notification
@@ -481,8 +485,24 @@ export interface TaskOutputDelivered {
 
 /** The ExtensionAPI slice the notifier uses (`events` only for `withdrawOnDelivery`). */
 export type TaskNotifierApi = Pick<ExtensionAPI, "sendMessage" | "sendUserMessage" | "on"> & {
-	events?: { on(channel: string, handler: (data: unknown) => void): unknown };
+	events?: { on(channel: string, handler: (data: unknown) => void): unknown; emit?(channel: string, data: unknown): void };
 };
+
+/**
+ * The yield tool's view of every notifier (each extension has its own, so it
+ * asks over the bus): a synchronous query each notifier adds its backlog to,
+ * and an event each time one hands a notification to pi. A notification
+ * still coalescing has not reached pi yet, so a wait must not end on it; one
+ * handed to pi is delivered after the tool call that is waiting.
+ */
+export const NOTIFIER_BACKLOG_CHANNEL = brandedId("notifier-backlog");
+export interface NotifierBacklogQuery {
+	/** Notifications in a coalescing window, not yet handed to pi. */
+	coalescing: number;
+	/** Notifications handed to pi and not yet delivered to the model. */
+	handed: number;
+}
+export const NOTIFICATION_HANDED_CHANNEL = brandedId("notification-handed");
 
 export interface TaskNotifierOptions {
 	/**
@@ -711,6 +731,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 				},
 				{ deliverAs: "steer", triggerTurn: true },
 			);
+			pi.events?.emit?.(NOTIFICATION_HANDED_CHANNEL, { customType: entry.customType });
 		} catch {
 			// The session was disposed under us (assertActive). Dropping the notice
 			// beats taking the process down from a stream callback.
@@ -805,6 +826,13 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			}
 		}
 	};
+
+	pi.events?.on(NOTIFIER_BACKLOG_CHANNEL, (data) => {
+		if (!active) return;
+		const query = data as NotifierBacklogQuery;
+		query.coalescing += batch.length;
+		query.handed += pending.size;
+	});
 
 	pi.on("message_end", (event) => {
 		const message = event.message as { role?: string; customType?: string; details?: unknown };

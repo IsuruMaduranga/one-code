@@ -15,10 +15,10 @@
 import { childWriteWatcher } from "../../lib/agents/child-writes.ts";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, type ExtensionAPI, type ExtensionError, getAgentDir, SessionManager, SettingsManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../../lib/core/abort.ts";
-import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, disposeChildSession, openChildSession } from "../../lib/agents/agent-loader.ts";
+import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, withParentSessionId, disposeChildSession, openChildSession } from "../../lib/agents/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../../lib/side-calls/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../../lib/agents/subagent-gate.ts";
 import type { HookBridge } from "../../lib/agents/hook-bridge.ts";
@@ -30,12 +30,18 @@ import { type AgentDefinition, agentToolOptions, childMcpTools, toolsRemovedByFl
 import { childExtensionPaths } from "../../lib/agents/child-extensions.ts";
 import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../../lib/agents/subagent-handback.ts";
 import type { RequestCapture } from "../../lib/side-calls/request-replay.ts";
-import { forkCacheExtension } from "./fork-cache.ts";
+import { forkCacheExtension, type ParentTool, withParentParameters } from "./fork-cache.ts";
+import { agentStallMs, StallWatch } from "./stall-watch.ts";
+import { knobValue } from "../../lib/profile/knobs.ts";
+
+/** Claude Code's CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS, in the product's spelling. */
+const AGENT_STALL_KNOB = "ASYNC_AGENT_STALL_TIMEOUT_MS";
 import { parentModeExtension } from "./parent-mode.ts";
 import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
-import { type AbortReason, SessionTurnTracker } from "./session-turns.ts";
+import { type AbortReason, SessionTurnTracker, type TurnFailureSink } from "./session-turns.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import type { UsageTotals } from "../../lib/agents/usage.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../../lib/ui/tui-render.ts";
@@ -88,6 +94,8 @@ interface ChildSessionSpec {
 	 * built from it so the fork reads the parent's prompt cache (fork-cache.ts).
 	 */
 	parentRequest?: RequestCapture;
+	/** The parent's registered tools, for a fork to stub the ones its own session lacks (fork-cache.ts). */
+	parentTools?: readonly ParentTool[];
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
 	sessionFile?: string;
 	/** Where a new run's persisted session lands; falls back to an in-memory session. */
@@ -172,6 +180,54 @@ export function applyChildTierDefault(session: Pick<AgentSession, "model" | "set
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
 function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome {
 	return note ? { ...outcome, output: `${note}\n\n${outcome.output}` } : outcome;
+}
+
+/**
+ * A child extension that hands a guard's turn-failed reason to the run's
+ * tracker: the child's bus is its own, so nothing else in the parent hears it.
+ */
+export function turnFailureExtension(sink: TurnFailureSink): (pi: Pick<ExtensionAPI, "events">) => void {
+	return (pi) => {
+		pi.events.on(TURN_FAILED_CHANNEL, (data) => {
+			const reason = (data as TurnFailedEvent | undefined)?.reason;
+			if (typeof reason === "string" && reason) sink.recordTurnFailure(reason);
+		});
+	};
+}
+
+/**
+ * A child extension that fails a turn with no progress for `ms` (stall-watch.ts):
+ * every streamed chunk (a message update, a raw provider event) is progress, a
+ * tool or a compaction pauses the clock. It stops the turn as the tool-call
+ * guard does, so turnFailureExtension carries the reason to the tracker.
+ */
+export function stallWatchExtension(ms: number): (pi: Pick<ExtensionAPI, "on" | "events">) => void {
+	return (pi) => {
+		let ctx: { abort(): void } | undefined;
+		const watch = new StallWatch((seconds) => {
+			pi.events.emit(TURN_FAILED_CHANNEL, { reason: subagentResultText().stalled({ seconds }) } satisfies TurnFailedEvent);
+			try {
+				ctx?.abort();
+			} catch {
+				// A child disposed mid-turn (no session_shutdown): nothing left to stop.
+			}
+		}, ms);
+		const track = (handler: () => void) => (_event: unknown, context: { abort(): void }) => {
+			ctx = context;
+			handler();
+		};
+		pi.on("agent_start", track(() => watch.turnStarted()));
+		pi.on("message_start", track(() => watch.replyStarted()));
+		pi.on("message_update", track(() => watch.progress()));
+		pi.on("provider_stream_event", track(() => watch.progress()));
+		pi.on("tool_execution_start", track(() => watch.toolStarted()));
+		pi.on("tool_execution_end", track(() => watch.toolEnded()));
+		pi.on("session_before_compact", track(() => watch.compactionStarted()));
+		pi.on("session_compact", track(() => watch.compactionEnded()));
+		pi.on("session_compact_failed", track(() => watch.compactionEnded()));
+		pi.on("agent_settled", () => watch.stop());
+		pi.on("session_shutdown", () => watch.stop());
+	};
 }
 
 export class SubagentRuntime {
@@ -299,7 +355,9 @@ export class SubagentRuntime {
 	 * prompt and default tools, review S6); a named agent carries its own; a
 	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
 	 */
-	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot): AgentLoaderOptions {
+	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot & TurnFailureSink, background: boolean): AgentLoaderOptions {
+		// A background agent's turn fails after a stall (stall-watch.ts), timed from pi's idle timeout.
+		const stallMs = background ? agentStallMs(knobValue(AGENT_STALL_KNOB), SettingsManager.create(spec.cwd, getAgentDir()).getHttpIdleTimeoutMs()) : undefined;
 		const fork = SubagentRuntime.isFork(spec);
 		const systemPrompt = fork ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
 		return {
@@ -318,8 +376,12 @@ export class SubagentRuntime {
 				// Every subagent also gets SendMessage to its caller (sendToMainTool below),
 				// unless pi's tool flags removed it (lib/agents/agent-catalog.ts agentToolOptions).
 				subagentHandbackExtension(handback, { deferred: fork, sendMessage: toolLive("SendMessage") }),
+				// A guard that stops the child's turn (a runaway tool call) says why on the
+				// child's own bus; the turn's outcome carries it to the parent's notification.
+				turnFailureExtension(handback),
+				...(stallMs !== undefined ? [stallWatchExtension(stallMs)] : []),
 				...(fork && this.getParentMode ? [parentModeExtension(this.getParentMode)] : []),
-				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
+				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest, spec.parentTools)] : []),
 			],
 			// instructions (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
@@ -432,11 +494,11 @@ export class SubagentRuntime {
 	 * inherits the parent transcript + system prompt; a fresh named run gets the
 	 * agent's own prompt and toolset.
 	 */
-	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
+	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot & TurnFailureSink, background = false): Promise<{ session: Session; note?: string }> {
 		// The MCP wait first: the loader takes the parent's deferrals, which a server
 		// connecting during the wait adds to (it is instant once the connects settled).
 		const mcpTools = await this.getMcpTools();
-		const loader = await buildAgentLoader(this.childLoaderOptions(spec, handback));
+		const loader = await buildAgentLoader(this.childLoaderOptions(spec, handback, background));
 		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries tool lists.
 		const agent = spec.forkFrom ? undefined : spec.agent;
@@ -444,21 +506,29 @@ export class SubagentRuntime {
 		const removed = toolsRemovedByFlags(agent);
 		// Told once, when the agent starts: a resume continues a session that heard it.
 		const flagsNote = removed.length > 0 && agent && !spec.sessionFile ? subagentResultText().toolsLeftOut({ name: agent.name, tools: removed }) : undefined;
+		const fork = SubagentRuntime.isFork(spec);
+		const ownTools = [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)];
+		// A fork declares the parent's schemas (fork-cache.ts) whenever it is handed the parent's
+		// tools: at a spawn with its parent's request, and on every resume, so a resume whose saved
+		// request is gone still declares what the fork's own recorded requests did.
+		const customTools = fork && spec.parentTools ? withParentParameters(ownTools, spec.parentTools) : ownTools;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
+			const sessionManager = newSessionManager();
 			const session = await openChildSession({
 				loader,
 				session: {
 					cwd: spec.cwd,
 					agentDir: getAgentDir(),
-					modelRuntime: this.modelRuntime,
+					// A fork's Codex requests go out under its parent's session id, so they read the parent's cache.
+					modelRuntime: fork && spec.parentRequest?.sessionId ? withParentSessionId(this.modelRuntime, spec.parentRequest.sessionId, () => sessionManager.getSessionId()) : this.modelRuntime,
 					model: resolvedModel as never,
 					thinkingLevel: spec.thinking as never,
 					// The allowlist with the plumbing re-added, and the denylist (CC's "All
 					// tools except …" shape), which filters injected customTools too.
 					...agentToolOptions(agent),
-					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...childMcpTools(mcpTools)],
-					sessionManager: newSessionManager(),
+					customTools,
+					sessionManager,
 				},
 				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",
 				onError: (error) => this.onExtensionError(spec.name, error),
@@ -583,7 +653,7 @@ export class SubagentRuntime {
 	 */
 	async runResident(options: ResidentRunOptions): Promise<RpcChildHandle> {
 		const tracker = new SessionTurnTracker();
-		const built = await this.buildChildSession(options, tracker);
+		const built = await this.buildChildSession(options, tracker, true);
 		const session = built.session;
 		let spawnNote = built.note;
 		let exited = false;

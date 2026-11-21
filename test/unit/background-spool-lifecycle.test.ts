@@ -23,6 +23,10 @@ vi.mock("node:fs", async (original) => {
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import bashExtension from "../../extensions/tools/bash/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
+
+// task_output is switched off in the shipped profile (Claude Code 2.1.327 has none); these tests drive it.
+useShippedProfileWithAllTools();
 
 describe("background spool completion", () => {
 	it.each(["bash", "monitor"])("%s does not report finalized output before its spool flushes", async (name) => {

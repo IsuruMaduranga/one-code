@@ -13,6 +13,7 @@
  */
 
 import { parseClaudeId } from "../profile/claude-id.ts";
+import { RESPONSES_BREAKPOINT } from "./openai-cache-breakpoints.ts";
 
 /** The wire shape a system message takes: Anthropic `system`, OpenAI Responses `input`, or Chat Completions `messages`. */
 export type SystemRoleLayout = "anthropic" | "responses" | "completions";
@@ -108,9 +109,14 @@ export function byWireCallId<V>(stored: ReadonlyMap<string, V>, wireId: string):
 	return undefined;
 }
 
-/** A system message with `text` in the API's own shape. */
-export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string): WireMessage {
-	return layout === "anthropic" ? { role: "system", content: [{ type: "text", text }] } : { role, content: text };
+/**
+ * A system message with `text` in the API's own shape. With `breakpoint`, a
+ * Responses message is one part carrying OpenAI's explicit cache breakpoint
+ * (lib/request/openai-cache-breakpoints.ts contextBreakpoint).
+ */
+export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string, breakpoint = false): WireMessage {
+	if (layout === "anthropic") return { role: "system", content: [{ type: "text", text }] };
+	return breakpoint && layout === "responses" ? { role, content: [{ type: "input_text", text, prompt_cache_breakpoint: RESPONSES_BREAKPOINT }] } : { role, content: text };
 }
 
 /**
@@ -121,12 +127,23 @@ export function systemMessage(layout: SystemRoleLayout, role: "system" | "develo
  * position: a fork's request drops the parent's first message, and then nothing
  * moves. The cache mark is reseated afterwards (anthropic-payload.ts
  * reseatMessageMark). Undefined when nothing changes.
+ *
+ * With `breakpoint` (asked only when the message is built: an OpenAI model that
+ * takes explicit breakpoints, caching on), the message carries OpenAI's explicit cache breakpoint on its one part.
+ * OpenAI's implicit cache never ends at a developer message after the first
+ * user message, so without it the epoch's first request cached only up to the
+ * user message and the next request (a fork's too) paid the context again
+ * (findings §95). Claude Code marks the same message on Anthropic (findings
+ * §94). It is set here, before the ledger records the request, so every
+ * replay of it (a fork, a side call) carries the same bytes; a mark on a
+ * message's last part costs no tokens and leaves the prefix unchanged.
  */
 export function withSystemRoleContext(
 	payload: Record<string, unknown>,
 	layout: SystemRoleLayout,
 	moved: readonly MovedBlock[],
 	role: "system" | "developer",
+	breakpoint: () => boolean = () => false,
 ): Record<string, unknown> | undefined {
 	if (moved.length === 0) return undefined;
 	const key = messagesKey(layout);
@@ -152,5 +169,5 @@ export function withSystemRoleContext(
 		.join("\n\n");
 
 	const user: WireMessage = { ...carrier, content: kept };
-	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text), ...messages.slice(index + 1)] };
+	return { ...payload, [key]: [...messages.slice(0, index), user, systemMessage(layout, role, text, breakpoint()), ...messages.slice(index + 1)] };
 }

@@ -24,6 +24,11 @@
 # (cache-probe-classifier.mjs --review). `--no-review` skips it.
 # A reader phase repeats a web_fetch reader call against a deterministic page
 # fixture (cache-probe-reader.sh). `--no-reader` skips it.
+# A fork phase asks the model to fork once and checks the fork's first request
+# reads the parent's cached prompt (test/e2e/cache-probe-fork.mjs over the run's
+# session files, Codex on its default WebSocket transport): the fork's tools
+# must match the parent's, and on Codex the fork must send the parent's session
+# id (findings §75). `--no-fork` skips it.
 # On a first-party Anthropic model a late-tool phase registers a tool mid-session
 # and checks it is announced without a cache miss (cache-probe-late-tool.sh).
 # `--no-late-tool` skips it; `--late-tool-form tool_addition|addendum` also
@@ -59,6 +64,7 @@ CHECK_ARGS=()
 CLASSIFIER=1
 REVIEW=1
 READER=1
+FORK=1
 LATE_TOOL=0
 REPO_ARGS=()
 EXPECT_AUTH=""
@@ -90,6 +96,8 @@ for arg in "$@"; do
 		REVIEW=0
 	elif [ "$arg" = "--no-reader" ]; then
 		READER=0
+	elif [ "$arg" = "--no-fork" ]; then
+		FORK=0
 	elif [ "$arg" = "--no-late-tool" ]; then
 		LATE_TOOL=0
 	elif [ "$arg" = "--no-load" ]; then
@@ -126,17 +134,25 @@ if [ -n "${CACHE_PROBE_WORK_DIR:-}" ]; then
 else
 	WORK="$(mktemp -d "${TMPDIR:-/tmp}/cache-probe.XXXXXX")"
 fi
+# A throwaway git project; on Codex it asks for SSE, which dump-requests.ts can
+# see, unless the second argument is "websocket" (Codex's default, which users run).
+probe_project() {
+	mkdir -p "$1"
+	git -C "$1" init -q
+	printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$1/CLAUDE.md"
+	case "$MODEL:${2:-}" in
+	openai-codex/*:websocket) ;;
+	openai-codex/*)
+		mkdir -p "$1/.pi"
+		printf '{"transport":"sse"}\n' > "$1/.pi/settings.json"
+		;;
+	esac
+}
 PROJECT="$WORK/project"
-mkdir -p "$PROJECT"
-git -C "$PROJECT" init -q
-printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$PROJECT/CLAUDE.md"
+probe_project "$PROJECT"
 APPROVE=()
 case "$MODEL" in
-openai-codex/*)
-	mkdir -p "$PROJECT/.pi"
-	printf '{"transport":"sse"}\n' > "$PROJECT/.pi/settings.json"
-	APPROVE=(--approve)
-	;;
+openai-codex/*) APPROVE=(--approve) ;;
 esac
 
 # --expect-auth: where every recorded request notes its credential shape, and the
@@ -180,6 +196,17 @@ fi
 if [ "$REVIEW" = 1 ]; then
 	auto_phase review 'Call the Agent tool exactly once, with subagent_type general-purpose and this prompt: "Run curl -sI https://example.com with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' --review
 fi
+if [ "$FORK" = 1 ]; then
+	echo "--- fork phase"
+	# Codex's default WebSocket transport, where a fork shares its parent's session
+	# id (and cached socket); the check reads the session files, not a wire dump.
+	probe_project "$WORK/fork-project" websocket
+	(
+		cd "$WORK/fork-project"
+		WIRE_AUTH_DUMP="$AUTH_DUMP" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ${PHASE_DUMP[@]+"${PHASE_DUMP[@]}"} --model "$MODEL" --mode json --session-dir "$WORK/fork-sessions" -p 'Call the Agent tool exactly once, with subagent_type "fork" and this prompt: "Run echo fork-probe with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' > "$WORK/fork-events.jsonl" 2> "$WORK/fork-stderr.log"
+	) || echo "pi exited non-zero in the fork phase (see $WORK/fork-stderr.log)"
+	node "$REPO/test/e2e/cache-probe-fork.mjs" "$WORK/fork-sessions" --model "$MODEL" || status=1
+fi
 if [ "$READER" = 1 ]; then
 	echo "--- reader phase"
 	CACHE_PROBE_WORK_DIR="$WORK/reader" bash "$REPO/test/e2e/cache-probe-reader.sh" "$MODEL" || status=1
@@ -189,10 +216,10 @@ if [ "$LATE_TOOL" = 1 ]; then
 	WIRE_AUTH_DUMP="$AUTH_DUMP" CACHE_PROBE_WORK_DIR="$WORK/late-tool" bash "$REPO/test/e2e/cache-probe-late-tool.sh" "$MODEL" ${LATE_FORM[@]+"${LATE_FORM[@]}"} || status=1
 fi
 if [ -n "$EXPECT_AUTH" ] && [ "$ONE_MODEL" = 1 ]; then
-	echo "--- credential and model check (session, auto-mode and late-tool phases)"
+	echo "--- credential and model check (session, auto-mode, fork and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" --model "${MODEL#*/}" || status=1
 elif [ -n "$EXPECT_AUTH" ]; then
-	echo "--- credential check (session, auto-mode and late-tool phases)"
+	echo "--- credential check (session, auto-mode, fork and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" || status=1
 fi
 exit $status

@@ -144,7 +144,7 @@ plan mode it is refused. Deleting always asks you first. Deferred.
 |---|---|
 | `task_create`, `task_get`, `task_list`, `task_update` | Maintain the structured task list shown in the pinned widget. Deferred, and off unless `ONECODE_ENABLE_TODO_TOOLS=1`. |
 | `monitor` | Watches a long-running command or a WebSocket and reports each output line as an event. Deferred. |
-| `task_output`, `task_stop` | Read the output of a background task or stop it. Deferred. |
+| `task_stop` | Stops a background task. Deferred. There's no tool to fetch a task's output: a notification brings each result, and the model reads a shell's or monitor's log file with `read`. |
 | `schedule_wakeup` | Schedules the next iteration of a self-paced `/loop`. The pending wake-up shows in `cron_list`. |
 | `cron_create`, `cron_list`, `cron_delete` | Schedule a prompt on a cron expression within the session, list the jobs, or cancel one. A fixed-interval `/loop` uses them. Deferred. |
 
@@ -179,7 +179,7 @@ deferred until needed. `list_mcp_resources`, `read_mcp_resource`, and
 ## Tool discovery
 
 `tool_search` loads deferred tools. The model passes exact names
-(`select:monitor,task_output`), a required term (`+notebook`), or free
+(`select:monitor,task_stop`), a required term (`+notebook`), or free
 keywords. If the model calls a tool it hasn't loaded yet, the call fails
 and the model is steered to `tool_search`.
 
@@ -229,7 +229,7 @@ matchers, and mapped to One Code's names. Case is ignored.
 | `Workflow` | `workflow` |
 | `TaskCreate`, `TaskGet`, `TaskList`, `TaskUpdate` | `task_create`, `task_get`, `task_list`, `task_update` |
 | `TodoWrite` | `task_create` |
-| `TaskOutput`, `TaskStop` | `task_output`, `task_stop` |
+| `TaskStop` | `task_stop` |
 | `Monitor` | `monitor` |
 | `ScheduleWakeup` | `schedule_wakeup` |
 | `CronCreate`, `CronList`, `CronDelete` | `cron_create`, `cron_list`, `cron_delete` |

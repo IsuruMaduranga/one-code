@@ -12,6 +12,8 @@ import { guideAgent } from "./guide-agent.ts";
 import { type ToolPassages, withoutOff } from "../../../extensions/sdk/profile.ts";
 
 const AGENT_PASSAGES: ToolPassages = {
+	// Claude Code 2.1.327 says it only while Yield is on (findings §94).
+	yield: [" To wait on background work, call yield."],
 	task_stop: ["- Stop a run with task_stop (deferred — load it with tool_search first).\n"],
 	// pi's --exclude-tools takes SendMessage out alone: the facts that hold without it stay.
 	SendMessage: [
@@ -66,7 +68,7 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			name: "Name for this run (default: <agent>-<n>)",
 		},
 		sendMessageDescription: withoutOff(
-			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message waits for its next tool round or the end of its current reply; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 			live,
 			SEND_MESSAGE_PASSAGES,
 		),
@@ -76,13 +78,13 @@ export const subagentsText = (live: LiveTools): SubagentsText => {
 			summary: "5-10 word preview shown in the UI",
 		},
 		listAgentsDescription: withoutOff(
-			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `resident` is idle but reachable live; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
+			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `idle` finished its turn and waits for a message; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
 			live,
 			LIST_AGENTS_PASSAGES,
 		),
 		toMain: {
 			description:
-				'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then.',
+				'Report progress, findings, or a question to the main conversation mid-run (to: "main"). Your plain text output is NOT visible to the main conversation until you finish, so use this to surface something before then. A reply reaches you as a message: while you are working, at your next tool call. If you cannot go on without the answer, ask, then end your turn saying what you are waiting for; the reply starts your next turn, with everything you have done so far.',
 			params: {
 				to: 'Recipient — only "main" is valid from inside a subagent',
 				message: "Plain text message for the main conversation",

@@ -240,7 +240,6 @@ export const background: NonNullable<ProfileText["background"]> = {
 		params: (p) => ({
 			command: mark("background.monitor.params.command", p),
 			description: mark("background.monitor.params.description", p),
-			persistent: mark("background.monitor.params.persistent", p),
 			timeoutMs: mark("background.monitor.params.timeoutMs", p),
 			ws: mark("background.monitor.params.ws", p),
 		}),
@@ -257,6 +256,7 @@ export const background: NonNullable<ProfileText["background"]> = {
 			taskId: "[background.tasks.stopParams.taskId]",
 		},
 	},
+	yield: { description: "[background.yield.description]" },
 	loop: {
 		skillBody: (p) => mark("background.loop.skillBody", p),
 		tick: (tick) => mark("background.loop.tick", tick),

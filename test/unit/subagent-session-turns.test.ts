@@ -106,6 +106,27 @@ describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
 		expect(t.turnOutcome()).toMatchObject({ failed: true, output: subagentResultText().failure({ kind: "aborted", why: "wallClock", output: "partial" }) });
 	});
 
+	it("reports a guard's stop with its reason ahead of the abort it caused, and clears it per turn", () => {
+		const reason = 'The model kept repeating "Lspnull" in a bash call\'s arguments for over 8,192 characters without finishing the call, so the turn was stopped.';
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.recordTurnFailure(reason);
+		t.recordTurnFailure("a later reason loses");
+		t.process(assistantEnd("", undefined, "aborted"));
+		t.process(settled);
+		expect(t.turnOutcome()).toMatchObject({
+			failed: true,
+			failureReason: reason.replace(/\.$/, ""),
+			output: subagentResultText().failure({ kind: "harnessStop", reason, output: "" }),
+		});
+		expect(t.turnOutcome().output).toBe(`The harness stopped the subagent's turn: ${reason}`);
+		t.beginTurn();
+		t.process(assistantEnd("fresh answer"));
+		t.process(settled);
+		expect(t.turnOutcome()).toEqual(expect.objectContaining({ output: "fresh answer" }));
+		expect(t.turnOutcome().failureReason).toBeUndefined();
+	});
+
 	it("an aborted turn with no text says so, and beginTurn clears the flag", () => {
 		const t = new SessionTurnTracker();
 		t.beginTurn();
@@ -116,5 +137,20 @@ describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
 		t.process(settled);
 		expect(t.turnOutcome()).toMatchObject({ output: "fresh answer" });
 		expect(t.turnOutcome().failed).toBeUndefined();
+	});
+});
+
+describe("turnFailureExtension", () => {
+	it("hands a guard's reason from the child's bus to the run's tracker", async () => {
+		const { turnFailureExtension } = await import("../../extensions/agents/subagents/runner.ts");
+		const { TURN_FAILED_CHANNEL } = await import("../../extensions/lib/notify/interrupt.ts");
+		const handlers = new Map<string, (data: unknown) => void>();
+		const pi = { events: { on: (channel: string, handler: (data: unknown) => void) => void handlers.set(channel, handler), emit: () => {} } };
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		turnFailureExtension(t)(pi as never);
+		handlers.get(TURN_FAILED_CHANNEL)!({ reason: "The model kept repeating text." });
+		handlers.get(TURN_FAILED_CHANNEL)!({});
+		expect(t.harnessStop).toBe("The model kept repeating text.");
 	});
 });

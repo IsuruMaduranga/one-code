@@ -22,15 +22,16 @@ import {
 	trailingPadding,
 } from "./tool-call-corruption.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
+import { repeatLimit, type RepeatTail, trailingRepeat } from "./repeat.ts";
 import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/request/openrouter-host.ts";
 import { activeOpenRouterRouting, routingFloorFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
-// Silence allowed inside a stream. Every raw chunk restarts the clock, but
-// OpenRouter's keepalive comments never reach us, so a model thinking
-// server-side before its first token looks silent: that wait is long. After
-// the first content it is Claude Code's 90 s watchdog, and 60 s while a tool
-// call's arguments stream (arguments never pause for thinking).
+// Silence allowed inside an OpenRouter stream. Every raw chunk restarts the
+// clock, but OpenRouter's keepalive comments never reach us, so a model
+// thinking server-side before its first token looks silent: that wait is long.
+// After the first content it is 90 s, and 60 s while a tool call's arguments
+// stream (arguments never pause for thinking).
 const FIRST_CONTENT_IDLE_MS = 300_000;
 const STREAM_IDLE_MS = 90_000;
 const TOOL_CALL_IDLE_MS = 60_000;
@@ -54,6 +55,10 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	// toolcall_end, and nothing else stops it (gpt-6.1-sol, battery round 7:
 	// 26 MB of tabs and newlines over 25 minutes in a one-shot run).
 	const padding = new Map<number, TrailingPadding>();
+	// Any provider: a call whose arguments end in one unit repeated without end
+	// (GPT-6.1 Terra: "Lspnull " for 43 KB over six minutes in a subagent;
+	// findings §94). Every chunk looks like progress, so no idle clock sees it.
+	const repeats = new Map<number, RepeatTail>();
 	const pending = new Map<AbortController, Promise<void>>();
 	let responseId: string | undefined;
 	// OpenRouter names the serving provider on every chunk; a cancelled
@@ -74,6 +79,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		rawCalls.clear();
 		flagged.clear();
 		padding.clear();
+		repeats.clear();
 		responseId = undefined;
 		streamProvider = undefined;
 		contentStarted = false;
@@ -156,18 +162,33 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		if (idleTimer) armIdle(ctx);
 	});
 
+	/** Stop a turn whose tool call ran away, once, saying why (the parent of a child reads the reason as the agent's failure). */
+	const stopRunaway = (ctx: ExtensionContext, reason: string) => {
+		stopped = true;
+		clearIdle();
+		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
+		ctx.abort();
+		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} Send the request again, or switch models if it repeats.`, "error");
+	};
+
 	pi.on("message_update", (event, ctx) => {
 		const update = event.assistantMessageEvent;
 		if (!alive() || stopped || update.type !== "toolcall_delta") return;
 		const state = trailingPadding(padding.get(update.contentIndex), update.delta);
 		padding.set(update.contentIndex, state);
-		if (!state.structural || state.run < RUNAWAY_PADDING_LIMIT) return;
-		stopped = true;
-		clearIdle();
-		const reason = `The model streamed over ${RUNAWAY_PADDING_LIMIT.toLocaleString("en-US")} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped.`;
-		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
-		ctx.abort();
-		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} Send the request again, or switch models if it repeats.`, "error");
+		if (state.structural && state.run >= RUNAWAY_PADDING_LIMIT) {
+			return stopRunaway(
+				ctx,
+				`The model streamed over ${RUNAWAY_PADDING_LIMIT.toLocaleString("en-US")} characters of blank space into a tool call's arguments without finishing it, so the turn was stopped.`,
+			);
+		}
+		const call = update.partial.content[update.contentIndex];
+		const tool = call?.type === "toolCall" ? call.name : undefined;
+		const limit = repeatLimit(tool);
+		const repeat = trailingRepeat(repeats.get(update.contentIndex), update.delta, limit);
+		repeats.set(update.contentIndex, repeat.state);
+		if (repeat.unit === undefined) return;
+		stopRunaway(ctx, toolCallCorruptionText.runawayRepeat({ tool: tool ?? "tool", unit: repeat.unit, chars: limit }));
 	});
 
 	pi.on("message_update", (event, ctx) => {

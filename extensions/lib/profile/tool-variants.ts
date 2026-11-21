@@ -6,7 +6,8 @@
  * with the permission mode. One Code keys the same split on the model's tier
  * (`working-docs/decisions/system-prompt.md`, "Four registers"): frontier and
  * workhorse get the short forms, cheap and tiny the long ones, on every
- * provider.
+ * provider. A description that names a model-gated tool also follows whether
+ * the model is offered it (lib/models/model-family.ts toolsWithheldFrom).
  *
  * pi copies a tool's description when the tool is registered, so a tool whose
  * text depends on the session is registered again when that text changes
@@ -17,9 +18,11 @@
  * changes ride reminders and the permission gate, never the cached tool list.
  */
 
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PromptTier } from "../models/model-tier.ts";
 import { sessionModelTier } from "../models/session-model-tier.ts";
+import { toolsWithheldFrom } from "../models/model-family.ts";
 
 /** Which of Claude Code's description forms a tool carries. */
 export type DescriptionForm = "short" | "long";
@@ -57,13 +60,17 @@ export function registerFormTool(pi: ExtensionAPI, tool: AnyToolDefinition, desc
 	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: describe(form) })));
 }
 
-/** Apply the frozen session tier's form (and the tier it came from) only at session and model boundaries. */
-export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm, tier: PromptTier) => void): void {
+/**
+ * Apply the frozen session tier's form (and the tier it came from, and the
+ * tools the model is not offered, `toolsWithheldFrom`) only at session and
+ * model boundaries.
+ */
+export function followDescriptionForm(pi: ExtensionAPI, apply: (form: DescriptionForm, tier: PromptTier, withheld: readonly string[]) => void): void {
 	const requestTier = sessionModelTier(pi);
-	const follow = () => {
+	const follow = (model: Model<Api> | undefined) => {
 		const tier = requestTier();
-		apply(descriptionForm(tier), tier);
+		apply(descriptionForm(tier), tier, toolsWithheldFrom(model));
 	};
-	pi.on("session_start", follow);
-	pi.on("model_select", follow);
+	pi.on("session_start", (_event, ctx) => follow(ctx.model));
+	pi.on("model_select", (event) => follow(event.model));
 }

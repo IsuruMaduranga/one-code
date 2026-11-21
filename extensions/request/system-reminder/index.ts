@@ -38,6 +38,8 @@ import { extensionVersion } from "../../lib/app/package-version.ts";
 import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact, withoutSilentMessages } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../../lib/request/system-role.ts";
+import { contextBreakpoint } from "../../lib/request/openai-cache-breakpoints.ts";
+import { authKind } from "../../lib/request/anthropic-auth.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "./turn-budget-layout.ts";
 
 /** Whether requests carry the `<total_tokens>` budget lines (the `context-budget` feature decides). */
@@ -210,7 +212,7 @@ function systemReminderExtension(pi: ExtensionAPI) {
 		const layout = systemRoleLayout(model);
 		const role = instructionRole(shape, model);
 		let payload = event.payload as Record<string, unknown>;
-		if (layout) payload = withSystemRoleContext(payload, layout, moved, role) ?? payload;
+		if (layout) payload = withSystemRoleContext(payload, layout, moved, role, () => contextBreakpoint(model, payload, () => authKind(model.provider, model.baseUrl))) ?? payload;
 		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
 		// gets its clear_at nudge after each tool result.
 		const systemRoleWire = acceptsAnthropicWire(model, "system-role");

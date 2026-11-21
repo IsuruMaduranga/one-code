@@ -11,6 +11,7 @@
  */
 import { type CronText, cronWords } from "../../lib/agents/cron-text.ts";
 import { memoOn } from "../../lib/core/text-spans.ts";
+import { countNoun } from "../../lib/ui/tui-render.ts";
 import { type ToolPassages, withoutOff } from "../../lib/profile/live-tools.ts";
 import { activeProfile } from "../../lib/profile/profile.ts";
 
@@ -35,12 +36,12 @@ export type MonitorEnd =
 	| { kind: "failed" }
 	/** The tool call was aborted. */
 	| { kind: "aborted" }
-	/** Stopped at its deadline; `persistentAsked` when the call asked for no deadline, which a one-shot run cannot honour. */
-	| { kind: "deadline"; ms: number; persistentAsked: boolean };
+	/** Stopped at its deadline. */
+	| { kind: "deadline"; ms: number };
 
 export interface MonitorText {
 	description: string;
-	params(p: { defaultTimeoutMs: number; maxTimeoutMs: number }): { command: string; description: string; persistent: string; timeoutMs: string; ws: string };
+	params(p: { defaultTimeoutMs: number; maxTimeoutMs: number }): { command: string; description: string; timeoutMs: string; ws: string };
 }
 
 /** A background task as task_output's header and /background show it. */
@@ -95,13 +96,68 @@ export interface LoopText {
 	foldNote(p: { streak: number }): string;
 }
 
+/** The yield tool's description (Claude Code 2.1.327's flagged `Yield`, findings §94). */
+export interface YieldText {
+	description: string;
+}
+
 export interface BackgroundText {
 	cron: CronText;
 	wakeup: WakeupText;
 	monitor: MonitorText;
 	tasks: TaskToolsText;
 	loop: LoopText;
+	yield: YieldText;
 }
+
+/** Why a yield ended, in Claude Code 2.1.327's order of precedence. */
+export type YieldEnd =
+	| { kind: "delivered" }
+	| { kind: "message" }
+	| { kind: "scheduled" }
+	| { kind: "nothingRunning" }
+	| { kind: "interrupted" }
+	| { kind: "duplicate" }
+	| { kind: "cap"; running: number };
+
+/** The yield tool's results, which the base words (Claude Code 2.1.327's, with One Code's tool name). */
+export interface YieldResultText {
+	/** The tool result itself; the reason follows on its own line. */
+	ended: string;
+	/** "Resumed after 59 seconds: something arrived; it follows this line." */
+	resumed(p: { waitedMs: number; end: YieldEnd }): string;
+}
+
+function waited(ms: number): string {
+	if (ms < 1000) return "Resumed at once";
+	const seconds = Math.round(ms / 1000);
+	if (seconds < 120) return `Resumed after ${countNoun(seconds, "second")}`;
+	return `Resumed after ${Math.round(seconds / 60)} minutes`;
+}
+
+function yieldReason(end: YieldEnd): string {
+	switch (end.kind) {
+		case "delivered":
+			return "something arrived; it follows this line.";
+		case "message":
+			return "a message arrived. If it follows this line, deal with it as you judge right, then end your turn rather than waiting again: a reply before another wait may not be shown to the person. If it doesn't follow, end your turn and it reaches you then.";
+		case "scheduled":
+			return "a scheduled prompt is due. It starts a new turn once you end this one.";
+		case "nothingRunning":
+			return "none of your background work is running. If you have nothing left to do, end your turn.";
+		case "interrupted":
+			return "the wait was interrupted.";
+		case "duplicate":
+			return "an earlier call to this tool in this reply already waited.";
+		case "cap":
+			return `nothing has reported yet; ${countNoun(end.running, "background task")} still running. Call yield again to keep waiting.`;
+	}
+}
+
+const yieldResultText: YieldResultText = {
+	ended: "The wait has ended. The line after this result says why.",
+	resumed: ({ waitedMs, end }) => `${waited(waitedMs)}: ${yieldReason(end)}`,
+};
 
 /** The group's results, refusals and notes, which the base words (`wakeupResultText`). */
 export interface WakeupResultText {
@@ -150,9 +206,19 @@ export interface MonitorResultText {
 	spoolLost(p: { keptChars: number }): string;
 	/** Heads an in-memory output cut to its last `cap` characters. */
 	earlierTruncated: string;
-	/** Closes a notification batch that left lines out. */
-	moreLines(p: { hidden: number; taskId: string }): string;
+	/** Closes a notification batch that left lines out; `logPath` is the monitor's output file, once it has one. */
+	moreLines(p: { hidden: number; taskId: string; logPath?: string }): string;
+	/**
+	 * The line a background monitor's last batch carries when its deadline
+	 * stops it (Claude Code 2.1.327's expiry notice, findings §94): how long it
+	 * ran, how many events it delivered, and the output file when the command
+	 * wrote stderr and no event arrived.
+	 */
+	expired(p: { duration: string; events: number; stderrPath?: string }): string;
 }
+
+/** The task_output clause of the monitor's results, left out while the tool is off. */
+const MONITOR_PASSAGES: ToolPassages = { task_output: [", inspect with task_output"] };
 
 function startFailed(failure: MonitorStartFailure): string {
 	switch (failure.kind) {
@@ -173,9 +239,7 @@ function how(end: MonitorEnd): string {
 		case "aborted":
 			return "stopped (tool call aborted)";
 		case "deadline":
-			return end.persistentAsked
-				? `stopped at its default deadline of ${end.ms} ms (persistent is not available in a one-shot session)`
-				: `stopped at its ${end.ms} ms deadline`;
+			return `stopped at its ${end.ms} ms deadline`;
 	}
 }
 
@@ -183,19 +247,29 @@ function how(end: MonitorEnd): string {
 const monitorResultText: MonitorResultText = {
 	startFailed,
 	started: ({ id, description }) =>
-		`Monitor ${id} started (${description}). Events arrive as task notifications; stop with task_stop, inspect with task_output.`,
+		withoutOff(`Monitor ${id} started (${description}). Events arrive as task notifications; stop with task_stop, inspect with task_output.`, activeProfile().live, MONITOR_PASSAGES),
 	ranToEnd: ({ id, description, end, events, note, output }) => `Monitor ${id} (${description}) ${how(end)} after ${events} event(s). ${note}\n\n${output}`,
 	noEvents: "(no events)",
 	noOutput: "(no output — the monitor received no events and nothing on stderr)",
 	spoolLost: ({ keptChars }) =>
 		`[The monitor's spool file could not be written, so only the last ${keptChars.toLocaleString("en-US")} characters of its output were kept.]\n`,
 	earlierTruncated: "… (earlier output truncated)\n",
-	moreLines: ({ hidden, taskId }) => `\n… +${hidden} more line(s) not shown — task_output ${taskId} has the full stream`,
+	moreLines: ({ hidden, taskId, logPath }) =>
+		activeProfile().live.has("task_output")
+			? `\n… +${hidden} more line(s) not shown — task_output ${taskId} has the full stream`
+			: `\n… +${hidden} more line(s) not shown${logPath ? ` — the full stream is in ${logPath}` : ""}`,
+	expired: ({ duration, events, stderrPath }) => {
+		const stderr = events === 0 && stderrPath ? `Its command wrote to stderr, which isn't delivered as events and may mean it failed: see \`${stderrPath}\`. ` : "";
+		return events === 0
+			? `[Monitor expired after ${duration} with no events delivered. ${stderr}Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]`
+			: `[Monitor expired after ${duration} with ${countNoun(events, "event")} delivered. Re-arm it if you still need the watch.]`;
+	},
 };
 
 /** The group's results, refusals and notes, which the base words (`taskToolsResultText`). */
 export interface TaskToolsResultText {
-	unknownTask(p: { id: string; known: string[] }): string;
+	/** An id no task has; `known` lists every background task, so a lost id (a monitor's, after a compaction) can be found. */
+	unknownTask(p: { id: string; known: Array<{ id: string; description: string }> }): string;
 	taskLine(task: ShownTask): string;
 	noOutputYet: string;
 	/** task_output on a background agent still running: its report comes by notification only. */
@@ -213,7 +287,7 @@ const RESIDENT_ENDED_PASSAGES: ToolPassages = { SendMessage: [["; it can no long
 
 /** The base's words of the group. */
 const taskToolsResultText: TaskToolsResultText = {
-	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.join(", ") || "(none)"}`,
+	unknownTask: ({ id, known }) => `No background task "${id}". Known tasks: ${known.map((task) => `${task.id} (${task.description})`).join(", ") || "(none)"}`,
 	taskLine: (task: ShownTask) =>
 		`${task.id} [${task.kind}] ${task.status} · ${task.description} · started ${task.finished ? `${task.seconds}s` : `${task.seconds}s ago`}`,
 	noOutputYet: "(no output yet)",
@@ -232,6 +306,7 @@ const merge = (profile: BackgroundText) => ({
 	monitor: { ...profile.monitor, ...monitorResultText },
 	tasks: { ...profile.tasks, ...taskToolsResultText },
 	loop: profile.loop,
+	yield: { ...profile.yield, ...yieldResultText },
 });
 
 /**

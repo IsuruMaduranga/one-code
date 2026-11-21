@@ -9,7 +9,7 @@
 import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../../lib/ui/tui-render.ts";
 import { formatTokenCount } from "../../lib/agents/usage.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
-import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
+import { type LiveRun, type LiveStatus, longReplyNote, streamingText, type TranscriptBlock } from "./live-runs.ts";
 import { FORK_AGENT } from "./runs.ts";
 
 export interface Paint {
@@ -58,7 +58,7 @@ export function rowLabel(run: Pick<LiveRun, "agentType" | "name">): string {
  * would drop out from under an open viewer and orphan the overlay. A nested
  * run whose parent already left the strip surfaces at root level.
  */
-export function buildRows(runs: LiveRun[], mainBusy: boolean, pinnedId?: string): PanelRow[] {
+export function buildRows(runs: LiveRun[], mainBusy: boolean, pinnedId?: string, now: number = Date.now()): PanelRow[] {
 	const rows: PanelRow[] = [
 		{
 			label: "main",
@@ -86,7 +86,8 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, pinnedId?: string)
 		rows.push({
 			run,
 			label: rowLabel(run),
-			activity: run.label,
+			// A reply streaming for a long time shows its age and size, so a model stuck in a loop is visible.
+			activity: [run.label, longReplyNote(run, now)].filter(Boolean).join(" · "),
 			status: run.status,
 			startedAt: run.startedAt,
 			finishedAt: run.finishedAt,
@@ -319,6 +320,7 @@ function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose
  */
 const TOOL_LABELS: Record<string, string> = {
 	edit: "Update",
+	yield: "Wait for background work",
 	ls: "LS",
 	powershell: "PowerShell",
 	ask_user_question: "Ask User",

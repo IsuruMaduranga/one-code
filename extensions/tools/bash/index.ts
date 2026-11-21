@@ -31,7 +31,7 @@ import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import type { ShellParams } from "../../lib/shell-run/shell-text.ts";
-import { sessionView } from "../../lib/agents/child-extensions.ts";
+import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
 import { shellResultText } from "../../lib/shell-run/shell-text.ts";
 import { bashGuardBlock } from "../../lib/shell/bash-guards.ts";
 import { turnAfterBashAllowed, USER_BASH_CHANNEL, type UserBashTurnRequest, withTurnAfterRun } from "../../lib/shell-run/user-bash-turn.ts";
@@ -88,7 +88,8 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 	// A child's words name only the tools every child has (lib/agents/child-extensions.ts).
 	const view = sessionView(pi);
 	const text = view.text("shell");
-	const describe = () => text.bashDescription({ form, autoMode, searchTools });
+	let withheld: readonly string[] = [];
+	const describe = () => textForModel("shell", withheld, view).bashDescription({ form, autoMode, searchTools });
 	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
@@ -100,8 +101,9 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		words: () => shellResultText(view.live),
 		backgroundShell: () => bash.spawn,
 	});
-	followDescriptionForm(pi, (next, tier) => {
+	followDescriptionForm(pi, (next, tier, withheldTools) => {
 		form = next;
+		withheld = withheldTools;
 		searchTools = searchToolsEnabled(tier, (tool) => view.live.has(tool));
 		setDescription(describe());
 	});

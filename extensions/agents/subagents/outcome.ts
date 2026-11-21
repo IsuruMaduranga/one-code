@@ -39,6 +39,8 @@ export interface ChildOutcome {
 	toolCalls: number;
 	usage: UsageTotals;
 	failed?: boolean;
+	/** Why a failed turn failed, in a sentence, when a guard in the child said (the parent's notification summary carries it). */
+	failureReason?: string;
 	/**
 	 * What the child actually did: each call's name and whole input. Auto mode
 	 * reviews this when the child returns, to catch a sequence whose individual

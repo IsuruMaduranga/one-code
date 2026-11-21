@@ -18,7 +18,7 @@ export const SPAWNERS = [
 	{ id: "bg-daemon", what: "worker a finished background bash leaves" },
 	{ id: "bg-noterm", what: "worker a finished background bash leaves, ignoring SIGTERM" },
 	{ id: "bg-running", what: "background bash still running" },
-	{ id: "monitor", what: "persistent monitor still running" },
+	{ id: "monitor", what: "monitor still running (30-minute deadline)" },
 	{ id: "sub-daemon", what: "worker a subagent's background bash leaves" },
 ];
 

@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 import backgroundExtension from "../../extensions/tools/background/index.ts";
 import bashExtension from "../../extensions/tools/bash/index.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
+
+// task_output is switched off in the shipped profile (Claude Code 2.1.327 has none); these tests drive it.
+useShippedProfileWithAllTools();
 
 const isAlive = (pid: number) => {
 	try { process.kill(pid, 0); return true; } catch { return false; }

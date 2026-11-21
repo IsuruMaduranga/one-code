@@ -1,12 +1,15 @@
 /**
  * One Code's /loop text (the profile's `text.background.loop`): Claude Code's
  * `/loop` bundled skill (2.1.288) and its sentinel ticks (2.1.282), verbatim
- * with our tool names, kept in Claude Code's own shape. Dropped branches: the
- * cloud-schedule offer, the "tell the user" addenda and the
- * confirm-before-arming order (Claude Code gates them on claude.ai features
- * and a per-model flag One Code has no counterpart for), and `TaskList`,
- * which becomes task_output (our task_list is the to-do list and shows no
- * monitor; decisions/tools.md, "Session cron"). The base sorts the
+ * with our tool names, kept in Claude Code's own shape, with 2.1.327's monitor
+ * branch: a monitor is armed with a deadline and re-armed when it expires
+ * (findings §94). Dropped branches: the cloud-schedule offer, the "tell the
+ * user" addenda and the confirm-before-arming order (Claude Code gates them on
+ * claude.ai features and a per-model flag One Code has no counterpart for).
+ * 2.1.327 finds a monitor with `TaskList`, which lists only to-do items there
+ * and here; One Code has no output tool, so the lookup clause is dropped and
+ * a lost task id comes from task_stop, whose unknown-id result lists the
+ * background tasks (decisions/tools.md, "Session cron"). The base sorts the
  * arguments into a form and decides which tick goes out
  * (extensions/tools/background/loop-skill.ts, loop-fire.ts).
  */
@@ -19,13 +22,13 @@ const ky = "cron_create";
 const vA = "cron_delete";
 const il = "monitor";
 const Um = "task_stop";
-const jb = "task_output";
 const PVe = AUTONOMOUS_LOOP;
 const gve = AUTONOMOUS_LOOP_DYNAMIC;
-/** Claude Code's monitor-TTL branch is off here: our monitor has `persistent`. */
-const b8 = (): boolean => false;
-const gDe = (): number => 0;
-const Ktn = (ms: number): string => `${ms}ms`;
+/** Claude Code 2.1.327's monitor deadline: the longest a monitor runs before it must be re-armed. */
+const gDe = (): number => 1_800_000;
+const Ktn = (ms: number): string => `${Math.round(ms / 60000)} minutes`;
+/** Where a lost monitor id comes from (Claude Code's TaskList clause). */
+const LOST_ID = `if its task ID is no longer in context, ${Um} with an unknown ID lists the background tasks`;
 /** The self-paced forms confirm after arming the wakeup, as visible text, and say how a stopped loop ended. */
 const VISIBLE_UPDATE = "This must be ordinary visible response text \u2014 the user cannot see your thinking/reasoning, so an update written only there is invisible to them. Make it the last thing in the turn, then end the turn.";
 const STOP_OUTCOME = "Then write the loop's outcome for the user as ordinary visible response text \u2014 a stopped loop has no next tick to surface it.";
@@ -37,8 +40,8 @@ function fileText(file: LoopFile): string {
 
 const I="| Interval pattern      | Cron expression     | Notes                                    |\n|-----------------------|---------------------|------------------------------------------|\n| `Nm` where N \u2264 59   | `*/N * * * *`     | every N minutes                          |\n| `Nm` where N \u2265 60   | `0 */H * * *`     | round to hours (H = N/60, must divide 24)|\n| `Nh` where N \u2264 23   | `0 */N * * *`     | every N hours                            |\n| `Nd`                | `0 0 */N * *`     | every N days at midnight local           |\n| `Ns`                | treat as `ceil(N/60)m` | cron minimum granularity is 1 minute  |\n\n**If the interval doesn't cleanly divide its unit** (e.g. `7m` \u2192 `*/7 * * * *` gives uneven gaps at :56\u2192:00; `90m` \u2192 1.5h which cron can't express), pick the nearest clean interval and tell the user what you rounded to before scheduling.";
 
-function armMonitor(): string {return b8()?`arm one now with \`timeout_ms: ${gDe()}\``:"arm one now with `persistent: true`"}
-function rearmReminder(e: "iterations" | "ticks"): string {if(b8())return`A monitor expires after at most ${Ktn(gDe())} and tells you; on later ${e} call ${jb} first and re-arm only if no monitor for it is still running.`;return e==="iterations"?`Arm once; on later iterations call ${jb} first and skip this step if a monitor is already running.`:`Arm once; on later ticks call ${jb} first and skip if a monitor is already running.`}
+function armMonitor(): string {return`arm one now with \`timeout_ms: ${gDe()}\``}
+function rearmReminder(e: "iterations" | "ticks"): string {return`A monitor expires after at most ${Ktn(gDe())} and tells you; on later ${e} re-arm only if no monitor for it is still running.`}
 function explicitPrompt(e: string, Ofe: number): string {let o=`The user wants you to self-pace. Decide what makes the next iteration worth running \u2014 a passage of time, or an observable event.
 
 1. **Run the parsed prompt now.** If it's a slash command, invoke it via the skill tool; otherwise act on it directly.
@@ -51,7 +54,7 @@ function explicitPrompt(e: string, Ofe: number): string {let o=`The user wants y
    If it doesn't need another iteration, stop instead (step 6) \u2014 re-arming is a per-turn choice, not a default.
 4. **After the wakeup is armed, briefly confirm**: that you're self-pacing, whether a ${il} is the primary wake signal, that you ran the task now, and what fallback delay you picked. ${VISIBLE_UPDATE}
 5. **If you were woken by a \`<task-notification>\`** rather than this prompt: handle the event in the context of the loop task, then make the same decision. If the loop should continue, call ${yl} again with the same \`prompt\` and the same 1200\u20131800s \`delaySeconds\` from the schedule step above (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat), then write the same brief update as visible text. If the event means the work is finished, stop (step 6).
-6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`# /loop \u2014 schedule a recurring or self-paced prompt
+6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (${LOST_ID}). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`# /loop \u2014 schedule a recurring or self-paced prompt
 
 Parse the input below into \`[interval] <prompt\u2026>\` and schedule it.
 
@@ -103,7 +106,7 @@ The user invoked \`/loop\` with no prompt and no interval. Run the autonomous ch
    If it isn't, stop instead (step 6) \u2014 re-arming is a per-turn choice, not a default.
 4. **After the wakeup is armed, briefly confirm**: ${b}, whether a ${il} is the primary wake signal, and what fallback delay you picked. ${VISIBLE_UPDATE}
 5. **If woken by a \`<task-notification>\`** rather than this prompt: handle the event, then make the same decision. If the loop should continue, call ${yl} again with \`${c}\` and the same 1200\u20131800s \`delaySeconds\` (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat), then write the same brief update as visible text. If the event means the work is finished, stop (step 6).
-6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`${O}
+6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (${LOST_ID}). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`${O}
 
 ## Action
 
@@ -136,7 +139,7 @@ function cronTick(): string {return`# Autonomous loop tick
 Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick. The recurring cron will fire the next tick automatically \u2014 do not call ${yl} from this tick.`}
 const DYNAMIC_MONITOR_NOTE=`
 
-If a ${il} is armed (check ${jb}), keep \`delaySeconds\` at 1200\u20131800s \u2014 the ${il} is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. To stop the loop, call ${yl} with \`stop: true\` and ${Um} the monitor (use ${jb} to find its task ID if no longer in context).`;
+If a ${il} is armed, keep \`delaySeconds\` at 1200\u20131800s \u2014 the ${il} is the wake signal and this is only the fallback heartbeat. If you were woken by a \`<task-notification>\`, handle the event before deciding whether to re-arm. To stop the loop, call ${yl} with \`stop: true\` and ${Um} the monitor (${LOST_ID}).`;
 function dynamicTick(): string {return`# Autonomous loop tick (dynamic pacing)
 
 Run the autonomous check using the loop instructions established earlier in this conversation. If you cannot find them, treat this as a no-op tick.

@@ -13,7 +13,7 @@
  *            (bg-noterm); a background bash still running at the end
  *            (bg-running); a subagent whose own background bash leaves a
  *            worker (sub-daemon)
- *   round 2  a persistent monitor (monitor)
+ *   round 2  a monitor with the longest deadline, 30 minutes (monitor)
  *
  * PROBE_PRINT (a one-shot run) drops the monitor, and the still-running
  * background bash unless PROBE_BLOCK asks for it (a one-shot run blocks on it:
@@ -53,7 +53,7 @@ function roundsFor(text: string): ToolCall[][] {
 	if (print) return [first];
 	return [
 		[call("load", "tool_search", { query: "select:monitor" }), ...first],
-		[call("monitor", "monitor", { command: procCommand("sleep", "monitor"), description: "probe monitor", persistent: true })],
+		[call("monitor", "monitor", { command: procCommand("sleep", "monitor"), description: "probe monitor", timeout_ms: 1_800_000 })],
 	];
 }
 

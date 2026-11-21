@@ -3,11 +3,12 @@
  * the session-fact blocks leave the first user message for one system message
  * right after it; the instructions and context blocks stay.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/request/reminders.ts";
 import { reseatMessageMark } from "../../extensions/lib/request/anthropic-payload.ts";
 import { instructionRole, withSystemRoleContext } from "../../extensions/lib/request/system-role.ts";
+import { contextBreakpoint, takesExplicitCacheBreakpoints } from "../../extensions/lib/request/openai-cache-breakpoints.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const ENV = { framed: wrapReminder("# Environment\nx"), inner: "# Environment\nx" };
@@ -84,6 +85,32 @@ describe("withSystemRoleContext", () => {
 		expect((withSystemRoleContext(completions, "completions", [ENV], "system") as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
 	});
 
+	// OpenAI's implicit cache never ends at a developer message after the first
+	// user message, so the epoch's first request cached only up to the user
+	// message (findings §95); Claude Code marks the same message on Anthropic.
+	it("puts OpenAI's explicit cache breakpoint on the context message's one part when asked, and only on Responses", () => {
+		const responses = { input: [{ role: "developer", content: "prompt" }, { role: "user", content: [{ type: "input_text", text: ENV.framed }, { type: "input_text", text: "hi" }] }] };
+		const out = withSystemRoleContext(responses, "responses", [ENV], "developer", () => true) as { input: unknown[] };
+		expect(out.input[2]).toEqual({ role: "developer", content: [{ type: "input_text", text: ENV.inner, prompt_cache_breakpoint: { mode: "explicit" } }] });
+		const completions = { messages: [{ role: "system", content: "prompt" }, { role: "user", content: [{ type: "text", text: ENV.framed }, { type: "text", text: "hi" }] }] };
+		expect((withSystemRoleContext(completions, "completions", [ENV], "system", () => true) as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
+	});
+
+	it("marks the context message only for an OpenAI Responses model that takes breakpoints, with caching on and no ChatGPT sign-in", () => {
+		const sol = { api: "openai-responses", compat: { supportsExplicitPromptCacheMode: true } };
+		expect(takesExplicitCacheBreakpoints(sol)).toBe(true);
+		expect(takesExplicitCacheBreakpoints({ api: "openai-responses", compat: {} })).toBe(false);
+		expect(takesExplicitCacheBreakpoints({ ...sol, api: "openai-codex-responses" })).toBe(false);
+		expect(takesExplicitCacheBreakpoints({ ...sol, api: "azure-openai-responses" })).toBe(false);
+		expect(contextBreakpoint(sol, {}, () => "key")).toBe(true);
+		expect(contextBreakpoint(sol, { prompt_cache_options: { ttl: "30m" } }, () => "key")).toBe(true);
+		expect(contextBreakpoint(sol, { prompt_cache_options: { mode: "explicit" } }, () => "key")).toBe(false);
+		expect(contextBreakpoint(sol, {}, () => "chatgpt")).toBe(false);
+		const auth = vi.fn(() => "key" as const);
+		expect(contextBreakpoint({ api: "anthropic-messages" }, {}, auth)).toBe(false);
+		expect(auth).not.toHaveBeenCalled();
+	});
+
 	it("picks the role pi gives a system message on each API", () => {
 		expect(instructionRole("anthropic", { reasoning: true })).toBe("system");
 		expect(instructionRole("responses", { reasoning: true })).toBe("developer");
@@ -97,7 +124,7 @@ describe("system-reminder's layout hook", () => {
 	const flagged = { id: "claude-opus-5-5", api: "anthropic-messages", provider: "anthropic", compat: { supportsMidConvoSystemMessages: true } };
 	const haiku = { id: "claude-haiku-4-5", api: "anthropic-messages", provider: "anthropic", compat: {} };
 
-	async function run(model: Record<string, unknown>) {
+	async function run(model: Record<string, unknown>, wire: "anthropic" | "responses" = "anthropic") {
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		const emit = (text: string, order: number, extra: Record<string, unknown> = {}) =>
@@ -109,10 +136,11 @@ describe("system-reminder's layout hook", () => {
 		const ctx = createFakeCtx({ model });
 		const messages = [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 }];
 		const shaped = await fake.fireOne<{ messages: Array<{ content: Array<{ text: string }> }> }>("context", { messages }, ctx);
-		const wireUser = { role: "user", content: shaped!.messages[0].content.map((block) => ({ type: "text", text: block.text })) };
-		const payload = await fake.fireOne<{ messages: Array<{ role: string; content: Array<{ text: string }> }>; betas?: string[] }>(
+		const partType = wire === "responses" ? "input_text" : "text";
+		const wireUser = { role: "user", content: shaped!.messages[0].content.map((block) => ({ type: partType, text: block.text })) };
+		const payload = await fake.fireOne<{ messages: Array<{ role: string; content: Array<{ text: string }> }>; input: Array<{ role: string; content: unknown }>; betas?: string[] }>(
 			"before_provider_request",
-			{ payload: { model: model.id, messages: [wireUser] } },
+			{ payload: wire === "responses" ? { model: model.id, input: [{ role: "developer", content: "prompt" }, wireUser] } : { model: model.id, messages: [wireUser] } },
 			ctx,
 		);
 		return { shaped: shaped!.messages[0].content.map((block) => block.text), payload };
@@ -124,6 +152,17 @@ describe("system-reminder's layout hook", () => {
 		expect(payload!.messages[0].content.map((b) => b.text)).toEqual([wrapReminder("Codebase and user instructions are shown below."), "hello"]);
 		expect(payload!.messages[1].content[0].text).toBe("# Environment\nx\n\nWhile auto mode is active:\n\nnote\n\nToday's date is 2026-10-04.");
 		expect(payload!.betas).toEqual(["mid-conversation-system-2026-04-07"]);
+	});
+
+	it("puts OpenAI's explicit cache breakpoint on the developer context message of a model that takes one", async () => {
+		const sol = { id: "gpt-6.1-sol", api: "openai-responses", provider: "openai", reasoning: true, compat: { supportsMidConvoSystemMessages: true, supportsExplicitPromptCacheMode: true } };
+		const { payload } = await run(sol, "responses");
+		expect(payload!.input.map((m) => m.role)).toEqual(["developer", "user", "developer"]);
+		expect(payload!.input[2].content).toEqual([
+			{ type: "input_text", text: "# Environment\nx\n\nWhile auto mode is active:\n\nnote\n\nToday's date is 2026-10-04.", prompt_cache_breakpoint: { mode: "explicit" } },
+		]);
+		const { payload: plain } = await run({ ...sol, compat: { supportsMidConvoSystemMessages: true } }, "responses");
+		expect(plain!.input[2].content).toBe("# Environment\nx\n\nWhile auto mode is active:\n\nnote\n\nToday's date is 2026-10-04.");
 	});
 
 	it("keeps Claude Code's first-message order elsewhere, without the system-only note", async () => {

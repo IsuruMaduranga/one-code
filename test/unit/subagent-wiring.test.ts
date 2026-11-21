@@ -26,8 +26,9 @@ import { subagentModelWordsInForce } from "../../extensions/lib/models/subagent-
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
-import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
+import { launchToolFilter, PRODUCT_DIR, PROFILE_DIR, resolveProfile, setActiveProfileForTest, toolLive } from "../../extensions/lib/profile/profile.ts";
 import { profile as shipped } from "./helpers/default-profile.ts";
+import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 const model = (id: string, input: string[], cost: number) => ({
 	provider: "openai", id, name: id, input, cost: { input: cost, output: cost * 4 },
@@ -144,8 +145,22 @@ describe("subagent RPC commands", () => {
 		expect(views).toEqual([]);
 		await h.fake.commands.get("tasks")!.handler("", h.ctx);
 		expect(h.notices()).toContain("Check the code");
-		expect(h.notices()).toContain("task_output");
+		// The notice names task_output only while the profile has it live (One Code's has it off).
+		expect(h.notices()).toContain("task_stop");
+		if (toolLive("task_output")) expect(h.notices()).toContain("task_output");
+		else expect(h.notices()).not.toContain("task_output");
 		expect((h.ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
+	});
+
+	it("lists the agent catalog one agent per line when nothing runs", async () => {
+		const h = await mount([], session, "rpc");
+		h.ctx.hasUI = true;
+		await h.fake.commands.get("agents")!.handler("", h.ctx);
+		const notice = h.notices();
+		expect(notice).toMatch(/^Available agents:\n- /m);
+		// Every catalog row starts its own line: a list put into the text as is would run them together with commas.
+		expect(notice).toContain(`\n${subagentResultText().forkRow}`);
+		expect(notice).not.toMatch(/,- /);
 	});
 
 	it("keeps the existing /subagent status fallback in RPC", async () => {
@@ -506,6 +521,8 @@ describe("a turn that ends with an agent pending", () => {
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2 and M3: a resumed turn (SendMessage
 // to a finished agent).
 describe("subagent resumed turns", () => {
+	// task_output is switched off in the shipped profile; these tests drive it.
+	useShippedProfileWithAllTools();
 	const resumable = (): AgentRunRecord => {
 		const sessionFile = join(dir, "child.jsonl");
 		writeFileSync(sessionFile, "");
@@ -612,18 +629,6 @@ describe("fork runs in a one-shot session", () => {
 		expect(retried.details!.agentRuns![0].name).toBe("truncate-check");
 	});
 
-	// A fork's first request extends the parent's recorded one, tools block
-	// included; the ledger keeps a recorded declaration only while the live
-	// schema matches (lib/request/ledger/wire.ts mergeDeclarations), so a fork's spawn
-	// tool with its own schema replaced the parent's Agent mid-array and the fork
-	// missed the parent's cache from there on.
-	it("gives a fork a spawn tool with the parent's Agent schema", async () => {
-		const { h, run } = await mountFork();
-		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const nested = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools?.find((tool) => tool.name === "Agent");
-		expect(JSON.stringify(nested!.parameters)).toBe(JSON.stringify(h.fake.tools.get("Agent")!.parameters));
-	});
-
 	// The fork's wire carries the parent's Agent declaration, which offers these
 	// options; a nested run cannot honor them, so the result names the fix.
 	it("refuses the parent's options a nested run cannot honor, naming the fix, and runs the call without them", async () => {
@@ -646,19 +651,15 @@ describe("fork runs in a one-shot session", () => {
 		expect(run).toHaveBeenCalledTimes(2);
 	});
 
-	// The same rule for every tool a fork is handed: one whose schema differs
-	// from the parent's tool of that name replaces the parent's recorded
-	// declaration, and the fork misses the parent's cache from there on.
-	it("gives a fork only tools whose schemas match the parent's tools of the same name", async () => {
+	// A fork declares the parent's schema for every tool it is handed
+	// (fork-cache.ts withParentParameters, applied by the runner:
+	// fork-runner-tools.test.ts), so each spawn tool must be one the parent has.
+	it("hands a fork only spawn tools the parent also has", async () => {
 		const { h, run } = await mountFork();
 		await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" });
-		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string; parameters: unknown }> }).extraTools ?? [];
+		const extraTools = (run.mock.calls[0][0] as { extraTools?: Array<{ name: string }> }).extraTools ?? [];
 		expect(extraTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["Agent", "cron_create", "cron_list", "cron_delete"]));
-		for (const tool of extraTools) {
-			const parent = h.fake.tools.get(tool.name);
-			expect(parent, `the parent has no ${tool.name} tool`).toBeDefined();
-			expect(JSON.stringify(tool.parameters), tool.name).toBe(JSON.stringify(parent!.parameters));
-		}
+		for (const tool of extraTools) expect(h.fake.tools.get(tool.name), `the parent has no ${tool.name} tool`).toBeDefined();
 	});
 
 	// pi's tool flags restrict a fresh agent as they restrict the parent, and a
@@ -875,6 +876,8 @@ describe("hand-back shape by permission mode", () => {
 // reach the model with the report, and a later turn's update is not the
 // report task_output returns.
 describe("task_output beside a background agent's hand-back", () => {
+	// task_output is switched off in the shipped profile; these tests drive it.
+	useShippedProfileWithAllTools();
 	const textOf = (content: unknown) =>
 		typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("");
 	const sent = (h: Awaited<ReturnType<typeof mount>>) => h.fake.sentMessages.map((m) => textOf(m.message.content)).join("\n");

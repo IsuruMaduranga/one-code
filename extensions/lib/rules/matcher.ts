@@ -69,6 +69,7 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	taskupdate: "task_update",
 	taskoutput: "task_output",
 	taskstop: "task_stop",
+	yield: "yield",
 	monitor: "monitor",
 	schedulewakeup: "schedule_wakeup",
 	croncreate: "cron_create",
@@ -869,6 +870,8 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// Inspecting/stopping background work this session already started.
 	"task_output",
 	"task_stop",
+	// Waits for background work this session started; no side effects.
+	"yield",
 	// The session's cron store: timers that replay a prompt, and listing and
 	// cancelling them. (schedule_wakeup and cron_create are here for every mode
 	// but auto, where CLASSIFY_IN_AUTO_TOOLS sends them to the classifier.)

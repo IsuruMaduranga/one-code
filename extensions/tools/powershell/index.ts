@@ -28,7 +28,8 @@ import { Type } from "typebox";
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, createPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
 import { registerShellTool } from "../../lib/shell-run/shell-tool.ts";
-import { sessionView } from "../../lib/agents/child-extensions.ts";
+import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
+import { followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { shellResultText, type ShellText } from "../../lib/shell-run/shell-text.ts";
 import { powershellGuardBlock } from "./guards.ts";
 import { shellToolPolicy, withShellTools } from "./policy.ts";
@@ -60,7 +61,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		shellToolPolicy({ platform: process.platform, env: process.env, bash: !!bashSpawn().spawn, powershell: spec !== undefined });
 	const startupPolicy = policy();
 
-	registerShellTool(pi, {
+	const setDescription = registerShellTool(pi, {
 		name: "powershell",
 		ccLabel: "PowerShell",
 		description: text.powershellDescription({ edition: powerShellEdition(spec) }),
@@ -83,6 +84,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
 		wrapBackgroundCommand: (command) => `${POWERSHELL_TOOL_PREFIX}${command}`,
 	});
+	followDescriptionForm(pi, (_form, _tier, withheld) => setDescription(textForModel("shell", withheld, view).powershellDescription({ edition: powerShellEdition(spec) })));
 
 	let noticesShown = false;
 	const reconcile = (ctx?: Pick<ExtensionContext, "hasUI" | "ui">) => {

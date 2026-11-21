@@ -48,3 +48,8 @@ export function withoutOff(text: string, live: LiveTools, passages: ToolPassages
 	}
 	return out;
 }
+
+/** `live` with `tools` off: the tool set a session's model is offered when its policy leaves some out (lib/models/model-family.ts toolsWithheldFrom). */
+export function withoutTools(live: LiveTools, tools: readonly string[]): LiveTools {
+	return { has: (tool) => !tools.includes(tool) && live.has(tool), ...(live.watch ? { watch: live.watch } : {}) };
+}
