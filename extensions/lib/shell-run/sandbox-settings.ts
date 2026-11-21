@@ -11,8 +11,8 @@
  * a repository's permission mode does (lib/rules/settings.ts).
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settings-files.ts";
 
@@ -142,10 +142,13 @@ export interface SandboxScope {
 }
 
 /**
- * The git directories a command in a linked worktree writes outside the
- * worktree: its own git directory (index, HEAD, its logs) and the shared
- * repository's objects, refs and logs. Without them `git add` and `git
- * commit` fail in a worktree session and in an isolated subagent. Empty for
+ * The git paths a command in a linked worktree writes outside the
+ * worktree: its own git directory (index, HEAD, its logs), the shared
+ * repository's objects, refs and logs, and its packed refs (`packed-refs` and
+ * the lock it is written through: a commit's automatic maintenance packs the
+ * refs). Without them `git add` and `git commit` fail in a worktree session
+ * and in an isolated subagent. (On Linux the runtime skips a path that does
+ * not exist yet, so packing the refs still fails there.) Empty for
  * an ordinary checkout, whose `.git` is inside the working directory, and
  * for no repository. The shared repository's `hooks` and `config` are not
  * in the list, so they stay unwritable.
@@ -153,18 +156,31 @@ export interface SandboxScope {
  * The `.git` file that names the git directory sits in the worktree, where a
  * sandboxed command can rewrite it, so it is believed only when the git
  * directory names this worktree back (its `gitdir` file, which git writes
- * and no sandboxed command can).
+ * and no sandboxed command can). Git writes that path with symlinks resolved
+ * (macOS's `/var/folders/…` temp dir, where an isolated subagent's worktree
+ * lives, is `/private/var/folders/…`), so the two are compared as real
+ * directories. Only the directory is resolved, never the `.git` entry
+ * itself: a `.git` symlink planted in another directory does not make it the
+ * worktree.
  */
-export function linkedWorktreeGitDirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8")): string[] {
+export function linkedWorktreeGitDirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), real: (path: string) => string = realpathSync): string[] {
+	const sameDir = (a: string, b: string) => {
+		try {
+			return real(a) === real(b);
+		} catch {
+			return false;
+		}
+	};
 	for (let root = resolve(dir); ; root = dirname(root)) {
 		const dotGit = join(root, ".git");
 		try {
 			const pointer = /^gitdir:\s*(.+)$/m.exec(read(dotGit))?.[1]?.trim();
 			if (!pointer) return [];
 			const gitDir = resolve(root, pointer);
-			if (resolve(gitDir, read(join(gitDir, "gitdir")).trim()) !== dotGit) return [];
+			const named = resolve(gitDir, read(join(gitDir, "gitdir")).trim());
+			if (named !== dotGit && !(basename(named) === ".git" && sameDir(dirname(named), root))) return [];
 			const common = resolve(gitDir, read(join(gitDir, "commondir")).trim());
-			return [gitDir, join(common, "objects"), join(common, "refs"), join(common, "logs")];
+			return [gitDir, join(common, "objects"), join(common, "refs"), join(common, "logs"), join(common, "packed-refs"), join(common, "packed-refs.lock")];
 		} catch (error) {
 			// A directory `.git` is an ordinary checkout; anything else unreadable ends the search here too.
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(root) === root) return [];

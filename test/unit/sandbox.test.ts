@@ -25,6 +25,10 @@ import { createHostGate, type HostAnswer } from "../../extensions/safety/sandbox
 import { sandboxSectionText, sandboxStatusLines } from "../../extensions/safety/sandbox/section.ts";
 import { renderTranscript, toolCallEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import backgroundExtension from "../../extensions/tools/background/index.ts";
+import { backgroundWords } from "../../extensions/tools/background/text.ts";
+import { requireText } from "../../extensions/lib/profile/profile.ts";
+import { DEFAULT_COALESCE_MS, escapeTaskText } from "../../extensions/lib/notify/notifications.ts";
 
 const ON: SandboxSettings = { ...SANDBOX_OFF, enabled: true };
 /** The user also turned auto-allow on. */
@@ -211,10 +215,32 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 			if (!(path in files)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 			return files[path];
 		};
-		expect(linkedWorktreeGitDirs("/wt/src/deep", read)).toEqual(["/repo/.git/worktrees/wt", "/repo/.git/objects", "/repo/.git/refs", "/repo/.git/logs"]);
+		expect(linkedWorktreeGitDirs("/wt/src/deep", read)).toEqual(["/repo/.git/worktrees/wt", "/repo/.git/objects", "/repo/.git/refs", "/repo/.git/logs", "/repo/.git/packed-refs", "/repo/.git/packed-refs.lock"]);
 		// A `.git` file a command wrote to point at someone else's git directory is not believed.
 		expect(linkedWorktreeGitDirs("/forged", read)).toEqual([]);
 		expect(linkedWorktreeGitDirs("/nowhere/at/all", read)).toEqual([]);
+	});
+
+	it("believes a worktree's git directory that names it by its real path, and never through a `.git` symlink", () => {
+		// macOS: the temp dir is reached as /var/folders/…, and git records /private/var/folders/….
+		const files: Record<string, string> = {
+			"/var/t/wt/.git": "gitdir: /repo/.git/worktrees/wt\n",
+			"/repo/.git/worktrees/wt/gitdir": "/private/var/t/wt/.git\n",
+			"/repo/.git/worktrees/wt/commondir": "../..\n",
+			// A `.git` symlink in another directory reads as the worktree's own pointer.
+			"/elsewhere/.git": "gitdir: /repo/.git/worktrees/wt\n",
+		};
+		const read = (path: string) => {
+			if (!(path in files)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+			return files[path];
+		};
+		const links: Record<string, string> = { "/var/t/wt": "/private/var/t/wt", "/private/var/t/wt": "/private/var/t/wt", "/elsewhere": "/elsewhere", "/elsewhere/.git": "/private/var/t/wt/.git" };
+		const real = (path: string) => {
+			if (!(path in links)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+			return links[path];
+		};
+		expect(linkedWorktreeGitDirs("/var/t/wt", read, real)).toEqual(["/repo/.git/worktrees/wt", "/repo/.git/objects", "/repo/.git/refs", "/repo/.git/logs", "/repo/.git/packed-refs", "/repo/.git/packed-refs.lock"]);
+		expect(linkedWorktreeGitDirs("/elsewhere", read, real)).toEqual([]);
 	});
 
 	it("gives a call nothing without the gate's grant", async () => {
@@ -380,6 +406,71 @@ describe.skipIf(!supported)("the shell tool under a sandbox", () => {
 		const result = await tool.execute("c1", { command: "Get-ChildItem" }, undefined, undefined, createFakeCtx({ mode: "tui" }));
 		expect(result).toMatchObject({ isError: true, content: [{ text: 'refused {"kind":"noBash"}' }] });
 		expect(foreground).not.toHaveBeenCalled();
+	});
+});
+
+describe.skipIf(process.platform === "win32")("a monitor under the sandbox", () => {
+	const DENIED = "<sandbox_violations>\ndeny network-outbound example.com:443\n</sandbox_violations>";
+	/** The fake sandbox, except that a wrapped command runs as written, so the monitor's command really runs. */
+	function passThrough(violations: string) {
+		const sandbox = fakeSandbox(ON, violations);
+		const wrap = sandbox.wrap;
+		sandbox.wrap = async (command, call) => {
+			await wrap(command, call);
+			return command;
+		};
+		return sandbox;
+	}
+	function mountMonitor() {
+		const fake = createFakePi();
+		backgroundExtension(fake.pi as never);
+		void fake.fire("before_agent_start", {}, createFakeCtx({}));
+		return { fake, monitor: fake.tools.get("monitor")! };
+	}
+
+	it("returns what the sandbox denied after the events in a one-shot run, and ends the run", async () => {
+		const sandbox = passThrough(`\n${DENIED}`);
+		setSandboxForTest(ON, sandbox);
+		const { monitor } = mountMonitor();
+		const result = (await monitor.execute("c1", { command: "echo ev1", description: "d" }, undefined, undefined, createFakeCtx({ mode: "print" }))) as { content: Array<{ text: string }> };
+		expect(sandbox.wrapped[0]).toMatchObject({ command: "echo ev1", text: "echo ev1" });
+		expect(result.content[0].text).toMatch(/\n\nev1\n<sandbox_violations>\ndeny network-outbound example\.com:443\n<\/sandbox_violations>$/);
+		expect(sandbox.open.count).toBe(0);
+	});
+
+	it("carries what the sandbox denied on a detached monitor's completion notification", async () => {
+		const sandbox = passThrough(`\n${DENIED}`);
+		setSandboxForTest(ON, sandbox);
+		const { fake, monitor } = mountMonitor();
+		await monitor.execute("c1", { command: "echo ev1", description: "d" }, undefined, undefined, createFakeCtx({ hasUI: true, mode: "tui" }));
+		const ended = () => fake.sentMessages.find((m) => ((m.message.content as Array<{ text?: string }>)[0]?.text ?? "").includes("<status>completed</status>"));
+		for (let waited = 0; !ended() && waited < 5000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
+		const text = (ended()!.message.content as Array<{ text: string }>)[0].text;
+		// The end's recent tail, then the block, inside the completion's <event>.
+		expect(text.slice(text.indexOf("<status>completed</status>"))).toContain(`ev1\n${escapeTaskText(DENIED)}</event>`);
+		expect(sandbox.open.count).toBe(0);
+	});
+
+	it("carries what the sandbox denied on the last batch of a monitor that expired", async () => {
+		setSandboxForTest(ON, passThrough(`\n${DENIED}`));
+		const expiry = vi.spyOn(backgroundWords(requireText("background")).monitor, "expired").mockReturnValue("EXPIRY");
+		const { fake, monitor } = mountMonitor();
+		await monitor.execute("c1", { command: "echo ev1; sleep 30", description: "d", timeout_ms: 1000 }, undefined, undefined, createFakeCtx({ hasUI: true, mode: "tui" }));
+		const expiredBatch = () => fake.sentMessages.find((m) => ((m.message.content as Array<{ text?: string }>)[0]?.text ?? "").includes("EXPIRY"));
+		for (let waited = 0; !expiredBatch() && waited < 8000; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(expiry).toHaveBeenCalledOnce();
+		const text = (expiredBatch()!.message.content as Array<{ text: string }>)[0].text;
+		// The event may have gone out in a batch of its own first; the block follows the expiry line.
+		expect(text).toContain(`EXPIRY\n${escapeTaskText(DENIED)}</event>`);
+		expiry.mockRestore();
+	}, 15_000);
+
+	it("adds nothing when the sandbox denied nothing", async () => {
+		setSandboxForTest(ON, passThrough(""));
+		const { monitor } = mountMonitor();
+		const result = (await monitor.execute("c1", { command: "echo ev1", description: "d" }, undefined, undefined, createFakeCtx({ mode: "print" }))) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toMatch(/\n\nev1$/);
 	});
 });
 

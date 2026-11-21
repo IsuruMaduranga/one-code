@@ -502,7 +502,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			// The command's own host list ends with the monitor.
 			void finished.then(() => sandboxRun?.finish());
 
-			const flush = (force = false) => {
+			// `after` follows the batch's events: what the sandbox denied, on the batch that ends the monitor.
+			const flush = (force = false, after = "") => {
 				flushTimer = undefined;
 				if (batchSize(pending) === 0) return;
 				if (!force && notify.holding()) {
@@ -519,7 +520,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// end's own recent tail and task_output's result hold those lines.
 				notify(
 					"task-notification",
-					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch, (more) => text.monitor.moreLines({ ...more, logPath: task.logPath })) }),
+					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: [formatMonitorEvents(id, batch, (more) => text.monitor.moreLines({ ...more, logPath: task.logPath })), after].filter(Boolean).join("\n") }),
 					{ taskId: id, events: batchSize(batch), ...(force ? { [TASK_COMPLETION_KEY]: true } : {}) },
 				);
 			};
@@ -558,11 +559,13 @@ function backgroundExtension(pi: ExtensionAPI) {
 					finish();
 					// After shutdown or inside a one-shot run, report through `finished` alone.
 					if (!alive() || oneShot) return;
+					// What the sandbox denied the command rides its end, as a background shell's completion carries it.
+					const denied = sandboxRun?.withViolations("").trim() ?? "";
 					if (expired) {
 						// The expiry line rides the monitor's last batch and is no event.
 						const duration = formatDuration(0, timeoutMs).replace(/ 0[sm]$/, "");
 						pushEvent(pending, text.monitor.expired({ duration, events: eventCount, stderrPath: stderrWritten ? task.logPath : undefined }));
-						flush(true);
+						flush(true, denied);
 						return;
 					}
 					flush(true);
@@ -577,7 +580,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							toolUseId: toolCallId,
 							status: ccStatus,
 							summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
-							result: recent || undefined,
+							result: [recent, denied].filter(Boolean).join("\n") || undefined,
 						}),
 						{ taskId: id, status: finalStatus, [TASK_COMPLETION_KEY]: true },
 					);
@@ -698,7 +701,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 				// than persist the tail. Without one, say what was lost.
 				const spooled = overflowed && task.logPath ? persistedFilePreview(task.logPath) : undefined;
 				const kept = overflowed && !spooled ? `${spoolLost}${stored.trim()}` : stored.trim() || text.monitor.noEvents;
-				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				const shown = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				// What the sandbox denied the command follows its events.
+				const output = sandboxRun ? sandboxRun.withViolations(shown) : shown;
 				const finalStatus = task.status;
 				const end: MonitorEnd =
 					finalStatus !== "stopped"
