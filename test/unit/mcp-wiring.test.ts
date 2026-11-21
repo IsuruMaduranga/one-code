@@ -326,6 +326,25 @@ describe("mcp wiring", () => {
 		expect(renderInEpoch(fake.events, told).join("\n")).not.toContain("slow");
 	});
 
+	it("leaves out a tool whose name is over the limit of the session model's provider, and says so", async () => {
+		const long = "list_pull_request_review_comments_for_repository_and_branch"; // with "mcp__demo__", 70 characters
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }, { name: long }] });
+		mcpExtension(fake.pi as never);
+		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "openai-completions" } });
+		expect(fake.tools.has("mcp__demo__foo")).toBe(true);
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(false);
+	});
+
+	it("keeps a 65 to 128 character tool name where the provider takes it", async () => {
+		const long = "list_pull_request_review_comments_for_repository_and_branch";
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: long }] });
+		mcpExtension(fake.pi as never);
+		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "anthropic-messages" } });
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(true);
+	});
+
 	it("execute() on a registered MCP tool calls through the live connection", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", { tools: [{ name: "foo" }] });

@@ -23,6 +23,20 @@ export function namespacedToolName(server: string, tool: string): string {
 	return `mcp__${clean(server)}__${clean(tool)}`;
 }
 
+/** APIs whose provider rejects a function name over 64 characters (OpenAI documents the limit for `function.name`). */
+const SHORT_NAME_APIS: ReadonlySet<string> = new Set(["openai-completions", "openai-responses", "azure-openai-responses", "openai-codex-responses"]);
+
+/**
+ * The longest tool name the provider behind `api` accepts: 64 on the OpenAI
+ * family, 128 elsewhere (Anthropic's and Gemini's limit) and while the API is
+ * unknown. A longer name fails the whole request, and a loaded tool rides
+ * every later one, so the caller leaves such a tool out. Never shortened or
+ * hashed: a user's `mcp__…` permission rules and hook matchers match the name.
+ */
+export function maxToolNameLength(api: string | undefined): number {
+	return api !== undefined && SHORT_NAME_APIS.has(api) ? 64 : 128;
+}
+
 /** CC's name for a plugin-provided server: `plugin:<plugin>:<server>`, so two plugins' `github` servers cannot collide with each other or with the user's. */
 export function pluginServerName(pluginName: string, serverName: string): string {
 	return `plugin:${pluginName}:${serverName}`;
