@@ -169,7 +169,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 
 		let payload = live;
 		const base = current.epoch ? undefined : current.base;
-		const end = base ? appendPoint(base.list, api) : 0;
+		let end = base ? appendPoint(base.list, api) : 0;
 		if (base) payload = spliceRequest(base, payload, api);
 		// An epoch renders pi's tools again, in the order the branch first declared them.
 		else {
@@ -178,6 +178,7 @@ function ledgerWireExtension(pi: ExtensionAPI) {
 			const body: LedgerEpochBody = { payload };
 			pi.events.emit(LEDGER_EPOCH_BODY_CHANNEL, body);
 			payload = body.payload as WirePayload;
+			if (typeof body.kept === "number") end = body.kept;
 		}
 		// A product's secret values leave the new tail here, before it is recorded
 		// (lib/request/ledger/redact.ts): the record, the cache and every side call

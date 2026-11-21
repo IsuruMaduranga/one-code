@@ -55,6 +55,7 @@
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
 import { LEDGER_EPOCH_BODY_CHANNEL, LEDGER_PLAN_CHANNEL, type LedgerEpochBody, type RequestPlan } from "../../lib/request/ledger/plan.ts";
+import { listKey } from "../../lib/request/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -157,6 +158,15 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 			shaped = false;
 			const body = data as LedgerEpochBody;
 			body.payload = splice(body.payload);
+			// The capture's elements the splice left as they were are the parent's
+			// cached bytes: the ledger must not redact or re-lay them. A capture's
+			// last turn the fork's first one was joined into is the fork's again.
+			const key = listKey(capture.api);
+			const base = Array.isArray(capture.payload[key]) ? (capture.payload[key] as unknown[]) : [];
+			const list = Array.isArray(body.payload[key]) ? (body.payload[key] as unknown[]) : [];
+			let kept = 0;
+			while (kept < base.length && list[kept] === base[kept]) kept++;
+			body.kept = kept;
 		});
 
 		pi.on("context_with_system", (event, ctx) => {

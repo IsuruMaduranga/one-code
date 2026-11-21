@@ -29,6 +29,13 @@ export const LEDGER_EPOCH_BODY_CHANNEL = brandedId("ledger-epoch-body");
 
 export interface LedgerEpochBody {
 	payload: Record<string, unknown>;
+	/**
+	 * Set by a listener that put an already-sent request in front: how many
+	 * leading list elements are that request's, unchanged. The ledger leaves
+	 * them as sent (no redaction, layout or repair there), as it leaves a
+	 * record's prefix: another session's cache holds those bytes.
+	 */
+	kept?: number;
 }
 
 /**

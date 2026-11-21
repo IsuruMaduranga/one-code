@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { forkCacheExtension } from "../../extensions/agents/subagents/fork-cache.ts";
 import type { RequestCapture } from "../../extensions/lib/side-calls/request-replay.ts";
 import { RECORD } from "../../extensions/lib/request/ledger/records.ts";
+import { setSecretValues } from "../../extensions/lib/profile/secrets.ts";
 import { LedgerSim, type SimMessage } from "./helpers/ledger-sim.ts";
 
 type Handlers = Record<string, ((event: unknown, ctx: unknown) => unknown)[]>;
@@ -109,5 +110,25 @@ describe("a fork child with the ledger and fork-cache", () => {
 		const whole = ["user:U1", "assistant:A1", "user:U2", "assistant:A2", "user:btw Q", "assistant:btw A", "user:fork task"];
 		expect(blocks(first)).toEqual(whole);
 		expect(blocks(second)).toEqual([...whole, "assistant:fork reply 1", "user:tool result"]);
+	});
+	// The parent sent U1 before the value was registered and keeps sending it as
+	// sent. A fork's epoch must not redact inside the capture: those bytes are
+	// what the parent cached, and only the fork's own tail is new.
+	it("leaves the captured prefix as the parent sent it when a secret value is registered later", async () => {
+		const parent = new LedgerSim();
+		await parent.sessionStart();
+		parent.message("user", "U1 hunter2-token-xyz");
+		await parent.request("A1");
+		const u2 = parent.message("user", "U2");
+		const sent = await parent.request("A2");
+		parent.add({ type: "custom", customType: RECORD.epoch, data: { v: 1, by: "test", cause: "fold" } });
+		const fork = await forkOf(parent, captureOf(sent, u2.message as SimMessage));
+		setSecretValues("fork-cache-test", [{ value: "hunter2-token-xyz", name: "t" }]);
+		try {
+			const first = await fork.request("fork reply 1");
+			expect(blocks(first)[0]).toBe("user:U1 hunter2-token-xyz");
+		} finally {
+			setSecretValues("fork-cache-test", []);
+		}
 	});
 });
