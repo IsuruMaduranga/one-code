@@ -107,6 +107,10 @@ const explicit = calls.some((c) => c.explicit);
 const historyMarks = !explicit && calls.some((c) => c.historyMarks);
 
 console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : historyMarks ? "history breakpoints" : "implicit"} cache)`);
+// The per-pair warnings below need one marked call in the phase; a hook that
+// left every payload alone would otherwise read as a plain implicit cache.
+const skippedAll = calls.filter((c) => c.skipped).length;
+if (!explicit && !historyMarks && skippedAll > 0) warnings.push(`the classifier's cache hook ran on ${skippedAll} call(s) but left every payload unmarked (a blank part or an unexpected shape); the calls are checked as an implicit cache`);
 console.log("call   total   cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < calls.length; i++) {
 	const cur = calls[i];

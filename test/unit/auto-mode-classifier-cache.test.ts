@@ -415,6 +415,17 @@ describe("OpenAI Responses wire layout", () => {
 		expect(payload.prompt_cache_options).toEqual({ ttl: "30m" });
 	});
 
+	it("marks the history when pi-ai sends a configuration_update item after the user message", () => {
+		// GPT-6.1 Sol (`compat.supportsMidConvoEffort`): the classifier's forced effort rides
+		// in this item; rejecting it left every call unmarked, reading only the system prompt.
+		const update = { type: "configuration_update", reasoning: { effort: "low" } };
+		const payload = responses();
+		(payload.input as unknown[]).push(update);
+		expect(cacheClassifierHistory(payload, parts, 2, 1)).toBe(3);
+		expect((payload.input[1].content as Part[]).flatMap((part) => (part.prompt_cache_breakpoint ? [part.text] : []))).toEqual(["header", "history", "new"]);
+		expect(payload.input[2]).toEqual(update);
+	});
+
 	it("marks the same set whatever the previous-boundary hint or breakpoints elsewhere", () => {
 		const placed = [{ role: "developer", content: Array.from({ length: 4 }, (_, i) => ({ type: "input_text", text: `rule ${i}`, prompt_cache_breakpoint: breakpoint })) }];
 		for (const [payload, previous] of [[responses(), undefined], [responses(), 0], [responses(), 2], [responses({}, placed), 1]] as const) {
@@ -454,6 +465,7 @@ describe("OpenAI Responses wire layout", () => {
 		["the text differs from the parts joined", () => { const p = responses(); userParts(p)[0].text = "provider-normalized text"; return p; }],
 		["the request carries no prompt_cache_options", () => { const p: Record<string, unknown> = responses(); delete p.prompt_cache_options; return p; }],
 		["another input item is present", () => { const p = responses(); p.input.push({ role: "assistant", content: [{ type: "output_text", text: "earlier" }] }); return p; }],
+		["an item that only looks like a configuration_update is present", () => { const p = responses(); (p.input as unknown[]).push({ type: "configuration_update", role: "assistant", content: "x" }); return p; }],
 		["a second user item is present", () => { const p = responses(); p.input.unshift({ role: "user", content: [{ type: "input_text", text: "earlier" }] }); return p; }],
 		["the user item has two parts", () => { const p = responses(); userParts(p).push({ type: "input_text", text: "more" }); return p; }],
 		["the user part carries another field", () => { const p = responses(); userParts(p)[0].prompt_cache_breakpoint = breakpoint; return p; }],
