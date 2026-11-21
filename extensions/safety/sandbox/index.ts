@@ -37,7 +37,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
+import { checkoutProtectedFiles, linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
@@ -199,7 +199,7 @@ function sandboxExtension(pi: ExtensionAPI) {
 		scopes = new Map();
 		const scopeFor = (dir: string): SandboxScope => {
 			let scope = scopes.get(dir);
-			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }));
+			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig), ...[dir, ...workspace].flatMap((each) => checkoutProtectedFiles(each))] }));
 			return scope;
 		};
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).

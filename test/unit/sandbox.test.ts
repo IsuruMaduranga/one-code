@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
-import { linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
@@ -219,6 +219,27 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		// A `.git` file a command wrote to point at someone else's git directory is not believed.
 		expect(linkedWorktreeGitDirs("/forged", read)).toEqual([]);
 		expect(linkedWorktreeGitDirs("/nowhere/at/all", read)).toEqual([]);
+	});
+
+	it.skipIf(process.platform === "win32")("protects what redirects git and what the runtime lists, for an ordinary checkout and a linked worktree", () => {
+		const eisdir = () => {
+			throw Object.assign(new Error("EISDIR"), { code: "EISDIR" });
+		};
+		const files: Record<string, string | (() => never)> = {
+			"/repo/.git": eisdir,
+			"/wt/.git": "gitdir: /repo/.git/worktrees/wt\n",
+			"/repo/.git/worktrees/wt/commondir": "../..\n",
+		};
+		const read = (path: string) => {
+			const file = files[path];
+			if (file === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+			return typeof file === "string" ? file : file();
+		};
+		const main = checkoutProtectedFiles("/repo/packages/app", read);
+		expect(main).toEqual(expect.arrayContaining(["/repo/.git/commondir", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/hooks", "/repo/.git/config", "/repo/.mcp.json", "/repo/packages/app/.mcp.json", "/repo/.pi", "/repo/.gitmodules"]));
+		const linked = checkoutProtectedFiles("/wt", read);
+		expect(linked).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/worktrees/wt/gitdir", "/repo/.git/worktrees/wt/config.worktree", "/repo/.git/hooks", "/repo/.git/config", "/repo/.git/commondir"]));
+		expect(checkoutProtectedFiles("/nowhere", read)).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
 	});
 
 	it("believes a worktree's git directory that names it by its real path, and never through a `.git` symlink", () => {
