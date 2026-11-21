@@ -11,7 +11,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
-import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxSettings, setSandboxForTest, unsandboxedRequest } from "../../extensions/lib/shell-run/sandbox.ts";
+import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
+import { linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
@@ -37,12 +39,15 @@ const text = {
 };
 
 /** A running sandbox that marks what it wraps and reports `violations` once per call. */
-function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox & { wrapped: Array<{ command: string; cwd: string; shell: string; id: string; text: string }>; hosts: Map<string, string[]> } {
+function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox & { wrapped: Array<{ command: string; cwd: string; shell: string; id: string; text: string }>; hosts: Map<string, string[]>; open: { count: number } } {
 	const wrapped: Array<{ command: string; cwd: string; shell: string; id: string; text: string }> = [];
 	const hosts = new Map<string, string[]>();
+	const open = { count: 0 };
 	return {
 		wrapped,
 		hosts,
+		open,
+		ended: () => void open.count--,
 		allowHosts: (id, list) => {
 			if (list.some((host) => host.includes(" "))) throw new Error(`invalid host "${list.find((host) => host.includes(" "))}"`);
 			hosts.set(id, [...list]);
@@ -50,6 +55,7 @@ function fakeSandbox(settings: SandboxSettings, violations = ""): ActiveSandbox 
 		release: (id) => void hosts.delete(id),
 		wrap: async (command, call) => {
 			wrapped.push({ command, ...call });
+			open.count++;
 			return `SANDBOX(${command})`;
 		},
 		annotate: () => violations,
@@ -163,6 +169,51 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		// The grant was the one run's: the same call id again gets nothing.
 		await sandboxedCommand(request);
 		expect(sandbox.hosts.size).toBe(0);
+	});
+
+	it("ends every wrap exactly once, with or without hosts, so the runtime can clean up after it", async () => {
+		const sandbox = fakeSandbox(ON);
+		setSandboxForTest(ON, sandbox);
+		const run = await sandboxedCommand(request);
+		expect(sandbox.open.count).toBe(1);
+		if (!("run" in run) || !run.run) throw new Error("not sandboxed");
+		// Reading what was denied does not end the run; finishing does, once.
+		run.run.withViolations("out");
+		expect(sandbox.open.count).toBe(1);
+		run.run.finish();
+		run.run.finish();
+		expect(sandbox.open.count).toBe(0);
+	});
+
+	it("reads another directory's settings for a session that starts there", () => {
+		setSandboxForTest({ ...ON, excludedCommands: ["docker *"] }, fakeSandbox(ON));
+		useSandboxSettingsFor(process.cwd());
+		expect(sandboxSettings().excludedCommands).toEqual(["docker *"]);
+		const elsewhere = mkdtempSync(join(tmpdir(), "sandbox-other-"));
+		try {
+			useSandboxSettingsFor(elsewhere);
+			// The first directory's exclusions are not carried into the second.
+			expect(sandboxSettings().excludedCommands).not.toContain("docker *");
+		} finally {
+			rmSync(elsewhere, { recursive: true, force: true });
+		}
+	});
+
+	it("finds a linked worktree's git directories only when the git directory names the worktree back", () => {
+		const files: Record<string, string> = {
+			"/wt/.git": "gitdir: /repo/.git/worktrees/wt\n",
+			"/repo/.git/worktrees/wt/gitdir": "/wt/.git\n",
+			"/repo/.git/worktrees/wt/commondir": "../..\n",
+			"/forged/.git": "gitdir: /repo/.git/worktrees/wt\n",
+		};
+		const read = (path: string) => {
+			if (!(path in files)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+			return files[path];
+		};
+		expect(linkedWorktreeGitDirs("/wt/src/deep", read)).toEqual(["/repo/.git/worktrees/wt", "/repo/.git/objects", "/repo/.git/refs", "/repo/.git/logs"]);
+		// A `.git` file a command wrote to point at someone else's git directory is not believed.
+		expect(linkedWorktreeGitDirs("/forged", read)).toEqual([]);
+		expect(linkedWorktreeGitDirs("/nowhere/at/all", read)).toEqual([]);
 	});
 
 	it("gives a call nothing without the gate's grant", async () => {
@@ -394,6 +445,23 @@ describe("the gate and a monitor that names hosts for itself", () => {
 	});
 });
 
+describe("the classifier's view and a user's approval of a call under the sandbox", () => {
+	it("shows the classifier the hosts the allow would grant, whatever shape the model wrote them in", () => {
+		// The model wrote a bare string; argument validation made it a one-entry list, which is what the gate grants.
+		const entry = toolCallEntry("bash", { command: "npm install", allowed_domains: "evil.example" }, undefined, ["evil.example"]);
+		expect(renderTranscript([entry])).toContain('{"Bash":{"command":"npm install","allowed_domains":["evil.example"]}}');
+		expect(renderTranscript([toolCallEntry("bash", { command: "ls", allowed_domains: ["a.example"] }, undefined, [])])).toContain('{"Bash":"ls"}');
+		expect(toolCallEntry("monitor", { command: "tail -f log", description: "d" }, undefined, ["a.example"])).toMatchObject({ input: { command: "tail -f log", allowed_domains: ["a.example"] } });
+	});
+
+	it("does not let an approval of a command cover the same command leaving the sandbox or naming hosts", () => {
+		const plain = denialInputKey("bash", { command: "curl https://a.example" }, "/work", true);
+		expect(denialInputKey("bash", { command: "curl https://a.example", description: "x", dangerouslyDisableSandbox: false }, "/work", true)).toBe(plain);
+		expect(denialInputKey("bash", { command: "curl https://a.example", dangerouslyDisableSandbox: true }, "/work", true)).not.toBe(plain);
+		expect(denialInputKey("bash", { command: "curl https://a.example", allowed_domains: ["a.example"] }, "/work", true)).not.toBe(plain);
+	});
+});
+
 describe("a host the settings do not list", () => {
 	function gate(mode: string, answers: HostAnswer[] = []) {
 		const asked: string[] = [];
@@ -505,7 +573,8 @@ describe("the /sandbox panel", () => {
 		const file = { model: "x", sandbox: { network: { allowedDomains: ["a.example"] }, enabled: false } };
 		expect(applySandboxPick(file, { tab: "mode", value: "auto-allow" })).toEqual({ model: "x", sandbox: { network: { allowedDomains: ["a.example"] }, enabled: true, autoAllowBashIfSandboxed: true } });
 		expect(applySandboxPick(file, { tab: "mode", value: "regular" }).sandbox).toMatchObject({ enabled: true, autoAllowBashIfSandboxed: false });
-		expect(applySandboxPick({ sandbox: { autoAllowBashIfSandboxed: true } }, { tab: "mode", value: "off" }).sandbox).toEqual({ autoAllowBashIfSandboxed: true, enabled: false });
+		// "No sandbox" withdraws auto-allow, so a project that turns the sandbox on does not inherit it.
+		expect(applySandboxPick({ sandbox: { autoAllowBashIfSandboxed: true } }, { tab: "mode", value: "off" }).sandbox).toEqual({ autoAllowBashIfSandboxed: false, enabled: false });
 		expect(applySandboxPick({}, { tab: "overrides", value: "strict" })).toEqual({ sandbox: { allowUnsandboxedCommands: false } });
 		expect(applySandboxPick({}, { tab: "overrides", value: "fallback" })).toEqual({ sandbox: { allowUnsandboxedCommands: true } });
 	});
@@ -514,6 +583,8 @@ describe("the /sandbox panel", () => {
 		expect(sandboxPickOutcome({ tab: "mode", value: "auto-allow" }, true, AUTO)).toMatch(/^Sandbox with auto-allow.*modes[.]$/);
 		expect(sandboxPickOutcome({ tab: "mode", value: "auto-allow" }, false, AUTO)).toContain("turns on at the next start");
 		expect(sandboxPickOutcome({ tab: "mode", value: "auto-allow" }, true, ON)).toContain("another settings file turns auto-allow off");
+		expect(sandboxPickOutcome({ tab: "mode", value: "regular" }, true, ON)).toBe("Sandbox with regular permissions: every prompt stays.");
+		expect(sandboxPickOutcome({ tab: "mode", value: "regular" }, true, AUTO)).toContain("another settings file turns auto-allow on");
 		expect(sandboxPickOutcome({ tab: "mode", value: "off" }, true, SANDBOX_OFF)).toBe("No sandbox. The sandbox turns off at the next start.");
 		expect(sandboxPickOutcome({ tab: "mode", value: "off" }, true, ON)).toContain("another settings file turns the sandbox on");
 		expect(sandboxPickOutcome({ tab: "overrides", value: "fallback" }, true, { ...ON, allowUnsandboxedCommands: false })).toContain("strict sandbox mode stays");

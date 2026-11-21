@@ -28,6 +28,7 @@ import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tre
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
 import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.ts";
+import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
 import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
 import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
@@ -202,6 +203,7 @@ function foldEntry(entry: { type: string; timestamp?: string; customType?: strin
 
 function backgroundExtension(pi: ExtensionAPI) {
 	const text = backgroundWords(requireText("background"));
+	const originalCommands = trackOriginalCommands(pi);
 	const cronParameters = cronToolParameters(text.cron);
 	const created = (job: CronJob) => text.cron.created({ job: shownJob(job), maxAgeDays: RECURRING_MAX_AGE_DAYS });
 	const jobList = (jobs: CronJob[]) => text.cron.list({ jobs: jobs.map(shownJob) });
@@ -441,7 +443,10 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const sandboxBash = bashSpawn().spawn?.shell;
 			let sandboxRun: SandboxRun | undefined;
 			if (command && sandboxBash) {
-				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId });
+				// In a worktree session the command arrives wrapped for the worktree: the excluded patterns are matched
+				// against the model's own command, and the sandbox is scoped to the directory it runs in.
+				const original = originalCommands.get(toolCallId);
+				const sandboxed = await sandboxedCommand({ command, original: original?.command ?? command, disable: false, cwd: original?.cwd ?? ctx.cwd, bash: sandboxBash, id: toolCallId });
 				if ("refused" in sandboxed) {
 					if (sandboxed.refused.kind === "hosts") return startFailed({ kind: "hostsRejected", reason: sandboxed.refused.reason });
 					// `noBash` cannot happen here: the call above is made only with a bash.

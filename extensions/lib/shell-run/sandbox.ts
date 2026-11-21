@@ -55,12 +55,21 @@ export interface ActiveSandbox {
 	allowHosts(id: string, hosts: readonly string[]): void;
 	/** The run `id` is over: its host list no longer applies. */
 	release(id: string): void;
+	/**
+	 * One wrapped command is over. The runtime counts its wraps and removes
+	 * what a command left on disk (bubblewrap's mount points for paths that
+	 * did not exist) only once every wrap was ended, so this is called exactly
+	 * once per successful `wrap`.
+	 */
+	ended(): void;
 	/** The filesystem rules of a command run in `cwd`, for the prompt. */
 	filesystem(cwd: string): ReturnType<typeof sandboxFilesystem>;
 }
 
 interface SandboxState {
 	settings?: SandboxSettings;
+	/** The directory `settings` were read for. */
+	settingsCwd?: string;
 	active?: ActiveSandbox;
 	/** Why the sandbox the settings ask for is not running. */
 	unavailable?: string;
@@ -80,11 +89,30 @@ export function sandboxPlatform(platform: NodeJS.Platform = process.platform): "
 	return platform === "darwin" || platform === "linux" ? platform : undefined;
 }
 
-/** The process's sandbox settings, read once. */
+/** The process's sandbox settings, read once for a directory. */
 export function sandboxSettings(): SandboxSettings {
 	const slot = state();
-	slot.settings ??= loadSandboxSettings(process.cwd(), homedir());
+	if (!slot.settings) {
+		slot.settingsCwd = process.cwd();
+		slot.settings = loadSandboxSettings(slot.settingsCwd, homedir());
+	}
 	return slot.settings;
+}
+
+/**
+ * A session starts in `cwd`. The settings were read for the directory the
+ * process started in; a session of another directory (a resume from the
+ * picker) gets its own, so one project's allowances and exclusions never
+ * apply in another and a project that turns the sandbox on is heard. The
+ * shell tools' schemas were registered before this and keep their shape
+ * until the next start.
+ */
+export function useSandboxSettingsFor(cwd: string): void {
+	const slot = state();
+	sandboxSettings();
+	if (slot.settingsCwd === cwd) return;
+	slot.settingsCwd = cwd;
+	slot.settings = loadSandboxSettings(cwd, homedir());
 }
 
 /** Whether the settings ask for a sandbox on a platform that has one: what the tools' schemas follow. */
@@ -111,7 +139,7 @@ export function sandboxSettled(): Promise<void> {
  * say, so the caller can tell the user what waits for a restart.
  */
 export function reloadSandboxSettings(): SandboxSettings {
-	const loaded = loadSandboxSettings(process.cwd(), homedir());
+	const loaded = loadSandboxSettings(state().settingsCwd ?? process.cwd(), homedir());
 	state().settings = { ...sandboxSettings(), autoAllowBashIfSandboxed: loaded.autoAllowBashIfSandboxed, allowUnsandboxedCommands: loaded.allowUnsandboxedCommands };
 	return loaded;
 }
@@ -154,6 +182,8 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 		const bash = process.platform === "linux" ? bashSpawn().spawn : undefined;
 		if (bash) {
 			const failure = await probeSandbox((command) => SandboxManager.wrapWithSandbox(command, bash.shell), bash);
+			// The trial was a wrap like any other: end it, or the runtime defers every later cleanup behind it.
+			SandboxManager.cleanupAfterCommand();
 			if (failure) {
 				await SandboxManager.reset().catch(() => undefined);
 				throw new Error(failure);
@@ -166,13 +196,8 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) =>
 				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
-			annotate: (id, output) => {
-				try {
-					return SandboxManager.annotateStderrWithSandboxFailures(id, output);
-				} finally {
-					SandboxManager.cleanupAfterCommand();
-				}
-			},
+			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
+			ended: () => SandboxManager.cleanupAfterCommand(),
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),
 			release: (id) => SandboxManager.unregisterCommandNetworkLists(id),
 		};
@@ -219,7 +244,8 @@ export interface SandboxRun {
 	/** `text` with what the sandbox denied this run appended, when it denied something. */
 	withViolations(text: string): string;
 	/**
-	 * The run is over: its host list no longer applies. Safe to call twice.
+	 * The run is over: its host list no longer applies and the runtime may
+	 * clean up after it. Safe to call twice.
 	 * Whoever runs the command calls it when the command ends, a background
 	 * task's owner when the task does.
 	 */
@@ -280,12 +306,16 @@ export async function sandboxedCommand(request: SandboxRequest): Promise<Sandbox
 			return { refused: { kind: "hosts", reason: (error as Error).message } };
 		}
 	}
+	let wrapped = false;
 	const finish = () => {
 		if (listed) sandbox.release(id);
 		listed = false;
+		if (wrapped) sandbox.ended();
+		wrapped = false;
 	};
 	try {
 		const command = await sandbox.wrap(request.line?.() ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });
+		wrapped = true;
 		return {
 			command,
 			run: {
@@ -375,6 +405,7 @@ export function runsSandboxed(input: ShellInput, command: string): boolean {
 export function setSandboxForTest(settings: SandboxSettings | undefined, active?: ActiveSandbox, unavailable?: string): void {
 	const slot = state();
 	slot.settings = settings;
+	slot.settingsCwd = settings ? process.cwd() : undefined;
 	slot.active = active;
 	slot.unavailable = unavailable;
 	slot.starting = undefined;

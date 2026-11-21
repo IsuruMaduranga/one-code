@@ -75,13 +75,19 @@ export type TranscriptEntry =
  * the call names for itself (`allowed_domains`) stay with it: allowing the
  * call grants them, so the classifier reads them (the ruleset's "Command
  * Network Lists"). Every other tool is its whole input.
+ *
+ * `granted` is the host list an allow would grant the call under review: the
+ * gate reads it from the validated arguments, which can differ from what the
+ * model wrote (a bare string is coerced to a one-entry list), so the entry
+ * shows exactly that list and never fewer hosts than the allow opens.
  */
-export function toolCallEntry(tool: string, input: unknown, asWritten?: string): TranscriptEntry {
+export function toolCallEntry(tool: string, input: unknown, asWritten?: string, granted?: readonly string[]): TranscriptEntry {
 	const args = isPlainObject(input) ? input : {};
-	const hosts = Array.isArray(args.allowed_domains) && args.allowed_domains.length > 0 ? { allowed_domains: args.allowed_domains } : {};
+	const listed = granted ?? (Array.isArray(args.allowed_domains) ? args.allowed_domains : []);
+	const hosts = listed.length > 0 ? { allowed_domains: [...listed] } : {};
 	if (asWritten !== undefined) return { kind: "tool", tool, input: { command: asWritten, ...hosts } };
 	if (SHELL_TOOLS.has(tool) && typeof args.command === "string") return { kind: "tool", tool, input: { command: args.command, ...hosts } };
-	return { kind: "tool", tool, input: args };
+	return { kind: "tool", tool, input: granted && granted.length > 0 ? { ...args, ...hosts } : args };
 }
 
 /** Clip a diagnostic field; classifier transcript entries are never clipped. */

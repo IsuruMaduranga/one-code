@@ -11,6 +11,8 @@
  * a repository's permission mode does (lib/rules/settings.ts).
  */
 
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settings-files.ts";
 
@@ -137,6 +139,37 @@ export interface SandboxScope {
 	writableDirs: readonly string[];
 	/** Files that configure the permission gate: never writable, whatever allows their directory. */
 	protectedFiles: readonly string[];
+}
+
+/**
+ * The git directories a command in a linked worktree writes outside the
+ * worktree: its own git directory (index, HEAD, its logs) and the shared
+ * repository's objects, refs and logs. Without them `git add` and `git
+ * commit` fail in a worktree session and in an isolated subagent. Empty for
+ * an ordinary checkout, whose `.git` is inside the working directory, and
+ * for no repository. The shared repository's `hooks` and `config` are not
+ * in the list, so they stay unwritable.
+ *
+ * The `.git` file that names the git directory sits in the worktree, where a
+ * sandboxed command can rewrite it, so it is believed only when the git
+ * directory names this worktree back (its `gitdir` file, which git writes
+ * and no sandboxed command can).
+ */
+export function linkedWorktreeGitDirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8")): string[] {
+	for (let root = resolve(dir); ; root = dirname(root)) {
+		const dotGit = join(root, ".git");
+		try {
+			const pointer = /^gitdir:\s*(.+)$/m.exec(read(dotGit))?.[1]?.trim();
+			if (!pointer) return [];
+			const gitDir = resolve(root, pointer);
+			if (resolve(gitDir, read(join(gitDir, "gitdir")).trim()) !== dotGit) return [];
+			const common = resolve(gitDir, read(join(gitDir, "commondir")).trim());
+			return [gitDir, join(common, "objects"), join(common, "refs"), join(common, "logs")];
+		} catch (error) {
+			// A directory `.git` is an ordinary checkout; anything else unreadable ends the search here too.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(root) === root) return [];
+		}
+	}
 }
 
 /** The filesystem rules of one command, in the runtime's shape. Writes are allow-only; reads are deny-only. */

@@ -47,7 +47,7 @@ import { sessionResultsDir } from "../request/persisted-output.ts";
 import { powerShellParser } from "../shell-run/shell-spawn.ts";
 import { sandboxGateFacts } from "../shell-run/sandbox.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "../core/scratchpad.ts";
-import { decide, extractSubject, isPathSubjectTool, isShellTool, normalizeToolName, type PermissionMode, parseRules } from "../rules/matcher.ts";
+import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../rules/matcher.ts";
 import { projectAllowApproved } from "../consent/project-trust.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../rules/settings.ts";
 import type { PermissionBridge } from "./subagent-gate.ts";

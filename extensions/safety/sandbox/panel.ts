@@ -191,7 +191,9 @@ export function applySandboxPick(file: Record<string, unknown>, pick: SandboxPic
 	const sandbox = isPlainObject(file.sandbox) ? { ...file.sandbox } : {};
 	if (pick.tab === "mode") {
 		sandbox.enabled = pick.value !== "off";
-		if (pick.value !== "off") sandbox.autoAllowBashIfSandboxed = pick.value === "auto-allow";
+		// "No sandbox" also withdraws auto-allow: a project's file may turn the sandbox on, and an earlier
+		// auto-allow left in the user's file would then run that project's commands without a prompt.
+		sandbox.autoAllowBashIfSandboxed = pick.value === "auto-allow";
 	} else {
 		sandbox.allowUnsandboxedCommands = pick.value === "fallback";
 	}
@@ -221,5 +223,7 @@ export function sandboxPickOutcome(pick: SandboxPick, running: boolean, loaded: 
 			? `Sandbox with auto-allow: a sandboxed Bash command runs without a prompt in default and acceptEdits modes.${restart}`
 			: `Saved, but another settings file turns auto-allow off, so sandboxed commands keep their prompts.${restart}`;
 	}
-	return `Sandbox with regular permissions: every prompt stays.${restart}`;
+	return loaded.autoAllowBashIfSandboxed
+		? `Saved, but another settings file turns auto-allow on, so sandboxed Bash commands still run without a prompt.${restart}`
+		: `Sandbox with regular permissions: every prompt stays.${restart}`;
 }

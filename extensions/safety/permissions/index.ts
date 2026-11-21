@@ -1579,7 +1579,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 					// worktree it runs in (the classifier transcript already holds it).
 					{
 						cwd: callCwd, powershellParse, toolCallId: event.toolCallId, skipPreGate: unsandboxed || hosts.length > 0,
-						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command),
+						appendEntry: toolCallEntry(normalizedTool, writtenArguments(ctx.sessionManager.getBranch(), event.toolCallId) ?? event.input, original?.command, hosts),
 					},
 				);
 				if (outcome.decision === "allow") {
@@ -1818,7 +1818,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (!ctx) return { block: true, reason: refusalText({ kind: "nonInteractive" }) };
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
-				appendEntry: toolCallEntry(normalizedTool, input),
+				appendEntry: toolCallEntry(normalizedTool, input, undefined, hosts),
 				// The main session as far as the call that started this child's turn.
 				history: childCursor(call.parentToolCallId),
 				// The child's own turn signal, so an aborted child turn cancels the

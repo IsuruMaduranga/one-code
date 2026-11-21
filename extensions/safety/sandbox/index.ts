@@ -29,7 +29,7 @@ import { projectConfigDir } from "../../lib/profile/sources.ts";
 import { gateControlFiles } from "../../lib/profile/settings-files.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { activeSandbox, reloadSandboxSettings, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, startSandbox, stopSandbox } from "../../lib/shell-run/sandbox.ts";
+import { activeSandbox, reloadSandboxSettings, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, startSandbox, stopSandbox, useSandboxSettingsFor } from "../../lib/shell-run/sandbox.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
@@ -37,7 +37,8 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
-import type { SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
+import { linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
+import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
 
@@ -67,6 +68,8 @@ const SANDBOX_PANEL_MAX_HEIGHT = 30;
  */
 export function tellSandboxSection(pi: ExtensionAPI): void {
 	const text = sessionView(pi).text("shell").sandbox;
+	// Where the session's commands run: the worktree it entered, else its own directory.
+	const workCwd = followWorkCwd(pi.events);
 	let cwd = process.cwd();
 	/** The section for a command run in `dir`, or null when no sandbox is configured. */
 	const section = (dir: string): string | null => (sandboxConfigured() ? sandboxSectionText(text, { settings: sandboxSettings(), platform: sandboxPlatform()!, active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: dir }) : null);
@@ -78,15 +81,15 @@ export function tellSandboxSection(pi: ExtensionAPI): void {
 		const fact = untoldBlockFact(request, SANDBOX_FACT, live);
 		if (fact) request.blocks.push({ text: live ?? text.turnedOff, facts: [fact] });
 	});
-	if (!sandboxConfigured()) return;
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
-		cwd = ctx.cwd;
+		cwd = workCwd(ctx.cwd);
 	});
 	pi.on("turn_start", async (_event, ctx) => {
-		cwd = ctx.cwd;
+		cwd = workCwd(ctx.cwd);
+		if (!sandboxConfigured()) return;
 		// The section names whether the sandbox started, so it waits for the answer.
 		await sandboxSettled();
-		const live = section(ctx.cwd);
+		const live = section(cwd);
 		if (live === null) return;
 		pi.events.emit(REMINDER_CHANNEL, { text: live, key: "sandbox", placement: "first-prepend", order: CONTEXT_ORDER.sandbox, facts: [toldBlockFact(SANDBOX_FACT, live)] });
 	});
@@ -139,9 +142,19 @@ function sandboxExtension(pi: ExtensionAPI) {
 				const paint = safeThemePaint(theme);
 				const bold = safeThemeBold(theme);
 				const state = openSandboxPanel(loaded);
+				let frame: { key: string; lines: string[] } | undefined;
 				const height = () => boundedDockHeight((tui as { terminal?: { rows?: number } }).terminal?.rows ?? SANDBOX_PANEL_MAX_HEIGHT, SANDBOX_PANEL_MAX_HEIGHT);
 				return {
-					render: (width: number) => renderSandboxPanel({ state, mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded), config: state.tab === "config" ? statusLines(ctx) : [], width, height: height() }, paint, bold).map((line) => truncateLine(line, width)),
+					// One frame per width, tab, row and scroll position: a repaint with nothing changed builds nothing.
+					render: (width: number) => {
+						const key = `${width}:${height()}:${state.tab}:${state.row}:${state.offset}`;
+						if (frame?.key !== key) {
+							const lines = renderSandboxPanel({ state, mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded), config: state.tab === "config" ? statusLines(ctx) : [], width, height: height() }, paint, bold).map((line) => truncateLine(line, width));
+							// The render settles the scroll position, so the key is taken after it.
+							frame = { key: `${width}:${height()}:${state.tab}:${state.row}:${state.offset}`, lines };
+						}
+						return frame.lines;
+					},
 					handleInput: (data: string) => {
 						const key = decodeSandboxPanelKey(data);
 						if (!key) return;
@@ -160,7 +173,9 @@ function sandboxExtension(pi: ExtensionAPI) {
 						}
 						tui.requestRender();
 					},
-					invalidate: () => {},
+					invalidate: () => {
+						frame = undefined;
+					},
 				};
 			});
 			if (outcome) ctx.ui.notify(outcome, "info");
@@ -169,17 +184,21 @@ function sandboxExtension(pi: ExtensionAPI) {
 
 	tellSandboxSection(pi);
 
-	if (!sandboxConfigured()) return;
-
 	let warned = false;
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		liveCtx = ctx;
+		// A session of another directory than the process started in reads that directory's settings.
+		useSandboxSettingsFor(ctx.cwd);
+		if (!sandboxConfigured()) {
+			void stopSandbox();
+			return;
+		}
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		scopes = new Map();
 		const scopeFor = (dir: string): SandboxScope => {
 			let scope = scopes.get(dir);
-			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }));
+			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }));
 			return scope;
 		};
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).

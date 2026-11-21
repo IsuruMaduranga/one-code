@@ -20,6 +20,7 @@
  * starts empty.
  */
 
+import { commandHosts } from "../../../lib/shell-run/sandbox-settings.ts";
 import { autoModeResultText } from "./text.ts";
 
 /** Claude Code's `MAX_DENIALS`. */
@@ -63,7 +64,12 @@ function stableJson(value: unknown): string {
  * because the same command in another directory is another action.
  */
 export function denialInputKey(toolName: string, input: Record<string, unknown>, cwd: string, shell: boolean): string {
-	const counted = shell ? { command: input.command } : input;
+	// A shell call is its command, plus what it asks of the sandbox: the same command asking to leave the
+	// sandbox, or naming hosts for itself, is another action than the one the user approved.
+	const hosts = commandHosts(input);
+	const counted = shell
+		? { command: input.command, ...(input.dangerouslyDisableSandbox === true ? { dangerouslyDisableSandbox: true } : {}), ...(hosts.length > 0 ? { allowed_domains: hosts } : {}) }
+		: input;
 	return `${toolName}\0${cwd}\0${stableJson(counted)}`;
 }
 

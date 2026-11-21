@@ -60,7 +60,7 @@ export function sandboxStatusLines(facts: SandboxFacts): string[] {
 		`Never writable: ${fs.denyWrite.length} protected path${fs.denyWrite.length === 1 ? "" : "s"}`,
 		`Not readable: ${list(fs.denyRead)}`,
 		`Network hosts allowed: ${list(facts.settings.network.allowedDomains)}`,
-		...(facts.sessionHosts?.length ? [`Network hosts allowed for this session: ${list(facts.sessionHosts)}`] : []),
+		...(facts.sessionHosts?.length ? [`Network hosts allowed for this session (not in auto mode): ${list(facts.sessionHosts)}`] : []),
 		"A host not listed: you are asked (auto mode reviews the hosts a command names; bypassPermissions allows it).",
 		`Network hosts denied: ${list(facts.settings.network.deniedDomains)}`,
 		`Commands outside the sandbox: ${list(facts.settings.excludedCommands)}`,

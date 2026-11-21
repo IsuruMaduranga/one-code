@@ -214,7 +214,8 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				command: params.command,
 				original: originalCommand,
 				disable: params.dangerouslyDisableSandbox === true,
-				cwd: ctx.cwd,
+				// A worktree session's command runs in the worktree, which is published with its original; pi's own cwd stays the checkout's.
+				cwd: originalCommands.get(toolCallId)?.cwd ?? ctx.cwd,
 				bash: (spec.sandboxed?.bash ?? spec.backgroundShell)()?.shell,
 				...(spec.sandboxed ? { line: () => spec.sandboxed!.line(params.command) } : {}),
 				id: toolCallId,
@@ -234,7 +235,13 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					() => (viaBash ? viaBash.foreground(ctx.cwd) : spec.foreground(ctx.cwd)).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
-				).finally(() => sandboxed.run?.finish());
+				)
+					.catch((error: unknown) => {
+						// A command that timed out or was stopped still says what the sandbox denied it (a host retried until the deadline).
+						if (sandboxed.run && error instanceof Error) error.message = sandboxed.run.withViolations(error.message);
+						throw error;
+					})
+					.finally(() => sandboxed.run?.finish());
 				// The no-match check parses the command; only bash results need the grammar.
 				if (spec.name === "bash") await bashParserReady();
 				const shaped = withClaudeCodeShellText(result, spec.name, originalCommand);
@@ -272,7 +279,8 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				const spool = summary.logPath && Buffer.byteLength(summary.output, "utf8") > INLINE_OUTPUT_CAP
 					? persistedFilePreview(summary.logPath)
 					: undefined;
-				const output = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
+				const shown = spool ?? persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: INLINE_OUTPUT_CAP });
+				const output = sandboxed.run ? sandboxed.run.withViolations(shown) : shown;
 				return {
 					content: [
 						{
@@ -317,6 +325,9 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					// else — the model reads it (or task_output) when it needs the text.
 					// Without a spool file the tail rides `<result>` so nothing is lost.
 					const { status, detail } = shellFinish(summary);
+					// What the sandbox denied the command rides its completion: the log holds only the command's own words.
+					const denied = sandboxed.run?.withViolations("").trim() ?? "";
+					const tail = finishedTask.logPath ? "" : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim();
 					notify(
 						taskNotification({
 							kind: "shell",
@@ -325,7 +336,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							outputFile: finishedTask.logPath,
 							status,
 							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: finishedTask.logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim() || undefined,
+							result: [tail, denied].filter(Boolean).join("\n") || undefined,
 						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath, [TASK_COMPLETION_KEY]: true },
 					);
