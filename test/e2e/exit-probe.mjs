@@ -13,7 +13,8 @@
  *   node test/e2e/exit-probe.mjs --only rpc-stdin,new
  *   node test/e2e/exit-probe.mjs --keep          keep each run's temp root
  *   node test/e2e/exit-probe.mjs --jobs 1        one run at a time (default 3)
- *   node test/e2e/exit-probe.mjs --sandbox       every run with the command sandbox on (macOS, Linux)
+ *   node test/e2e/exit-probe.mjs --sandbox       every run with the command sandbox on (macOS, Linux; on Linux
+ *                                                the sandbox ends a finished command's workers, so those are not expected)
  *
  * Detection does not trust our bookkeeping: pi runs with a unique tag in its
  * environment (EXIT_PROBE_TAG), inherited by every descendant, and every
@@ -47,7 +48,7 @@ import os from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { alive } from "../unit/helpers/process-alive.ts";
-import { cellOutcome, ENDINGS, expectation, keptOutcome, parsePs, SPAWNERS, spawnerOf } from "./exit-probe-policy.mjs";
+import { cellOutcome, endingsFor, expectation, keptOutcome, parsePs, SPAWNERS, spawnerOf } from "./exit-probe-policy.mjs";
 import { killHard, repo, rpcClient, writeFreshHome } from "./lib/harness.mjs";
 
 const { values: opts } = parseArgs({
@@ -524,7 +525,7 @@ function report(ending, result) {
 	if (result.root) console.log(`      kept ${result.root}`);
 }
 
-const selected = ENDINGS.filter((e) => !opts.only || opts.only.split(",").includes(e.id));
+const selected = endingsFor({ sandbox: opts.sandbox, platform: process.platform }).filter((e) => !opts.only || opts.only.split(",").includes(e.id));
 const results = new Array(selected.length);
 let printed = 0;
 /** Record run `index` and print every finished run up to the first one still going, in table order. */

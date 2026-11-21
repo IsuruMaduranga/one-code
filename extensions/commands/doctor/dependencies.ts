@@ -17,6 +17,7 @@ import { POWERSHELL_KNOB } from "../../tools/powershell/policy.ts";
 import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { whichOnPath } from "../../lib/shell-run/which.ts";
+import { USERNS_FIX } from "../../lib/shell-run/sandbox-probe.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
 import { installHint, serverInstallHint } from "../../tools/lsp/install-hints.ts";
@@ -120,8 +121,10 @@ export interface DependencyInput {
 	/**
 	 * The command sandbox as the settings ask for it (lib/shell-run/sandbox-settings.ts).
 	 * On Linux it needs bubblewrap and socat on PATH; macOS ships what it uses.
+	 * `usernsRestricted` says the kernel restricts unprivileged user namespaces
+	 * (Ubuntu 24.04 and later), where bubblewrap is installed and cannot start.
 	 */
-	sandbox?: { enabled: boolean; required: boolean };
+	sandbox?: { enabled: boolean; required: boolean; usernsRestricted?: boolean };
 }
 
 export interface ShellsInput {
@@ -190,6 +193,13 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			const found = which(command);
 			if (!found) missing.push(tool);
 			checks.push({ name: command, found: !!found, path: found, need: enabled ? "required" : "unused", reason: enabled ? "the command sandbox (sandbox.enabled)" : "the command sandbox (off)", hint: installHint(tool, platform) });
+		}
+		if (enabled && missing.length === 0 && input.sandbox.usernsRestricted) {
+			findings.push({
+				level: required ? "error" : "warn",
+				text: `The command sandbox is on in your settings and this kernel restricts unprivileged user namespaces (the default on Ubuntu 24.04 and later), so bubblewrap cannot start it unless an AppArmor profile allows bwrap: ${required ? "shell commands are refused (sandbox.failIfUnavailable)" : "shell commands run without the sandbox"}.`,
+				fix: `To let bubblewrap start: ${USERNS_FIX}.`,
+			});
 		}
 		if (enabled && missing.length > 0) {
 			findings.push({

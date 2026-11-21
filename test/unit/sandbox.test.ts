@@ -5,6 +5,9 @@
  * The runtime itself is not started here; the live checks are in
  * working-docs/features/sandbox/.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Type } from "typebox";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
@@ -12,6 +15,7 @@ import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requested
 import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
+import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
 import { checkDependencies } from "../../extensions/commands/doctor/dependencies.ts";
 import { applySandboxPanelKey, applySandboxPick, openSandboxPanel, renderSandboxPanel, sandboxModeOf, sandboxPickOutcome } from "../../extensions/safety/sandbox/panel.ts";
 import { createHostGate, type HostAnswer } from "../../extensions/safety/sandbox/hosts.ts";
@@ -539,6 +543,29 @@ describe("/doctor and the Linux sandbox's programs", () => {
 		expect(on.findings.find((finding) => finding.text.includes("command sandbox"))).toMatchObject({ level: "warn", fix: expect.stringContaining("apt install bubblewrap") });
 		const required = checkDependencies({ ...input, platform: "linux", sandbox: { enabled: true, required: true } });
 		expect(required.findings.find((finding) => finding.text.includes("command sandbox"))).toMatchObject({ level: "error" });
+	});
+
+	it("names the kernel's user-namespace restriction when both programs are there and bubblewrap still cannot start", () => {
+		const bin = mkdtempSync(join(tmpdir(), "sandbox-doctor-"));
+		try {
+			for (const name of ["bwrap", "socat"]) writeFileSync(join(bin, name), "#!/bin/sh\n", { mode: 0o755 });
+			const sandbox = { enabled: true, required: true, usernsRestricted: true };
+			const restricted = checkDependencies({ ...input, env: { PATH: bin }, platform: "linux", sandbox });
+			expect(restricted.findings.find((entry) => entry.text.includes("user namespaces"))).toMatchObject({ level: "error", fix: expect.stringContaining("apparmor_restrict_unprivileged_userns=0") });
+			// A machine without the programs gets the install finding, not this one.
+			const missing = checkDependencies({ ...input, platform: "linux", sandbox });
+			expect(missing.findings.some((entry) => entry.text.includes("user namespaces"))).toBe(false);
+			expect(checkDependencies({ ...input, env: { PATH: bin }, platform: "linux", sandbox: { ...sandbox, usernsRestricted: false } }).findings.some((entry) => entry.text.includes("command sandbox"))).toBe(false);
+		} finally {
+			rmSync(bin, { recursive: true, force: true });
+		}
+		expect(usernsRestricted(() => "1\n")).toBe(true);
+		expect(usernsRestricted(() => "0\n")).toBe(false);
+		expect(usernsRestricted(() => {
+			throw new Error("ENOENT");
+		})).toBe(false);
+		expect(sandboxProbeFailure("\nbwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\n", true)).toMatch(/^bubblewrap could not run a command \(bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted\)\. This kernel restricts.*sudo sysctl -w kernel\.apparmor_restrict_unprivileged_userns=0/);
+		expect(sandboxProbeFailure("", false)).toBe("bubblewrap could not run a command (no error output)");
 	});
 
 	it("says nothing where the sandbox is off, and lists nothing on macOS", () => {

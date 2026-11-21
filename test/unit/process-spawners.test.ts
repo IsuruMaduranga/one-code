@@ -45,6 +45,7 @@ const SPAWNERS: Record<string, Lifetime> = {
 		kind: "exception",
 		how: "the kills themselves: taskkill.exe, unref'd, ends on its own; the exit watchdog SIGKILLs what outlasts SIGTERM and exits within KILL_GRACE_MS",
 	},
+	"extensions/lib/shell-run/sandbox-probe.ts": { kind: "awaited", how: "one trial command at the Linux sandbox's start: waitForChildExit with a timeout that kills its group" },
 	"extensions/lib/shell-run/shell-spawn.ts": {
 		kind: "exception",
 		how: "defines spawnShellCommand (its callers own the lifetime); the PowerShell tool's operations are awaited; the PowerShell parser server lives in pi's own group, unref'd, and ends when its stdin closes",

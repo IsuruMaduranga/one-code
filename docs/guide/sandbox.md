@@ -19,6 +19,19 @@ setting.
 | Linux and WSL2 | bubblewrap, with socat for the network proxy. | `bubblewrap` and `socat`, from your package manager. `/doctor` reports either one that is missing. |
 | Native Windows | No sandbox. Commands run without one. | Not applicable. |
 
+On Ubuntu 24.04 and later, the kernel restricts unprivileged user
+namespaces by default, and bubblewrap can't start a sandbox until you lift
+the restriction:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+To keep the setting across restarts, add it to a file in `/etc/sysctl.d`.
+As an alternative, add an AppArmor profile that grants `userns` to `bwrap`.
+One Code tries one command when it starts the sandbox, and `/doctor` reports
+the restriction.
+
 The sandbox is built on Anthropic's open source sandbox runtime, which is in
 beta.
 
@@ -203,5 +216,8 @@ holds whatever another file sets.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.
+- On Linux, a process that a command leaves running ends when the command
+  ends. To keep a process running, such as a development server, start it
+  as a background command.
 - The sandbox runtime is in beta. For a wall around the whole agent rather
   than its shell commands, run One Code in a container.

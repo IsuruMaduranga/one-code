@@ -19,6 +19,8 @@ import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { processState } from "../profile/process-state.ts";
 import { shellQuote } from "../shell/shell-quote.ts";
+import { probeSandbox } from "./sandbox-probe.ts";
+import { bashSpawn } from "./shell-spawn.ts";
 import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
@@ -153,6 +155,15 @@ async function start1(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: stri
 		const missing = SandboxManager.checkDependencies().errors;
 		if (missing.length > 0) throw new Error(missing.join("; "));
 		await SandboxManager.initialize(sandboxRuntimeConfig(settings, opts.scopeFor(opts.cwd)), opts.ask);
+		// On Linux the dependency check can pass where bubblewrap still cannot start (sandbox-probe.ts): try one command.
+		const bash = process.platform === "linux" ? bashSpawn().spawn : undefined;
+		if (bash) {
+			const failure = await probeSandbox((command) => SandboxManager.wrapWithSandbox(command, bash.shell), bash);
+			if (failure) {
+				await SandboxManager.reset().catch(() => undefined);
+				throw new Error(failure);
+			}
+		}
 		// The runtime points TMPDIR at a path every user of the machine shares;
 		// the session's own private directory replaces it.
 		const prefix = opts.tempDir ? `export TMPDIR=${shellQuote(opts.tempDir)}; ` : "";
