@@ -24,7 +24,7 @@ describe("the credential denylist", () => {
 		expect(isSensitivePath(path)).toBe(true);
 	});
 
-	it.each(["/work/app/gradle.properties", "/work/app/android/gradle.properties", "/work/app/.gemini/settings.json", "/work/app/src/config/hub.ts", "/work/app/docs/chrome/google.md"])(
+	it.each(["/work/app/gradle.properties", "/work/app/android/gradle.properties", "/work/app/.gemini/settings.json", "/work/app/src/config/hub.ts", "/work/app/docs/chrome/google.md", "/work/app/src/main/java/com/google/chrome/Foo.java", "/Users/dana/work/google/chrome/my-extension/src/index.ts"])(
 		"leaves %s alone",
 		(path) => {
 			expect(isSensitivePath(path)).toBe(false);
