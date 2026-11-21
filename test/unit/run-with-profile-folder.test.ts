@@ -40,7 +40,23 @@ describe("run-with-profile's profile folder check", () => {
 	it("refuses a folder with no brand.json, or with no index.ts for its default profile", () => {
 		expect(profileFolderProblem(folder({ "index.ts": "" }))).toMatch(/no brand\.json/);
 		expect(profileFolderProblem(folder({ "brand.json": "{}" }))).toMatch(/no index\.ts/);
-		expect(profileFolderProblem(folder({ "brand.json": JSON.stringify({ defaultProfile: "Main" }), "index.ts": "" }))).toMatch(/no profiles[\\/]Main[\\/]index\.ts/);
+		expect(profileFolderProblem(folder({ "brand.json": JSON.stringify({ profiles: ["Main"], defaultProfile: "Main" }), "index.ts": "" }))).toMatch(/no profiles[\\/]Main[\\/]index\.ts/);
 		expect(profileFolderProblem(folder({ "brand.json": "{" }))).toMatch(/not valid JSON/);
+	});
+
+	it("refuses a default profile the harness would refuse, before building a path from it", () => {
+		// profiles/../../outside/index.ts exists, so only the id check stops these.
+		const parent = folder({ "outside/index.ts": "" });
+		const product = join(parent, "product");
+		mkdirSync(product);
+		writeFileSync(join(product, "brand.json"), JSON.stringify({ defaultProfile: "../../outside" }));
+		mkdirSync(join(product, "profiles"));
+		expect(profileFolderProblem(product)).toMatch(/"defaultProfile" must be one of the ids in "profiles"/);
+		// Listed, but not a profile id.
+		writeFileSync(join(product, "brand.json"), JSON.stringify({ profiles: ["../../outside"], defaultProfile: "../../outside" }));
+		expect(profileFolderProblem(product)).toMatch(/"profiles" must be an array of profile ids/);
+		// A valid id the list does not hold, though its folder exists.
+		expect(profileFolderProblem(folder({ "brand.json": JSON.stringify({ profiles: ["Main"], defaultProfile: "Other" }), "profiles/Other/index.ts": "" }))).toMatch(/"defaultProfile" must be one of the ids/);
+		expect(profileFolderProblem(folder({ "brand.json": "[]" }))).toMatch(/not a JSON object/);
 	});
 });

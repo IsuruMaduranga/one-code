@@ -1562,12 +1562,18 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// rules and the safety floor were checked above, so no grant reaches them.
 			const inputKey = denialInputKey(
 				normalizedTool,
-				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>),
+				// A worktree session's call is keyed by the model's own command, with everything else it asked for:
+				// what it asks of the sandbox is part of the action (`denialInputKey`).
+				original !== undefined ? { ...(event.input as Record<string, unknown>), command: original.command } : (event.input as Record<string, unknown>),
 				callCwd,
 				isShellTool(normalizedTool),
 			);
+			// What the call asks of the sandbox, shown with the denied call so the user approves it knowingly.
+			const sandboxAsk = `${unsandboxed ? " (unsandboxed)" : ""}${hosts.length > 0 ? ` [hosts: ${hosts.join(", ")}]` : ""}`;
 			if (denials.takeGrant(inputKey)) {
 				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "user", reason: "approved in /permissions" });
+				// The approval was of this exact call, and the panel named the hosts it asked for: they hold for this one run.
+				grantCommandHosts(event.toolCallId, hosts);
 				noteAllow();
 				return undefined;
 			}
@@ -1620,8 +1626,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 				if (!outcome.noVerdict) {
 					denials.record({
 						toolName: normalizedTool,
-						display: `${event.toolName}(${previewSubject(matchSubject)})`,
-						fullDisplay: `${event.toolName}(${matchSubject})`,
+						display: `${event.toolName}(${previewSubject(matchSubject)})${sandboxAsk}`,
+						fullDisplay: `${event.toolName}(${matchSubject})${sandboxAsk}`,
 						inputKey,
 						reason: outcome.reason,
 						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),

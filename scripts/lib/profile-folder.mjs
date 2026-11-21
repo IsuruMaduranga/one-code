@@ -11,6 +11,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { profileIdProblems } from "../../extensions/lib/profile/profile-ids.mjs";
 
 export function profileFolderProblem(dir) {
 	const brandFile = join(dir, "brand.json");
@@ -21,8 +22,11 @@ export function profileFolderProblem(dir) {
 	} catch (error) {
 		return `${brandFile} is not valid JSON (${error instanceof Error ? error.message : String(error)})`;
 	}
-	const id = brand?.defaultProfile;
-	if (id !== undefined && typeof id !== "string") return `${brandFile}: "defaultProfile" must be a profile id`;
+	if (typeof brand !== "object" || brand === null || Array.isArray(brand)) return `${brandFile} is not a JSON object`;
+	// The harness's own rule (lib/profile/brand.mjs checkBrand), checked before the id becomes part of a path.
+	const idProblems = profileIdProblems(brand);
+	if (idProblems.length > 0) return `${brandFile}: ${idProblems.join("; ")}`;
+	const id = brand.defaultProfile;
 	const entry = id === undefined ? "index.ts" : join("profiles", id, "index.ts");
 	if (!existsSync(join(dir, entry))) return id === undefined ? `${dir} holds no index.ts (and its brand.json names no defaultProfile)` : `${dir} holds no ${entry}, the default profile its brand.json names`;
 	return undefined;

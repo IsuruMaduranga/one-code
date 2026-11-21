@@ -2093,6 +2093,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 				const handler = resident.turnHandlers.shift();
 				// A stop or resume during review must not change this turn's outcome.
 				const stopped = stopThatEnded(p.record.taskId, outcome);
+				// A stop that landed as the turn finished on its own cut nothing short: the report says completed, so the
+				// exit it causes must not mark the panel stopped either. A stop of the idle resident later marks it again.
+				if (!outcome.aborted) stoppedTaskIds.delete(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
@@ -2785,7 +2788,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (oneShot) {
 			const outcome = await handle.result;
 			runningIds.delete(record.taskId);
-			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+			live.finish(stopThatEnded(record.taskId, outcome) ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
 			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions, report: outcome.output } satisfies SubagentActionsPayload);
 			return {

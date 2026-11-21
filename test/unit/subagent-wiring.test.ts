@@ -1341,6 +1341,25 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		expect(sent()).toContain("<status>completed</status>");
 	});
 
+	// The kill still ends the resident after its finished turn; the panel then says what the report says.
+	it("shows an agent that finished as the stop landed as completed, not stopped, once it exits", async () => {
+		const { h, runtime, input, sent } = await launched();
+		runtime.handle.kill.mockImplementationOnce(async () => {
+			runtime.finish([], "The integration is built.");
+			(runtime.options() as { onExit?: () => void }).onExit?.();
+		});
+		input(CTRL_X);
+		input(CTRL_K);
+		input(CTRL_X);
+		input(CTRL_K);
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sent()).toContain("<status>completed</status>");
+		// The /tasks snapshot (RPC's text form) reads the panel's own status.
+		h.ctx.mode = "rpc";
+		await h.fake.commands.get("tasks")!.handler("", h.ctx);
+		expect(h.notices()).toContain("[general-purpose-1, done]");
+	});
+
 	it("lets send now's ctrl+x ctrl+s through while the strip has focus", async () => {
 		const { h, input } = await launched();
 		let sent = 0;
