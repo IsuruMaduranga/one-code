@@ -51,6 +51,11 @@ declare module "*/app-launch.mjs" {
 }
 
 /** Types for the plain-JS replaced-built-ins module (extensions/lib/app/replaced-builtins.mjs). */
+declare module "*/create-app.mjs" {
+	/** pi's exit hint with the app's command name in place of `pi`. */
+	export function rebrandResumeHint(chunk: string, bin: string): string;
+}
+
 declare module "*/replaced-builtins.mjs" {
 	export interface ReplacedBuiltin {
 		name: string;
