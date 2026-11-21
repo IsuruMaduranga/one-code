@@ -343,7 +343,9 @@ describe("spawnOwnedTree", { timeout: LOADED_MS }, () => {
 	});
 
 	it.skipIf(win32)("starts the child as the leader of its own group", async () => {
-		const { tree } = await startTree("echo ready; sleep 30");
+		// The member is forked before the ready line: a group kill that lands while the shell is still
+		// forking it can miss the new child on macOS, which then holds the group for its 30 s.
+		const { tree } = await startTree("sleep 30 & echo ready; wait");
 		try {
 			expect(tree.alive()).toBe(true);
 		} finally {

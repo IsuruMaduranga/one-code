@@ -8,6 +8,7 @@ import { memoryDir } from "../../extensions/lib/context/memory.ts";
 import { localGateMode } from "../../extensions/lib/agents/permission-gate.ts";
 import { powerShellSpawn } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
+import { comparablePath } from "../../extensions/lib/profile/paths.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 import { useRepositorySettings } from "./helpers/settings-files.ts";
 import { persistProjectAllowApproval } from "../../extensions/lib/consent/project-trust.ts";
@@ -210,8 +211,9 @@ describe("permissionGateFactory — what the bridge call carries (SUBAGENT-REVIE
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toMatchObject({ toolName: "bash", cwd: "/tmp/child", sessionId: "sess-123" });
 		expect(calls[0].signal).toBe(controller.signal);
-		// The child's own persisted-output directory, from its session and not the parent's.
-		expect(calls[0].resultsDirPath).toBe(realpathSync(sessionResultsDir(ctx)));
+		// The child's own persisted-output directory, from its session and not the parent's, in the
+		// containment form the parent's matcher compares (realpath'd, then forward-slashed and case-folded on darwin/win32).
+		expect(calls[0].resultsDirPath).toBe(comparablePath(realpathSync.native(sessionResultsDir(ctx))));
 	});
 });
 

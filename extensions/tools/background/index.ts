@@ -655,7 +655,9 @@ function backgroundExtension(pi: ExtensionAPI) {
 				waitForChildExit(child).then(
 					({ code }) => {
 						drain();
-						end(stopRequested ? "stopped" : code === 0 ? "completed" : "failed", code !== null && code !== 0 ? `exit code ${code}` : undefined);
+						// A stopped monitor's exit code reports the kill, not the command (on Windows taskkill
+						// always leaves 1), so its end names none, as a stopped background shell's does.
+						end(stopRequested ? "stopped" : code === 0 ? "completed" : "failed", !stopRequested && code !== null && code !== 0 ? `exit code ${code}` : undefined);
 					},
 					(error: Error) => {
 						drain();

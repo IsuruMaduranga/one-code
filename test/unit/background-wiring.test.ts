@@ -799,6 +799,28 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(all()).not.toContain(expiry);
 	}, 10_000);
 
+	// Windows has no TERM trap; there B4 covers it, since taskkill always leaves exit code 1.
+	it.skipIf(process.platform === "win32")("a stopped monitor whose command exits non-zero on the stop names no exit code", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "trap 'exit 3' TERM; echo one; while :; do sleep 0.1; done", description: "trapped" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
+		const ended = summaryTag(monitorEndedSummary("trapped", "killed", true));
+		for (let waited = 0; !all().includes("<status>killed</status>") && waited < 5000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		expect(all()).toContain(ended);
+		expect(all()).not.toContain("exit code 3");
+	}, 10_000);
+
 	it("B2: a monitor call without timeout_ms passes validation with the 5-minute default the description names", () => {
 		const fake = mount();
 		const tool = fake.tools.get("monitor") as unknown as { name: string; parameters: unknown; prepareArguments?: (a: unknown) => unknown };
