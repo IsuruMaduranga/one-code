@@ -18,6 +18,7 @@
  */
 
 import { announcePrompt } from "../notify/desktop.ts";
+import { brandedId } from "../profile/brand.mjs";
 
 interface Emitter {
 	emit(channel: string, data: unknown): void;
@@ -59,4 +60,38 @@ export async function openGatePrompt<T>(options: GatePromptOptions<T>): Promise<
 export function bindGatePrompt(events: Emitter, ctx: { hasUI: boolean }) {
 	return <T>(attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
 		openGatePrompt({ events, attention, signal, hasUI: () => ctx.hasUI, open });
+}
+
+/**
+ * A prompt another extension needs opened in the permission gate's own queue
+ * (the sandbox's question about a network host, raised mid-command): the gate
+ * shows one prompt at a time and holds a prompt while a panel has the
+ * keyboard, and a prompt opened beside that queue could land on top of
+ * either. The asker emits the request; the permissions extension marks it
+ * `taken` and runs `open` in its queue.
+ */
+export const GATE_PROMPT_REQUEST_CHANNEL = brandedId("gate-prompt-request");
+
+export interface GatePromptRequest {
+	attention: string | undefined;
+	signal?: AbortSignal;
+	hasUI: () => boolean;
+	open: () => Promise<unknown>;
+	/** Set by the gate when it takes the request. */
+	taken?: boolean;
+	/** Called by the gate with the answer, or undefined when the prompt did not open or was dismissed. */
+	settle(answer: unknown): void;
+}
+
+/**
+ * Ask for `open` to run in the permission gate's prompt queue. Without a
+ * gate on the bus (a session with the permissions feature off) the prompt
+ * opens directly, with the same abort and no-UI handling.
+ */
+export function requestGatePrompt<T>(events: Emitter, ctx: { hasUI: boolean }, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> {
+	return new Promise<T | undefined>((resolve) => {
+		const request: GatePromptRequest = { attention, signal, hasUI: () => ctx.hasUI, open, settle: (answer) => resolve(answer as T | undefined) };
+		events.emit(GATE_PROMPT_REQUEST_CHANNEL, request);
+		if (!request.taken) resolve(bindGatePrompt(events, ctx)(attention, signal, open).catch(() => undefined));
+	});
 }

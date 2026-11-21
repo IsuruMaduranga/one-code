@@ -19,7 +19,7 @@
 
 import { brand, brandedId } from "../../lib/profile/brand.mjs";
 import { desktopNotificationText } from "../../lib/notify/desktop.ts";
-import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { bindGatePrompt, GATE_PROMPT_REQUEST_CHANNEL, type GatePromptRequest, openGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { ccToolName } from "../../lib/rules/hook-matcher.ts";
 import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
@@ -1294,6 +1294,16 @@ function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const gatePrompt = <T>(ctx: ExtensionContext, attention: string | undefined, signal: AbortSignal | undefined, open: () => Promise<T>): Promise<T | undefined> =>
 		serializePrompt(() => bindGatePrompt(pi.events, ctx)(attention, signal, open), signal);
+
+	// A prompt another extension raises (the sandbox's host question) takes its turn in the same queue.
+	pi.events.on(GATE_PROMPT_REQUEST_CHANNEL, (data) => {
+		const request = data as GatePromptRequest;
+		request.taken = true;
+		void serializePrompt(() => openGatePrompt({ events: pi.events, attention: request.attention, signal: request.signal, hasUI: request.hasUI, open: request.open }), request.signal).then(
+			(answer) => request.settle(answer),
+			() => request.settle(undefined),
+		);
+	});
 
 	/** A context overflow judged nothing: ask once, or stop a headless turn. */
 	const transcriptOverflow = async (ctx: ExtensionContext, toolName: string, subject: string, signal = ctx.signal): Promise<ChildGateDecision> => {

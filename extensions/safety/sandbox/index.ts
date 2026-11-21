@@ -21,7 +21,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { privateSessionTempDir } from "../../lib/core/scratchpad.ts";
 import { sessionView } from "../../lib/agents/child-extensions.ts";
-import { bindGatePrompt } from "../../lib/consent/gate-prompt.ts";
+import { requestGatePrompt } from "../../lib/consent/gate-prompt.ts";
 import { desktopNotificationText } from "../../lib/notify/desktop.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
@@ -119,7 +119,8 @@ function sandboxExtension(pi: ExtensionAPI) {
 		const ctx = liveCtx;
 		if (!ctx) return undefined;
 		const options = hostPromptOptions(host);
-		const choice = await bindGatePrompt(pi.events, ctx)(desktopNotificationText.permission(brand.name, "Bash"), ctx.signal, () => ctx.ui.select(hostPromptTitle(host, port), [options.once, options.session, options.no], { signal: ctx.signal }));
+		// In the permission gate's own prompt queue: one prompt at a time, and none on top of an open panel.
+		const choice = await requestGatePrompt(pi.events, ctx, desktopNotificationText.permission(brand.name, "Bash"), ctx.signal, () => ctx.ui.select(hostPromptTitle(host, port), [options.once, options.session, options.no], { signal: ctx.signal }));
 		return choice === options.once ? "once" : choice === options.session ? "session" : choice === options.no ? "no" : undefined;
 	};
 	const hosts = createHostGate({ mode: () => mode, notListed: text.hostNotListed, prompt: askUser });

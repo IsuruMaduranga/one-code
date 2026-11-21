@@ -20,6 +20,7 @@ import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.t
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
 import { checkDependencies } from "../../extensions/commands/doctor/dependencies.ts";
 import { applySandboxPanelKey, applySandboxPick, openSandboxPanel, renderSandboxPanel, sandboxModeOf, sandboxPickOutcome } from "../../extensions/safety/sandbox/panel.ts";
+import { GATE_PROMPT_REQUEST_CHANNEL, type GatePromptRequest, requestGatePrompt } from "../../extensions/lib/consent/gate-prompt.ts";
 import { createHostGate, type HostAnswer } from "../../extensions/safety/sandbox/hosts.ts";
 import { sandboxSectionText, sandboxStatusLines } from "../../extensions/safety/sandbox/section.ts";
 import { renderTranscript, toolCallEntry } from "../../extensions/safety/permissions/auto-mode/transcript.ts";
@@ -501,6 +502,42 @@ describe("a host the settings do not list", () => {
 		expect(await hosts.ask({ host: "a.example" })).toBe(false);
 		expect(await hosts.ask({ host: "a.example" })).toBe(true);
 		expect(asked).toEqual(["a.example", "a.example"]);
+	});
+});
+
+describe("a prompt raised outside the permission gate", () => {
+	const bus = () => {
+		const handlers = new Map<string, Array<(data: unknown) => void>>();
+		return {
+			on: (channel: string, handler: (data: unknown) => void) => void handlers.set(channel, [...(handlers.get(channel) ?? []), handler]),
+			emit: (channel: string, data: unknown) => void (handlers.get(channel) ?? []).forEach((handler) => handler(data)),
+		};
+	};
+
+	it("runs in the gate's queue when a gate is on the bus, and opens directly when none is", async () => {
+		const events = bus();
+		const order: string[] = [];
+		// The gate: it takes the request and answers it later, in its own turn.
+		events.on(GATE_PROMPT_REQUEST_CHANNEL, (data) => {
+			const request = data as GatePromptRequest;
+			request.taken = true;
+			order.push("queued");
+			void Promise.resolve().then(async () => request.settle(await request.open()));
+		});
+		const answer = requestGatePrompt(events, { hasUI: true }, undefined, undefined, async () => {
+			order.push("opened");
+			return "Yes";
+		});
+		expect(order).toEqual(["queued"]);
+		expect(await answer).toBe("Yes");
+		expect(order).toEqual(["queued", "opened"]);
+
+		const alone = bus();
+		expect(await requestGatePrompt(alone, { hasUI: true }, undefined, undefined, async () => "No")).toBe("No");
+		// With no one to ask, nothing opens.
+		const open = vi.fn(async () => "Yes");
+		expect(await requestGatePrompt(alone, { hasUI: false }, undefined, undefined, open)).toBeUndefined();
+		expect(open).not.toHaveBeenCalled();
 	});
 });
 
