@@ -81,6 +81,7 @@ export interface LspResultText {
 const PROJECT_CODE_REASON: Record<string, string> = {
 	"rust-analyzer": "runs this project's build scripts and proc macros",
 	jdtls: "runs this project's Gradle or Maven build to import it",
+	"typescript-language-server": "runs the TypeScript in this project's node_modules outside the command sandbox",
 };
 
 const projectCodeReason = (command: string) => PROJECT_CODE_REASON[command] ?? "runs this project's code";

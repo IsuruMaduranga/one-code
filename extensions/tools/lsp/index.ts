@@ -55,7 +55,8 @@ import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnos
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { singleFlight } from "../../lib/core/single-flight.ts";
 import { findProjectRoot as findRepoRoot } from "../../lib/context/git.ts";
-import { createLspTrustGate, PROJECT_CODE_SERVERS } from "./trust.ts";
+import { createLspTrustGate, needsProjectTrust } from "./trust.ts";
+import { sandboxConfigured } from "../../lib/shell-run/sandbox.ts";
 import { activeProfile, requireText } from "../../lib/profile/profile.ts";
 import type { ResolvedFixHints, ResolvedLanguageServer } from "../../lib/profile/language-servers.ts";
 import { withFixHints } from "./fix-hints.ts";
@@ -255,7 +256,7 @@ function lspExtension(pi: ExtensionAPI) {
 	 */
 	const trustGate = createLspTrustGate({ projectRoot: (dir) => findRepoRoot(dir) ?? dir });
 	const projectCodeAllowed = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<boolean> => {
-		if (target.plugin || target.fromProfile || !PROJECT_CODE_SERVERS.has(target.command)) return true;
+		if (target.plugin || target.fromProfile || !needsProjectTrust(target.command, sandboxConfigured())) return true;
 		const why = lspResultText.projectCodeReason(target.command);
 		const confirm = ctx.hasUI
 			? async (root: string) =>
