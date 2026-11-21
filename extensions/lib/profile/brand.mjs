@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import data from "../../../profile/brand.json" with { type: "json" };
+import { PROFILE_NAME, profileIdProblems } from "./profile-ids.mjs";
 
 const REQUIRED = ["name", "idPrefix", "bin", "envPrefix", "stateDir", "productFile", "theme", "homepage", "subtitle"];
 
@@ -62,35 +63,13 @@ export function checkBrand(value) {
 	// Path checks compare case-folded paths on macOS and Windows (lib/profile/paths.ts comparablePath) against patterns built from this name.
 	// The leading dot is required: the name is a protected path segment at any depth (lib/rules/protected-paths.ts), and a plain word such as "agent" would guard every folder of that name.
 	if (typeof value.stateDir === "string" && !STATE_DIR_NAME.test(value.stateDir)) problems.push(`"stateDir" must be one lower-case folder name starting with "." (letters, digits, ".", "_", "-")`);
-	if (value.profiles !== undefined) {
-		if (!Array.isArray(value.profiles) || value.profiles.some((id) => typeof id !== "string" || !PROFILE_NAME.test(id))) problems.push(`"profiles" must be an array of profile ids (letters, digits, ".", "_", "-")`);
-		else if (new Set(value.profiles.map((id) => id.toLowerCase())).size !== value.profiles.length) problems.push(`"profiles" names an id twice (ids compare without case)`);
-		else {
-			const taken = value.profiles.filter((id) => RESERVED_FLAGS.has(id.toLowerCase()));
-			if (taken.length > 0) problems.push(`"profiles" must not use ${taken.map((id) => `"${id}"`).join(", ")}: \`--${taken[0]}\` is already a launch flag`);
-		}
-	}
-	// Spelled as the list spells it: the id names a folder, and folder names are case-sensitive on Linux.
-	if (value.defaultProfile !== undefined && (typeof value.defaultProfile !== "string" || !Array.isArray(value.profiles) || !value.profiles.includes(value.defaultProfile))) problems.push(`"defaultProfile" must be one of the ids in "profiles", spelled as the list spells it`);
+	problems.push(...profileIdProblems(value));
 	if (problems.length > 0) throw new Error(`profile/brand.json: ${problems.join("; ")}`);
 	return value;
 }
 
 const STATE_DIR_NAME = /^\.[a-z0-9][a-z0-9._-]*$/;
-/** A profile's name, a product's or a user's: it is a folder name and a launch flag. */
-export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-/**
- * Launch flags a product profile's id must not take: `--<id>` chooses the
- * profile and is taken out of the arguments, so an id spelled like one of
- * pi's or the harness's own flags would hide that flag.
- */
-const RESERVED_FLAGS = new Set([
-	"profile", "help", "version", "print", "mode", "continue", "resume", "session", "session-dir", "fork", "no-session",
-	"model", "models", "provider", "api-key", "thinking", "tools", "no-tools", "extension", "no-extensions", "skill", "no-skills",
-	"theme", "no-themes", "prompt-template", "no-prompt-templates", "system-prompt", "append-system-prompt", "export", "list-models",
-	"offline", "verbose", "approve", "no-approve", "tui-mode", "permission-mode", "add-dir", "dangerously-skip-permissions",
-]);
+export { PROFILE_NAME };
 
 /** The names a product profile's own `brand.json` may set; every other name is the product's. */
 export const PROFILE_BRAND_FIELDS = ["name", "stateDir", "productFile", "theme", "subtitle", "wordmark", "spinnerVerbs"];

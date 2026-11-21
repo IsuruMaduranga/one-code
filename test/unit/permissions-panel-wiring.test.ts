@@ -23,6 +23,9 @@ import { requireText } from "../../extensions/lib/profile/profile.ts";
 import { defaultEnvironment } from "../../extensions/safety/permissions/auto-mode/classifier-prompt.ts";
 import { indexFor } from "../../extensions/safety/permissions/auto-mode/prompt.ts";
 import { autoModeResultText } from "../../extensions/safety/permissions/auto-mode/text.ts";
+import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/shell/original-command.ts";
+import { type ActiveSandbox, sandboxedCommand, setSandboxForTest } from "../../extensions/lib/shell-run/sandbox.ts";
+import { SANDBOX_OFF } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 
 /** Stands in for the provider behind the model registry's stream (helpers/side-call-registry.ts). */
 const completeSimple = vi.fn<typeof CompleteSimple>();
@@ -105,6 +108,7 @@ describe("/permissions wiring", () => {
 		await fake.fire("input", { text: "clean up the old build directory", source: "interactive" }, ctx);
 	});
 	afterEach(() => {
+		setSandboxForTest(undefined);
 		vi.unstubAllEnvs();
 		rmSync(home, { recursive: true, force: true });
 	});
@@ -263,6 +267,100 @@ describe("/permissions wiring", () => {
 		expect(screens[0]).toContain(`${brand.name} won't ask before using allowed tools.`);
 		expect(screens[1]).toContain(`${brand.name} will always ask for confirmation before using these tools.`);
 		expect(screens[2]).toContain(`${brand.name} will always reject requests to use denied tools.`);
+	});
+
+	describe("what a denied call asks of the sandbox", () => {
+		/** A running sandbox that keeps the host list each run was given (the shell tool's side, `sandboxedCommand`). */
+		const runningSandbox = () => {
+			const hosts = new Map<string, string[]>();
+			const sandbox: ActiveSandbox = {
+				wrap: async (command) => `SANDBOX(${command})`,
+				annotate: (_id, output) => output,
+				allowHosts: (id, list) => void hosts.set(id, [...list]),
+				release: (id) => void hosts.delete(id),
+				ended: () => {},
+				filesystem: () => ({}) as never,
+			};
+			const settings = { ...SANDBOX_OFF, enabled: true };
+			setSandboxForTest(settings, sandbox);
+			return hosts;
+		};
+		const sandboxSupported = process.platform === "darwin" || process.platform === "linux";
+		const call = (input: Record<string, unknown>, toolCallId: string) => fake.fireOne<GateResult>("tool_call", { toolName: "bash", input, toolCallId }, ctx);
+		const HOSTS = ["a.example", "b.example"];
+
+		it.skipIf(!sandboxSupported)("keys a worktree-wrapped call by the model's command with its sandbox request, so approving the plain call does not cover leaving the sandbox", async () => {
+			runningSandbox();
+			const worktree = join(home, "wt");
+			mkdirSync(worktree, { recursive: true });
+			const command = `rm -rf ${outside()}`;
+			const wrapped = (toolCallId: string, extra: Record<string, unknown> = {}) => {
+				fake.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId, command, cwd: worktree });
+				return call({ command: `cd '${worktree}' && (${command}\n)`, ...extra }, toolCallId);
+			};
+			blockOnce();
+			expect((await wrapped("w1"))?.block).toBe(true);
+			await openPanel(ENTER);
+
+			completeMock.mockClear();
+			blockOnce();
+			expect((await wrapped("w2", { dangerouslyDisableSandbox: true }))?.block).toBe(true);
+			expect(completeMock).toHaveBeenCalledTimes(2);
+			// The grant is still there for the call that was approved.
+			completeMock.mockClear();
+			expect(await wrapped("w3")).toBeUndefined();
+			expect(completeMock).not.toHaveBeenCalled();
+		});
+
+		it.skipIf(!sandboxSupported)("shows the hosts a denied call named, and that it asked to leave the sandbox", async () => {
+			runningSandbox();
+			blockOnce();
+			await call({ command: `rm -rf ${outside()}`, allowed_domains: HOSTS }, "h1");
+			blockOnce();
+			await call({ command: `rm -rf ${outside()}/b`, dangerouslyDisableSandbox: true }, "u1");
+			// Newest first: the unsandboxed call, then the one naming hosts; approve both.
+			await openPanel(ENTER, DOWN, ENTER);
+			expect(screens.at(-1)).toContain(`bash(rm -rf ${outside()}/b) (unsandboxed)`);
+			expect(screens.at(-1)).toContain(`bash(rm -rf ${outside()}) [hosts: a.example, b.example]`);
+			// The model is told the whole approved call too (the full display).
+			const told = reminders.join("\n");
+			expect(told).toContain(`bash(rm -rf ${outside()}/b) (unsandboxed)`);
+			expect(told).toContain(`bash(rm -rf ${outside()}) [hosts: a.example, b.example]`);
+		});
+
+		it.skipIf(!sandboxSupported)("gives an approved call the hosts it named, for its one run", async () => {
+			const granted = runningSandbox();
+			const command = `rm -rf ${outside()}`;
+			blockOnce();
+			expect((await call({ command, allowed_domains: HOSTS }, "h1"))?.block).toBe(true);
+			await openPanel(ENTER);
+
+			completeMock.mockClear();
+			expect(await call({ command, allowed_domains: HOSTS }, "h2")).toBeUndefined();
+			expect(completeMock).not.toHaveBeenCalled();
+			await sandboxedCommand({ command, original: command, disable: false, cwd, bash: "/bin/bash", id: "h2" });
+			expect([...granted.values()]).toEqual([HOSTS]);
+		});
+
+		// The panel showed no hosts for a call denied while no sandbox ran, so its approval grants none: once a sandbox
+		// runs, the same input would be granted hosts, which is another action, and the retry goes to the classifier.
+		const asking = (tool: string): Record<string, unknown> =>
+			tool === "bash" ? { command: `rm -rf ${outside()}`, allowed_domains: HOSTS } : { command: `tail -f ${outside()}/log`, description: "watch", allowed_domains: HOSTS };
+		it.skipIf(!sandboxSupported).each(["bash", "monitor"])("does not let an approval of a %s call made while no sandbox ran cover it once one runs and would grant it hosts", async (tool) => {
+			const input = asking(tool);
+			blockOnce();
+			expect((await fake.fireOne<GateResult>("tool_call", { toolName: tool, input, toolCallId: "c1" }, ctx))?.block).toBe(true);
+			await openPanel(ENTER);
+			const approved = screens.at(-1)!.split("\n").find((line) => line.includes("✔"));
+			expect(approved).toContain(`${tool}(`);
+			expect(approved).not.toContain("[hosts:");
+
+			runningSandbox();
+			completeMock.mockClear();
+			blockOnce();
+			expect((await fake.fireOne<GateResult>("tool_call", { toolName: tool, input, toolCallId: "c2" }, ctx))?.block).toBe(true);
+			expect(completeMock).toHaveBeenCalled();
+		});
 	});
 
 	describe("Auto mode tab", () => {

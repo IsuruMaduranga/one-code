@@ -248,16 +248,20 @@ function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 }
 
 /**
- * The product's extension folders the manifest's glob loads: every folder,
- * a linked one included, with an `index.ts`. Read on each resolve, not once
- * per process: /reload globs the entries again, and a folder added since must
- * not stop the wrapper (a few file checks per extension copy at startup).
+ * The product's extension folders the manifest's glob loads: every real
+ * folder with an `index.ts`. A linked folder is none: pi expands the entry
+ * with Node's `fs.globSync`, whose `*` does not follow a symbolic link, so a
+ * profile listing one would run an extension the session never loads. Read
+ * on each resolve, not once per process: /reload globs the entries again, and
+ * a folder added since must not stop the wrapper (a few file checks per
+ * extension copy at startup).
  */
 export function productExtensionFolders(productDir: string): string[] {
 	const root = resolve(productDir, PRODUCT_EXTENSIONS_DIR);
 	if (!existsSync(root)) return [];
-	return readdirSync(root)
-		.filter((name) => isProductExtensionFolder(name) && existsSync(join(root, name, "index.ts")))
+	return readdirSync(root, { withFileTypes: true })
+		.filter((entry) => entry.isDirectory() && isProductExtensionFolder(entry.name) && existsSync(join(root, entry.name, "index.ts")))
+		.map((entry) => entry.name)
 		.sort();
 }
 
@@ -271,7 +275,7 @@ function productExtensionChoice(listed: unknown, folders: readonly string[]): { 
 		return { choice: new Map(folders.map((name) => [name, false])), problems: [`its "extensions" must be an array of folder names under ${PRODUCT_EXTENSIONS_DIR}/`] };
 	}
 	const names = listed as readonly string[] | undefined;
-	const problems = (names ?? []).filter((name) => !folders.includes(name)).map((name) => `it lists the extension "${name}", which has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts`);
+	const problems = (names ?? []).filter((name) => !folders.includes(name)).map((name) => `it lists the extension "${name}", which has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts (a linked folder is none: pi's glob does not follow links)`);
 	return { choice: new Map(folders.map((name) => [name, names === undefined || names.includes(name)])), problems };
 }
 
@@ -295,7 +299,9 @@ function childExtensionProblems(entries: readonly string[], productDir: string, 
 		} else if (!existsSync(path)) {
 			problems.push(`child extension "${entry}" does not exist (${path})`);
 		} else if (!choice.has(folder)) {
-			problems.push(`child extension "${entry}" must sit in a product extension folder, one with an index.ts (${PRODUCT_EXTENSIONS_DIR}/<name>/), whose name its productExtension wrapper carries`);
+			// A child-only folder was legal before each profile chose its extensions (decisions/bi-fork.md): name the move.
+			const fix = folder !== inside && isProductExtensionFolder(folder) ? `give ${PRODUCT_EXTENSIONS_DIR}/${folder}/ an index.ts (one exporting productExtension("${folder}", () => {}) registers nothing in the main session) or move the file into a folder that has one` : `move it into a folder that has one`;
+			problems.push(`child extension "${entry}" must sit in a product extension folder, one with an index.ts (${PRODUCT_EXTENSIONS_DIR}/<name>/), whose name its productExtension wrapper carries: ${fix}`);
 		} else if (choice.get(folder) === false) {
 			problems.push(`child extension "${entry}" is in the folder "${folder}", which the profile's extensions list leaves out`);
 		}
@@ -558,10 +564,14 @@ export function profileText(): ProfileText {
 	return activeProfile().text;
 }
 
-/** Stop the process: an invalid profile must never run degraded or without its gate. */
-export function failClosed(error: unknown): never {
+/**
+ * Stop the process: an invalid profile must never run degraded or without its
+ * gate. `subject` names what is invalid when it is not the profile itself (a
+ * product extension's entry file).
+ */
+export function failClosed(error: unknown, subject = `The profile in ${profileDirName}/, or a switch over it,`): never {
 	const reason = error instanceof Error ? error.message : String(error);
-	process.stderr.write(`\nThe profile in ${profileDirName}/, or a switch over it, is invalid, so the harness will not start: ${reason}\n\n`);
+	process.stderr.write(`\n${subject} is invalid, so the harness will not start: ${reason}\n\n`);
 	process.exit(1);
 }
 

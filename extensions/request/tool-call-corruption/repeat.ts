@@ -25,8 +25,15 @@ export const REPEAT_CHECK_EVERY = 512;
  * 2 KB; a shell command can (a heredoc of identical rows), so it gets more;
  * file content (zero-filled data, identical CSV rows, base64) and tools One
  * Code does not know (an MCP tool's payload) get the most.
+ *
+ * A unit holding a whole row (a line break and some text: a heredoc of
+ * identical rows, an Agent prompt pasting one log line a hundred times) is
+ * how legitimate repetition looks, so its repetition must keep growing to
+ * `lines` before any tool's call counts as runaway. Both runaways the replay
+ * found (features/agent-wait/notes.md) repeat a unit with no line break, and
+ * stay caught at the tool's own limit.
  */
-export const REPEAT_LIMITS = { short: 2_048, shell: 8_192, content: 65_536 } as const;
+export const REPEAT_LIMITS = { short: 2_048, shell: 8_192, content: 65_536, lines: 65_536 } as const;
 
 const SHORT_ARGUMENT_TOOLS: ReadonlySet<string> = new Set([
 	"read",
@@ -61,7 +68,7 @@ export function repeatLimit(toolName: string | undefined): number {
 }
 
 export interface RepeatTail {
-	/** The last `limit + REPEAT_MAX_UNIT` characters streamed at the last check, and every character since. */
+	/** The last `limit + REPEAT_MAX_UNIT` characters streamed at the last check (up to `lines` while a row repeats), and every character since. */
 	tail: string;
 	/** Characters streamed since the last check. */
 	sinceCheck: number;
@@ -86,6 +93,58 @@ export function repeatingUnit(text: string): string | undefined {
 }
 
 /**
+ * Whether a unit is a whole row: once its JSON escapes are read (arguments
+ * stream escaped: `\n`, `\u000a`, an escaped backslash `\\` that is no line
+ * break), it holds a line break and text besides blank space.
+ *
+ * The unit can start anywhere in the repeat, inside an escape too ("n…ok\\"),
+ * so it is read from an escape boundary: the first backslash of a run, which
+ * follows a character that is not a backslash. Every period starts at that same
+ * boundary, so no escape crosses the unit's end. A unit of backslashes alone
+ * holds no boundary and is no row.
+ */
+export function isRowUnit(unit: string): boolean {
+	let start = 0;
+	if (unit.includes("\\")) {
+		start = -1;
+		for (let i = 0; i < unit.length; i++) {
+			if (unit[i] === "\\" && unit[(i - 1 + unit.length) % unit.length] !== "\\") {
+				start = i;
+				break;
+			}
+		}
+		if (start < 0) return false;
+	}
+	const row = decodeEscapes(unit.slice(start) + unit.slice(0, start));
+	return row.includes("\n") && !/^\s*$/.test(row);
+}
+
+const SIMPLE_ESCAPES: Readonly<Record<string, string>> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", '"': '"', "/": "/", "\\": "\\" };
+
+/** Read JSON string escapes; anything that is not a whole escape stays as written. */
+function decodeEscapes(text: string): string {
+	let out = "";
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (ch !== "\\" || i + 1 >= text.length) {
+			out += ch;
+			continue;
+		}
+		const next = text[i + 1];
+		if (next in SIMPLE_ESCAPES) {
+			out += SIMPLE_ESCAPES[next];
+			i++;
+		} else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(text.slice(i + 2, i + 6))) {
+			out += String.fromCharCode(Number.parseInt(text.slice(i + 2, i + 6), 16));
+			i += 5;
+		} else {
+			out += ch;
+		}
+	}
+	return out;
+}
+
+/**
  * The unit as a person would read it: the tail can end anywhere inside the
  * repeat ("ll  Lspnu"), so start it where a word starts ("Lspnull  ").
  */
@@ -100,19 +159,31 @@ export function readableUnit(unit: string): string {
 
 /**
  * Feed one streamed delta of a call's arguments. Returns the new state and,
- * once the last `limit` characters are one unit repeated, that unit (as a
- * person would read it, `readableUnit`).
+ * once the last `limit` characters are one unit repeated (the last `lines`
+ * when the unit is a whole row, `isRowUnit`), that unit (as a person would
+ * read it, `readableUnit`) and the length of the repetition that stopped it.
  */
-export function trailingRepeat(previous: RepeatTail | undefined, delta: string, limit: number): { state: RepeatTail; unit?: string } {
+export function trailingRepeat(previous: RepeatTail | undefined, delta: string, limit: number): { state: RepeatTail; unit?: string; chars?: number } {
 	// Trimmed only when it is checked: a slice per delta would copy the whole
 	// tail (64 KB for file content) on every streamed chunk.
 	let tail = (previous?.tail ?? "") + delta;
 	const sinceCheck = (previous?.sinceCheck ?? 0) + delta.length;
 	if (sinceCheck < REPEAT_CHECK_EVERY) return { state: { tail, sinceCheck } };
-	const keep = limit + REPEAT_MAX_UNIT;
-	if (tail.length > keep) tail = tail.slice(tail.length - keep);
-	if (tail.length < limit) return { state: { tail, sinceCheck } };
-	const unit = repeatingUnit(tail.slice(tail.length - limit));
+	const trim = (chars: number) => {
+		if (tail.length > chars + REPEAT_MAX_UNIT) tail = tail.slice(tail.length - chars - REPEAT_MAX_UNIT);
+	};
+	const unit = tail.length < limit ? undefined : repeatingUnit(tail.slice(tail.length - limit));
+	if (unit === undefined) {
+		trim(limit);
+		return { state: { tail, sinceCheck: 0 } };
+	}
+	if (!isRowUnit(unit) || limit >= REPEAT_LIMITS.lines) {
+		trim(limit);
+		return { state: { tail, sinceCheck: 0 }, unit: readableUnit(unit), chars: limit };
+	}
+	// A row repeating: keep the tail growing until the repetition reaches `lines` or breaks off.
+	trim(REPEAT_LIMITS.lines);
 	const state = { tail, sinceCheck: 0 };
-	return unit === undefined ? { state } : { state, unit: readableUnit(unit) };
+	const rows = tail.length < REPEAT_LIMITS.lines ? undefined : repeatingUnit(tail.slice(tail.length - REPEAT_LIMITS.lines));
+	return rows === undefined ? { state } : { state, unit: readableUnit(rows), chars: REPEAT_LIMITS.lines };
 }

@@ -6,6 +6,7 @@
  * around a still-running task, and the /loop, schedule_wakeup and cron
  * timers (fake timers, no external process).
  */
+import { validateToolArguments } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Cron job ids feed Claude Code's jitter (cron.ts JITTER); ids whose first 8 hex
@@ -94,6 +95,23 @@ function mount(): FakePi {
  * runs to its end inside the tool call (LIFECYCLE-REVIEW-2026-09-06 M3).
  */
 const liveSessionCtx = (overrides: Record<string, unknown> = {}) => createFakeCtx({ hasUI: true, mode: "tui", ...overrides });
+
+/**
+ * Wait, up to `withinMs`, until a running task's output holds the line `line` (the header that names the command
+ * does not count), reading it without blocking (a running task's read withdraws no notification). Fails loud when
+ * the line never shows.
+ */
+async function waitForTaskOutput(fake: FakePi, ctx: unknown, taskId: string, line: string, withinMs = 5000): Promise<void> {
+	const deadline = Date.now() + withinMs;
+	for (;;) {
+		const out = (await fake.tools.get("task_output")!.execute("wait", { task_id: taskId, block: false }, undefined, undefined, ctx as never)) as {
+			content: Array<{ text: string }>;
+		};
+		if (out.content.some((part) => part.text.split("\n").some((row) => row.trim() === line))) return;
+		if (Date.now() >= deadline) throw new Error(`task ${taskId} never showed ${JSON.stringify(line)}; last output:\n${out.content.map((part) => part.text).join("\n")}`);
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+}
 
 describe("background wiring: monitor batching", () => {
 	it("flushes a batch (capped, with overflow count) as soon as the command exits", async () => {
@@ -771,6 +789,67 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(all).toContain(escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 })));
 		expect(all).not.toContain(summaryTag(monitorEndedSummary("slow", "killed", true)));
 		expect(all).not.toContain("<status>");
+	});
+
+	it("B4: a monitor stopped before its deadline whose kill grace runs past it is reported stopped, not expired", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		// The ignored SIGTERM is inherited by `sleep`, so the tree dies only at the SIGKILL after the grace (2 s), past the 1 s deadline.
+		const startedAt = Date.now();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "trap '' TERM; echo one; while :; do sleep 0.1; done", description: "stubborn", timeout_ms: 1000 },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		// Stop once the command has printed, and before the deadline, so only the kill grace runs past it.
+		await waitForTaskOutput(fake, ctx, start.details.taskId, "one", 900);
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		expect(Date.now() - startedAt).toBeLessThan(1000);
+		// No task_output from here: reading the end would withdraw its notification.
+		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
+		const ended = summaryTag(monitorEndedSummary("stubborn", "killed", true));
+		const expiry = escapeTaskText(words.monitor.expired({ duration: "1s", events: 1 }));
+		for (let waited = 0; !all().includes(ended) && !all().includes(expiry) && waited < 6000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 300));
+		expect(all()).toContain(ended);
+		expect(all()).not.toContain(expiry);
+	}, 10_000);
+
+	// Windows has no TERM trap; there B4 covers it, since taskkill always leaves exit code 1.
+	it.skipIf(process.platform === "win32")("a stopped monitor whose command exits non-zero on the stop names no exit code", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "trap 'exit 3' TERM; echo one; while :; do sleep 0.1; done", description: "trapped" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await waitForTaskOutput(fake, ctx, start.details.taskId, "one");
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		const all = () => fake.sentMessages.map((m) => (m.message.content as Array<{ text?: string }>)[0]?.text ?? "").join("\n");
+		const ended = summaryTag(monitorEndedSummary("trapped", "killed", true));
+		for (let waited = 0; !all().includes("<status>killed</status>") && waited < 5000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		expect(all()).toContain(ended);
+		expect(all()).not.toContain("exit code 3");
+	}, 10_000);
+
+	it("B2: a monitor call without timeout_ms passes validation with the 5-minute default the description names", () => {
+		const fake = mount();
+		const tool = fake.tools.get("monitor") as unknown as { name: string; parameters: unknown; prepareArguments?: (a: unknown) => unknown };
+		const args = { ws: { url: "wss://events.example.com/stream", protocols: ["v1"] }, description: "deploy events" };
+		const prepared = tool.prepareArguments ? tool.prepareArguments(args) : args;
+		expect(validateToolArguments(tool as never, { type: "toolCall", id: "c1", name: "monitor", arguments: prepared } as never)).toMatchObject({ timeout_ms: 300_000 });
+		// A given deadline is kept, and the schema still lists the field as required, as Claude Code's does.
+		expect(tool.prepareArguments!({ ...args, timeout_ms: 1000 })).toMatchObject({ timeout_ms: 1000 });
+		expect((tool.parameters as { required: string[] }).required).toContain("timeout_ms");
 	});
 
 	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {

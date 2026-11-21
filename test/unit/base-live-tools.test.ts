@@ -5,7 +5,7 @@
  * (One Code's: profile/test/profile-live-tools.test.ts).
  */
 import { describe, expect, it } from "vitest";
-import type { LiveTools } from "../../extensions/lib/profile/live-tools.ts";
+import { type LiveTools, withoutTools } from "../../extensions/lib/profile/live-tools.ts";
 import type { ShellBlock } from "../../extensions/lib/shell-run/shell-text.ts";
 import { notificationText } from "../../extensions/lib/notify/notifications-text.ts";
 import { webFetchResultWords } from "../../extensions/tools/web-fetch/text.ts";
@@ -74,5 +74,16 @@ describe("the base's words naming another tool", () => {
 	it("name the tools when every one is on", () => {
 		const all = texts(ALL_LIVE).map(([, , text]) => text).join("\n");
 		for (const tool of ["task_output", "monitor", "SendMessage"]) expect(all, tool).toContain(tool);
+	});
+
+	it("B6: the detach block names each background tool that is live, task_stop without task_output included", () => {
+		const detach = (live: LiveTools) => shellResultWords(live).blocked({ kind: "detach", via: "`nohup`" });
+		expect(detach(ALL_LIVE)).toContain(
+			"it returns a task id immediately, completion arrives as a task notification, output stays readable with task_output, and it can be stopped with task_stop. ",
+		);
+		const noOutput = detach(withoutTools(ALL_LIVE, ["task_output"]));
+		expect(noOutput).toContain("it returns a task id immediately, completion arrives as a task notification, and it can be stopped with task_stop. ");
+		expect(noOutput).not.toContain("task_output");
+		expect(detach(withoutTools(ALL_LIVE, ["task_output", "task_stop"]))).toContain("it returns a task id immediately and completion arrives as a task notification. ");
 	});
 });

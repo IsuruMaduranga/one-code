@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
+import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -170,5 +171,87 @@ describe("an isolated resident's exit", () => {
 		} finally {
 			rmSync(repo, { recursive: true, force: true });
 		}
+	});
+});
+
+// A stop can land after pi has ended the turn's run but before its settle event
+// reaches the tracker (pi awaits the child's agent_settled handlers first). The
+// kill cut nothing short there, so the turn keeps its own outcome; a stop of
+// every agent then delivers that report instead of dropping it as stopped.
+describe("a kill as the turn ends on its own", () => {
+	type Listener = (event: unknown) => void;
+	function scriptedSession() {
+		let listener: Listener = () => {};
+		let finishPrompt!: () => void;
+		const session = {
+			...fakeSession(),
+			isIdle: true,
+			subscribe: (l: Listener) => {
+				listener = l;
+				return () => {};
+			},
+			prompt: vi.fn(
+				() =>
+					new Promise<void>((resolve) => {
+						finishPrompt = resolve;
+					}),
+			),
+		};
+		const reply = (text: string) =>
+			listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], stopReason: "stop", usage: emptyUsage() } });
+		/** pi's run: started, replied, and (when `ended`) idle again with its settle event still pending. */
+		const run = (text: string, ended: boolean) => {
+			session.isIdle = false;
+			listener({ type: "agent_start" });
+			reply(text);
+			if (ended) session.isIdle = true;
+		};
+		return { session, run, finishPrompt: () => finishPrompt() };
+	}
+
+	async function resident() {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const scripted = scriptedSession();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session: scripted.session, note: undefined } as never);
+		vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockResolvedValue((() => {}) as never);
+		const outcomes: Array<{ output: string; failed?: boolean; aborted?: string }> = [];
+		const handle = await runtime.runResident({ name: "worker", cwd: agentDir, onProgress: () => {}, onTurnEnd: (outcome: ChildOutcome) => outcomes.push(outcome) } as never);
+		await handle.send("Build it");
+		await vi.waitFor(() => expect(scripted.session.prompt).toHaveBeenCalled());
+		return { handle, outcomes, ...scripted };
+	}
+
+	it("reports a resident turn pi already ended as it ended", async () => {
+		const { handle, outcomes, run } = await resident();
+		run("The integration is built.", true);
+		await handle.kill();
+		expect(outcomes).toHaveLength(1);
+		expect(outcomes[0].output).toBe("The integration is built.");
+		expect(outcomes[0].failed).toBeUndefined();
+		expect(outcomes[0].aborted).toBeUndefined();
+	});
+
+	it("still reports a resident turn the kill cut short as stopped", async () => {
+		const { handle, outcomes, run } = await resident();
+		run("Halfway there.", false);
+		await handle.kill();
+		expect(outcomes).toHaveLength(1);
+		expect(outcomes[0].failed).toBe(true);
+		expect(outcomes[0].aborted).toBe("stopped");
+	});
+
+	it("reports a blocking run pi already ended as it ended", async () => {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const scripted = scriptedSession();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session: scripted.session } as never);
+		vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockResolvedValue((() => {}) as never);
+		const handle = runtime.run({ cwd: agentDir, task: "Check again", onProgress: () => {} });
+		await vi.waitFor(() => expect(scripted.session.prompt).toHaveBeenCalled());
+		scripted.run("All checks pass.", true);
+		handle.kill();
+		scripted.finishPrompt();
+		const result = await handle.result;
+		expect(result.output).toBe("All checks pass.");
+		expect(result.aborted).toBeUndefined();
 	});
 });

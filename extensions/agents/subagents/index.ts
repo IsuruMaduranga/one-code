@@ -88,7 +88,7 @@ import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Work
 import type { SubagentsText } from "./text.ts";
 import { subagentWords } from "./words.ts";
 import { textForModel } from "../../lib/agents/child-extensions.ts";
-import type { ParentTool } from "./fork-cache.ts";
+import { type ParentTool, withSavedParentTools } from "./fork-cache.ts";
 import { findProjectRoot } from "../../lib/context/git.ts";
 import { followEnteredWorktree, registerWorktreeIsolation } from "../../lib/agents/worktree-isolation.ts";
 import { sessionWorkCwd } from "../../lib/agents/worktree-channel.ts";
@@ -117,7 +117,7 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../lib/rules/settings-chann
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
-import { StopAllPresses, stopAllNote } from "./stop-all.ts";
+import { StopAllPresses } from "./stop-all.ts";
 import { claimChordKey, CtrlXPrefix } from "../../lib/ui/ctrl-x-chord.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, agentViewTarget, scrolledView, userMessageForAgent, viewportScrollFor } from "../../lib/agents/agent-view.ts";
@@ -264,6 +264,8 @@ interface Resident {
 	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: StopKind | undefined) => void>;
 	/** Finished turns whose hand-back is still waiting on auto mode's review, so not yet delivered. */
 	reviewing: number;
+	/** The task of the latest turn a SendMessage started on the idle resident (under its own task id). */
+	turnTask?: BackgroundTask;
 }
 
 /**
@@ -329,14 +331,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
-	// A resident busy on a later turn (a SendMessage, its own cron fire) has no
-	// running task, yet it is still session work: yield waits for it and the
-	// turn-end line counts it (lib/notify/session-work.ts). One whose task still
-	// runs is reported by the background extension's registry.
+	// A resident busy on a later turn (a steer that ran on its own, its own cron
+	// fire) has no running task, yet it is still session work: yield waits for it
+	// and the turn-end line counts it (lib/notify/session-work.ts). One whose task
+	// still runs, its first one or a SendMessage turn's (under a new task id), is
+	// reported by the background extension's registry.
 	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
 		const query = data as SessionWorkQuery;
 		for (const [taskId, resident] of residents) {
-			if (resident.handle.exited() || !resident.handle.busy() || tasks.get(taskId)?.status === "running") continue;
+			if (resident.handle.exited() || !resident.handle.busy() || tasks.get(taskId)?.status === "running" || resident.turnTask?.status === "running") continue;
 			query.tasks.push(sessionBackgroundTask({ id: taskId, kind: "subagent", status: "running", description: tasks.get(taskId)?.description ?? taskId }));
 		}
 	});
@@ -887,6 +890,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
+	/**
+	 * The stop that ended a turn, read when it ends: a stop counts only when the
+	 * turn was cut short. One that lands as the agent finishes on its own (the
+	 * kill finds a turn pi already ended) leaves a completed turn, whose report
+	 * is delivered; a stop of every agent drops only the notifications of the
+	 * turns it really stopped (notifyHandBack).
+	 */
+	const stopThatEnded = (taskId: string, outcome: ChildOutcome): StopKind | undefined =>
+		outcome.aborted ? stoppedTaskIds.get(taskId) : undefined;
+
 	/** Stop an agent, recording its persistent id before kill can settle its turn. */
 	const stopAgent = (taskId: string, handle = liveHandles.get(taskId), how: StopKind = "one") => {
 		// An old task can still await review after the agent has resumed. Its
@@ -914,8 +927,14 @@ function subagentsExtension(pi: ExtensionAPI) {
 	 * handle yet).
 	 */
 	const runningAgents = () => liveRuns.list().filter((run) => run.status === "running" && run.depth === 0 && liveHandles.has(run.taskId));
+	const runningAgentIds = () => runningAgents().map((run) => run.taskId);
 	const stopAllPresses = new StopAllPresses();
-	panel.setMainNote((now, focused) => stopAllNote(stopAllPresses.asking(now), runningAgents().length > 0, focused));
+	// The strip's note and hint read the chord's own predicate, so they name the
+	// key exactly while it would act.
+	panel.setStopAll((now) => {
+		const running = runningAgentIds();
+		return { applies: running.length > 0, asking: stopAllPresses.asking(now, running) };
+	});
 	/**
 	 * Stop every running agent at the user's word, as Claude Code does: idle
 	 * residents stay, and the agents' own notifications are dropped
@@ -929,7 +948,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 	/** One press of the chord: the first asks (the strip's ticker takes the prompt down), a second inside the window stops. */
 	const pressStopAll = () => {
-		if (stopAllPresses.press(Date.now()) === "stop") stopAllByUser();
+		if (stopAllPresses.press(Date.now(), runningAgentIds()) === "stop") stopAllByUser();
 		else panel.refresh();
 	};
 	// ctrl+x ctrl+k, from the prompt (lib/ui/ctrl-x-chord.ts); the focused strip decodes its own.
@@ -1410,7 +1429,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		outputFile?: string;
 		/** The turn's outcome: its status, tool count and tokens come from here. */
 		outcome: ChildOutcome;
-		/** The turn ended because the user or the model stopped the agent (CC's `killed`); "all" when every agent was stopped at once. */
+		/** The turn ended because the user or the model stopped the agent (CC's `killed`); "all" when every agent was stopped at once. Set only when the stop cut the turn short (stopThatEnded). */
 		stopped?: StopKind;
 		/** Start of the span `outcome`'s tokens and tool uses cover, for CC's `<duration_ms>`. */
 		startedAt: number;
@@ -1483,44 +1502,55 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 	/**
 	 * The capture is persisted too, so a resumed fork still reads the cache its
-	 * earlier turns wrote. One file per distinct capture (a fan-out of forks
-	 * shares one), named by its hash, beside the fork session directories.
+	 * earlier turns wrote, and so are the parent's tools it declares, so a resume
+	 * after the parent's tool set changed still stubs a tool the capture
+	 * declares (fork-cache.ts). One file per distinct content (a fan-out of forks
+	 * shares one), named by its hash, beside the fork session directories; each
+	 * fork names its file in a pointer file of its own.
 	 */
 	const FORK_REQUEST_FILE = "parent-request";
+	const FORK_TOOLS_FILE = "parent-tools";
 	const forkRequestsDir = (sessionSearchDir: string) => join(dirname(sessionSearchDir), "parent-requests");
 	/** Each capture is serialized and hashed once, however many forks share it. */
 	const persistedCaptures = new WeakMap<RequestCapture, string>();
-	const persistForkRequest = (record: AgentRunRecord, capture: RequestCapture) => {
-		if (!record.sessionSearchDir) return;
+	/** Save `body` under its hash (unless `known` names it already) and point the fork's `pointer` file at it; the shared file's name, or undefined when nothing was written. */
+	const persistShared = (record: AgentRunRecord, pointer: string, body: () => string, known?: string): string | undefined => {
+		if (!record.sessionSearchDir) return undefined;
 		try {
 			const dir = forkRequestsDir(record.sessionSearchDir);
-			let name = persistedCaptures.get(capture);
+			let name = known;
 			if (!name || !existsSync(join(dir, name))) {
-				const body = JSON.stringify(capture);
-				name = `${createHash("sha256").update(body).digest("hex").slice(0, 24)}.json`;
+				const text = body();
+				name = `${createHash("sha256").update(text).digest("hex").slice(0, 24)}.json`;
 				mkdirSync(dir, { recursive: true });
 				if (!existsSync(join(dir, name))) {
 					// Atomic: a partial file would be skipped as present by every later fork.
 					const temp = join(dir, `${name}.${process.pid}.tmp`);
-					writeFileSync(temp, body);
+					writeFileSync(temp, text);
 					renameSync(temp, join(dir, name));
 				}
-				persistedCaptures.set(capture, name);
 			}
-			writeFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), name);
+			writeFileSync(join(record.sessionSearchDir, pointer), name);
+			return name;
 		} catch {
-			// The run still reads the cache; only a later resume re-reads uncached.
+			// The run still works from memory; only a later resume lacks this input.
+			return undefined;
 		}
 	};
-	const readForkRequest = (record: AgentRunRecord): RequestCapture | undefined => {
+	const readShared = (record: AgentRunRecord, pointer: string): unknown => {
 		if (!record.sessionSearchDir) return undefined;
 		try {
-			const name = readFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), "utf-8").trim();
-			return JSON.parse(readFileSync(join(forkRequestsDir(record.sessionSearchDir), name), "utf-8")) as RequestCapture;
+			const name = readFileSync(join(record.sessionSearchDir, pointer), "utf-8").trim();
+			return JSON.parse(readFileSync(join(forkRequestsDir(record.sessionSearchDir), name), "utf-8"));
 		} catch {
 			return undefined;
 		}
 	};
+	const persistForkRequest = (record: AgentRunRecord, capture: RequestCapture) => {
+		const name = persistShared(record, FORK_REQUEST_FILE, () => JSON.stringify(capture), persistedCaptures.get(capture));
+		if (name) persistedCaptures.set(capture, name);
+	};
+	const readForkRequest = (record: AgentRunRecord): RequestCapture | undefined => readShared(record, FORK_REQUEST_FILE) as RequestCapture | undefined;
 
 	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
 	const FORK_PROMPT_FILE = "system-prompt.md";
@@ -1533,19 +1563,29 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 	/** This session's registered tools, for a fork to stub the ones only the main conversation has (fork-cache.ts). */
-	const parentTools = (): readonly ParentTool[] => pi.getAllTools();
+	const parentTools = (): readonly ParentTool[] => pi.getAllTools().map((tool) => ({ name: tool.name, parameters: tool.parameters }));
 	/**
-	 * A fork's inputs from this conversation (its system prompt and the parent's
-	 * last request, for the cache), saved beside its session so a SendMessage
-	 * can resume it later. Undefined for a named agent.
+	 * A resumed fork's parent tools: this session's, plus each one the fork was
+	 * spawned with that this session no longer registers (another tool flag or
+	 * profile since), so the stub for a tool its saved request declares survives.
+	 */
+	const forkResumeTools = (record: AgentRunRecord): readonly ParentTool[] => withSavedParentTools(parentTools(), readShared(record, FORK_TOOLS_FILE));
+	/**
+	 * A fork's inputs from this conversation (its system prompt, the parent's
+	 * last request for the cache, and the parent's tools that go with it),
+	 * saved beside its session so a SendMessage can resume it later. Undefined
+	 * for a named agent.
 	 */
 	const forkInputs = (request: RunRequest, record: AgentRunRecord, ctx: ExtensionContext) => {
-		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined };
+		if (!request.fork) return { parentSystemPrompt: undefined, parentRequest: undefined, parentTools: undefined };
 		const parentSystemPrompt = forkSystemPrompt(ctx);
 		persistForkPrompt(record, parentSystemPrompt);
 		const parentRequest = forkRequest(ctx);
-		if (parentRequest) persistForkRequest(record, parentRequest);
-		return { parentSystemPrompt, parentRequest };
+		if (!parentRequest) return { parentSystemPrompt, parentRequest, parentTools: undefined };
+		persistForkRequest(record, parentRequest);
+		const tools = parentTools();
+		persistShared(record, FORK_TOOLS_FILE, () => JSON.stringify(tools));
+		return { parentSystemPrompt, parentRequest, parentTools: tools };
 	};
 	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
 		if (!record.sessionSearchDir) return undefined;
@@ -1833,7 +1873,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(request, record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentTools: forkTools } = forkInputs(request, record, ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
@@ -1842,7 +1882,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
-			parentTools: parentRequest ? parentTools() : undefined,
+			parentTools: forkTools,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1861,7 +1901,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 		liveHandles.set(record.taskId, handle);
 
 		try {
-			const { actions, ...outcome }: ChildOutcome = await handle.result;
+			// `aborted` steers the stop bookkeeping only; the reported result never carries it.
+			const { actions, aborted: _aborted, ...outcome }: ChildOutcome = await handle.result;
 			registry.sessionFileFor(record); // resolve now that the child has written it
 			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
@@ -2007,7 +2048,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const { parentSystemPrompt: forkPrompt, parentRequest } = forkInputs(p.request, p.record, ctx);
+		const { parentSystemPrompt: forkPrompt, parentRequest, parentTools: forkTools } = forkInputs(p.request, p.record, ctx);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -2018,7 +2059,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
 			parentRequest,
-			parentTools: parentRequest ? parentTools() : undefined,
+			parentTools: forkTools,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2051,7 +2092,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// answered synchronously when auto mode is off.
 				const handler = resident.turnHandlers.shift();
 				// A stop or resume during review must not change this turn's outcome.
-				const stopped = stoppedTaskIds.get(p.record.taskId);
+				const stopped = stopThatEnded(p.record.taskId, outcome);
+				// A stop that landed as the turn finished on its own cut nothing short: the report says completed, so the
+				// exit it causes must not mark the panel stopped either. A stop of the idle resident later marks it again.
+				if (!outcome.aborted) stoppedTaskIds.delete(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome, { startedBy: mainCallOf(p.record.taskId) }).then((review) => {
@@ -2623,6 +2667,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					review,
 				});
 			});
+			resident.turnTask = task;
 			registerTask(task);
 			void resident.handle.send(params.message);
 			return {
@@ -2719,9 +2764,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 			sessionFile,
 			parentSystemPrompt: forkPrompt,
 			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
-			parentTools: record.agent === FORK_AGENT ? parentTools() : undefined,
+			parentTools: record.agent === FORK_AGENT ? forkResumeTools(record) : undefined,
 			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 			signal: oneShot ? signal : undefined,
+			// A background turn fails on a stall, as a resident's does.
+			background: !oneShot,
 			model: record.model,
 			// Resume degrades to the session model if the recorded model has become
 			// unavailable since the original run, rather than failing the resume
@@ -2741,7 +2788,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		if (oneShot) {
 			const outcome = await handle.result;
 			runningIds.delete(record.taskId);
-			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+			live.finish(stopThatEnded(record.taskId, outcome) ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
 			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions, report: outcome.output } satisfies SubagentActionsPayload);
 			return {
@@ -2775,7 +2822,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		void handle.result.then(async (outcome) => {
 			runningIds.delete(record.taskId);
 			// Read before the review: a stop or resume during it must not change this turn's outcome.
-			const stopped = stoppedTaskIds.get(record.taskId);
+			const stopped = stopThatEnded(record.taskId, outcome);
 			live.finish(stopped ? "stopped" : Boolean(outcome.failed));
 			// Auto mode reviews this turn's actions before the reply goes out, as it
 			// does for a resident's turn; a resumed turn once skipped it
@@ -2910,9 +2957,18 @@ function subagentsExtension(pi: ExtensionAPI) {
 				...runs.filter((run) => run.status === "running"),
 				...runs.filter((run) => run.status !== "running" && run.viewed),
 			].map((run) => ({ kind: "agent" as const, taskId: run.taskId, text: run.label, model: modelLabel(ctx, run.model), running: run.status === "running" }));
-			const work = querySessionWork(pi.events);
-			return { shells, agents, quitNote: quitNote(work.tasks.filter((task) => task.status === "running").length, work.crons.length) };
+			return { shells, agents };
 		};
+		/**
+		 * What quitting would stop, read when the dialog paints and on its ticker:
+		 * it counts monitors, workflows and scheduled jobs, whose changes do not
+		 * rebuild the snapshot.
+		 */
+		const currentQuitNote = () => {
+			const work = querySessionWork(pi.events);
+			return quitNote(work.tasks.filter((task) => task.status === "running").length, work.crons.length);
+		};
+		let shownQuitNote = currentQuitNote();
 		let selected = 0;
 		// Rebuilt when a run or shell changes, not per frame or keystroke.
 		let snapshot = build();
@@ -2945,6 +3001,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 					if (shellById(dialogView.id)?.status === "running") tui.requestRender();
 				} else if (snapshot.shells.some((shell) => !shell.running) && shellRows(shellTasks.list(), Date.now()).length !== snapshot.shells.length) {
 					refresh();
+				} else if (currentQuitNote() !== shownQuitNote) {
+					tui.requestRender();
 				}
 			}, 1000);
 			ticker.unref?.();
@@ -2963,7 +3021,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 					}
 					shown = tasksItems(snapshot);
 					selected = Math.max(0, Math.min(selected, shown.length - 1));
-					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
+					shownQuitNote = currentQuitNote();
+					return ["", ...renderTasksDialog({ ...snapshot, selected, width, quitNote: shownQuitNote }, paint), ""].map((line) => truncateLine(line, width));
 				},
 				handleInput: (data: string) => {
 					if (isKeyRelease(data)) return;

@@ -249,17 +249,19 @@ describe("the product extensions a profile runs", () => {
 
 	it("are every folder when the profile lists none, and only the listed ones when it does", () => {
 		const dir = productWith("lookup", "deploy");
-		// A linked folder is one pi's glob loads, so it is one the wrapper knows.
+		// A linked folder is none: pi's glob (Node's fs.globSync) does not follow a link, so the session never loads it.
 		const linked = mkdtempSync(join(tmpdir(), "product-extension-linked-"));
 		made.push(linked);
 		writeFileSync(join(linked, "index.ts"), "");
 		symlinkSync(linked, join(dir, PRODUCT_EXTENSIONS_DIR, "linked"), "junction");
 		useProfile({}, dir);
-		expect([...activeProfile().productExtensions]).toEqual([["deploy", true], ["linked", true], ["lookup", true]]);
+		expect([...activeProfile().productExtensions]).toEqual([["deploy", true], ["lookup", true]]);
 		useProfile({ extensions: ["lookup"] }, dir);
-		expect([...activeProfile().productExtensions]).toEqual([["deploy", false], ["linked", false], ["lookup", true]]);
+		expect([...activeProfile().productExtensions]).toEqual([["deploy", false], ["lookup", true]]);
 		useProfile({ extensions: [] }, dir);
-		expect([...activeProfile().productExtensions.values()]).toEqual([false, false, false]);
+		expect([...activeProfile().productExtensions.values()]).toEqual([false, false]);
+		// Listing it is refused rather than turning on an extension that never runs.
+		expect(() => useProfile({ extensions: ["linked"] }, dir)).toThrow(/"linked", which has no folder extensions\/linked\/ with an index.ts \(a linked folder is none/);
 	});
 
 	it("refuse a listed name with no folder, and a child extension in a folder the list leaves out", () => {
@@ -272,6 +274,9 @@ describe("the product extensions a profile runs", () => {
 		writeFileSync(join(dir, PRODUCT_EXTENSIONS_DIR, "loose.ts"), "");
 		writeFileSync(join(dir, PRODUCT_EXTENSIONS_DIR, "shared", "child.ts"), "");
 		for (const entry of ["extensions/loose.ts", "extensions/shared/child.ts"]) expect(() => useProfile({ childExtensions: [entry] }, dir), entry).toThrow(/must sit in a product extension folder, one with an index.ts/);
+		// A child-only folder was legal before each profile chose its extensions: the error names the move.
+		expect(() => useProfile({ childExtensions: ["extensions/shared/child.ts"] }, dir)).toThrow(/give extensions\/shared\/ an index\.ts \(one exporting productExtension\("shared", \(\) => \{\}\) registers nothing in the main session\) or move the file into a folder that has one/);
+		expect(() => useProfile({ childExtensions: ["extensions/loose.ts"] }, dir)).toThrow(/whose name its productExtension wrapper carries: move it into a folder that has one/);
 		expect(() => useProfile({ extensions: "lookup" as never }, dir)).toThrow(/its "extensions" must be an array of folder names/);
 	});
 
@@ -303,6 +308,9 @@ describe("the product extensions a profile runs", () => {
 			useProfile({}, dir);
 			expect(() => sdk.productExtension("lokup", () => undefined)(createFakePi().pi as never)).toThrow("exit");
 			expect(String(stderr.mock.calls[0]?.[0])).toContain(`productExtension("lokup"): the product has no folder extensions/lokup/`);
+			// The entry file that misspelled the name is to blame, not the profile folder.
+			expect(String(stderr.mock.calls[0]?.[0])).toContain(`The product extension ${join(import.meta.dirname, "product-extension.test.ts")} is invalid`);
+			expect(String(stderr.mock.calls[0]?.[0])).not.toContain("The profile in");
 		} finally {
 			exit.mockRestore();
 			stderr.mockRestore();

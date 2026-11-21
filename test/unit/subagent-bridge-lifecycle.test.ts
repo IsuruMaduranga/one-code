@@ -154,8 +154,9 @@ describe("subagent permission bridge lifecycle", () => {
 		}
 		const worktree = join(root, "worktree");
 		mkdirSync(worktree);
-		// Resolved, as the child's gate sends it (the temp dir sits under a symlink on macOS).
-		const childResultsPath = realpathSync(childResults);
+		// Resolved, as the child's gate sends it: the temp dir sits under a symlink on macOS, and the
+		// native realpath expands a Windows 8.3 name (RUNNER~1) as the gate's own resolution of the read does.
+		const childResultsPath = realpathSync.native(childResults);
 		const read = (path: string, resultsDirPath?: string) => bridge({ toolName: "read", input: { path }, cwd: worktree, resultsDirPath });
 
 		expect(await read(own, childResultsPath)).toBeUndefined();

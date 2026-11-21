@@ -124,6 +124,12 @@ interface ChildSessionSpec {
 export interface SubagentRunOptions extends ChildSessionSpec {
 	task: string;
 	signal?: AbortSignal;
+	/**
+	 * The caller runs this turn as a background task (a SendMessage resume in a
+	 * session that outlives the turn): its child gets the stall watch, as a
+	 * resident does, so a silent agent fails instead of waiting out the wall-clock cap.
+	 */
+	background?: boolean;
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
 	/** Optional live sink for the subagent panel (activity + transcript blocks). */
 	sink?: LiveSink;
@@ -175,6 +181,17 @@ export function applyChildTierDefault(session: Pick<AgentSession, "model" | "set
 	if (!model) return;
 	const { level } = tierThinkingAt("child", model, session.settingsManager.getSettings(), parent);
 	if (level !== undefined) session.setThinkingLevel(level);
+}
+
+/**
+ * Whether pi has already ended the turn's run: it started (`agent_start`) and
+ * the session is idle again, while pi still awaits the child's `agent_settled`
+ * handlers before the settle event reaches the tracker. A kill in that window
+ * cuts nothing short, so the turn keeps its real outcome; before the run starts
+ * (queued behind the prefix gate) the session is idle too, but it never ran.
+ */
+function settledInPi(tracker: SessionTurnTracker, session: Pick<Session, "isIdle"> | undefined): boolean {
+	return tracker.runStarted && session?.isIdle === true;
 }
 
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
@@ -600,7 +617,7 @@ export class SubagentRuntime {
 				// corrupt session file, loader error) must resolve to a failed
 				// outcome, never reject handle.result — call sites like the
 				// SendMessage resume path consume it with a bare .then().
-				const built = await this.buildChildSession(options, tracker);
+				const built = await this.buildChildSession(options, tracker, options.background === true);
 				session = built.session;
 				spawnNote = built.note;
 				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
@@ -635,7 +652,9 @@ export class SubagentRuntime {
 		return {
 			result,
 			kill: () => {
-				tracker.markAborted();
+				// A run pi has already ended finished on its own: prompt() is only
+				// waiting on the settle handlers, so its outcome stays the real one.
+				if (!settledInPi(tracker, session)) tracker.markAborted();
 				void session?.abort();
 			},
 			snapshot: () => ({ toolCalls: tracker.toolCalls, text: tracker.turnText, usage: tracker.usage }),
@@ -797,8 +816,10 @@ export class SubagentRuntime {
 				pendingSend = undefined;
 				// Report an in-flight turn as terminated, not as a normal completion:
 				// the settle path can't tell an abort's partial text from success, so
-				// without this a killed run notifies as if it finished cleanly.
-				tracker.markAborted();
+				// without this a killed run notifies as if it finished cleanly. A turn
+				// pi has already ended (its settle event not yet here) finished on its
+				// own, and is reported as it ended: the kill cut nothing short.
+				if (!settledInPi(tracker, session)) tracker.markAborted();
 				finishTurn(tracker.turnOutcome());
 				// onExit only after the abort settles: it triggers worktree cleanup,
 				// which must not race an aborting session still writing files. The

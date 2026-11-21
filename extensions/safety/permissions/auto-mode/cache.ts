@@ -160,7 +160,7 @@ export function cacheClassifierHistory(payload: unknown, parts: readonly string[
  */
 function cacheResponsesHistory(payload: WireRecord, input: unknown[], parts: readonly string[], historyEnd: number): number | undefined {
 	if (!isPlainObject(payload.prompt_cache_options) || parts.some((part) => part.trim() === "")) return undefined;
-	const message = onlyUserMessage(input);
+	const message = onlyUserMessage(input, isConfigurationUpdate);
 	if (message === undefined || !Array.isArray(message.content) || message.content.length !== 1) return undefined;
 	const [part] = message.content;
 	if (!isPlainObject(part) || Object.keys(part).length !== 2 || part.type !== "input_text" || part.text !== parts.join("")) return undefined;
@@ -173,11 +173,27 @@ function countMarked(parts: readonly string[], marked: (i: number) => boolean): 
 	return parts.reduce((count, _part, i) => count + (marked(i) ? 1 : 0), 0);
 }
 
-/** The single user message of a list whose other entries are only system or developer instructions. */
-function onlyUserMessage(list: unknown[]): WireRecord | undefined {
+/**
+ * The single user message of a list whose other entries are only system or
+ * developer instructions, or entries `alsoAllowed` accepts.
+ */
+function onlyUserMessage(list: unknown[], alsoAllowed: (entry: WireRecord) => boolean = () => false): WireRecord | undefined {
 	const userIndex = list.findIndex((entry) => isPlainObject(entry) && entry.role === "user");
-	if (userIndex === -1 || list.some((entry, i) => i !== userIndex && !(isPlainObject(entry) && (entry.role === "system" || entry.role === "developer")))) return undefined;
+	if (userIndex === -1 || list.some((entry, i) => i !== userIndex && !(isPlainObject(entry) && (entry.role === "system" || entry.role === "developer" || alsoAllowed(entry))))) return undefined;
 	return list[userIndex] as WireRecord;
+}
+
+/**
+ * pi-ai's Responses `configuration_update` item: the reasoning effort, sent
+ * after the user message on a model with `compat.supportsMidConvoEffort`
+ * (GPT-6.1 Sol, where the classifier gets the lowest level because thinking
+ * cannot be turned off). It holds no text and is not a cache boundary, so the
+ * user message stays the one to mark. Rejecting it left every classifier call
+ * on such a model unmarked: each read only the system prompt and re-sent the
+ * whole transcript (about 3,750 tokens) uncached.
+ */
+function isConfigurationUpdate(entry: WireRecord): boolean {
+	return entry.type === "configuration_update" && entry.role === undefined;
 }
 
 /** The marker of a single marked text block holding exactly `text`. */

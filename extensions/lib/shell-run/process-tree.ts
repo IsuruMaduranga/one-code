@@ -33,7 +33,9 @@
  *   language server stops and an MCP server closes, since the leader's exit is
  *   not its tree's and a replacement must not start beside it.
  * - `kill` (`killProcessTree`): one signal to the whole group (falling back to
- *   the child alone when the group is already gone); `taskkill /T /F` on
+ *   the child alone when the group is already gone), and after a SIGKILL a
+ *   bounded re-check that signals the group again while a member forked as
+ *   the kill landed is left (`rekillGroupWhileAlive`); `taskkill /T /F` on
  *   Windows, which has no groups.
  * - `endGroupWithLauncher`: when the leader exits, by itself or on a stop, the
  *   rest of its group is stopped too. A launcher-fronted server (LSP, MCP)
@@ -149,6 +151,75 @@ function taskkillTreesAtExit(children: ChildProcess[]): void {
 }
 
 /**
+ * After a group SIGKILL, how long to wait before checking the group again, and
+ * how many times: a member forked while the kill landed (`killProcessTree`)
+ * shows up within milliseconds, and the window must stay far shorter than any
+ * pid allocator takes to wrap around to the group id.
+ */
+const KILL_RECHECK_MS = 20;
+const KILL_RECHECK_TRIES = 10;
+
+/** Whether the group `pgid` still has a member (a zombie included); EPERM means one we may not signal, still a member. */
+function groupHasMembers(pgid: number): boolean {
+	try {
+		process.kill(-pgid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
+}
+
+/**
+ * Send `signal` to the group `pgid`, frozen first (see `killProcessTree`).
+ * Returns whether the group signal went out; a group the signal did not reach
+ * is never left stopped.
+ */
+function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
+	let frozen = false;
+	try {
+		process.kill(-pgid, "SIGSTOP");
+		frozen = true;
+	} catch {
+		// The group is gone, or cannot be stopped: signal it as it is.
+	}
+	let signalled = true;
+	try {
+		process.kill(-pgid, signal);
+	} catch {
+		signalled = false;
+	}
+	if (frozen && !(signalled && signal === "SIGKILL")) {
+		try {
+			process.kill(-pgid, "SIGCONT");
+		} catch {
+			// Every member died of the signal.
+		}
+	}
+	return signalled;
+}
+
+/**
+ * The one re-check after a group SIGKILL. A process that is forking when the
+ * group signal lands can hand it a child the signal never reached (measured on
+ * macOS: a shell forking in a loop kept 11 of 100 groups alive past the kill),
+ * so the group is probed again every `KILL_RECHECK_MS` and SIGKILLed again
+ * while it has members, `KILL_RECHECK_TRIES` times at most, ending at the first
+ * empty probe (an empty group has no one left to fork). Only a group this code
+ * just SIGKILLed is named, and only right after a probe found it alive: a group
+ * id stays reserved while any member (a zombie leader included) lives, so it
+ * cannot name a stranger. The timers are unref'd, so a one-shot run is never
+ * held open by them; the exit watchdog runs the same loop (`EXIT_WATCHDOG`).
+ */
+function rekillGroupWhileAlive(pgid: number, tries = KILL_RECHECK_TRIES): void {
+	const timer = setTimeout(() => {
+		if (!groupHasMembers(pgid)) return;
+		signalGroup(pgid, "SIGKILL");
+		if (tries > 1) rekillGroupWhileAlive(pgid, tries - 1);
+	}, KILL_RECHECK_MS);
+	timer.unref?.();
+}
+
+/**
  * Signal the whole group, frozen first. A group signal is not delivered to
  * every member at once: the command can die while its shell has not been
  * signalled yet, and the shell then reaps it and runs on, to the next command
@@ -158,6 +229,11 @@ function taskkillTreesAtExit(children: ChildProcess[]): void {
  * SIGSTOP ends no process, so no parent wakes to act; the signal then lands
  * on a stopped group, and SIGCONT lets a member with a handler run it (a
  * stopped process takes its pending signal before any of its own code).
+ *
+ * A SIGKILL that reached the group is followed by `rekillGroupWhileAlive`,
+ * which catches a member forked while the kill landed; every POSIX path that
+ * ends a group with SIGKILL (`tree.kill`, a stop's escalation, the callers'
+ * own kills) comes through here.
  */
 export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
 	if (child.pid == null) return;
@@ -165,31 +241,14 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 		taskkillTree(child);
 		return;
 	}
-	const group = -child.pid;
-	let frozen = false;
-	try {
-		process.kill(group, "SIGSTOP");
-		frozen = true;
-	} catch {
-		// The group is gone, or cannot be stopped: signal it as it is.
+	if (signalGroup(child.pid, signal)) {
+		if (signal === "SIGKILL") rekillGroupWhileAlive(child.pid);
+		return;
 	}
-	let signalled = true;
 	try {
-		process.kill(group, signal);
+		child.kill(signal);
 	} catch {
-		signalled = false;
-		try {
-			child.kill(signal);
-		} catch {
-			// Already gone.
-		}
-	}
-	// A group the signal did not reach must not be left stopped, SIGKILL included.
-	if (!frozen || (signalled && signal === "SIGKILL")) return;
-	try {
-		process.kill(group, "SIGCONT");
-	} catch {
-		// Every member died of the signal.
+		// Already gone.
 	}
 }
 
@@ -237,12 +296,7 @@ const groupSignalHandlers = new Map<NodeJS.Signals, () => void>();
 export function rememberedGroupAlive(child: ChildProcess): boolean {
 	if (child.pid == null) return false;
 	if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
-	try {
-		process.kill(-child.pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code !== "ESRCH";
-	}
+	return groupHasMembers(child.pid);
 }
 
 /** Whether this process has seen the leader exit (Node reaped it: it is no zombie holding the group). */
@@ -287,13 +341,17 @@ function releaseGroupListeners(): void {
 /**
  * The watchdog `killAfterExit` starts, as a `node -e` script: argv is the
  * grace in ms, then the group ids. It exits as soon as every group is gone,
- * and SIGKILLs what is left when the grace runs out.
+ * and SIGKILLs what is left when the grace runs out, then re-checks the way
+ * `rekillGroupWhileAlive` does (the same interval and bound) for a member
+ * forked while the kill landed.
  */
 const EXIT_WATCHDOG = [
 	"const [grace, ...groups] = process.argv.slice(1).map(Number);",
 	"const alive = (g) => { try { process.kill(-g, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };",
 	"const poll = setInterval(() => { if (!groups.some(alive)) process.exit(0); }, 50);",
-	"setTimeout(() => { clearInterval(poll); for (const g of groups) { try { process.kill(-g, 'SIGKILL'); } catch {} } }, grace);",
+	`let tries = ${KILL_RECHECK_TRIES + 1};`,
+	"const kill = () => { const left = groups.filter(alive); if (left.length === 0 || tries-- === 0) process.exit(0); for (const g of left) { try { process.kill(-g, 'SIGKILL'); } catch {} } setTimeout(kill, " + String(KILL_RECHECK_MS) + "); };",
+	"setTimeout(() => { clearInterval(poll); kill(); }, grace);",
 ].join("\n");
 
 /** How long an exiting process waits, blocking, for groups it just sent SIGTERM to empty before it leaves the rest to the watchdog. */

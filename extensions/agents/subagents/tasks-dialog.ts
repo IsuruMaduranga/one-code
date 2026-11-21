@@ -25,7 +25,7 @@
  */
 
 import type { BackgroundTask } from "../../lib/agents/task-registry.ts";
-import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText } from "../../lib/ui/tui-render.ts";
+import { countNoun, cutPlainText as cut, formatDuration, hintLines, padPlainText, wrapProse } from "../../lib/ui/tui-render.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 
 /**
@@ -82,8 +82,9 @@ export function renderTasksDialog(input: TasksDialogInput, paint: TasksPaint): s
 	// Hints wrap at their separators on a narrow terminal, so none is cut off.
 	const hint = ["↑/↓ to select", "Enter to view", ...(current?.running ? ["x to stop"] : []), "Esc to close"].join(" · ");
 	const pushHints = () => out.push(...hintLines(hint, width, "  ").map((hintLine) => paint.fg("dim", hintLine)));
+	// Wrapped like the hints: the longest note runs past 80 columns.
 	const pushQuitNote = () => {
-		if (input.quitNote) out.push(paint.fg("dim", line(`  ${input.quitNote}`)));
+		if (input.quitNote) out.push(...wrapProse(`  ${input.quitNote}`, width).map((noteLine) => paint.fg("dim", line(noteLine))));
 	};
 	if (items.length === 0) {
 		out.push(line("  No tasks currently running"));

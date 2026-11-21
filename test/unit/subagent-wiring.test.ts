@@ -13,6 +13,8 @@ import { AGENT_VIEW_CHANNEL } from "../../extensions/lib/agents/agent-view.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/lib/rules/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
+import { captureRequest, LAST_REQUEST_CHANNEL } from "../../extensions/lib/side-calls/request-replay.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
@@ -324,6 +326,25 @@ describe("the main-session call that started a run's turn", () => {
 	});
 });
 
+// A finished agent that SendMessage resumes in a session that outlives the
+// turn runs as a background task, so its child gets the stall watch a
+// resident has (runner.ts childLoaderOptions).
+describe("a resumed agent's background turn", () => {
+	it("runs as a background run in a TUI session", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: new Promise(() => {}), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		runtime.finish([], "FIRST REPORT");
+		await runtime.handle.kill();
+		writeFileSync(join(spawned.details.agentRuns[0].sessionSearchDir, "child.jsonl"), "");
+		const reply = (await h.call("SendMessage", { to: "worker", message: "Add a total row" })) as { details: { taskId?: string } };
+		expect(runtime.runner.run).toHaveBeenCalledOnce();
+		expect(h.tasks.get(reply.details.taskId!)?.status).toBe("running");
+		expect(runtime.runner.run.mock.calls[0][0].background).toBe(true);
+	});
+});
+
 describe("subagent task_stop", () => {
 	it.each([false, true])("keeps a stopped turn distinct from a resumed run during review (repeat stop=%s)", async (repeatStop) => {
 		const runtime = fakeResident(true, [{ toolName: "read", input: { path: "file.ts" } }]);
@@ -421,7 +442,7 @@ describe("subagent task_stop", () => {
 		let finish!: (value: ChildOutcome) => void;
 		const handle = {
 			result: new Promise<ChildOutcome>((resolve) => { finish = resolve; }),
-			kill: vi.fn(() => finish(outcome())),
+			kill: vi.fn(() => finish({ ...outcome(), aborted: "stopped" })),
 			snapshot: () => ({ text: "Agent output", toolCalls: 0, usage: emptyUsage() }),
 		};
 		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({ run: () => handle } as unknown as SubagentRuntime);
@@ -616,6 +637,33 @@ describe("fork runs in a one-shot session", () => {
 		expect(sent.content[0].text).not.toContain("was not persisted");
 		expect(run).toHaveBeenCalledTimes(2);
 		expect(run.mock.calls[1][0].parentSystemPrompt).toBe(run.mock.calls[0][0].parentSystemPrompt);
+		// The resumed turn blocks this call, so it runs without the background stall watch.
+		expect((run.mock.calls[1][0] as { background?: boolean }).background).toBe(false);
+	});
+
+	// A fork resumed after the parent lost a tool its saved request declares
+	// (another --tools flag, another profile) still gets that tool's stub,
+	// with the schema the parent had when the fork was spawned (fork-cache.ts).
+	it("hands a resumed fork the parent tools it was spawned with that the parent has since lost", async () => {
+		const parent = join(dir, "parent.jsonl");
+		writeFileSync(parent, "");
+		const run = vi.fn((_options: { parentTools?: ReadonlyArray<{ name: string; parameters: unknown }> }) => ({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({ run } as unknown as SubagentRuntime);
+		const sessionModel = { ...session, api: "openai-completions" };
+		const h = await mount([], sessionModel, "print", parent);
+		const schema = { type: "object", properties: { question: { type: "string" } } };
+		(h.fake.pi as { registerTool(tool: unknown): void }).registerTool({ name: "ask_user_question", label: "ask", description: "ask", parameters: schema, execute: async () => ({ content: [], details: undefined }) } as never);
+		h.fake.events.emit(LAST_REQUEST_CHANNEL, captureRequest(sessionModel, { messages: [], tools: [{ type: "function", function: { name: "ask_user_question" } }] }, { role: "user", timestamp: 1 }));
+		const spawned = (await h.call("Agent", { subagent_type: "fork", name: "historian", task: "Read the git history" })) as Result;
+		const record = spawned.details!.agentRuns![0];
+		expect(run.mock.calls[0][0].parentTools?.find((tool) => tool.name === "ask_user_question")?.parameters).toBe(schema);
+		writeFileSync(join(record.sessionSearchDir, "child.jsonl"), "");
+		h.fake.tools.delete("ask_user_question");
+		await h.call("SendMessage", { to: "historian", message: "Which commit added median?" });
+		expect(run).toHaveBeenCalledTimes(2);
+		const resumed = run.mock.calls[1][0].parentTools ?? [];
+		expect(resumed.find((tool) => tool.name === "ask_user_question")?.parameters).toEqual(schema);
+		expect(resumed.filter((tool) => tool.name === "SendMessage")).toHaveLength(1);
 	});
 
 	// DeepSeek V3.2 (battery round 8): a fork rejected for its model override
@@ -810,10 +858,11 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 	let options: Parameters<SubagentRuntime["runResident"]>[0];
 	let busy = false;
 	let exited = false;
-	const finish = (actions: ChildOutcome["actions"] = [], output?: string) => {
+	/** End the turn; `aborted` marks one a kill cut short, as the runner's kill() does. */
+	const finish = (actions: ChildOutcome["actions"] = [], output?: string, aborted?: ChildOutcome["aborted"]) => {
 		if (!busy) return;
 		busy = false;
-		options.onTurnEnd?.({ ...outcome(failed), actions, ...(output === undefined ? {} : { output }) });
+		options.onTurnEnd?.({ ...outcome(failed), actions, ...(output === undefined ? {} : { output }), ...(aborted ? { aborted } : {}) });
 	};
 	const handle = {
 		send: vi.fn(async () => { busy = true; return "started" as const; }),
@@ -821,7 +870,7 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 		exited: () => exited,
 		snapshot: () => ({ text: "Agent output", toolCalls: 0, usage: emptyUsage() }),
 		release: vi.fn(),
-		kill: vi.fn(async () => { if (exited) return; finish(stoppedActions); exited = true; options.onExit?.(); }),
+		kill: vi.fn(async () => { if (exited) return; finish(stoppedActions, undefined, "stopped"); exited = true; options.onExit?.(); }),
 	};
 	const runner = {
 		runResident: async (opts: typeof options) => { options = opts; return handle; },
@@ -942,6 +991,37 @@ describe("task_output beside a background agent's hand-back", () => {
 		expect(result.content[0].text).toContain("FIRST REPORT");
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		expect(sent(h)).not.toContain("FIRST REPORT");
+	});
+});
+
+// A resident busy on a turn no task covers counts as session work; a turn a
+// SendMessage started has its own task, which the background registry reports,
+// so the resident must not be counted a second time.
+describe("a resident's later turn in the session work", () => {
+	const residentWork = (h: Awaited<ReturnType<typeof mount>>) => {
+		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		h.fake.events.emit(SESSION_WORK_CHANNEL, query);
+		return query.tasks;
+	};
+
+	it("counts a turn with no task, and leaves a SendMessage turn to its own task", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		const taskId = spawned.details.agentRuns[0].taskId;
+		runtime.finish([], "FIRST REPORT");
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		expect(residentWork(h)).toEqual([]);
+		const reply = (await h.call("SendMessage", { to: "worker", message: "Add a total row" })) as { details: { taskId: string } };
+		expect(h.tasks.get(reply.details.taskId)?.status).toBe("running");
+		// One agent at work: the turn's own task (the harness's registry reports it), not the resident besides.
+		expect(residentWork(h).map((task) => task.id)).toEqual([reply.details.taskId]);
+		runtime.finish([], "SECOND REPORT");
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		expect(h.tasks.get(reply.details.taskId)?.status).toBe("completed");
+		// A turn that starts with no SendMessage (a cron fire) has no task: the resident is counted itself.
+		await runtime.handle.send();
+		expect(residentWork(h).map((task) => [task.id, task.status])).toEqual([[taskId, "running"]]);
 	});
 });
 
@@ -1246,6 +1326,40 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		expect(after).not.toContain("was stopped by user");
 	});
 
+	// The stop lands as the agent finishes on its own: the runner's kill() finds
+	// a turn pi already ended and reports it as it ended, not as stopped.
+	it("delivers the report of an agent that finished as the stop landed", async () => {
+		const { runtime, input, sent } = await launched();
+		runtime.handle.kill.mockImplementationOnce(async () => runtime.finish([], "The integration is built."));
+		input(CTRL_X);
+		input(CTRL_K);
+		input(CTRL_X);
+		input(CTRL_K);
+		expect(runtime.handle.kill).toHaveBeenCalledOnce();
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sent()).toContain("The integration is built.");
+		expect(sent()).toContain("<status>completed</status>");
+	});
+
+	// The kill still ends the resident after its finished turn; the panel then says what the report says.
+	it("shows an agent that finished as the stop landed as completed, not stopped, once it exits", async () => {
+		const { h, runtime, input, sent } = await launched();
+		runtime.handle.kill.mockImplementationOnce(async () => {
+			runtime.finish([], "The integration is built.");
+			(runtime.options() as { onExit?: () => void }).onExit?.();
+		});
+		input(CTRL_X);
+		input(CTRL_K);
+		input(CTRL_X);
+		input(CTRL_K);
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(sent()).toContain("<status>completed</status>");
+		// The /tasks snapshot (RPC's text form) reads the panel's own status.
+		h.ctx.mode = "rpc";
+		await h.fake.commands.get("tasks")!.handler("", h.ctx);
+		expect(h.notices()).toContain("[general-purpose-1, done]");
+	});
+
 	it("lets send now's ctrl+x ctrl+s through while the strip has focus", async () => {
 		const { h, input } = await launched();
 		let sent = 0;
@@ -1264,5 +1378,31 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		await vi.advanceTimersByTimeAsync(2000);
 		expect(input(CTRL_X)).toBeUndefined();
 		expect(runtime.handle.kill).not.toHaveBeenCalled();
+	});
+});
+
+// /tasks says what quitting would stop. Monitors, workflows and scheduled jobs
+// count too, and their changes do not rebuild the dialog's rows, so the line is
+// read when the dialog paints and its ticker repaints on a change.
+describe("/tasks quit note", () => {
+	it("follows background work that starts while the dialog is open", async () => {
+		const h = await mount([], session, "tui", undefined, { hasUI: true });
+		let monitorRunning = false;
+		h.fake.events.on(SESSION_WORK_CHANNEL, (data) => {
+			if (monitorRunning) (data as SessionWorkQuery).tasks.push({ id: "m1", type: "monitor", status: "running", description: "watch the build" });
+		});
+		let dialog: { render(width: number): string[] } | undefined;
+		const tui = { requestRender: vi.fn(), terminal: { rows: 30, columns: 80 } };
+		(h.ctx.ui as { custom: unknown }).custom = vi.fn((factory: (...args: unknown[]) => { render(width: number): string[] }) => {
+			dialog = factory(tui, {}, {}, () => {});
+			return new Promise(() => {});
+		});
+		void h.fake.commands.get("tasks")!.handler("", h.ctx);
+		await vi.waitFor(() => expect(dialog).toBeDefined());
+		expect(dialog!.render(80).join("\n")).not.toContain("Quitting");
+		monitorRunning = true;
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(tui.requestRender).toHaveBeenCalled();
+		expect(dialog!.render(80).join("\n")).toContain("Quitting or /reload stops running background work.");
 	});
 });

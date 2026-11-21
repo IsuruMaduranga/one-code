@@ -25,7 +25,10 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type FeatureId, PRODUCT_EXTENSIONS_DIR } from "./features.ts";
-import { activeProfile, failClosed, featureEnabled, isToolDisabled, productExtensionEnabled, wordedTools } from "./profile.ts";
+import { relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { activeProfile, failClosed, featureEnabled, isToolDisabled, PRODUCT_DIR, productExtensionEnabled, wordedTools } from "./profile.ts";
+import { isRelativeInside } from "./paths.ts";
 import { wordedByUser } from "./user-profile.ts";
 import { brandedId } from "./brand.mjs";
 
@@ -83,12 +86,40 @@ export const PRODUCT_EXTENSION_NAME = Symbol.for(brandedId("product-extension-na
  * stops the process, as an invalid profile does.
  */
 export function productExtension<R>(name: string, factory: (pi: ExtensionAPI) => R): ((pi: ExtensionAPI) => R | undefined) & { readonly [PRODUCT_EXTENSION_NAME]: string } {
+	// The entry file that calls the wrapper, read now while it is on the stack: a misspelled name is that file's fault, not the profile's.
+	const entry = callerFile(productExtension);
 	const wrapped = (pi: ExtensionAPI) => {
 		requireProfile();
 		const enabled = productExtensionEnabled(name);
-		if (enabled === undefined) failClosed(new Error(`productExtension("${name}"): the product has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts; the name must be the extension's folder.`));
+		if (enabled === undefined) {
+			const where = entry === undefined ? "A product extension's entry file" : `The product extension ${displayPath(entry)}`;
+			failClosed(new Error(`productExtension("${name}"): the product has no folder ${PRODUCT_EXTENSIONS_DIR}/${name}/ with an index.ts; the name must be the extension's folder.`), where);
+		}
 		if (!enabled) return undefined;
 		return factory(profiledPi(pi));
 	};
 	return Object.assign(wrapped, { [PRODUCT_EXTENSION_NAME]: name });
+}
+
+/** The file of the code that called `fn`, from V8's call sites; undefined where the stack does not say. */
+function callerFile(fn: Function): string | undefined {
+	const previous = Error.prepareStackTrace;
+	try {
+		Error.prepareStackTrace = (_, sites) => sites;
+		const holder: { stack?: NodeJS.CallSite[] } = {};
+		Error.captureStackTrace(holder, fn);
+		const file = holder.stack?.[0]?.getFileName?.() ?? undefined;
+		if (!file) return undefined;
+		return file.startsWith("file:") ? fileURLToPath(file) : file;
+	} catch {
+		return undefined;
+	} finally {
+		Error.prepareStackTrace = previous;
+	}
+}
+
+/** A path as the stop message shows it: from the product's folder when it is inside, else whole. */
+function displayPath(path: string): string {
+	const inside = relative(PRODUCT_DIR, path);
+	return isRelativeInside(inside) ? inside.replaceAll("\\", "/") : path;
 }

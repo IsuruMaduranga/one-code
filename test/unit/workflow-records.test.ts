@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ACTIVITY_CAP, AgentRecordStore, previewValue } from "../../extensions/agents/workflow/records.ts";
+import { ACTIVITY_CAP, AgentRecordStore, previewValue, valueText } from "../../extensions/agents/workflow/records.ts";
 
 const tick = (() => {
 	let t = 1000;
@@ -18,6 +18,15 @@ describe("previewValue", () => {
 		const circular: Record<string, unknown> = {};
 		circular.self = circular;
 		expect(previewValue(circular)).toBe("[object Object]");
+	});
+});
+
+describe("valueText", () => {
+	it("gives text for a value JSON has none for, a function or a symbol, instead of undefined", () => {
+		function named() {}
+		expect(valueText(named)).toBe(String(named));
+		expect(valueText(Symbol("s"))).toBe("Symbol(s)");
+		expect(valueText(10n)).toBe("10");
 	});
 });
 

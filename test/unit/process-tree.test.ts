@@ -137,7 +137,8 @@ describe("killProcessTree", { timeout: LOADED_MS }, () => {
 			const settled = Promise.all([settledWithin(term, AT_ONCE_MS), settledWithin(killed, AT_ONCE_MS)]);
 			killProcessTree(term);
 			killProcessTree(killed, "SIGKILL");
-			for (const [pid, signal] of kill.mock.calls) sent.push(`${pid === -term.pid! ? "term" : pid === -killed.pid! ? "killed" : "other"}:${signal}`);
+			// Only these two groups: a re-check an earlier test's SIGKILL left pending may probe its own group meanwhile.
+			for (const [pid, signal] of kill.mock.calls) if (pid === -term.pid! || pid === -killed.pid!) sent.push(`${pid === -term.pid! ? "term" : "killed"}:${signal}`);
 			await settled;
 		} finally {
 			kill.mockRestore();
@@ -185,6 +186,40 @@ describe("killProcessTree", { timeout: LOADED_MS }, () => {
 		);
 		expect(runs).toEqual(runs.map(() => ({ out: "ready", err: "" })));
 	});
+
+	it.skipIf(win32)("a SIGKILL leaves no member behind in a group that is forking as it lands", async () => {
+		// A process forking when the group signal lands can hand the group a child the
+		// signal never reached (macOS: 11 of 100 such groups outlived a single SIGKILL,
+		// 31 of 100 under load). The kill re-checks the group and signals it again while it
+		// has members; 40 groups make a miss without that near certain (about 99%).
+		const rounds = 5;
+		const perRound = 8;
+		const survivors: number[] = [];
+		for (let round = 0; round < rounds; round++) {
+			const children = Array.from({ length: perRound }, () =>
+				// Forks for long enough to be mid-loop when the kill lands, and no further: a late timer on a
+				// loaded machine must not let a shell fill the process table.
+				spawn("/bin/sh", ["-c", "i=0; while [ $i -lt 300 ]; do sleep 5 & i=$((i+1)); done; wait"], { ...detachedSpawnOptions(), stdio: "ignore" }),
+			);
+			await new Promise((r) => setTimeout(r, 20)); // every shell is mid-loop
+			const exited = children.map((child) => (child.exitCode === null && child.signalCode === null ? once(child, "exit") : Promise.resolve()));
+			for (const child of children) killProcessTree(child, "SIGKILL");
+			await Promise.all(exited);
+			// Past the re-check window (and the leaders' reaping), with room for a loaded machine.
+			await until(() => children.every((child) => !rememberedGroupAlive(child)), 40);
+			for (const child of children) {
+				if (!rememberedGroupAlive(child)) continue;
+				survivors.push(child.pid!);
+				try {
+					process.kill(-child.pid!, "SIGKILL");
+				} catch {
+					// Gone meanwhile.
+				}
+			}
+		}
+		expect(survivors).toEqual([]);
+		// Forty forking shells take seconds on a loaded machine: the default five would fail the test for being slow.
+	}, 60_000);
 
 	it.skipIf(win32)("a frozen group still runs its TERM handler", async () => {
 		// `ready` comes once the member is forked, so the kill always finds a group of two.
@@ -343,7 +378,9 @@ describe("spawnOwnedTree", { timeout: LOADED_MS }, () => {
 	});
 
 	it.skipIf(win32)("starts the child as the leader of its own group", async () => {
-		const { tree } = await startTree("echo ready; sleep 30");
+		// The member is forked before the ready line: a group kill that lands while the shell is still
+		// forking it can miss the new child on macOS, which then holds the group for its 30 s.
+		const { tree } = await startTree("sleep 30 & echo ready; wait");
 		try {
 			expect(tree.alive()).toBe(true);
 		} finally {

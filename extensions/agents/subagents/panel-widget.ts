@@ -17,6 +17,7 @@ import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePa
 import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
 import { renderShellChip, shellRows } from "./shell-panel.ts";
+import { stopAllNote, type StopAllState } from "./stop-all.ts";
 
 const WIDGET_KEY = "subagents";
 const DEBOUNCE_MS = 200;
@@ -98,11 +99,11 @@ export class SubagentWidget {
 		return this.focusIndex === undefined ? undefined : rows[this.focusIndex]?.run;
 	}
 
-	/** The `main` row's note (stop-all.ts stopAllNote), read at each render. */
-	private mainNote: ((now: number, focused: boolean) => string | undefined) | undefined;
+	/** The stop-all chord's state (stop-all.ts), read at each render for the `main` row's note and the focused hint. */
+	private stopAll: ((now: number) => StopAllState) | undefined;
 
-	setMainNote(note: (now: number, focused: boolean) => string | undefined): void {
-		this.mainNote = note;
+	setStopAll(state: (now: number) => StopAllState): void {
+		this.stopAll = state;
 		this.render();
 	}
 
@@ -283,8 +284,9 @@ export class SubagentWidget {
 				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 				return linesComponent((width) => {
 					const lines: string[] = [];
-					const mainNote = this.mainNote?.(now, selected !== undefined);
-					if (showStrip) lines.push(...renderStrip({ rows, selected, viewedId: this.viewedId, width: width - 1, now, mainNote }, paint));
+					const stopAll = this.stopAll?.(now);
+					const mainNote = stopAll ? stopAllNote(stopAll.asking, stopAll.applies, selected !== undefined) : undefined;
+					if (showStrip) lines.push(...renderStrip({ rows, selected, viewedId: this.viewedId, width: width - 1, now, mainNote, stopAll: stopAll?.applies }, paint));
 					else if (notice) lines.push(paint.fg("dim", TASKS_NOTICE));
 					if (shellVisible) {
 						if (lines.length) lines.push("");

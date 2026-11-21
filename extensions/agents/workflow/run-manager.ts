@@ -30,7 +30,7 @@ import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 import type { DeferRequest } from "../../lib/request/deferred.ts";
-import { persistIfLarge } from "../../lib/request/persisted-output.ts";
+import { persistIfLargeOutcome } from "../../lib/request/persisted-output.ts";
 import { workflowResultText } from "./text.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
@@ -78,6 +78,8 @@ export class RunHandle extends EventEmitter {
 	finished!: Promise<RunHandle>;
 	private controller = new AbortController();
 	private resolveFinished!: (handle: RunHandle) => void;
+	/** The script's value as the report carries it, built on first use (see `reportedResult`). */
+	private resultBlock?: string;
 
 	readonly runId: string;
 	readonly meta: WorkflowMeta;
@@ -122,6 +124,22 @@ export class RunHandle extends EventEmitter {
 		// consequent "aborted" error.
 		this.errorMessage ??= reason;
 		this.stopWork();
+	}
+
+	/**
+	 * The completed run's value as its report carries it, or undefined when
+	 * there is none. Built once: a value too large to send whole is saved in the
+	 * run's directory on the first call, and the notification and the tool
+	 * result then carry the same block without writing the file again. A failed
+	 * write is not kept: the next report tries it again rather than point the
+	 * model at a file that was never written.
+	 */
+	reportedResult(): string | undefined {
+		if (this.status !== "completed" || this.result === undefined) return undefined;
+		if (this.resultBlock !== undefined) return this.resultBlock;
+		const { text, saved } = persistIfLargeOutcome(valueText(this.result), { dir: this.runDir, id: "result" });
+		if (saved) this.resultBlock = text;
+		return text;
 	}
 
 	finish(status: RunStatus, result?: unknown, errorMessage?: string): void {
@@ -367,13 +385,14 @@ export function buildRunReport(handle: RunHandle): string {
 		.filter((agent) => agent.worktree)
 		.map((agent) => ({ label: agent.label, path: agent.worktree!.path, ...(agent.worktree!.branch ? { branch: agent.worktree!.branch } : {}) }));
 	const completed = handle.status === "completed";
+	const result = handle.reportedResult();
 	return workflowResultText.report({
 		name: handle.meta.name,
 		runId: handle.runId,
 		status: handle.status as "completed" | "failed" | "aborted",
 		...(state ? { stats: { agents: state.agentCount(), outputTokens: state.outputTokens(), cost: state.cost() } } : {}),
 		seconds,
-		...(completed && handle.result !== undefined ? { result: persistIfLarge(valueText(handle.result), { dir: handle.runDir, id: "result" }) } : {}),
+		...(result !== undefined ? { result } : {}),
 		...(completed ? {} : { reason: handle.errorMessage }),
 		progress: completed ? [] : handle.recentEvents.slice(-5),
 		keptWorktrees,
