@@ -1435,7 +1435,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// A shell call that asks to leave the sandbox takes no fast path (lib/rules/matcher.ts `unsandboxed`).
 		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(event.input as Record<string, unknown>);
 		// Hosts the call names for itself count in auto mode only, where the classifier reads them (`commandHosts`).
-		const hosts = mode === "auto" && isShellTool(normalizedTool) ? requestedHosts(event.input as Record<string, unknown>) : [];
+		const hosts = mode === "auto" && (isShellTool(normalizedTool) || normalizedTool === "monitor") ? requestedHosts(event.input as Record<string, unknown>) : [];
 		// Where the user turned auto-allow on, a command the sandbox will hold needs no prompt in the manual modes (`sandboxed`).
 		const sandboxed = normalizedTool === "bash" && runsSandboxed(event.input as Record<string, unknown>, matchSubject);
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
@@ -1741,7 +1741,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				: undefined;
 		const powershellParse = await parsePowerShell(normalizedTool, subject, mode);
 		const unsandboxed = isShellTool(normalizedTool) && unsandboxedRequest(input);
-		const hosts = mode === "auto" && isShellTool(normalizedTool) ? requestedHosts(input) : [];
+		const hosts = mode === "auto" && (isShellTool(normalizedTool) || normalizedTool === "monitor") ? requestedHosts(input) : [];
 		const sandboxed = normalizedTool === "bash" && runsSandboxed(input, subject);
 
 		const result = decide({

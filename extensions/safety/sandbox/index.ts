@@ -9,9 +9,11 @@
  * under other settings) goes on the request's tail. A host the settings do
  * not list is decided by the permission mode (hosts.ts): the user is asked
  * in the manual modes, and auto mode sends the model to the command's own
- * host list. `/sandbox` shows the state.
+ * host list. `/sandbox` opens the panel (panel.ts): the mode, the overrides
+ * and the rules in force.
  *
- * Child sessions do not load this file: they share the process's sandbox.
+ * A child session loads child.ts: it shares the process's sandbox and only
+ * tells its own model the section (`tellSandboxSection`).
  */
 
 import { homedir } from "node:os";
@@ -27,8 +29,13 @@ import { projectConfigDir } from "../../lib/profile/sources.ts";
 import { gateControlFiles } from "../../lib/profile/settings-files.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { listWorkspaceDirectories } from "../../lib/rules/settings.ts";
-import { activeSandbox, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxUnavailable, startSandbox, stopSandbox } from "../../lib/shell-run/sandbox.ts";
+import { activeSandbox, reloadSandboxSettings, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, startSandbox, stopSandbox } from "../../lib/shell-run/sandbox.ts";
+import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
+import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
+import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
+import { panelUi } from "../../lib/ui/panel-focus.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
@@ -47,10 +54,53 @@ const protectedConfig = (dir: string): string[] => PROTECTED_CONFIG_CHILDREN.map
 /** The told fact of the sandbox section. */
 const SANDBOX_FACT = "sandbox:section";
 
+/** Rows the panel may take; the terminal's own height caps it. */
+const SANDBOX_PANEL_MAX_HEIGHT = 30;
+
+/**
+ * Tell this session's model the sandbox section: in message 1 when an epoch
+ * opens, and on the request's tail when it is no longer what message 1 says
+ * (a session resumed under other settings, a sandbox that could not start, a
+ * workspace directory added since). The main session and every child session
+ * do this for themselves; the sandbox they describe is the process's one.
+ */
+export function tellSandboxSection(pi: ExtensionAPI): void {
+	const text = sessionView(pi).text("shell").sandbox;
+	let cwd = process.cwd();
+	/** The section for a command run in `dir`, or null when no sandbox is configured. */
+	const section = (dir: string): string | null => (sandboxConfigured() ? sandboxSectionText(text, { settings: sandboxSettings(), platform: sandboxPlatform()!, active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: dir }) : null);
+
+	pi.events.on(RENDER_CHANNEL, (data) => {
+		const request = data as RenderRequest;
+		if (request.epoch) return;
+		const live = section(cwd);
+		const fact = untoldBlockFact(request, SANDBOX_FACT, live);
+		if (fact) request.blocks.push({ text: live ?? text.turnedOff, facts: [fact] });
+	});
+	if (!sandboxConfigured()) return;
+	pi.on("session_start", (_event, ctx: ExtensionContext) => {
+		cwd = ctx.cwd;
+	});
+	pi.on("turn_start", async (_event, ctx) => {
+		cwd = ctx.cwd;
+		// The section names whether the sandbox started, so it waits for the answer.
+		await sandboxSettled();
+		const live = section(ctx.cwd);
+		if (live === null) return;
+		pi.events.emit(REMINDER_CHANNEL, { text: live, key: "sandbox", placement: "first-prepend", order: CONTEXT_ORDER.sandbox, facts: [toldBlockFact(SANDBOX_FACT, live)] });
+	});
+}
+
 function sandboxExtension(pi: ExtensionAPI) {
 	const text = sessionView(pi).text("shell").sandbox;
 	let mode = "default";
-	let cwd = process.cwd();
+	// The workspace directories in force, as the permission gate announces them: a directory added mid-session
+	// is writable from the next command, and one a repository names counts only once the user trusts it.
+	let workspace: string[] = [];
+	pi.events.on(WORKSPACE_CHANNEL, (data) => {
+		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
+		workspace = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
+	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		mode = (data as PermissionStatus).mode;
 	});
@@ -67,36 +117,61 @@ function sandboxExtension(pi: ExtensionAPI) {
 	const hosts = createHostGate({ mode: () => mode, notListed: text.hostNotListed, prompt: askUser });
 	pi.on("agent_end", () => hosts.endRun());
 
+	const statusLines = (ctx: ExtensionContext) => sandboxStatusLines({ settings: sandboxSettings(), platform: sandboxPlatform(), active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: ctx.cwd, sessionHosts: hosts.sessionHosts() });
 	registerLocalCommand(pi, "sandbox", {
-		description: "Show the command sandbox's state and rules",
+		description: "Choose how commands are sandboxed and see the sandbox's rules",
 		handler: async (_args, ctx) => {
-			ctx.ui.notify(sandboxStatusLines({ settings: sandboxSettings(), platform: sandboxPlatform(), active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: ctx.cwd, sessionHosts: hosts.sessionHosts() }).join("\n"), "info");
+			// Without a terminal to draw the panel in (RPC, a one-shot run), the state is printed.
+			if (!sandboxPlatform() || !canShowCustomUi(ctx)) {
+				ctx.ui.notify(statusLines(ctx).join("\n"), "info");
+				return;
+			}
+			const running = sandboxConfigured();
+			// The lists show what the settings files say now; a change made earlier in this session may still wait for a restart.
+			let loaded = reloadSandboxSettings();
+			let outcome: string | undefined;
+			await panelUi(pi.events, ctx.ui).custom<null>((tui, theme, _keybindings, done) => {
+				const paint = safeThemePaint(theme);
+				const bold = safeThemeBold(theme);
+				const state = openSandboxPanel(loaded);
+				const height = () => boundedDockHeight((tui as { terminal?: { rows?: number } }).terminal?.rows ?? SANDBOX_PANEL_MAX_HEIGHT, SANDBOX_PANEL_MAX_HEIGHT);
+				return {
+					render: (width: number) => renderSandboxPanel({ state, mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded), config: statusLines(ctx), width, height: height() }, paint, bold).map((line) => truncateLine(line, width)),
+					handleInput: (data: string) => {
+						const key = decodeSandboxPanelKey(data);
+						if (!key) return;
+						const effect = applySandboxPanelKey(state, key, { mode: sandboxModeOf(loaded), override: sandboxOverrideOf(loaded) }, sandboxConfigRows(height()));
+						if (effect?.kind === "close") return done(null);
+						if (effect?.kind === "pick") {
+							const path = productSettingsPath(homedir());
+							try {
+								writeSettings(path, applySandboxPick(readSettingsForWrite(path), effect.pick));
+								loaded = reloadSandboxSettings();
+								outcome = sandboxPickOutcome(effect.pick, running, loaded);
+							} catch (error) {
+								outcome = `The sandbox setting was not saved: ${(error as Error).message}`;
+							}
+							return done(null);
+						}
+						tui.requestRender();
+					},
+					invalidate: () => {},
+				};
+			});
+			if (outcome) ctx.ui.notify(outcome, "info");
 		},
 	});
 
-	/** The section for a command run in `dir`, or null when no sandbox is configured. */
-	const section = (dir: string): string | null => (sandboxConfigured() ? sandboxSectionText(text, { settings: sandboxSettings(), platform: sandboxPlatform()!, active: activeSandbox(), unavailable: sandboxUnavailable(), cwd: dir }) : null);
-
-	// Told on the tail when it is not what the epoch's message 1 says: a
-	// session resumed under other settings, or a sandbox that could not start.
-	pi.events.on(RENDER_CHANNEL, (data) => {
-		const request = data as RenderRequest;
-		if (request.epoch) return;
-		const live = section(cwd);
-		const fact = untoldBlockFact(request, SANDBOX_FACT, live);
-		if (fact) request.blocks.push({ text: live ?? text.turnedOff, facts: [fact] });
-	});
+	tellSandboxSection(pi);
 
 	if (!sandboxConfigured()) return;
 
 	let starting: Promise<unknown> = Promise.resolve();
 	let warned = false;
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
-		cwd = ctx.cwd;
 		liveCtx = ctx;
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
-		const workspace = listWorkspaceDirectories(ctx.cwd, home).map((dir) => dir.path);
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).
 		starting = startSandbox({
 			cwd: ctx.cwd,
@@ -116,15 +191,8 @@ function sandboxExtension(pi: ExtensionAPI) {
 		await starting;
 		await stopSandbox();
 	});
-
-	pi.on("turn_start", async (_event, ctx) => {
-		cwd = ctx.cwd;
+	pi.on("turn_start", (_event, ctx) => {
 		liveCtx = ctx;
-		// The section names whether the sandbox started, so it waits for the answer.
-		await starting;
-		const live = section(ctx.cwd);
-		if (live === null) return;
-		pi.events.emit(REMINDER_CHANNEL, { text: live, key: "sandbox", placement: "first-prepend", order: CONTEXT_ORDER.sandbox, facts: [toldBlockFact(SANDBOX_FACT, live)] });
 	});
 }
 

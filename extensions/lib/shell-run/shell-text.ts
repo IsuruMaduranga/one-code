@@ -68,11 +68,11 @@ export interface ShellSandboxText {
 	unavailable(p: { reason: string; required: boolean }): string;
 	/**
 	 * A shell call refused: the sandbox is required and is not running
-	 * (`unavailable`), the call is a PowerShell command, which the sandbox
-	 * does not run (`powershell`), or its own host list has an entry the
+	 * (`unavailable`), the sandbox runs every command through a bash
+	 * and the machine has none (`noBash`), or its own host list has an entry the
 	 * sandbox rejects (`hosts`).
 	 */
-	refused(p: { kind: "unavailable"; reason: string } | { kind: "powershell" } | { kind: "hosts"; reason: string }): string;
+	refused(p: { kind: "unavailable"; reason: string } | { kind: "noBash" } | { kind: "hosts"; reason: string }): string;
 }
 
 export interface ShellText {

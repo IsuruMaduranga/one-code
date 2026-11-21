@@ -8,14 +8,15 @@ sandbox limits what a command that runs can write and which hosts it can
 reach. It is off until you turn it on.
 
 This page explains how to turn the sandbox on, what it limits, how each
-permission mode treats a sandboxed command, and every setting.
+permission mode treats a sandboxed command, the `/sandbox` panel, and every
+setting.
 
 ## Requirements
 
 | Platform | What the sandbox uses | What you install |
 |---|---|---|
 | macOS | Seatbelt, which ships with macOS. | Nothing. |
-| Linux and WSL2 | bubblewrap, with socat for the network proxy. | `bubblewrap` and `socat`, from your package manager. |
+| Linux and WSL2 | bubblewrap, with socat for the network proxy. | `bubblewrap` and `socat`, from your package manager. `/doctor` reports either one that is missing. |
 | Native Windows | No sandbox. Commands run without one. | Not applicable. |
 
 The sandbox is built on Anthropic's open source sandbox runtime, which is in
@@ -23,8 +24,12 @@ beta.
 
 ## Turn on the sandbox
 
-1. Add the following to `~/.onecode/settings.json` or
-   `~/.claude/settings.json`:
+1. Run `/sandbox`, select **Sandbox commands, with regular permissions**,
+   and press Enter. One Code writes the choice to
+   `~/.onecode/settings.json`.
+
+   To edit the file yourself instead, add the following to
+   `~/.onecode/settings.json` or `~/.claude/settings.json`:
 
    ```json
    {
@@ -34,12 +39,12 @@ beta.
    }
    ```
 
-2. Start a new session. One Code reads the sandbox settings when it starts,
-   so a change applies from the next start.
+2. Start a new session. One Code starts the sandbox with the session, so
+   turning it on or off applies from the next start.
 
-3. To confirm, run `/sandbox`. The command prints whether the sandbox is
-   running, the writable directories, the allowed hosts, and the settings in
-   force.
+3. To confirm, run `/sandbox` and go to the **Config** tab. The tab shows
+   whether the sandbox is running, the writable directories, the allowed
+   hosts, and the settings in force.
 
 If the sandbox can't start (for example, bubblewrap is missing), One Code
 warns you and runs commands without it. To refuse commands instead, set
@@ -47,16 +52,19 @@ warns you and runs commands without it. To refuse commands instead, set
 
 ## What the sandbox limits
 
-The sandbox applies to each Bash command and each monitor command, and to
-every process the command starts. It doesn't apply to the file tools (read,
-edit, write), hooks, MCP servers, or commands you run yourself with `!`.
-While the sandbox is running, the PowerShell tool is refused, because the
-sandbox runs Bash commands only.
+The sandbox applies to each Bash command, each PowerShell command, and each
+monitor command, and to every process the command starts. It doesn't apply
+to the file tools (read, edit, write), hooks, MCP servers, or commands you
+run yourself with `!`.
+
+On macOS and Linux, a sandboxed PowerShell command runs through Bash inside
+the sandbox, so the sandbox needs a Bash on your `PATH`.
 
 **Writes.** A sandboxed command can write to the following locations only:
 
 - The working directory, or the worktree in a worktree session.
-- Your workspace directories.
+- Your workspace directories. A directory you add with `/add-dir` is
+  writable from the next command.
 - The session's private temporary directory, which `$TMPDIR` names inside
   the sandbox.
 - The paths you list in `filesystem.allowWrite`.
@@ -99,14 +107,14 @@ allow rule that matches the command approves it.
 
 In auto mode, a command that names its own hosts is always reviewed by the
 classifier, even when an allow rule matches the command. The hosts a command
-names never override `network.deniedDomains`. Per-command hosts apply to
-foreground commands; a background command or a monitor reaches only the
-hosts in your settings.
+names never override `network.deniedDomains`. The hosts hold for that one
+command: a background command or a monitor keeps them until it ends.
 
 ### Run sandboxed commands without a prompt
 
 By default, a sandboxed command goes through the same prompts as any other
-command. To skip the prompt for commands that run inside the sandbox, set
+command. To skip the prompt for commands that run inside the sandbox, select
+**Sandbox commands, with auto-allow** in `/sandbox`, or set
 `autoAllowBashIfSandboxed` in your user settings:
 
 ```json
@@ -125,6 +133,26 @@ doesn't change: its classifier reviews sandboxed commands too.
 
 Before you turn this setting on, consider that a sandboxed command can read
 most of your files and can run any program in the working directory.
+
+## The /sandbox panel
+
+`/sandbox` opens a panel with three tabs. Press the Left and Right arrow
+keys to change tabs, the Up and Down arrow keys to move, Enter to select,
+and Esc to close.
+
+| Tab | What you choose or see |
+|---|---|
+| **Mode** | **Sandbox commands, with auto-allow**, **Sandbox commands, with regular permissions**, or **No sandbox**. |
+| **Overrides** | **Allow unsandboxed fallback** lets the model ask to run a command outside the sandbox. **Strict sandbox mode** keeps every command inside it, except your excluded commands. |
+| **Config** | The sandbox's state and the rules in force. |
+
+A choice is saved to `~/.onecode/settings.json`. Auto-allow and the
+overrides apply at once. Turning the sandbox on or off applies from the next
+start. If another settings file holds a value against your choice (for
+example, a project that turns the sandbox on), the panel tells you.
+
+In a session without a terminal interface, `/sandbox` prints the Config
+tab's lines.
 
 ## Settings
 
@@ -175,7 +203,5 @@ holds whatever another file sets.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.
-- A directory you add with `/add-dir` becomes writable in the sandbox from
-  the next start.
 - The sandbox runtime is in beta. For a wall around the whole agent rather
   than its shell commands, run One Code in a container.

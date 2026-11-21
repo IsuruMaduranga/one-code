@@ -48,6 +48,9 @@
 # that pins its side models to the probe model (the matrix's login leg), since
 # a plain run's classifier and subagents pick their own.
 #
+# `CACHE_PROBE_SANDBOX=1` turns the command sandbox on in every probe project,
+# which adds the sandbox section to message 1 and its parameters to the shell tools.
+#
 # It runs the repo's own pi (node_modules), the version One Code ships against,
 # not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
 # optionally names a new output directory without changing TMPDIR for test fixtures.
@@ -140,6 +143,11 @@ probe_project() {
 	mkdir -p "$1"
 	git -C "$1" init -q
 	printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$1/CLAUDE.md"
+	# CACHE_PROBE_SANDBOX=1: every phase runs with the command sandbox on (macOS, Linux).
+	if [ -n "${CACHE_PROBE_SANDBOX:-}" ]; then
+		mkdir -p "$1/.claude"
+		printf '{"sandbox":{"enabled":true}}\n' > "$1/.claude/settings.json"
+	fi
 	case "$MODEL:${2:-}" in
 	openai-codex/*:websocket) ;;
 	openai-codex/*)

@@ -1550,6 +1550,8 @@ export function decide(params: DecideInput): Decision {
 			? allow.filter((rule) => {
 					if (isBroadExecutionRule(rule)) return false;
 					if ((params.classifyAllShell || params.commandHosts) && isShellTool(rule.tool)) return false;
+					// A monitor's command takes a host list too.
+					if (params.commandHosts && normalizeToolName(rule.tool) === "monitor") return false;
 					return true;
 				})
 			: allow;

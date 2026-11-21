@@ -23,6 +23,8 @@ import type { LspFailure } from "./text.ts";
  */
 const PACKAGE_MANAGER_HINTS: Record<string, { darwin: string; win32: string; linux: string }> = {
 	ripgrep: { darwin: "brew install ripgrep", win32: "winget install BurntSushi.ripgrep.MSVC", linux: "apt install ripgrep (or your distribution's package manager)" },
+	bubblewrap: { darwin: "not needed on macOS", win32: "not available on Windows", linux: "apt install bubblewrap (or your distribution's package manager)" },
+	socat: { darwin: "not needed on macOS", win32: "not available on Windows", linux: "apt install socat (or your distribution's package manager)" },
 	jdtls: { darwin: "brew install jdtls", win32: "download from https://download.eclipse.org/jdtls/ and put its bin\\jdtls.bat on PATH", linux: "download from https://download.eclipse.org/jdtls/ and put its bin/jdtls on PATH" },
 };
 

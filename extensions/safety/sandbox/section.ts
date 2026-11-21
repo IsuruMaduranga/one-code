@@ -55,7 +55,7 @@ export function sandboxStatusLines(facts: SandboxFacts): string[] {
 	const fs = facts.active.filesystem(facts.cwd);
 	const list = (entries: readonly string[]) => (entries.length > 0 ? entries.join(", ") : "none");
 	return [
-		`Command sandbox: on (${facts.platform === "darwin" ? "macOS Seatbelt" : "bubblewrap"}). Bash and Monitor commands run inside it.`,
+		`Command sandbox: on (${facts.platform === "darwin" ? "macOS Seatbelt" : "bubblewrap"}). Bash, PowerShell and Monitor commands run inside it.`,
 		`Writable: ${list(fs.allowWrite)}`,
 		`Never writable: ${fs.denyWrite.length} protected path${fs.denyWrite.length === 1 ? "" : "s"}`,
 		`Not readable: ${list(fs.denyRead)}`,
@@ -66,6 +66,6 @@ export function sandboxStatusLines(facts: SandboxFacts): string[] {
 		`Commands outside the sandbox: ${list(facts.settings.excludedCommands)}`,
 		`The model may ask to run a command outside it: ${facts.settings.allowUnsandboxedCommands ? "yes, through the permission gate" : "no (sandbox.allowUnsandboxedCommands is false)"}`,
 		`A sandboxed Bash command runs without a prompt: ${facts.settings.autoAllowBashIfSandboxed ? "yes, in default and acceptEdits modes (deny and ask rules still apply)" : "no (set sandbox.autoAllowBashIfSandboxed in your user settings to allow it)"}`,
-		"Change these under \"sandbox\" in your settings; changes apply from the next start.",
+		"Change these under \"sandbox\" in your settings; changes apply from the next start (the mode and the fallback apply at once).",
 	];
 }

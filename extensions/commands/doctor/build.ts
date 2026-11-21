@@ -20,6 +20,7 @@ import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
 import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
 import { readSettingsEnv } from "../../lib/profile/settings-files.ts";
 import { resolveBashSpawn, resolvePowerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
+import { loadSandboxSettings } from "../../lib/shell-run/sandbox-settings.ts";
 import { upgradeCommandFor } from "../../lib/app/update-check.mjs";
 import { replacedBuiltinsFix } from "../../lib/app/replaced-builtins.mjs";
 import { keepWindowFix } from "../../lib/app/compaction-keep.mjs";
@@ -235,7 +236,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	sections.push(mcpSection(compat, session, env.home));
 
 	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(productSettingsPath(env.home, env.env))?.webSearch);
-	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform) });
+	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform), sandbox: sandboxAsked(env.cwd, env.home) });
 	findings.push(...deps.findings);
 	sections.push(dependenciesSection(deps));
 
@@ -277,6 +278,12 @@ function summaryText(input: {
 /** The extension's own version — the app overrides it with *_VERSION (lockstep releases). */
 export function productVersion(env: NodeJS.ProcessEnv = process.env): string {
 	return env[VERSION_VAR] ?? extensionVersion();
+}
+
+/** What the settings ask of the command sandbox, for the dependency check. */
+function sandboxAsked(cwd: string, home: string): { enabled: boolean; required: boolean } {
+	const settings = loadSandboxSettings(cwd, home);
+	return { enabled: settings.enabled, required: settings.failIfUnavailable };
 }
 
 /** The shell tools exactly as a session resolves them (tools/bash/index.ts, tools/powershell/index.ts). */

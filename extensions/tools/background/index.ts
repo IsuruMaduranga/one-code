@@ -27,7 +27,8 @@ import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../l
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
-import { sandboxedCommand } from "../../lib/shell-run/sandbox.ts";
+import { sandboxConfigured, sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.ts";
+import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX, commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
 import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -417,6 +418,10 @@ function backgroundExtension(pi: ExtensionAPI) {
 			command: Type.Optional(Type.String({ description: monitorParams.command })),
 			description: Type.String({ description: monitorParams.description }),
 			timeout_ms: Type.Number({ minimum: 1000, maximum: MONITOR_TIMEOUT_SCHEMA_MAX_MS, default: DEFAULT_MONITOR_TIMEOUT_MS, description: monitorParams.timeoutMs }),
+			// Only where the settings turn the shell sandbox on, as on the bash tool (tools/bash/index.ts).
+			...(sandboxConfigured()
+				? { allowed_domains: Type.Optional(Type.Array(Type.String({ maxLength: COMMAND_HOST_MAX_LENGTH }), { description: requireText("shell").sandbox.allowedDomainsParam, maxItems: COMMAND_HOSTS_MAX })) }
+				: {}),
 			ws: Type.Optional(
 				Type.Object(
 					{
@@ -431,13 +436,19 @@ function backgroundExtension(pi: ExtensionAPI) {
 			lastCtx = ctx;
 			const startFailed = (failure: MonitorStartFailure) => ({ content: [{ type: "text" as const, text: text.monitor.startFailed(failure) }], details: {}, isError: true });
 			if (Boolean(params.command) === Boolean(params.ws)) return startFailed({ kind: "commandOrSocket" });
+			if (params.ws && commandHosts(params).length > 0) return startFailed({ kind: "hostsNeedCommand" });
 			// A monitor's command runs in the session's shell sandbox like any command the model starts.
 			let command = params.command;
 			const sandboxBash = bashSpawn().spawn?.shell;
+			let sandboxRun: SandboxRun | undefined;
 			if (command && sandboxBash) {
-				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId, detached: true });
-				if ("refused" in sandboxed) return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "it runs Bash commands only" });
+				const sandboxed = await sandboxedCommand({ command, original: command, disable: false, cwd: ctx.cwd, bash: sandboxBash, id: toolCallId });
+				if ("refused" in sandboxed) {
+					if (sandboxed.refused.kind === "hosts") return startFailed({ kind: "hostsRejected", reason: sandboxed.refused.reason });
+					return startFailed({ kind: "sandboxRequired", reason: sandboxed.refused.kind === "unavailable" ? sandboxed.refused.reason : "no bash was found to run it in" });
+				}
 				command = sandboxed.command;
+				sandboxRun = sandboxed.run;
 			}
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: the
@@ -483,6 +494,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const finished = new Promise<void>((resolve) => {
 				finish = resolve;
 			});
+			// The command's own host list ends with the monitor.
+			void finished.then(() => sandboxRun?.finish());
 
 			const flush = (force = false) => {
 				flushTimer = undefined;

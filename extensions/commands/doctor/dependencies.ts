@@ -117,6 +117,11 @@ export interface DependencyInput {
 	 * the report had no line for it until 2026-09-19 (the Vultr VM session).
 	 */
 	shells?: ShellsInput;
+	/**
+	 * The command sandbox as the settings ask for it (lib/shell-run/sandbox-settings.ts).
+	 * On Linux it needs bubblewrap and socat on PATH; macOS ships what it uses.
+	 */
+	sandbox?: { enabled: boolean; required: boolean };
 }
 
 export interface ShellsInput {
@@ -173,6 +178,24 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 				level: s.primary === "none" ? "error" : "warn",
 				text: notice,
 				fix: switchSet ? `Install PowerShell 7 (pwsh) or unset ${s.switchVar}.` : "Install Git for Windows or PowerShell 7.",
+			});
+		}
+	}
+
+	// The Linux sandbox is bubblewrap around the command and socat between it and the network proxy.
+	if (platform === "linux" && input.sandbox) {
+		const { enabled, required } = input.sandbox;
+		const missing: string[] = [];
+		for (const [command, tool] of [["bwrap", "bubblewrap"], ["socat", "socat"]] as const) {
+			const found = which(command);
+			if (!found) missing.push(tool);
+			checks.push({ name: command, found: !!found, path: found, need: enabled ? "required" : "unused", reason: enabled ? "the command sandbox (sandbox.enabled)" : "the command sandbox (off)", hint: installHint(tool, platform) });
+		}
+		if (enabled && missing.length > 0) {
+			findings.push({
+				level: required ? "error" : "warn",
+				text: `The command sandbox is on in your settings and ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not on PATH: ${required ? "shell commands are refused until it can start (sandbox.failIfUnavailable)" : "shell commands run without the sandbox"}.`,
+				fix: `Install ${missing.join(" and ")}: ${missing.map((tool) => installHint(tool, platform)).join("; ")}.`,
 			});
 		}
 	}

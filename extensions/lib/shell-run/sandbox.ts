@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto";
 import { homedir } from "node:os";
 import { processState } from "../profile/process-state.ts";
+import { shellQuote } from "../shell/shell-quote.ts";
 import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
@@ -31,6 +32,8 @@ export interface SandboxCall {
 	 * presents it to the proxy, so it is random and never the tool call's.
 	 */
 	id: string;
+	/** The model's own command: what the runtime reports a denial against. */
+	text: string;
 }
 
 /**
@@ -80,7 +83,8 @@ export function sandboxPlatform(platform: NodeJS.Platform = process.platform): "
 /** The process's sandbox settings, read once. */
 export function sandboxSettings(): SandboxSettings {
 	const slot = state();
-	slot.settings ??= loadSandboxSettings(process.cwd(), homedir());
+	// A copy: `reloadSandboxSettings` writes to it, and a session with no sandbox block gets the shared default.
+	slot.settings ??= { ...loadSandboxSettings(process.cwd(), homedir()) };
 	return slot.settings;
 }
 
@@ -94,12 +98,32 @@ export function activeSandbox(): ActiveSandbox | undefined {
 	return state().active;
 }
 
+/** Settles when the sandbox's start under way, if any, has ended either way. */
+export function sandboxSettled(): Promise<void> {
+	return Promise.resolve(state().starting).then(() => undefined, () => undefined);
+}
+
+/**
+ * Read the settings again after the user changed them in `/sandbox`. Two keys
+ * take effect at once, since neither changes a tool's schema nor the running
+ * sandbox's rules: whether a sandboxed command skips the prompt, and whether
+ * the model may ask to leave the sandbox. Everything else (on or off, the
+ * paths, the hosts) holds until the next start. Returns what the files now
+ * say, so the caller can tell the user what waits for a restart.
+ */
+export function reloadSandboxSettings(): SandboxSettings {
+	const loaded = loadSandboxSettings(process.cwd(), homedir());
+	const current = sandboxSettings();
+	current.autoAllowBashIfSandboxed = loaded.autoAllowBashIfSandboxed;
+	current.allowUnsandboxedCommands = loaded.allowUnsandboxedCommands;
+	return loaded;
+}
+
 /** Why the configured sandbox is not running, when it is not. */
 export function sandboxUnavailable(): string | undefined {
 	return state().unavailable;
 }
 
-const shellQuote = (text: string): string => `'${text.replace(/'/g, `'\\''`)}'`;
 
 /**
  * Start the session's sandbox. `scopeFor` gives what a command run in a
@@ -137,7 +161,7 @@ async function start1(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: stri
 			...(opts.tempDir ? { tempDir: opts.tempDir } : {}),
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) =>
-				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: command }),
+				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
 			annotate: (id, output) => {
 				try {
 					return SandboxManager.annotateStderrWithSandboxFailures(id, output);
@@ -175,8 +199,8 @@ export async function stopSandbox(): Promise<void> {
 export type SandboxRefusal =
 	/** The sandbox is required (`failIfUnavailable`) and is not running. */
 	| { kind: "unavailable"; reason: string }
-	/** The sandbox cannot run this shell. */
-	| { kind: "powershell" }
+	/** The sandbox runs every command through a bash, and the machine has none. */
+	| { kind: "noBash" }
 	/** The call's own host list has an entry the sandbox rejects. */
 	| { kind: "hosts"; reason: string };
 
@@ -190,7 +214,11 @@ export type SandboxedCommand =
 export interface SandboxRun {
 	/** `text` with what the sandbox denied this run appended, when it denied something. */
 	withViolations(text: string): string;
-	/** The run is over: its host list no longer applies. Safe to call twice. */
+	/**
+	 * The run is over: its host list no longer applies. Safe to call twice.
+	 * Whoever runs the command calls it when the command ends, a background
+	 * task's owner when the task does.
+	 */
 	finish(): void;
 }
 
@@ -203,15 +231,15 @@ export interface SandboxRequest {
 	/** The model's `dangerouslyDisableSandbox`, honoured only where the settings allow it. */
 	disable: boolean;
 	cwd: string;
-	/** The bash that runs it, or undefined for a shell the sandbox cannot run (PowerShell). */
+	/** The bash that runs commands inside the sandbox, or undefined when the machine has none. */
 	bash: string | undefined;
+	/**
+	 * What that bash runs for this call, when the tool's own shell is not bash
+	 * (the PowerShell tool's `pwsh -Command '…'` line). Default: `command`.
+	 */
+	line?: string;
 	/** The tool call's id: the permission gate grants a call its hosts under it. */
 	id: string;
-	/**
-	 * A command that outlives its tool call (a background command, a
-	 * monitor): nothing ends its run, so it gets no host list of its own.
-	 */
-	detached?: boolean;
 }
 
 /** Whether a call leaves the sandbox: the model asked and may, or the user excluded the command. */
@@ -235,11 +263,11 @@ export async function sandboxedCommand(request: SandboxRequest): Promise<Sandbox
 	const sandbox = activeSandbox();
 	if (!sandbox) return settings.failIfUnavailable ? { refused: { kind: "unavailable", reason: sandboxUnavailable() ?? "it has not started" } } : { command: request.command };
 	if (leavesSandbox(settings, request)) return { command: request.command };
-	if (!request.bash) return { refused: { kind: "powershell" } };
+	if (!request.bash) return { refused: { kind: "noBash" } };
 	// The command presents this id to the proxy, which finds its hosts by it: 128 random bits, as the runtime requires.
 	const id = randomBytes(16).toString("base64url");
 	let listed = false;
-	if (hosts.length > 0 && !request.detached) {
+	if (hosts.length > 0) {
 		try {
 			sandbox.allowHosts(id, hosts);
 			listed = true;
@@ -252,7 +280,7 @@ export async function sandboxedCommand(request: SandboxRequest): Promise<Sandbox
 		listed = false;
 	};
 	try {
-		const command = await sandbox.wrap(request.command, { cwd: request.cwd, shell: request.bash, id });
+		const command = await sandbox.wrap(request.line ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });
 		return {
 			command,
 			run: {

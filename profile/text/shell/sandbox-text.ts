@@ -76,8 +76,8 @@ export const shellSandboxText: ShellSandboxText = {
 			? "The settings require it, so Bash commands are refused until it can start. Tell the user what is missing; do not look for another way to run commands."
 			: "Bash commands run without it. Tell the user once that the sandbox is off and why."),
 	refused: (p) =>
-		p.kind === "powershell"
-			? "The command sandbox is on in this session and it runs Bash commands only, so this PowerShell command was not run. Use the bash tool."
+		p.kind === "noBash"
+			? "The command sandbox is on in this session and runs every command through a bash, and no bash was found, so the command was not run. Tell the user the sandbox needs a bash on PATH."
 			: p.kind === "hosts"
 				? `The command was not run: its \`allowed_domains\` list has an entry the sandbox rejects (${p.reason}). Name each host as a domain ("registry.npmjs.org"), a wildcard ("*.pythonhosted.org") or an address, each with an optional ":port", and run it again.`
 				: `The sandbox is required by the user's settings (sandbox.failIfUnavailable) and is not running: ${p.reason}. The command was not run. Tell the user what is missing; they can fix it or change the sandbox settings.`,

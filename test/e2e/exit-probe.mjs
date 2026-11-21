@@ -13,6 +13,7 @@
  *   node test/e2e/exit-probe.mjs --only rpc-stdin,new
  *   node test/e2e/exit-probe.mjs --keep          keep each run's temp root
  *   node test/e2e/exit-probe.mjs --jobs 1        one run at a time (default 3)
+ *   node test/e2e/exit-probe.mjs --sandbox       every run with the command sandbox on (macOS, Linux)
  *
  * Detection does not trust our bookkeeping: pi runs with a unique tag in its
  * environment (EXIT_PROBE_TAG), inherited by every descendant, and every
@@ -54,6 +55,7 @@ const { values: opts } = parseArgs({
 		only: { type: "string" },
 		keep: { type: "boolean", default: false },
 		jobs: { type: "string", default: "3" },
+		sandbox: { type: "boolean", default: false },
 	},
 });
 
@@ -189,7 +191,7 @@ function makeWorld(tag) {
 	const mcp = writeLauncher(join(bin, "probe-mcp"), join(repo, "test/e2e/golden-mcp-server.mjs"), `${tag}:mcp`);
 	writeFileSync(join(home, ".claude.json"), `${JSON.stringify({ mcpServers: { probe: { command: mcp, args: [] } } }, null, 2)}\n`);
 	const hook = `${bashPath(process.execPath)} ${bashPath(procScript)} fork ${tag}:hook`;
-	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: hook }] }] } }, null, 2)}\n`);
+	writeFileSync(join(home, ".claude", "settings.json"), `${JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: hook }] }] }, ...(opts.sandbox ? { sandbox: { enabled: true } } : {}) }, null, 2)}\n`);
 
 	const env = {
 		...baseEnv,
