@@ -1090,17 +1090,16 @@ function backgroundExtension(pi: ExtensionAPI) {
 		);
 		return messages ? { messages } : undefined;
 	});
+	// Everything a switch or a reload stops, from the one list every extension
+	// answers into: the registry's tasks (this extension's own answer) and the
+	// work that never enters the registry (a running workflow, a resident
+	// agent's turn that no task covers).
+	const runningWork = (): Array<{ id: string; description: string }> =>
+		querySessionWork(pi.events)
+			.tasks.filter((task) => task.status === "running")
+			.map(({ id, description }) => ({ id, description }));
 	// A switch stops everything below, so ask first. pi can cancel a switch but
 	// not a quit; the /tasks dialog says that quitting stops it (switch-guard.ts).
-	// Everything a switch or a reload stops: the registry's tasks and the work
-	// other extensions answer for (a running workflow, a resident agent's turn
-	// that no task covers), which never enter the registry.
-	const runningWork = (): Array<{ id: string; description: string }> => {
-		const seen = new Map<string, { id: string; description: string }>();
-		for (const task of registry.running()) seen.set(task.id, { id: task.id, description: task.description });
-		for (const task of querySessionWork(pi.events).tasks) if (task.status === "running" && !seen.has(task.id)) seen.set(task.id, { id: task.id, description: task.description });
-		return [...seen.values()];
-	};
 	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
 		if (!ctx.hasUI) return undefined;
 		const title = switchWarning(

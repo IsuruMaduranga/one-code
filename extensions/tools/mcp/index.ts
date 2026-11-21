@@ -153,6 +153,7 @@ function mcpExtension(pi: ExtensionAPI) {
 	const registerToolsFor = (connection: Connection) => {
 		// Names other extensions own, read once per batch (getAllTools builds every definition).
 		let taken: Set<string> | undefined;
+		const max = maxToolNameLength(modelApi);
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
 			// A provider caps a tool name (128 characters on Anthropic, 64 on the
@@ -162,7 +163,6 @@ function mcpExtension(pi: ExtensionAPI) {
 			// it elsewhere, so one over-long name would fail every later turn of
 			// the session with an opaque error. Leave it out here, before any
 			// request carries it, with a clear reason in `/mcp`.
-			const max = maxToolNameLength(modelApi);
 			if (name.length > max) {
 				failures.push({
 					server: connection.server,

@@ -43,7 +43,7 @@ export async function runSandboxedPlaceholder(
 		return words.placeholderFailed({ osMessage: `the command sandbox refused it (${wrapped.refused.kind === "noBash" ? words.noBash : wrapped.refused.reason})` });
 	}
 	try {
-		const output = await runPlaceholderCommand(wrapped.command, cwd, opts);
+		const output = await runPlaceholderCommand(wrapped.command, cwd, spec ? { ...opts, spec } : opts);
 		return wrapped.run ? wrapped.run.withViolations(output) : output;
 	} finally {
 		wrapped.run?.finish();

@@ -855,10 +855,6 @@ export function scopedTracker<T>(initial: T): { get(segment: Pick<Segment, "scop
 export const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_statement"]);
 
 /**
- * Split a command into its simple commands (see the module header). Returns
- * `parseFailed` with no segments while the grammar is not loaded.
- */
-/**
  * The text to parse when a backslash before a line end may make the grammar
  * read other words than bash runs, or undefined when the line has none.
  *
@@ -908,6 +904,10 @@ function continuationReading(command: string): string | undefined {
 	return suspicious ? text : undefined;
 }
 
+/**
+ * Split a command into its simple commands (see the module header). Returns
+ * `parseFailed` with no segments while the grammar is not loaded.
+ */
 export function parseCommand(raw: string): ParseResult {
 	const joined = continuationReading(raw);
 	const command = joined ?? raw;

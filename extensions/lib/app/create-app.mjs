@@ -47,15 +47,6 @@ import { withReplacedBuiltinsOff } from "./replaced-builtins.mjs";
 import { createUpdateCheck, minReleaseAgeFor, UPGRADE_COMMANDS } from "./update-check.mjs";
 
 /**
- * Launch the app.
- *
- * @param {object} options
- * @param {string} options.appVersion The app package's version.
- * @param {string} options.corePath This extension package's root, as the app resolved it.
- * @param {string[]} options.argv The process's argv (`process.argv`).
- * @param {(specifier: string) => string} options.resolve The app's `import.meta.resolve`, so pi resolves from the app's dependency tree.
- */
-/**
  * pi's exit hint with the app's command name. pi prints the label (dim, so
  * ANSI codes may follow it), then `pi [--session-dir <dir>] --session <id>`
  * after a space (before pi 1.6.0) or on its own line (pi 1.6.0 on). Only the
@@ -67,6 +58,15 @@ export function rebrandResumeHint(chunk, bin) {
 	return chunk.replace(/(To resume this session:(?:\x1b\[[0-9;]*m)*\s+)pi (--session(?:-dir)? )/, `$1${bin} $2`);
 }
 
+/**
+ * Launch the app.
+ *
+ * @param {object} options
+ * @param {string} options.appVersion The app package's version.
+ * @param {string} options.corePath This extension package's root, as the app resolved it.
+ * @param {string[]} options.argv The process's argv (`process.argv`).
+ * @param {(specifier: string) => string} options.resolve The app's `import.meta.resolve`, so pi resolves from the app's dependency tree.
+ */
 export async function createApp({ appVersion, corePath, argv: processArgv, resolve }) {
 	// --- 1. Isolated state ----------------------------------------------------
 	// The environment rules live in app-launch.mjs, next to the spawn helper that
