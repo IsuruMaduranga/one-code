@@ -152,11 +152,13 @@ export type SandboxPathEntry = string | { path: string; literal: true };
 
 /**
  * One path a deny rule names for a command, as {@link ruleDenyPaths} reads
- * it: `path` goes to the runtime as written; `expand` is a glob the runtime
- * cannot hold on this platform, so each command gets the files it matches
- * when its rules are built ({@link expandDenyGlobs}).
+ * it: `path` goes to the runtime as written; `literal` is an exact path that
+ * holds characters the runtime would read as glob syntax, marked literal for
+ * it; `expand` is a glob the runtime cannot hold on this platform, so each
+ * command gets the files it matches when its rules are built
+ * ({@link expandDenyGlobs}).
  */
-export type RuleDenyPath = { kind: "path"; path: string } | { kind: "expand"; glob: string };
+export type RuleDenyPath = { kind: "path"; path: string } | { kind: "literal"; path: string } | { kind: "expand"; glob: string };
 
 /**
  * The sandbox paths a deny rule's path pattern names, for a command run in
@@ -175,10 +177,15 @@ export type RuleDenyPath = { kind: "path"; path: string } | { kind: "expand"; gl
  * `**` across directories, on macOS for both lists and on Linux for reads,
  * which the runtime expands against the disk. A write-deny glob on Linux is
  * expanded per command (bubblewrap binds only real paths, and the runtime
- * skips a write glob there). A pattern holding a gate escape (`\*`), a `?` or
- * a bracket, which the gate takes literally and the runtime as syntax, is
- * widened to {@link literalDirectory}, never dropped. An exact path stays
- * exact.
+ * skips a write glob there).
+ *
+ * The gate takes a gate escape (`\*`), a `?` and a bracket literally, and
+ * the runtime reads them as glob syntax. An exact path holding them goes to
+ * the runtime marked literal. A glob holding them is expanded per command on
+ * Linux, and on macOS widened to {@link literalDirectory}, never dropped. The
+ * widening is not used for a Linux read: there the runtime binds a writable
+ * folder back over a folder it hides, so a deny of the working directory
+ * would hide nothing.
  */
 export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: string, home: string, platform: NodeJS.Platform): RuleDenyPath[] {
 	const trimmed = pattern.trim();
@@ -192,11 +199,12 @@ export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: stri
 	return paths.map((path): RuleDenyPath => {
 		if (!hasUnescapedWildcard(path)) {
 			const exact = unescapeLiteral(path);
-			return { kind: "path", path: RUNTIME_GLOB.test(exact) ? literalDirectory(path) : exact };
+			return RUNTIME_GLOB.test(exact) ? { kind: "literal", path: exact } : { kind: "path", path: exact };
 		}
+		const gateLiterals = /[?[\]\\]/.test(path);
 		// The runtime ends a `/**` itself (the directory and all beneath it), which bubblewrap can bind.
-		if (platform === "linux" && kind === "write" && RUNTIME_GLOB.test(path.replace(/\/\*\*$/, ""))) return { kind: "expand", glob: path };
-		return { kind: "path", path: /[?[\]\\]/.test(path) ? literalDirectory(path) : path };
+		if (platform === "linux" && (gateLiterals || (kind === "write" && RUNTIME_GLOB.test(path.replace(/\/\*\*$/, ""))))) return { kind: "expand", glob: path };
+		return { kind: "path", path: gateLiterals ? literalDirectory(path) : path };
 	});
 }
 
@@ -217,8 +225,10 @@ export const DENY_GLOB_WALK_BUDGET = 20_000;
  *
  * A walk that runs out of budget gives each of its globs the directory it
  * starts in ({@link literalDirectory}), the widening that covers everything
- * the glob matches and more. A file created after the rules are built is not
- * covered; the expansion runs again for the next command.
+ * the glob matches and more (for a Linux read that folder hides nothing when
+ * it is writable, see {@link ruleDenyPaths}: a known limit for a folder past
+ * the budget). A file created after the rules are built is not covered; the
+ * expansion runs again for the next command.
  */
 export function expandDenyGlobs(globs: readonly string[], budget = DENY_GLOB_WALK_BUDGET): Map<string, SandboxPathEntry[]> {
 	const byBase = new Map<string, string[]>();
@@ -466,7 +476,7 @@ function uniqueLists<Entry extends SandboxPathEntry>(lists: SandboxFilesystem<En
  * the next.
  */
 export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): SandboxFilesystem {
-	return uniqueLists(mapLists(filesystemRules(settings, scope, host), (entry) => [typeof entry === "string" ? entry : entry.kind === "path" ? entry.path : entry.glob]));
+	return uniqueLists(mapLists(filesystemRules(settings, scope, host), (entry) => [typeof entry === "string" ? entry : entry.kind === "expand" ? entry.glob : entry.path]));
 }
 
 /**
@@ -480,7 +490,13 @@ export function sandboxCommandFilesystem(settings: SandboxSettings, scope: Sandb
 	const rules = filesystemRules(settings, scope, host);
 	const globs = [...rules.denyWrite, ...rules.denyRead].flatMap((entry) => (typeof entry !== "string" && entry.kind === "expand" ? [entry.glob] : []));
 	const expanded = globs.length > 0 ? expandDenyGlobs(globs) : new Map<string, SandboxPathEntry[]>();
-	return uniqueLists(mapLists(rules, (entry): SandboxPathEntry[] => (typeof entry === "string" ? [entry] : entry.kind === "path" ? [entry.path] : (expanded.get(entry.glob) ?? [literalDirectory(entry.glob)]))));
+	const entries = (entry: string | RuleDenyPath): SandboxPathEntry[] => {
+		if (typeof entry === "string") return [entry];
+		if (entry.kind === "path") return [entry.path];
+		if (entry.kind === "literal") return [{ path: entry.path, literal: true }];
+		return expanded.get(entry.glob) ?? [literalDirectory(entry.glob)];
+	};
+	return uniqueLists(mapLists(rules, entries));
 }
 
 /** The session's configuration for the runtime's `initialize`: the rules of a command in `scope.cwd` at this moment. */

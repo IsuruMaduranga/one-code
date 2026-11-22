@@ -150,7 +150,7 @@ describe("sandbox settings", () => {
 describe.skipIf(process.platform === "win32")("the permission deny rules in the sandbox", () => {
 	const home = "/home/u";
 	/** The paths as the runtime gets them; a glob expanded per command as `expand:<glob>`. */
-	const shown = (paths: RuleDenyPath[]) => paths.map((path) => (path.kind === "path" ? path.path : `expand:${path.glob}`));
+	const shown = (paths: RuleDenyPath[]) => paths.map((path) => (path.kind === "path" ? path.path : path.kind === "literal" ? `literal:${path.path}` : `expand:${path.glob}`));
 	const write = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "write", "/work", home, platform));
 	const read = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "read", "/work", home, platform));
 
@@ -183,7 +183,7 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 		expect(write("secrets/**", "linux")).toEqual(["/work/secrets/**"]);
 	});
 
-	describe("a Linux write-deny glob", () => {
+	describe("a glob expanded per command", () => {
 		let root: string;
 		const put = (...parts: string[]) => {
 			mkdirSync(dirname(join(root, ...parts)), { recursive: true });
@@ -234,14 +234,39 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 			// The working directory itself stays writable.
 			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).not.toContain(root);
 		});
+
+		it("hides the files a Linux read glob with a literal `?` matches as the gate reads it, not the working directory", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("logs", "what?.txt");
+			put("logs", "whatX.txt");
+			const settings: SandboxSettings = { ...ON, denyRulePaths: { write: [], read: ["**/what?.txt"] } };
+			const fs = sandboxCommandFilesystem(settings, { cwd: root, writableDirs: [], protectedFiles: [] }, { home, platform: "linux" });
+			expect(fs.denyRead).toEqual([literal("logs", "what?.txt")]);
+		});
 	});
 
-	it("widens a pattern whose characters the gate takes literally and the runtime as glob syntax, and keeps an exact path exact", () => {
-		expect(write("notes/a\\*b.txt")).toEqual(["/work/notes"]);
-		expect(write("app/[id]/page.tsx")).toEqual(["/work/app"]);
-		expect(read("logs/what?.txt")).toEqual(["/work/logs"]);
+	it("marks an exact path literal where the runtime would read its characters as glob syntax, never widening it to its folder", () => {
+		for (const platform of ["darwin", "linux"] as const) {
+			expect(write("notes/a\\*b.txt", platform)).toEqual(["literal:/work/notes/a*b.txt"]);
+			expect(write("app/[id]/page.tsx", platform)).toEqual(["literal:/work/app/[id]/page.tsx"]);
+			expect(read("logs/what?.txt", platform)).toEqual(["literal:/work/logs/what?.txt"]);
+			expect(read("secret[1].txt", platform)).toEqual(["literal:/work/secret[1].txt"]);
+			expect(write("src/page.tsx", platform)).toEqual(["/work/src/page.tsx"]);
+		}
+		// The section shows the path itself; the runtime gets it marked literal.
+		const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["app/[id]/page.tsx"], read: ["secret[1].txt"] } };
+		const scope = { cwd: "/work", writableDirs: [], protectedFiles: [] };
+		for (const platform of ["darwin", "linux"] as const) {
+			expect(sandboxFilesystem(settings, scope, { home, platform })).toMatchObject({ denyWrite: ["/work/app/[id]/page.tsx"], denyRead: ["/work/secret[1].txt"] });
+			expect(sandboxCommandFilesystem(settings, scope, { home, platform })).toMatchObject({ denyWrite: [{ path: "/work/app/[id]/page.tsx", literal: true }], denyRead: [{ path: "/work/secret[1].txt", literal: true }] });
+		}
+	});
+
+	it("widens a glob that also holds such characters on macOS, and expands it on Linux, where a writable folder would be bound back over a hidden one", () => {
 		expect(write("src/*/[id].tsx")).toEqual(["/work/src"]);
-		expect(write("src/page.tsx")).toEqual(["/work/src/page.tsx"]);
+		expect(read("**/what?.txt")).toEqual(["/work"]);
+		expect(write("src/*/[id].tsx", "linux")).toEqual(["expand:/work/src/*/[id].tsx"]);
+		expect(read("**/what?.txt", "linux")).toEqual(["expand:/work/**/what?.txt"]);
 	});
 
 	it("adds the rules' paths after the settings' own lists, once each, for the command's directory", () => {
