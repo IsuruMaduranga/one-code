@@ -59,6 +59,40 @@ describe("chained git -C", () => {
 		expect(analyze("git -C sub -C out log -p").verdict).toBe("escalate");
 		expect(analyze("git -C sub -C .. log -p").notes.join("\n")).not.toContain("points outside the working directory");
 	});
+
+	// git changes into each directory, so the next -C starts where a link pointed.
+	posixOnly("applies the next -C from where a symbolic link led", () => {
+		mkdirSync(join(cwd, "deep"));
+		symlinkSync(cwd, join(cwd, "deep", "link"));
+		expect(analyze("git -C deep/link -C .. status").notes.join("\n")).toContain(`runs git -C .., which points outside the working directory`);
+		expect(analyze("git -C deep/link status").verdict).toBe("safe");
+	});
+
+	posixOnly("judges the checkout from that directory too", () => {
+		mkdirSync(join(cwd, "deep"));
+		mkdirSync(join(cwd, "a", "b"), { recursive: true });
+		symlinkSync(join(cwd, "a", "b"), join(cwd, "deep", "link"));
+		// A repository layout git takes as the checkout of `a`, reached only through the link.
+		mkdirSync(join(cwd, "a", "objects"));
+		mkdirSync(join(cwd, "a", "refs"));
+		writeFileSync(join(cwd, "a", "HEAD"), "ref: refs/heads/main\n");
+		expect(analyze("git -C deep/link -C .. status").notes.join("\n")).toContain("bareRepository");
+	});
+
+	posixOnly("reads git's file operands from that directory too", () => {
+		mkdirSync(join(cwd, "deep"));
+		symlinkSync(cwd, join(cwd, "deep", "home"));
+		writeFileSync(join(root, "o.txt"), "secret\n");
+		// From the link's target, `../o.txt` is outside the working directory.
+		expect(analyze("git -C deep/home diff ../o.txt a.txt").verdict).toBe("escalate");
+	});
+
+	it("keeps the result of a chain with no symbolic link", () => {
+		mkdirSync(join(cwd, "deep"));
+		expect(analyze("git -C deep -C .. status").verdict).toBe("safe");
+		expect(analyze("git -C deep -C ../.. status").verdict).toBe("escalate");
+		expect(analyze("git -C deep diff ../a.txt a.txt").verdict).toBe("safe");
+	});
 });
 
 describe("ls -L with an abbreviated --recursive", () => {

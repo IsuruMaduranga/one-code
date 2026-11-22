@@ -34,7 +34,7 @@ import { productReadOnlySubcommands } from "../profile/profile.ts";
 import { isNameOperand } from "./product-read-only.ts";
 import { isProtectedPath } from "../rules/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
-import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
+import { isWithin, resolveForContainment, resolveThroughLinks, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
@@ -910,14 +910,29 @@ function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: 
 	return undefined;
 }
 
-/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them. */
+/**
+ * One `-C <word>` step of the directory chain git walks: `word` applied from
+ * the real directory `from` lands on, then resolved through symbolic links.
+ * git changes into each directory in turn, so a later `-C ..` climbs from
+ * where a link pointed, not from the link's own parent: with `deep/link`
+ * pointing at the working directory, `git -C deep/link -C .. status` runs
+ * one level above it. `resolved` is the containment form, undefined when
+ * nothing of the path resolves (`at` is then the lexical path).
+ */
+function gitDirectoryStep(from: string, word: string, home: string): { at: string; resolved: string | undefined } {
+	const lexical = toAbsoluteBash(resolveThroughLinks(from) ?? from, word, home);
+	const real = resolveThroughLinks(lexical);
+	return { at: real ?? lexical, resolved: resolveForContainment(lexical) };
+}
+
+/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them ({@link gitDirectoryStep}). */
 function gitWorkingDirectory(args: Token[], cwd: string, home: string): string {
 	let dir = cwd;
 	for (let index = 0; index < args.length; ) {
 		const token = args[index].value;
 		if (token === "-C") {
 			const next = args[index + 1]?.value;
-			if (next) dir = toAbsoluteBash(dir, next, home);
+			if (next) dir = gitDirectoryStep(dir, next, home).at;
 			index += 2;
 		} else if (GIT_GLOBAL_SAFE.has(token)) {
 			index++;
@@ -944,10 +959,8 @@ const GIT_FILE_OPERANDS = new Set(["diff"]);
  * run a program (git-checkout-programs.ts), or undefined.
  */
 function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, CheckoutProgram | undefined>, hooks: readonly string[] = READ_HOOKS): string | undefined {
-	let dir = cwd;
-	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
-		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
-	}
+	// Only `-C` and the safe global options lead a command that reaches this check.
+	const dir = gitWorkingDirectory(args, cwd, home);
 	// Memoized for one analysis only: nothing runs between its segments, but the
 	// model can rewrite `.git/config` between calls.
 	const key = `${hooks.join(",")}\0${dir}`;
@@ -1297,9 +1310,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				gitEscalationReason(
 					args,
 					(dir, from) => {
-						const at = toAbsoluteBash(from ?? effectiveCwd, dir, home);
+						const { at, resolved } = gitDirectoryStep(from ?? effectiveCwd, dir, home);
 						if (isUnknownTilde(dir)) return { outside: true, at };
-						const resolved = resolveForContainment(at);
 						return { outside: resolved === undefined || !isWithin(containmentRoot, resolved), at };
 					},
 					(words) => fileReads.push(...words),
