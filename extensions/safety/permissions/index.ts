@@ -64,7 +64,7 @@ import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/d
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
 import { describeCandidate, isSilentFallback } from "../../lib/models/classifier-model.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../../lib/shell/paths.ts";
-import { DenialStore, denialInputKey, permissionGrantedMessage, sandboxAskSuffix } from "./auto-mode/denials.ts";
+import { DenialStore, denialInputKey, permissionGrantedMessage, permissionGrantReminder, sandboxAskSuffix } from "./auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
 import { safetyControlWrite, safetyFloorBlockText, safetyFloorReason, sessionSettingsFiles } from "./auto-mode/safety-floor.ts";
 import type { FloorTarget } from "./auto-mode/text.ts";
@@ -2224,8 +2224,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		}
 		const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...changes].join("\n");
 		announceLocalCommand(pi, { name: command, args, stdout });
-		// The grant message rides with the breadcrumb on the next prompt; no turn starts.
-		if (approved.length > 0) pi.events.emit(REMINDER_CHANNEL, { text: `${permissionGrantedMessage(displays)}\n`, placement: "user-prepend", raw: true });
+		// No turn starts: the grant rides the running turn's next request, or the next prompt.
+		if (approved.length > 0) pi.events.emit(REMINDER_CHANNEL, permissionGrantReminder(displays, !ctx.isIdle()));
 	};
 
 	/**

@@ -4,8 +4,8 @@
  * Code 2.1.278's wire text. Every expected string below is the text Claude
  * Code 2.1.273 to 2.1.278 sends; how each was confirmed is in
  * working-docs/findings/24-claude-code-notifications.md. A drift here is a
- * parity regression, not a wording preference. The one literal NOT verified
- * is the workflow summary (see `workflowSummary`). The frames around these
+ * parity regression, not a wording preference. The workflow summary is
+ * Claude Code 2.1.330's (see `workflowSummary`). The frames around these
  * words (tags, their order, indentation, delivery framing) are the base's,
  * checked in test/unit/notification-fidelity.test.ts with the profile's words,
  * so together they pin the bytes Claude Code sends.
@@ -56,8 +56,11 @@ describe("Claude Code 2.1.278 notification literals", () => {
 		expect(monitorEndedSummary("quiet", "completed", false)).toBe('Monitor "quiet" ended without producing output');
 		expect(monitorEndedSummary("w", "failed", true, "exit code 2")).toBe('Monitor "w" script failed: exit code 2');
 		expect(monitorEndedSummary("w", "killed", true)).toBe('Monitor "w" stopped');
-		// Unverified against CC (no local workflow completion was captured) — see workflowSummary.
-		expect(workflowSummary("review-changes", "completed")).toBe('Workflow "review-changes" finished');
+		// Claude Code 2.1.330's three forms: a failure always names a reason, a stop never does.
+		expect(workflowSummary("review-changes", "completed")).toBe('Dynamic workflow "review-changes" completed');
+		expect(workflowSummary("review-changes", "failed", "step 2 threw")).toBe('Dynamic workflow "review-changes" failed: step 2 threw');
+		expect(workflowSummary("review-changes", "failed")).toBe('Dynamic workflow "review-changes" failed: Unknown error');
+		expect(workflowSummary("review-changes", "killed", "aborted by the user")).toBe('Dynamic workflow "review-changes" was stopped');
 	});
 
 	it("the flagged hand-back warnings: CC's blocked literal, and One Code's own unavailable one", () => {

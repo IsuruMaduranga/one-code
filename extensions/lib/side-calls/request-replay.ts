@@ -57,12 +57,6 @@ const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"google-vertex": [["config", "maxOutputTokens"]],
 };
 
-/**
- * APIs whose cap is written only where the captured body carries one. Codex
- * sends one from pi 1.6.0 and took none before, so on an older pi nothing is written.
- */
-const CAP_ONLY_WHERE_SENT: ReadonlySet<ReplayApi> = new Set<ReplayApi>(["openai-codex-responses"]);
-
 const REPLAY_APIS: ReadonlySet<string> = new Set<ReplayApi>([
 	"anthropic-messages",
 	"openai-completions",
@@ -81,11 +75,16 @@ function capAt(payload: Record<string, unknown>, path: readonly string[]): numbe
 	return typeof value === "number" ? value : undefined;
 }
 
-/** The path of the cap `payload` carries for `api`, or the first one the API takes. */
-function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly string[] | undefined {
-	const paths = CAP_PATHS[api];
-	const found = paths.find((path) => capAt(payload, path) !== undefined);
-	return found ?? (CAP_ONLY_WHERE_SENT.has(api) ? undefined : paths[0]);
+/**
+ * Where a side call's cap goes: the path of the cap in `tail`, the body pi
+ * built for this call with its `maxTokens`, or none when pi wrote none there.
+ * pi leaves the cap off where the endpoint rejects it (Sign in with ChatGPT on
+ * `openai`, a Responses model whose compat takes no `max_output_tokens`, Codex
+ * before pi 1.6.0), so a replay writes one exactly where pi does, read from
+ * the bytes rather than from the login or pi's version.
+ */
+function capPath(api: ReplayApi, tail: Record<string, unknown>): readonly string[] | undefined {
+	return CAP_PATHS[api].find((path) => capAt(tail, path) !== undefined);
 }
 
 /** `payload` with `value` at `path`, copying only the objects on the way. */
@@ -241,7 +240,7 @@ export class LastExchange<Reply extends MessageLike = MessageLike> {
 /**
  * The captured body with `tail`'s message list (a body pi-ai built for the tail
  * alone) appended, every other field kept byte for byte. `maxTokens` replaces
- * the output cap when given.
+ * the output cap when given, where pi wrote a cap into `tail` (`capPath`).
  *
  * Anthropic cache breakpoints: the tail's own markers are dropped, and when the
  * tail starts with the assistant reply, the markers on the captured request's
@@ -269,7 +268,7 @@ export function extendPayload(capture: RequestCapture, tail: Record<string, unkn
 		const own = isPlainObject(tail.config) ? tail.config.abortSignal : undefined;
 		out = { ...out, config: own === undefined ? config : { ...config, abortSignal: own } };
 	}
-	const path = maxTokens === undefined ? undefined : capPath(capture.api, capture.payload);
+	const path = maxTokens === undefined ? undefined : capPath(capture.api, tail);
 	return path && maxTokens !== undefined ? withCap(out, path, maxTokens) : out;
 }
 

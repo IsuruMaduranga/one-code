@@ -37,6 +37,7 @@ import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { dirname } from "node:path";
 import { isWithin, resolveForContainment, resolveThroughLinks, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
+import { findGitRoot } from "../context/git.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
@@ -69,6 +70,17 @@ export interface ShellEvidence {
 	 * keeps the model's spelling from), the realpath'd form, and the verdict.
 	 */
 	writes: { token: string; absolute: string; resolved?: string; outsideCwd: boolean }[];
+	/**
+	 * The glob operands of a removing or moving command (`rm`, `rmdir`,
+	 * `shred`, `truncate`, `mv`), expanded against the filesystem as bash would
+	 * (`expandGlob`): each with the paths it matches, absolute and realpath'd,
+	 * or with `matches` undefined when this check cannot enumerate them. Each
+	 * also escalates, and appears in `writes` as written where the command's
+	 * branch records it. Read only by the edit-family rule check
+	 * (lib/rules/matcher.ts `decide`), so a rule on `config/prod.yaml` sees
+	 * `rm config/*.yaml`; containment never relies on the expansion.
+	 */
+	globWrites: { token: string; matches?: { absolute: string; resolved?: string }[] }[];
 	/** Credential/secret paths named anywhere in the command (original tokens, never expanded). */
 	sensitivePaths: string[];
 	/** In-project paths whose contents execute later (`.git/hooks/*`, `.vscode/*.json`). */
@@ -205,19 +217,29 @@ interface WrapperSpec {
 	 * position, so the command escalates; the wide reading skips it.
 	 */
 	unsafeValues?: readonly string[];
-	/** Options whose value is a command line of its own (`flock -c`, `env -S`): the wide reading returns it. */
+	/** Options whose value is a command line of its own (`flock -c`, `env -S`, `su -c`): the wide reading returns it. */
 	scripts?: readonly string[];
-	/** The first operand is a file, not the command (`flock LOCK cmd`, `script LOG cmd`). */
-	fileFirst?: boolean;
-	/** The first operand is a duration (`timeout 30 cmd`). */
-	durationFirst?: boolean;
+	/**
+	 * The first operand is never the command: a file (`flock LOCK cmd`,
+	 * `script LOG cmd`), a CPU mask (`taskset 0x3 cmd`) or a user (`su root
+	 * -c '…'`). Options may follow it too.
+	 */
+	operandFirst?: boolean;
+	/** The first operand is a value when it has this shape (`timeout 30 cmd`, `chrt 10 cmd`). */
+	valueFirst?: RegExp;
+	/** Wraps a compound command, after an optional name: `coproc { cmd; }`, `coproc NAME { cmd; }`. */
+	compound?: boolean;
 	/**
 	 * Whether an in-project payload stays contained (`containedNonNetwork`).
 	 * xargs takes its targets from stdin, and flock and script write the
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
-	/** Options that take no value and leave the payload and where it runs unchanged. */
+	/**
+	 * Options that take no value and leave the payload and where it runs
+	 * unchanged. A single-dash word listed whole (`-x86_64`, `-`) is one flag,
+	 * never a cluster of letters.
+	 */
 	flags?: readonly string[];
 	/** Peeled only for deny/ask forms; the pre-gate treats it as an unknown command. */
 	denyFormsOnly?: boolean;
@@ -232,29 +254,80 @@ interface WrapperSpec {
  * (PREGATE-REVIEW-2026-09-23 P6). `sudo`/`doas` are peeled for deny forms
  * only: the pre-gate peeling them would clear `sudo rm` as a contained delete.
  */
+const ENV: WrapperSpec = {
+	values: ["-u", "--unset"],
+	unsafeValues: ["-C", "--chdir"],
+	scripts: ["-S", "--split-string"],
+	flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"],
+	contained: true,
+};
+const NICE: WrapperSpec = { values: ["-n", "--adjustment"], contained: true };
+/** Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`, `0x1p3`, `inf`. */
+const TIMEOUT: WrapperSpec = {
+	values: ["-s", "--signal", "-k", "--kill-after"],
+	flags: ["-f", "--foreground", "--preserve-status", "-v", "--verbose", "-p"],
+	valueFirst: /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i,
+	contained: true,
+};
+
 const WRAPPERS: Record<string, WrapperSpec> = {
+	// macOS `arch -x86_64 cmd` runs cmd as that architecture; `-e NAME=value` sets its environment.
+	arch: {
+		values: ["-arch", "-d"],
+		unsafeValues: ["-e"],
+		flags: ["-32", "-64", "-i386", "-x86_64", "-x86_64h", "-arm64", "-arm64e", "-c", "-h"],
+		contained: true,
+		denyFormsOnly: true,
+	},
 	// `builtin cd x` runs the builtin `cd` (PR #12 review: it hid a `cd` from the worktree guard).
 	builtin: { contained: true },
 	// Runs its argument as the command of that name (`busybox rm x`).
 	busybox: { contained: false, denyFormsOnly: true },
 	caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], contained: true, denyFormsOnly: true },
+	// util-linux `chrt [policy] [priority] cmd`; the priority may be left out for some policies.
+	chrt: {
+		values: ["-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"],
+		flags: [
+			"-a", "--all-tasks", "-b", "--batch", "-d", "--deadline", "-e", "--ext", "-f", "--fifo", "-i", "--idle", "-o", "--other", "-r", "--rr",
+			"-R", "--reset-on-fork", "-p", "--pid", "-v", "--verbose", "-m", "--max",
+		],
+		valueFirst: /^\d+$/,
+		contained: true,
+		denyFormsOnly: true,
+	},
 	command: { flags: ["-p", "-v", "-V"], contained: true },
+	// bash 4+: `coproc cmd`, `coproc { cmd; }`, `coproc NAME { cmd; }` run cmd beside the shell.
+	coproc: { compound: true, contained: false, denyFormsOnly: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], flags: ["-n", "-s", "-L"], contained: false, denyFormsOnly: true },
 	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
-	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"], contained: true },
-	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], fileFirst: true, contained: false },
+	env: ENV,
+	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], operandFirst: true, contained: false },
+	// Homebrew's coreutils names for env, nice and timeout.
+	genv: { ...ENV, denyFormsOnly: true },
+	gnice: { ...NICE, denyFormsOnly: true },
+	gtimeout: { ...TIMEOUT, denyFormsOnly: true },
 	ionice: { values: ["-c", "--class", "-n", "--classdata"], flags: ["-t", "--ignore"], contained: true },
-	nice: { values: ["-n", "--adjustment"], contained: true },
+	nice: NICE,
 	nohup: { contained: true },
 	script: {
 		values: ["-t", "-E", "--echo", "-m", "--logging-format"],
 		unsafeValues: ["-T", "--log-timing", "-I", "--log-in", "-O", "--log-out", "-B", "--log-io"],
 		scripts: ["-c", "--command"],
-		fileFirst: true,
+		operandFirst: true,
 		contained: false,
 	},
 	setsid: { flags: ["-w", "--wait", "-f", "--fork", "-c", "--ctty"], contained: true },
 	stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], contained: true },
+	// `su [options] [-] [user [args]]`: the user's shell runs `-c`'s script; util-linux takes options after the user too.
+	su: {
+		values: ["-g", "--group", "-G", "--supp-group", "-w", "--whitelist-environment"],
+		unsafeValues: ["-s", "--shell"],
+		scripts: ["-c", "--command", "--session-command"],
+		flags: ["-", "-f", "--fast", "-l", "--login", "-m", "-p", "--preserve-environment", "-P", "--pty"],
+		operandFirst: true,
+		contained: false,
+		denyFormsOnly: true,
+	},
 	sudo: {
 		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
 		unsafeValues: ["-C", "-D", "-R", "--close-from", "--chdir", "--chroot"],
@@ -262,8 +335,10 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 		contained: false,
 		denyFormsOnly: true,
 	},
+	// util-linux `taskset [options] mask cmd`; with `-p` the operand after the mask is a process id.
+	taskset: { flags: ["-a", "--all-tasks", "-c", "--cpu-list", "-p", "--pid"], operandFirst: true, contained: true, denyFormsOnly: true },
 	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], flags: ["-p", "-l", "-v", "--portability", "--verbose"], contained: true },
-	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
+	timeout: TIMEOUT,
 	watch: { values: ["-n", "--interval", "-q", "--equexit"], flags: ["-d", "-t", "-b", "-e", "-g", "-c", "-x", "-p", "-w", "--differences", "--no-title", "--beep", "--errexit", "--chgexit", "--color", "--exec", "--precise", "--no-wrap"], contained: false, denyFormsOnly: true },
 	xargs: {
 		values: ["-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
@@ -380,6 +455,24 @@ function mayCarryLink(path: string, word: string): boolean {
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code !== "ENOENT";
 	}
+}
+
+/**
+ * A write target: a word as the tokenizer read it, which knows whether bash
+ * expands it, or a bare string (a redirect target, a path built from words),
+ * judged by its text.
+ */
+type WriteWord = string | Token;
+
+/**
+ * Whether bash expands `word` as a glob. The tokenizer knows for a plain word
+ * (`'*'` and `\*` are literal, `config/*'.yaml'` globs). A bare string, a word
+ * with an expansion in it (its value is source text) and one with a brace
+ * (the tokenizer leaves `{a,b}` unexpanded) are judged by their text.
+ */
+function expandsAsGlob(word: WriteWord): boolean {
+	const text = typeof word === "string" ? word : word.value;
+	return typeof word === "string" || word.dynamic || text.includes("{") ? /[*?[]/.test(text) : !!word.glob;
 }
 
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
@@ -511,7 +604,15 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			}
 			let option: string | undefined;
 			let attached: string | undefined;
-			if (word.startsWith("--")) {
+			// A single-dash word the spec lists whole is one option (`arch -arm64e`,
+			// `arch -arch x86_64`), never letters that might name another (`-e`).
+			if (spec.flags?.includes(word)) {
+				index++;
+				continue;
+			}
+			if (kind(spec, word)) {
+				option = word;
+			} else if (word.startsWith("--")) {
 				const eq = word.indexOf("=");
 				option = eq > 0 ? word.slice(0, eq) : word;
 				attached = eq > 0 ? word.slice(eq + 1) : undefined;
@@ -563,13 +664,17 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 		payload.peeled.push(name);
 		index++;
 		skipOptions(spec);
-		if (spec.fileFirst && index < tokens.length) {
+		if (spec.operandFirst && index < tokens.length) {
 			index++;
-			// `flock LOCK -c '…'`: options may follow the file too.
+			// `flock LOCK -c '…'`, `su root -c '…'`: options may follow the operand too.
 			skipOptions(spec);
 		}
-		// Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`.
-		if (spec.durationFirst && index < tokens.length && /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
+		if (spec.valueFirst && index < tokens.length && spec.valueFirst.test(tokens[index].value)) index++;
+		// `coproc { cmd; }` and `coproc NAME { cmd; }`: the group's first command is the payload.
+		if (spec.compound) {
+			if (tokens[index]?.value === "{") index++;
+			else if (tokens[index + 1]?.value === "{") index += 2;
+		}
 	}
 }
 
@@ -762,6 +867,53 @@ function bashBasename(word: string): string {
 	return trimmed.slice(trimmed.lastIndexOf("/") + 1);
 }
 
+/** Where `source` lands when moved or copied into the directory `dir`: `dir/<basename>`, a glob if either word is one. */
+function landingBeneath(dir: Token, source: Token): Token {
+	return { value: `${dir.value.replace(/\/+$/, "")}/${bashBasename(source.value)}`, glob: dir.glob || source.glob || undefined, dynamic: dir.dynamic ?? source.dynamic };
+}
+
+/** The short options that take a value, for the commands with a `-t DIR` option: in a cluster, the letters after one are its value (`-St` is suffix `t`). */
+const TARGET_DIRECTORY_COMMANDS: Record<string, string> = { mv: "St", cp: "St", ln: "St", install: "Stmog" };
+
+/**
+ * The directory `mv`, `cp`, `ln` or `install` puts its operands in, and those
+ * operands: `-t DIR`, `-tDIR` (also ending a cluster, `-ft DIR`),
+ * `--target-directory=DIR` or `--target-directory DIR`, with GNU's
+ * abbreviations of the long form (`--target=DIR`). `dir` is undefined when no
+ * such option is given. After `--` every word is an operand. A long option's
+ * separate value this does not model (`--suffix X`) counts as an operand,
+ * which only adds a write target.
+ */
+function targetDirectoryOperands(name: string, args: readonly Token[]): { dir?: string; operands: string[] } {
+	const valued = TARGET_DIRECTORY_COMMANDS[name] ?? "";
+	let dir: string | undefined;
+	const operands: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const value = args[i].value;
+		if (value === "--") {
+			operands.push(...args.slice(i + 1).map((token) => token.value));
+			break;
+		}
+		if (value.startsWith("--")) {
+			const equals = value.indexOf("=");
+			const option = equals < 0 ? value : value.slice(0, equals);
+			if (option.length > 2 && "--target-directory".startsWith(option)) dir = equals < 0 ? args[++i]?.value : value.slice(equals + 1);
+			continue;
+		}
+		if (value.startsWith("-") && value.length > 1) {
+			for (let j = 1; j < value.length; j++) {
+				if (!valued.includes(value[j])) continue;
+				const optionValue = value.slice(j + 1) || args[++i]?.value;
+				if (value[j] === "t") dir = optionValue;
+				break;
+			}
+			continue;
+		}
+		operands.push(value);
+	}
+	return { dir: dir || undefined, operands };
+}
+
 /** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
 function entryExists(absolute: string): boolean {
 	try {
@@ -861,7 +1013,12 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string }, onFileReads: (words: Token[]) => void): string | undefined {
+function gitEscalationReason(
+	args: Token[],
+	dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string },
+	onFileReads: (words: Token[]) => void,
+	repositoryAbove: (from?: string) => boolean,
+): string | undefined {
 	let index = 0;
 	/** Where git stands after the `-C` options read so far: git applies each one from the one before. */
 	let chained: string | undefined;
@@ -908,6 +1065,13 @@ function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: 
 		return `runs git ${subcommand} with an operand and no --list, which creates a ref`;
 	}
 	if (GIT_FILE_OPERANDS.has(subcommand)) onFileReads(check.parsed.positionals);
+	// From a subdirectory of a larger repository, `git grep --untracked` with a
+	// top-level pathspec (`:/`, `../..`) prints files above the working
+	// directory that no commit holds, an ignored `.env` at the root included.
+	// (The committed ones any history read prints anyway: `git log -p`.)
+	if (subcommand === "grep" && check.parsed.seen.has("--untracked") && repositoryAbove(chained)) {
+		return "runs git grep --untracked in a repository whose root is above the working directory, where a pathspec can read untracked files above it";
+	}
 	return undefined;
 }
 
@@ -1040,6 +1204,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		notes: [],
 		commands: [],
 		writes: [],
+		globWrites: [],
 		sensitivePaths: [],
 		executionPrimitives: [],
 		protectedPaths: [],
@@ -1102,21 +1267,45 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	/** The directory per subshell scope: a `cd` inside `$(…)` or `( … )` does not reach the parent. */
 	const cwdByScope = scopedTracker(cwd);
 
+	/** Record a removing or moving command's glob operand with what it expands to here (`ShellEvidence.globWrites`). */
+	const recordGlobWrite = (token: string) => {
+		const words = isUnknownTilde(token) ? undefined : expandGlob(effectiveCwd, token, home);
+		evidence.globWrites.push({
+			token,
+			matches: words?.map((word) => {
+				const absolute = toAbsoluteBash(effectiveCwd, word, home);
+				return { absolute, resolved: resolveForContainment(absolute) };
+			}),
+		});
+	};
+
 	/**
 	 * Resolve a write-target token, record it as evidence, and escalate on any
 	 * target that cannot be resolved, escapes the working directory, or names a
 	 * credential / execution-primitive path. Shared by redirections, mutating
 	 * command positionals, and output-flag targets so all writes get one check.
+	 * `removes` marks an operand of a removing or moving command, whose glob is
+	 * also expanded for the edit-family rule check (`recordGlobWrite`).
+	 * Whether bash expands the word as a glob is {@link expandsAsGlob}.
 	 */
-	const checkWriteTarget = (token: string) => {
+	const checkWriteTarget = (word: WriteWord, removes = false) => {
+		const token = typeof word === "string" ? word : word.value;
 		if (token === "/dev/null") return;
+		const globCharacters = /[*?[]/.test(token);
+		const expands = expandsAsGlob(word);
 		// A `~name`/`~-` target or a glob lands wherever bash expands it, which
 		// this check cannot know (SECURITY-REVIEW-2026-09-23 M2).
-		if (isUnknownTilde(token) || /[*?[]/.test(token)) {
+		if (isUnknownTilde(token) || expands) {
+			if (removes && expands) recordGlobWrite(token);
 			evidence.writes.push({ token, absolute: token, outsideCwd: true });
 			escalate(`writes to ${token}, which bash expands to a path this check cannot resolve`);
 			return;
 		}
+		// A quoted `'config/*.yaml'` is one literal file name: it is resolved and
+		// recorded like any other target, so a rule naming that exact file sees
+		// it and a rule on a file the pattern would match does not. It still
+		// escalates, as every name with glob characters did before.
+		if (globCharacters) escalate(`writes to ${token}, a quoted file name with glob characters`);
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
 		const outsideCwd = resolved === undefined || !(isWithin(containmentRoot, resolved) || writableRoots.some((root) => isWithin(root, resolved)));
@@ -1332,6 +1521,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 						return { outside: resolved === undefined || !isWithin(containmentRoot, resolved), at };
 					},
 					(words) => fileReads.push(...words),
+					(from) => {
+						const dir = resolveForContainment(from ?? effectiveCwd);
+						const root = dir === undefined ? undefined : findGitRoot(dir);
+						return dir === undefined || (root !== undefined && !isWithin(containmentRoot, root));
+					},
 				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
 			// git resolves a relative operand from its final `-C` directory, not
@@ -1435,11 +1629,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
-		const writeTokens: string[] = [];
+		const writeTokens: WriteWord[] = [];
 		if (fileOperands !== undefined) {
 			// Every operand is a path, bare names included. cp and mv write their
-			// last operand and read the rest, so a source outside the working space
-			// (or a credential) is an outside read and leaves the line uncontained.
+			// last operand and read the rest (mv removes them as well, below), so a
+			// source outside the working space (or a credential) is an outside read
+			// and leaves the line uncontained.
 			const copies = name === "cp" || name === "mv";
 			const reads = copies ? fileOperands.slice(0, -1) : [];
 			// The paths the write checks guard, beneath a directory operand as well
@@ -1462,19 +1657,23 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				}
 				checkRead(token);
 			}
+			// A move removes its sources, so each is a write target too: a deny
+			// rule on `config/prod.yaml` must see `mv config/prod.yaml old.yaml`.
+			if (name === "mv") writeTokens.push(...reads);
 			const destination = copies ? fileOperands.at(-1) : undefined;
 			if (destination === undefined) {
-				writeTokens.push(...fileOperands.map((token) => token.value));
+				writeTokens.push(...fileOperands);
 			} else if (reads.length === 0) {
-				writeTokens.push(destination.value);
+				writeTokens.push(destination);
 			} else {
 				// Into an existing directory, each source lands beneath it (`cp
 				// settings.json .claude` writes `.claude/settings.json`), and a
 				// directory source brings its whole tree along.
 				const intoDirectory = destination.value.endsWith("/") || isDirectory(toAbsoluteBash(effectiveCwd, destination.value, home));
 				for (const source of reads) {
-					const target = intoDirectory ? `${destination.value.replace(/\/+$/, "")}/${bashBasename(source.value)}` : destination.value;
-					writeTokens.push(target);
+					const landing = intoDirectory ? landingBeneath(destination, source) : destination;
+					writeTokens.push(landing);
+					const target = landing.value;
 					const sourceResolved = resolveForContainment(toAbsoluteBash(effectiveCwd, source.value, home));
 					if (sourceResolved !== undefined && touchesGuardedPath(sourceResolved, toAbsoluteBash(effectiveCwd, target, home), guarded)) {
 						escalate(`${name === "cp" ? "copies" : "moves"} ${source.value} to ${target}, which puts files on a protected, credential or execution-primitive path`);
@@ -1488,21 +1687,49 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// it drops out of containment — the command then reaches the classifier.
 			for (const token of args) {
 				if (token.value.startsWith("-")) continue;
-				if (hasGlob(token.value)) {
+				if (expandsAsGlob(token)) {
 					escalate(`targets ${token.value}, a glob whose expansion cannot be checked`);
+					recordGlobWrite(token.value);
 					continue;
 				}
-				writeTokens.push(token.value);
+				writeTokens.push(token);
 			}
 		} else if (isMutation) {
 			const positionals = args.filter((token) => !token.value.startsWith("-") && looksLikePath(token.value));
-			// For cp/mv/rsync/ln the destination is last; for the rest every
-			// positional is a candidate target.
-			if (["cp", "mv", "rsync", "ln", "install"].includes(name)) {
-				const last = positionals[positionals.length - 1];
+			// For cp/rsync/ln the destination is last; for the rest every
+			// positional is a candidate target. A move with options this check
+			// does not model writes every operand it names, its sources (which it
+			// removes) and `-t`'s directory included, bare names too. With a
+			// target directory (`-t DIR`, `--target-directory=DIR`), mv, cp, ln and
+			// install write each operand's name beneath it, as they do when the last
+			// operand is an existing directory or ends with a slash.
+			const into = name in TARGET_DIRECTORY_COMMANDS ? targetDirectoryOperands(name, args) : undefined;
+			// After `--` every word is an operand, a name that starts with a dash included.
+			const delimiter = args.findIndex((token) => token.value === "--");
+			const operands = delimiter < 0 ? args.filter((token) => !token.value.startsWith("-")) : [...args.slice(0, delimiter).filter((token) => !token.value.startsWith("-")), ...args.slice(delimiter + 1)];
+			if (name === "mv") {
+				writeTokens.push(...operands);
+			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
+				// The destination is the last operand even when it is a bare name
+				// (`cp --sparse=always x prod.yaml`); rsync's may be a remote spec, so it keeps the path test.
+				const last = (name === "rsync" ? positionals : operands).at(-1);
 				if (last) writeTokens.push(last.value);
-			} else {
+				// `ln -s ../prod.yaml` makes `prod.yaml` here.
+				if (name === "ln" && operands.length === 1) writeTokens.push(bashBasename(operands[0].value));
+			} else if (into?.dir === undefined) {
 				writeTokens.push(...positionals.map((token) => token.value));
+			}
+			if (into !== undefined && into.dir === undefined && operands.length > 1) {
+				// `mv --backup=numbered notes.md archive/` writes `archive/notes.md`.
+				const destination = operands[operands.length - 1];
+				if (destination.value.endsWith("/") || isDirectory(toAbsoluteBash(effectiveCwd, destination.value, home))) {
+					for (const source of operands.slice(0, -1)) writeTokens.push(landingBeneath(destination, source));
+				}
+			}
+			if (into?.dir !== undefined) {
+				const dir = into.dir;
+				if (!writeTokens.includes(dir)) writeTokens.push(dir);
+				for (const operand of into.operands) writeTokens.push(`${dir.replace(/\/+$/, "")}/${bashBasename(operand)}`);
 			}
 			for (const { value } of args) {
 				if (value.startsWith("of=")) writeTokens.push(value.slice(3)); // dd
@@ -1520,7 +1747,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 		}
 
-		for (const token of writeTokens) checkWriteTarget(token);
+		const removes = isDelete || name === "mv";
+		for (const token of writeTokens) checkWriteTarget(token, removes);
 	}
 
 	// A moved or copied relative symlink points somewhere else afterwards, and

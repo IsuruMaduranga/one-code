@@ -150,21 +150,46 @@ export function toAbsoluteBash(cwd: string, token: string, home: string): string
  * `guarded` also gets the source's directory entry (a symbolic link is one).
  */
 export function touchesGuardedPath(source: string, target: string, guarded: (path: string, entry: Dirent) => boolean, budget = 5_000): boolean {
+	return walkTree(source, (child, entry) => (guarded(join(target, child), entry) ? "stop" : undefined), budget) !== "done";
+}
+
+/**
+ * Walk the tree under `root` without following symbolic links, visiting at
+ * most `budget` entries. `visit` gets each entry's path relative to `root`
+ * and its directory entry, and answers `stop` to end the walk or `skip` to
+ * stay out of a directory. A directory that cannot be listed for a reason
+ * other than being gone goes to `unreadable` (relative, `""` for the root).
+ * Returns `stopped`, `over budget` (the walk saw more entries than the
+ * budget), or `done`.
+ */
+export function walkTree(root: string, visit: (relative: string, entry: Dirent) => "stop" | "skip" | undefined, budget: number, unreadable?: (relative: string) => void): "done" | "stopped" | "over budget" {
 	const stack = [""];
 	let seen = 0;
 	while (stack.length > 0) {
 		const relative = stack.pop() as string;
+		const path = join(root, relative);
 		let entries;
 		try {
-			entries = readdirSync(join(source, relative), { withFileTypes: true });
-		} catch {
+			// The entry was a directory when its parent was listed, but
+			// `readdirSync` follows a symbolic link: one swapped in since then
+			// would list a folder outside `root` under in-root names. Checking
+			// again just before the read narrows that window without closing it
+			// (Node has no portable no-follow directory open); a swapped entry is
+			// left out, as a walk that never follows links would treat a link.
+			if (relative !== "" && !lstatSync(path).isDirectory()) continue;
+			entries = readdirSync(path, { withFileTypes: true });
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR") unreadable?.(relative);
 			continue;
 		}
 		for (const entry of entries) {
 			const child = join(relative, entry.name);
-			if (++seen > budget || guarded(join(target, child), entry)) return true;
-			if (entry.isDirectory()) stack.push(child);
+			if (++seen > budget) return "over budget";
+			const answer = visit(child, entry);
+			if (answer === "stop") return "stopped";
+			if (answer !== "skip" && entry.isDirectory()) stack.push(child);
 		}
 	}
-	return false;
+	return "done";
 }

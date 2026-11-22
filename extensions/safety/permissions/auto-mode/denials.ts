@@ -20,6 +20,7 @@
  * starts empty.
  */
 
+import type { ReminderPayload } from "../../../lib/request/reminders.ts";
 import { autoModeResultText } from "./text.ts";
 
 /** Claude Code's `MAX_DENIALS`. */
@@ -148,4 +149,21 @@ export class DenialStore {
  */
 export function permissionGrantedMessage(displays: readonly string[]): string {
 	return autoModeResultText.permissionGranted({ displays });
+}
+
+/**
+ * The reminder that tells the model about approvals made without a retry. No
+ * turn starts either way. Idle, the grant rides raw before the next prompt's
+ * text, next to the command's breadcrumb, as Claude Code's meta message does.
+ * While a turn runs, the model would otherwise work on without it until the
+ * user types again, so it is an `orTail` breadcrumb: the next request of the
+ * turn carries it on its tail (the trailing tool result), framed as a
+ * system reminder so it does not read as the tool's output; a turn that ends
+ * first leaves it pending for the next prompt. Claude Code queues the panel
+ * itself until the turn ends (findings §33), so the mid-turn delivery is One
+ * Code's.
+ */
+export function permissionGrantReminder(displays: readonly string[], turnRunning: boolean): ReminderPayload {
+	const text = permissionGrantedMessage(displays);
+	return turnRunning ? { text, placement: "user-prepend", orTail: true } : { text: `${text}\n`, placement: "user-prepend", raw: true };
 }

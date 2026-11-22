@@ -418,6 +418,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		return {
 			sink,
 			progress: (toolCalls: number, usage: UsageTotals) => liveRuns.stats(record.taskId, toolCalls, usage),
+			wake: () => liveRuns.wake(record.taskId),
 			settle: () => liveRuns.settle(record.taskId),
 			finish: (outcome: FinishOutcome) => {
 				liveRuns.finish(record.taskId, outcome);
@@ -2081,6 +2082,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
 			extraTools: spawnToolsFor(p.record, { resident: true }),
 			mainToolCallId: () => mainCallOf(p.record.taskId),
+			onTurnStart: () => live.wake(),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
 				live.settle();

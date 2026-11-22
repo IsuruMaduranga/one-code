@@ -163,11 +163,13 @@ describe("LiveRunRegistry", () => {
 		const id = register(reg);
 		reg.settle(id);
 		expect(reg.get(id)?.status).toBe("idle");
-		reg.setActivity(id, "back to work"); // idle → running on new activity
+		reg.wake(id); // a new turn started
 		expect(reg.get(id)?.status).toBe("running");
 		reg.finish(id, true);
 		expect(reg.get(id)?.status).toBe("failed");
-		reg.settle(id); // no resurrecting a finished run
+		reg.wake(id); // no resurrecting a finished run
+		expect(reg.get(id)?.status).toBe("failed");
+		reg.settle(id);
 		expect(reg.get(id)?.status).toBe("failed");
 	});
 
@@ -269,11 +271,27 @@ describe("buildRows", () => {
 		register(reg, { taskId: "r1", name: "r1" });
 		reg.settle("r1");
 		reg.get("r1")!.finishedAt = 10_000;
-		reg.setActivity("r1", "Reading store.ts"); // steered into a new turn
+		reg.wake("r1"); // a SendMessage started a new turn
 		const rows = buildRows(reg.list(), false).map((r) => r.run?.taskId);
 		expect(rows).toEqual([undefined, "r1"]);
 		expect(reg.get("r1")!.status).toBe("running");
 		expect(reg.get("r1")!.finishedAt).toBeUndefined();
+	});
+
+	it("an idle resident stays idle through its child's late events; only a turn start wakes it", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "r1", name: "r1" });
+		reg.setStreaming("r1", { content: [{ type: "text", text: "partial" }] });
+		// A capped turn settles from its timer, then the abort's message_end and progress arrive.
+		reg.settle("r1");
+		reg.setStreaming("r1", undefined);
+		reg.stats("r1", 3, { input: 0, output: 5, cacheRead: 0, cacheWrite: 0, total: 5, cost: 0 });
+		reg.setActivity("r1", "Running bash");
+		expect(reg.get("r1")!.status).toBe("idle");
+		expect(reg.get("r1")!.finishedAt).toBeDefined();
+		expect(buildRows(reg.list(), false).map((r) => r.run?.taskId)).toEqual([undefined]);
+		reg.wake("r1");
+		expect(reg.get("r1")!.status).toBe("running");
 	});
 
 	it("pins the viewed run in the strip past its linger window (open-transcript case)", () => {

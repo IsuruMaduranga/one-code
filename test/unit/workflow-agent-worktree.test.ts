@@ -12,9 +12,9 @@ import * as agentLoader from "../../extensions/lib/agents/agent-loader.ts";
 import { AgentRunner } from "../../extensions/agents/workflow/agent-session.ts";
 import { keptWorktreeOf } from "../../extensions/agents/workflow/types.ts";
 import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
-const git = (cwd: string, ...args: string[]) =>
-	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
 let repo: string;
 let agentDir: string;
@@ -22,7 +22,7 @@ beforeEach(() => {
 	agentDir = mkdtempSync(join(tmpdir(), "wf-wt-agent-"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 	repo = mkdtempSync(join(tmpdir(), "wf-wt-repo-"));
-	git(repo, "init", "-q");
+	initTestRepo(repo);
 	writeFileSync(join(repo, "a.txt"), "a\n");
 	git(repo, "add", "a.txt");
 	git(repo, "commit", "-qm", "init");

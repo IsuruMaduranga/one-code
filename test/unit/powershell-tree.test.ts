@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/lib/shell/paths.ts";
-import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { applicationArgument } from "../../extensions/lib/shell/powershell-cmdlets.ts";
 import { powershellTreeContainedEdits, powershellTreeReadOnly } from "../../extensions/lib/shell/powershell-tree.ts";
 import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
@@ -45,7 +45,7 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits: Claude Code's acceptEdits cm
 			"Set-Content src/b.txt x | Out-Null",
 			"Remove-Item -LiteralPath src/a.txt -ErrorAction SilentlyContinue",
 		]) {
-			expect(await edits(command), command).toEqual({ ok: true });
+			expect((await edits(command)).ok, command).toBe(true);
 		}
 	});
 
@@ -73,7 +73,7 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits: Claude Code's acceptEdits cm
 
 	it("refuses a recursive removal or listing over a tree with a link in it (Windows PowerShell 5.1 follows it)", async () => {
 		mkdirSync(join(cwd, "build", "deep"), { recursive: true });
-		expect(await edits("Remove-Item -Recurse build")).toEqual({ ok: true });
+		expect((await edits("Remove-Item -Recurse build")).ok).toBe(true);
 		expect(await reads("Get-ChildItem -Recurse build")).toEqual({ ok: true });
 		symlinkSync(outside, join(cwd, "build", "deep", "out"));
 		expect(await edits("Remove-Item -Recurse build")).toMatchObject({ ok: false, reason: expect.stringMatching(/link/) });
@@ -141,6 +141,25 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits through decide(): capable tie
 		expect(denied.decision).toBe("deny");
 	});
 
+	it("reports every path a cleared line writes or removes", async () => {
+		const verdict = await edits("Set-Content src/b.txt x; Remove-Item notes.txt");
+		// Resolved paths are forward-slashed on every platform.
+		expect(verdict.writes?.map((write) => write.resolved)).toEqual([join(cwd, "src", "b.txt"), join(cwd, "notes.txt")].map((path) => path.replace(/\\/g, "/")));
+	});
+
+	it("withholds the fast path from an edit onto a path an edit-family deny or ask rule names, or under a bare one", async () => {
+		const subject = "Remove-Item src/a.txt";
+		const powershellParse = await psParse(subject);
+		const run = (rules: { deny?: string[]; ask?: string[] }, mode: "acceptEdits" | "auto" | "dontAsk") =>
+			decide({ ...base, subject, mode, claudeCodeFastPaths: true, deny: parseRules(rules.deny ?? []), ask: parseRules(rules.ask ?? []), powershellParse }).decision;
+		for (const rules of [{ deny: ["Edit(src/a.txt)"] }, { deny: ["Write(src/**)"] }, { ask: ["NotebookEdit(src/a.txt)"] }, { deny: ["Edit"] }]) {
+			expect(run(rules, "auto"), JSON.stringify(rules)).toBe("classify");
+			expect(run(rules, "acceptEdits"), JSON.stringify(rules)).toBe("ask");
+			expect(run(rules, "dontAsk"), JSON.stringify(rules)).toBe("deny");
+		}
+		expect(run({ deny: ["Edit(src/other.txt)"] }, "auto")).toBe("allow");
+	});
+
 	it("an edit into a workspace directory is contained", async () => {
 		const extra = join(root, "extra");
 		mkdirSync(extra, { recursive: true });
@@ -173,7 +192,7 @@ describe.skipIf(!HAVE_POWERSHELL)("the read-only verdict reads PowerShell's bind
 		expect((await reads("Get-ChildItem -Rec:$false src")).ok).toBe(true);
 		expect((await reads("Get-ChildItem -Recurse:$true src")).ok).toBe(true);
 		expect((await reads("Get-ChildItem -Recurse:$x src")).ok).toBe(false);
-		expect(await edits("Remove-Item src/a.txt -Confirm:$false")).toEqual({ ok: true });
+		expect((await edits("Remove-Item src/a.txt -Confirm:$false")).ok).toBe(true);
 	});
 
 	it("still names-checks a switch the binder drops for being $false", async () => {
@@ -228,7 +247,7 @@ describe.skipIf(!HAVE_POWERSHELL)("paths judged as PowerShell spells them (PR-24
 		expect((await reads("Get-Content -LiteralPath ' leading.txt'")).ok).toBe(false);
 		expect((await edits("Set-Content -LiteralPath 'notes.txt ' -Value x")).ok).toBe(false);
 		expect((await reads("Get-Content -LiteralPath ' '")).ok).toBe(false);
-		expect(await edits("Set-Content -LiteralPath 'two words.txt' -Value x")).toEqual({ ok: true });
+		expect((await edits("Set-Content -LiteralPath 'two words.txt' -Value x")).ok).toBe(true);
 	});
 
 	it("refuses a write target with a backtick, which -Path unescapes and -LiteralPath keeps (H2)", async () => {

@@ -10,11 +10,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkoutGitRunsProgram, checkoutRunsOwnProgram, configRunsProgram } from "../../extensions/lib/shell/git-checkout-programs.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 let cwd: string;
 beforeEach(() => {
 	cwd = realpathSync(mkdtempSync(join(tmpdir(), "bare-repo-")));
-	execFileSync("git", ["init", "-q"], { cwd });
+	initTestRepo(cwd);
 	const inner = join(cwd, "vendor", "x");
 	mkdirSync(join(inner, "objects"), { recursive: true });
 	mkdirSync(join(inner, "refs"));

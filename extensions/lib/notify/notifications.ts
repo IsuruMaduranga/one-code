@@ -240,10 +240,10 @@ export function monitorEndedSummary(description: string, status: TaskStatus, pro
 }
 
 /**
- * `Workflow "NAME" finished` — UNVERIFIED: the 2.1.278 binary holds no local
- * workflow completion summary (only remote/error variants) and no transcript
- * on this machine carries one, so this mirrors the agent shape
- * (working-docs/features/notifications/plan.md, Deviations).
+ * Claude Code 2.1.330's workflow summary: `Dynamic workflow "NAME" completed`,
+ * `Dynamic workflow "NAME" failed: REASON` (`Unknown error` when there is no
+ * reason) and `Dynamic workflow "NAME" was stopped` (never a reason). Its
+ * `<recovery>` and `<diagnostics>` tags are not mirrored.
  */
 export function workflowSummary(name: string, status: TaskStatus, reason?: string): string {
 	return notificationWords().summary({ kind: "workflow", name, status, ...(reason ? { reason } : {}) });
@@ -551,6 +551,17 @@ export interface TaskNotifierOptions {
  */
 export const REINVOCATION_TYPES: ReadonlySet<string> = new Set(["wakeup", "cron"]);
 
+/**
+ * Whether a steer pi queued survives an abort in this run mode (`ctx.mode`).
+ * The TUI clears both queues before every abort; RPC, print, json and an
+ * in-process child abort without clearing (see `createTaskNotifier`, "An abort
+ * keeps the queue outside the TUI"). An unknown mode reads as clearing, the
+ * case where a held copy is the only one.
+ */
+export function abortKeepsQueue(mode: string | undefined): boolean {
+	return mode !== undefined && mode !== "tui";
+}
+
 /** Default coalescing window (ms). */
 export const DEFAULT_COALESCE_MS = 250;
 
@@ -582,13 +593,28 @@ export const DEFAULT_COALESCE_MS = 250;
  * editor, so a completion steered in mid-turn and not yet drained would vanish
  * — the task reads "completed" while the model never hears of it. Each
  * notification therefore sits in an outbox until pi emits `message_end` for
- * the custom message carrying its id. pi drains every queued steer before it
- * settles (its post-run loop continues while messages are queued), so anything
- * still pending at `agent_settled` was discarded; the session is idle by then,
+ * the custom message carrying its id. pi drains every queued steer before a
+ * run it was not asked to abort settles (its post-run loop continues while
+ * messages are queued), so anything still pending at such an `agent_settled`
+ * was discarded (an abort is the exception below); the session is idle by then,
  * so a re-send starts a fresh turn (the same "idle → new turn" path a
  * notification takes when nothing is running). One re-send per notification:
  * if the second copy is not confirmed either, the entry is dropped rather than
  * looping a turn per settle.
+ *
+ * An abort keeps the queue outside the TUI. pi's `AgentSession.abort()` never
+ * touches the queues; the TUI clears them before every abort (Esc, tree
+ * navigation and an extension's `ctx.abort()` all go through
+ * `restoreQueuedMessagesToEditor`), but RPC `abort`, print and json runs, the
+ * SDK and in-process children abort without clearing. A run aborted while
+ * streaming returns before it polls the steering queue, so the steer is still
+ * there and the next run drains it before its first request. So after an
+ * `aborted` settle outside `ctx.mode === "tui"`, an unconfirmed entry stays
+ * pending as `queued` (pi still holds it): neither re-sent nor held, and the
+ * next run's `message_end` confirms it. Re-sending it there delivered the
+ * notification twice. If a client cleared the queue itself (RPC
+ * `clear_queue`), the next settle that was not an abort finds the entry still unconfirmed and treats
+ * it as discarded then. `abortKeepsQueue` reads the mode.
  *
  * After an interrupt, notifications wait for the user. A turn the user stopped
  * with Esc settles `aborted`; re-sending its discarded notification with
@@ -660,6 +686,8 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		text: string;
 		details: Record<string, unknown>;
 		resent: boolean;
+		/** Handed to pi before an abort that kept pi's queue: pi still holds it and its next run drains it. */
+		queued?: boolean;
 		/** Unmerged arrivals so a held group can withdraw one task without losing its peers. */
 		items: Incoming[];
 	}
@@ -847,11 +875,21 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	pi.on("agent_end", (event, ctx) => {
 		outcome.record(event.messages, ctx.signal?.aborted);
 	});
-	pi.on("agent_settled", () => {
+	pi.on("agent_settled", (_event, ctx) => {
 		busy = false;
 		const settled = outcome.take();
 		if (settled === "aborted" || settled === "error") interrupted = true;
+		const stillQueued = settled === "aborted" && abortKeepsQueue(ctx?.mode);
 		for (const [id, entry] of [...pending]) {
+			// pi kept it through the abort (see the header): its next run drains it.
+			// A run aborted again before it drained the queue leaves it there too.
+			if (stillQueued) {
+				entry.queued = true;
+				continue;
+			}
+			// Queued through an earlier abort and a run that was not aborted went
+			// by without draining it: the client cleared pi's queue, so it was discarded.
+			entry.queued = false;
 			if (entry.resent) {
 				pending.delete(id);
 				continue;

@@ -15,6 +15,7 @@ import { shellQuote } from "../../extensions/lib/shell/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/agents/worktree-channel.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 import { worktreeResultText } from "../../extensions/safety/worktree/text.ts";
 
@@ -36,8 +37,8 @@ const stateReminders: ReminderPayload[] = [];
 beforeEach(async () => {
 	// .native expands a Windows 8.3 short name (RUNNER~1) the way git reports the path.
 	repo = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-wiring-")));
-	const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, encoding: "utf8" });
-	git("init", "-q");
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+	initTestRepo(repo);
 	writeFileSync(join(repo, "a.txt"), "a\n");
 	git("add", "a.txt");
 	git("commit", "-qm", "init");

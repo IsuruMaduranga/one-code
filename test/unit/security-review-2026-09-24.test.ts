@@ -20,6 +20,7 @@ import { wildcardMatcher } from "../../extensions/lib/shell/powershell-paths.ts"
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 
@@ -179,9 +180,9 @@ describe("H5: jq reads the environment through $ENV", () => {
 
 /** A committed repository at `cwd` with one tracked file. */
 function repo(): void {
-	execFileSync("git", ["init", "-q"], { cwd });
+	initTestRepo(cwd);
 	execFileSync("git", ["add", "a.txt"], { cwd });
-	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd });
+	execFileSync("git", ["commit", "-qm", "init"], { cwd });
 }
 
 describe("M2, M3: git reset --hard is never contained", () => {

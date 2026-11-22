@@ -177,7 +177,13 @@ export function escapeLiteral(command: string): string {
 	return command.replace(/[\\*]/g, (ch) => `\\${ch}`);
 }
 
-/** Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are literals. */
+/**
+ * Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are
+ * literals. A `**` followed by a separator at the start of a segment
+ * (`a/**` + `/b`, or a leading one) is gitignore's "any number of
+ * directories, none included": it ends at a separator, so the leading form
+ * before `.env` matches `.env` and `x/.env` but never `prod.env`.
+ */
 function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegExp {
 	let out = "";
 	for (let i = 0; i < glob.length; i++) {
@@ -187,9 +193,14 @@ function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegEx
 			i++;
 		} else if (ch === "*") {
 			if (pathMode && glob[i + 1] === "*") {
-				out += ".*";
+				const startsSegment = i === 0 || glob[i - 1] === "/";
 				i++;
-				if (glob[i + 1] === "/") i++; // "**/" also matches zero directories
+				if (startsSegment && glob[i + 1] === "/") {
+					out += "(?:.*/)?";
+					i++;
+				} else {
+					out += ".*";
+				}
 			} else {
 				out += pathMode ? "[^/]*" : ".*";
 			}
@@ -200,6 +211,15 @@ function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegEx
 		}
 	}
 	return new RegExp(`^${out}$`, ignoreCase ? "i" : "");
+}
+
+/**
+ * A path rule's glob (made absolute) as the RegExp {@link matchesPathPattern}
+ * tests a path with: `**` crosses separators, `*` does not, `\*` and `\\` are
+ * literals, and `?` and brackets are plain characters.
+ */
+export function pathGlobRegex(glob: string, ignoreCase: boolean): RegExp {
+	return globToRegex(glob, true, ignoreCase);
 }
 
 /**
@@ -254,15 +274,6 @@ export function bashSubcommands(command: string): string[] | undefined {
 
 /** Redirect targets that are devices, never files: always fine under an allow rule. */
 const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"]);
-
-/** The command line `su -c '…'` / `su --command='…'` runs, if any. */
-function suScript(args: string[]): string | undefined {
-	for (const [index, arg] of args.entries()) {
-		if (arg.startsWith("--command=")) return arg.slice("--command=".length);
-		if (arg === "-c" || arg === "--command" || arg === "--session-command") return args[index + 1];
-	}
-	return undefined;
-}
 
 /**
  * The first innermost `{…}` group of `line` that holds a comma, in the shape
@@ -449,7 +460,7 @@ function expandForms(command: string, walk: FormsWalk): string[] {
 		const tokens = leadTokens(segment);
 		if (tokens.length === 0) continue;
 		// The wide reading also peels sudo/doas and returns the command lines
-		// wrapper options carry (`flock -c`, `env -S`).
+		// wrapper options carry (`flock -c`, `env -S`, `su -c`).
 		const payload = resolvePayload(tokens, "wide");
 		nested.push(...payload.scripts);
 		if (!payload.command) continue;
@@ -458,10 +469,6 @@ function expandForms(command: string, walk: FormsWalk): string[] {
 		// A wrapper option the peel does not know may take the next word as its
 		// value (`env -P dir cmd`, `env -a name cmd`): then the command starts a word later.
 		if (payload.opaque.length > 0) nested.push(args.join(" "));
-		if (payload.command === "su") {
-			const script = suScript(args);
-			if (script) nested.push(script);
-		}
 		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
 			nested.push(...(inlineShellScripts(args, "wide") ?? []).filter(Boolean));
 		}
@@ -708,21 +715,36 @@ export function findBashAllowRule(
  * Windows rules such as `Read(//c/Users/x/**)` are written in) — and also as
  * `C:/Users/x/docs/a.md`, so a rule spelled with the drive letter works too.
  * darwin and win32 compare case-insensitively, like their filesystems.
+ *
+ * `restricts` marks a deny or ask rule, which reads a single leading `/` both
+ * ways it may be meant ({@link pathPatternReading}); an allow rule leaves it
+ * unset and keeps the one absolute reading, so it never widens.
  */
-export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
-	const { glob, absolute } = pathPatternReading(pattern, subject, cwd);
+export function matchesPathPattern(pattern: string, subject: string, cwd: string, restricts = false): boolean {
+	const { globs, absolute } = pathPatternReading(pattern, subject, cwd, restricts);
+	const candidates = pathCandidates(absolute, cwd);
 	// Case-insensitive where the filesystem is (darwin, win32): `Read(~/Notes/**)`
 	// covers `~/notes/a.md`, the same file there — the rule every other
 	// containment check in this file compares by (comparablePath).
-	const regex = globToRegex(glob, true, foldsCase());
-	for (const candidate of pathCandidates(absolute, cwd)) {
-		if (regex.test(candidate)) return true;
-	}
-	return false;
+	return globs.some((glob) => {
+		const regex = globToRegex(glob, true, foldsCase());
+		for (const candidate of candidates) {
+			if (regex.test(candidate)) return true;
+		}
+		return false;
+	});
 }
 
-/** A path pattern as {@link matchesPathPattern} reads it, and the subject made absolute. */
-function pathPatternReading(pattern: string, subject: string, cwd: string): { glob: string; absolute: string } {
+/**
+ * A path pattern as {@link matchesPathPattern} reads it, and the subject made
+ * absolute. A pattern has one reading, except that a deny or ask rule
+ * (`restricts`) written with a single leading `/` has two: the absolute path
+ * this matcher has always read it as, and the path under the working
+ * directory, which is how Claude Code reads it (`//path` is its absolute
+ * form). A rule copied from Claude Code then protects the file it named there,
+ * and a rule written for this matcher keeps protecting what it did.
+ */
+function pathPatternReading(pattern: string, subject: string, cwd: string, restricts = false): { globs: string[]; absolute: string } {
 	const home = homedir();
 	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
 	// doubled slash distinguishes it from `/path`, which CC reads relative to
@@ -734,9 +756,15 @@ function pathPatternReading(pattern: string, subject: string, cwd: string): { gl
 	// whose backslashes would read as escapes on Windows); it matches the
 	// `C:/Users/x/…` candidate below.
 	const expandHome = (p: string) => (p === "~" ? forwardSlashes(home) : p.startsWith("~/") ? `${forwardSlashes(home)}/${p.slice(2)}` : p);
-	const glob = expandHome(spelled.startsWith("//") ? spelled.slice(1) : spelled);
+	// `./x` is `x`: the candidates are spelled without the prefix, so a pattern
+	// that kept it (`Read(./.env)`, the form Claude Code's docs write) matched nothing.
+	const plain = spelled.replace(/^(?:\.\/+)+/, "");
+	const glob = expandHome(plain.startsWith("//") ? plain.slice(1) : plain);
+	// The working directory spelled as a literal glob prefix (`C:/x` on Windows,
+	// matching the `C:/…` candidate), so `/config/prod.yaml` also names `<cwd>/config/prod.yaml`.
+	const underCwd = restricts && /^\/(?!\/)/.test(plain) ? [`${escapeLiteral(forwardSlashes(cwd)).replace(/\/+$/, "")}${plain}`] : [];
 	const expandedSubject = expandTilde(subject, home);
-	return { glob, absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
+	return { globs: [glob, ...underCwd], absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
 }
 
 /**
@@ -779,20 +807,23 @@ function isAtOrInside(path: string, dir: string): boolean {
  * first wildcard or escape) and the directory's prefix must agree as far as
  * the shorter one goes, in either direction; an exact pattern must start with
  * the directory's prefix. For the deny and ask write check only: it may only
- * withhold an allow, and allow rules stay exact.
+ * withhold an allow, and allow rules stay exact, so a single leading `/` is
+ * read both ways a deny or ask rule reads it.
  */
 export function writeTargetMeetsPathPattern(pattern: string, target: string, cwd: string): boolean {
-	if (matchesPathPattern(pattern, target, cwd)) return true;
-	const { glob, absolute } = pathPatternReading(pattern, target, cwd);
+	if (matchesPathPattern(pattern, target, cwd, true)) return true;
+	const { globs, absolute } = pathPatternReading(pattern, target, cwd, true);
 	if (!mayBeDirectory(absolute)) return false;
 	const fold = (p: string) => (foldsCase() ? p.toLowerCase() : p);
-	const cut = glob.search(/[*\\]/);
-	const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
-	return [...pathCandidates(absolute, cwd, true)].some((prefix) => {
-		const dir = fold(prefix);
-		// The empty prefix stands for the relative spellings: an absolute literal never starts one.
-		if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
-		return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
+	const prefixes = [...pathCandidates(absolute, cwd, true)].map(fold);
+	return globs.some((glob) => {
+		const cut = glob.search(/[*\\]/);
+		const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
+		return prefixes.some((dir) => {
+			// The empty prefix stands for the relative spellings: an absolute literal never starts one.
+			if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
+			return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
+		});
 	});
 }
 
@@ -973,8 +1004,10 @@ export function isAtOrInsideDir(candidate: string, dir: string, cwd: string): bo
 /**
  * Whether one rule matches a call. For bash this is the deny/ask ("any
  * subcommand") semantics — allow rules go through {@link findBashAllowRule}.
+ * `restricts` marks a deny or ask rule, whose path pattern a single leading
+ * `/` gives two readings ({@link matchesPathPattern}).
  */
-export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
+export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string, restricts = false): boolean {
 	if (!ruleCoversTool(rule.tool, toolName)) return false;
 	if (!rule.pattern) return true;
 	if (!subject) return false;
@@ -984,7 +1017,7 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 				? powershellPatternMatchesAny(rule.pattern, subject)
 				: bashPatternMatchesAny(rule.pattern, subject);
 		case "path":
-			return matchesPathPattern(rule.pattern, subject, cwd);
+			return matchesPathPattern(rule.pattern, subject, cwd, restricts);
 		case "url":
 			return matchesUrlPattern(rule.pattern, subject);
 		case "text":
@@ -1016,7 +1049,8 @@ export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
 export type ToolTier = "safe" | "edit" | "execute" | "custom";
 
 const SAFE_TOOLS = new Set(["read", "grep", "find", "ls"]);
-const EDIT_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+/** The edit family: a rule on one of these binds all three (`decide`), and the sandbox denies a write to a deny rule's path. */
+export const EDIT_TOOLS: ReadonlySet<string> = new Set(["edit", "write", "notebook_edit"]);
 
 export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);
@@ -1372,7 +1406,8 @@ const RUNNER_GROUPS: Record<RunnerKind, readonly string[]> = {
 	wrapper: [
 		"exec", "env", "xargs", "nohup", "setsid", "timeout", "time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin",
 		"sudo", "doas", "su", "runuser", "pkexec", "chroot", "nsenter", "unshare", "fakeroot", "firejail", "sandbox-exec", "watch",
-		"busybox", "parallel", "caffeinate", "taskset", "unbuffer", "chronic", "dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
+		"busybox", "parallel", "caffeinate", "taskset", "chrt", "coproc", "genv", "gnice", "gtimeout", "unbuffer", "chronic",
+		"dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
 		"strace", "ltrace", "valgrind", "gdb", "lldb", "hyperfine", "direnv", "mise", "asdf", "nix-shell", "nix", "entr",
 		"invoke-expression", "invoke-command", "start-process", "start-job",
 	],
@@ -1522,42 +1557,90 @@ export function decide(params: DecideInput): Decision {
 	}
 
 	/**
-	 * The deny or ask rule that binds this call. A rule with a path on one of
-	 * the file-writing tools binds the other two for that path, as Claude Code
-	 * applies its Edit rules to every tool that edits files: `Edit(config/prod.yaml)`
-	 * denied must not leave `write` or `notebook_edit` free to replace the file.
-	 * Allow rules stay exact (`ruleCoversTool`): widening one would be a grant.
+	 * The deny or ask rule that binds this call. A rule on one of the
+	 * file-writing tools binds the other two, with a path or bare, as Claude
+	 * Code applies its Edit rules to every tool that edits files:
+	 * `Edit(config/prod.yaml)` denied must not leave `write` or `notebook_edit`
+	 * free to replace the file, nor a bare `Edit` leave them free to write
+	 * anywhere. Allow rules stay exact (`ruleCoversTool`): widening one would be a grant.
 	 */
 	const blockingRule = (rules: readonly PermissionRule[]): PermissionRule | undefined =>
 		rules.find(
 			(r) =>
-				ruleMatches(r, toolName, subject, cwd) ||
+				ruleMatches(r, toolName, subject, cwd, true) ||
 				// The rule's own tool was just tried; only another tool of the family is read again.
-				(!!r.pattern && r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
+				(r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd, true)),
 		);
 	/**
-	 * Whether a shell line writes a path that such a rule names, by the
-	 * pre-gate's recorded write targets. The line then takes no fast path: it
-	 * is classified in auto mode, asked in acceptEdits and refused in dontAsk.
-	 * This only withholds an allow; the pre-gate itself gains no deny path.
+	 * A shell line's write targets against the edit-family rules, as Claude
+	 * Code's Bash tool checks its write paths against Edit rules after its own
+	 * deny and ask rules and before any allow rule (`checkPathConstraints`).
+	 * The targets are the pre-gate's recorded ones (redirects, a mutating
+	 * command's operands, a move's sources), for a line bash runs (`bash`,
+	 * `monitor`). A rule with a path that a target meets denies the line, or
+	 * asks for it, whatever allow rule matches it. A bare rule names no path,
+	 * and Claude Code's path check reads none, so it only withholds the fast
+	 * path and the sandbox auto-allow from a line that writes anything
+	 * (`writesUnderFamilyRule`). The pre-gate itself gains no deny path.
 	 */
-	let familyPatterns: string[] | undefined;
-	const blockedPaths = new WeakMap<ShellEvidence, boolean>();
-	const writesBlockedPath = (evidence: ShellEvidence): boolean => {
-		familyPatterns ??= [...deny, ...ask].filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool)).map((r) => r.pattern as string);
-		if (familyPatterns.length === 0) return false;
-		let blocked = blockedPaths.get(evidence);
-		if (blocked === undefined) {
-			const patterns = familyPatterns;
-			blocked = evidence.writes.some((write) =>
-				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => patterns.some((pattern) => writeTargetMeetsPathPattern(pattern, path, cwd))),
-			);
-			blockedPaths.set(evidence, blocked);
-		}
-		return blocked;
+	const familyPathRules = (rules: readonly PermissionRule[]) => rules.filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool));
+	const denyPathRules = familyPathRules(deny);
+	const askPathRules = familyPathRules(ask);
+	const bareFamilyRule = [...deny, ...ask].some((r) => !r.pattern && EDIT_TOOLS.has(r.tool));
+	/** The first of `rules` (each with a path) that one of `targets` meets, as written or where it resolves. */
+	const pathRuleMet = (
+		rules: readonly PermissionRule[],
+		targets: readonly { absolute: string; resolved?: string }[],
+		meets: (pattern: string, path: string, cwd: string) => boolean = (pattern, path, at) => matchesPathPattern(pattern, path, at, true),
+	): PermissionRule | undefined =>
+		rules.find((r) =>
+			targets.some((target) =>
+				[target.absolute, ...(target.resolved !== undefined && target.resolved !== target.absolute ? [target.resolved] : [])].some((path) => meets(r.pattern as string, path, cwd)),
+			),
+		);
+	const runsBashLine = !!subject && (tool === "bash" || tool === "monitor");
+	let lineEvidence: ShellEvidence | undefined;
+	/**
+	 * A line's write targets for the edit-family rule check: the recorded ones,
+	 * and what each glob operand of a removing or moving command matches on
+	 * disk (`ShellEvidence.globWrites`), so `rm config/*.yaml` meets a rule on
+	 * `config/prod.yaml` as `rm config/prod.yaml` does.
+	 */
+	const familyTargets = (evidence: ShellEvidence) => [...evidence.writes, ...evidence.globWrites.flatMap((glob) => glob.matches ?? [])];
+	/** The first of `rules` that one of the bash line's write targets meets. */
+	const writtenPathRule = (rules: readonly PermissionRule[]): PermissionRule | undefined => {
+		if (!runsBashLine || rules.length === 0) return undefined;
+		lineEvidence ??= shellEvidence(subject);
+		return pathRuleMet(rules, familyTargets(lineEvidence));
 	};
+	/**
+	 * Whether the bash line removes or moves through a glob whose matches this
+	 * check cannot enumerate while an edit-family rule names a path. Nothing
+	 * shows the line keeps clear of that path, so no allow rule, fast path or
+	 * sandbox auto-allow clears it: the classifier or a prompt reads it. It
+	 * refuses nothing, since nothing shows it reaches the path either.
+	 */
+	const removesThroughUnknownGlob = (): boolean => {
+		if (!runsBashLine || denyPathRules.length + askPathRules.length === 0) return false;
+		lineEvidence ??= shellEvidence(subject);
+		return lineEvidence.globWrites.some((glob) => glob.matches === undefined);
+	};
+	/**
+	 * Whether a line's write targets meet an edit-family deny or ask rule: a
+	 * bare one meets any target, and one with a path meets a target it names or
+	 * a directory that may hold its file (`rm -r config` under
+	 * `Edit(config/prod.yaml)`; `writeTargetMeetsPathPattern`). A fast path or
+	 * the sandbox auto-allow is withheld from such a line. For bash, a rule
+	 * whose path a target names already decided above, so what is left here is
+	 * the "may hold" case, which never refuses: the classifier or a prompt
+	 * reads the line. The PowerShell contained-edits branch learns its targets
+	 * only there.
+	 */
+	const writesUnderFamilyRule = (targets: readonly { absolute: string; resolved?: string }[]): boolean =>
+		targets.length > 0 &&
+		(bareFamilyRule || pathRuleMet(denyPathRules, targets, writeTargetMeetsPathPattern) !== undefined || pathRuleMet(askPathRules, targets, writeTargetMeetsPathPattern) !== undefined);
 
-	const denyRule = blockingRule(deny);
+	const denyRule = blockingRule(deny) ?? writtenPathRule(denyPathRules);
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
 
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
@@ -1665,7 +1748,7 @@ export function decide(params: DecideInput): Decision {
 	 */
 	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: () => boolean }): Decision => {
 		if (line.writes) return { decision: "deny", cause: "plan-mode" };
-		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd, true));
 		if (askRule) return line.readOnly || line.readOnlyOutside ? askOrDeny(askRule) : { decision: "ask", rule: askRule, cause: "plan-unproven" };
 		if (line.readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (line.readOnlyOutside) return { decision: "ask", cause: "working-dir" };
@@ -1744,9 +1827,12 @@ export function decide(params: DecideInput): Decision {
 	}
 
 	// An explicit ask rule is the user's stated intent to be prompted, so it wins
-	// over auto mode too: the classifier never gets to auto-approve a match.
-	const askRule = blockingRule(ask);
+	// over auto mode too: the classifier never gets to auto-approve a match. A
+	// shell line that writes a path an edit-family ask rule names is asked
+	// before any allow rule, as its deny counterpart is refused above.
+	const askRule = blockingRule(ask) ?? writtenPathRule(askPathRules);
 	if (askRule) return askOrDeny(askRule);
+	if (removesThroughUnknownGlob()) return mode === "auto" ? { decision: "classify", cause: "mode" } : askOrDeny();
 
 	/**
 	 * The session's own auto-memory and scratchpad directories are
@@ -1845,7 +1931,7 @@ export function decide(params: DecideInput): Decision {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
-		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesBlockedPath(evidence)) {
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderFamilyRule(familyTargets(evidence))) {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
@@ -1854,13 +1940,11 @@ export function decide(params: DecideInput): Decision {
 			return { decision: "allow", cause: "read-only" };
 		}
 		// Claude Code's acceptEdits PowerShell cmdlets on the working space, the
-		// PowerShell half of the bash file-command fast path above.
-		if (
-			fastPaths &&
-			(mode === "acceptEdits" || mode === "auto") &&
-			powershellTreeContainedEdits(params.powershellParse, { cwd, home: homedir(), writableRoots: params.workspaceDirs, protectedDirs: params.protectedDirs }).ok
-		) {
-			return { decision: "allow", cause: "mode" };
+		// PowerShell half of the bash file-command fast path above, withheld when
+		// what they write meets an edit-family deny or ask rule.
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto")) {
+			const edits = powershellTreeContainedEdits(params.powershellParse, { cwd, home: homedir(), writableRoots: params.workspaceDirs, protectedDirs: params.protectedDirs });
+			if (edits.ok && !writesUnderFamilyRule(edits.writes ?? [])) return { decision: "allow", cause: "mode" };
 		}
 	}
 
@@ -1869,7 +1953,7 @@ export function decide(params: DecideInput): Decision {
 	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
 	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
 		const evidence = shellEvidence(subject);
-		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesBlockedPath(evidence)) return { decision: "allow", cause: "sandboxed" };
+		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderFamilyRule(familyTargets(evidence))) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

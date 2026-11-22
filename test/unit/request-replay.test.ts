@@ -60,16 +60,21 @@ describe("captureRequest", () => {
 describe("extendPayload on Codex, Bedrock and Google (R2-H4)", () => {
 	const capture = (api: string, payload: Record<string, unknown>) => captureRequest({ ...anthropic, api }, payload)!;
 
-	it("appends the Codex tail to `input` and sets no cap Codex does not send", () => {
+	it("appends the Codex tail to `input` and sets no cap where pi wrote none (Codex before pi 1.6.0)", () => {
 		const out = extendPayload(capture("openai-codex-responses", { instructions: "x", input: [{ role: "user", content: "a" }], prompt_cache_key: "k" }), { input: [{ role: "user", content: "q" }] }, 4096);
 		expect(out.input).toEqual([{ role: "user", content: "a" }, { role: "user", content: "q" }]);
 		expect(out.prompt_cache_key).toBe("k");
 		expect(out).not.toHaveProperty("max_output_tokens");
 	});
 
+	it("caps a Codex side call where pi wrote a cap into the call's own body (pi 1.6.0)", () => {
+		const out = extendPayload(capture("openai-codex-responses", { instructions: "x", input: [], max_output_tokens: 32000 }), { input: [{ role: "user", content: "q" }], max_output_tokens: 4096 }, 4096);
+		expect(out.max_output_tokens).toBe(4096);
+	});
+
 	it("sets Bedrock's nested cap and joins a user tail onto a trailing user turn", () => {
 		const base = { system: [{ text: "s" }], messages: [{ role: "user", content: [{ text: "a" }, { cachePoint: { type: "default" } }] }], inferenceConfig: { maxTokens: 64000, temperature: 1 } };
-		const out = extendPayload(capture("bedrock-converse-stream", base), { messages: [{ role: "user", content: [{ text: "q" }, { cachePoint: { type: "default" } }] }] }, 2048);
+		const out = extendPayload(capture("bedrock-converse-stream", base), { messages: [{ role: "user", content: [{ text: "q" }, { cachePoint: { type: "default" } }] }], inferenceConfig: { maxTokens: 2048 } }, 2048);
 		expect(out.messages).toEqual([{ role: "user", content: [{ text: "a" }, { cachePoint: { type: "default" } }, { text: "q" }] }]);
 		expect(out.inferenceConfig).toEqual({ maxTokens: 2048, temperature: 1 });
 		expect(base.inferenceConfig.maxTokens).toBe(64000);
@@ -79,7 +84,7 @@ describe("extendPayload on Codex, Bedrock and Google (R2-H4)", () => {
 		const session = new AbortController().signal;
 		const own = new AbortController().signal;
 		const base = { model: "gemini", contents: [{ role: "model", parts: [{ text: "r" }] }], config: { maxOutputTokens: 8000, abortSignal: session, systemInstruction: "s" } };
-		const out = extendPayload(capture("google-generative-ai", base), { contents: [{ role: "user", parts: [{ text: "q" }] }], config: { abortSignal: own } }, 1500);
+		const out = extendPayload(capture("google-generative-ai", base), { contents: [{ role: "user", parts: [{ text: "q" }] }], config: { maxOutputTokens: 1500, abortSignal: own } }, 1500);
 		expect(out.contents).toEqual([{ role: "model", parts: [{ text: "r" }] }, { role: "user", parts: [{ text: "q" }] }]);
 		expect(out.config).toEqual({ maxOutputTokens: 1500, abortSignal: own, systemInstruction: "s" });
 	});
@@ -131,6 +136,7 @@ describe("extendPayload (Anthropic)", () => {
 				{ role: "user", content: [{ type: "text", text: "recap", cache_control: { type: "ephemeral" } }] },
 			],
 			system: [{ type: "text", text: "ignored" }],
+			max_tokens: 5000,
 		};
 		const out = extendPayload(capture, tail, 5000);
 		const messages = out.messages as { role: string; content: Record<string, unknown>[] }[];
@@ -166,7 +172,7 @@ describe("extendPayload (OpenAI-style)", () => {
 			{ ...anthropic, api: "openai-completions" },
 			{ messages: [{ role: "system", content: "p" }, { role: "user", content: "hi" }], max_completion_tokens: 32000 },
 		)!;
-		const out = extendPayload(capture, { messages: [{ role: "user", content: [{ type: "text", text: "q", cache_control: { type: "ephemeral" } }] }] }, 4000);
+		const out = extendPayload(capture, { messages: [{ role: "user", content: [{ type: "text", text: "q", cache_control: { type: "ephemeral" } }] }], max_completion_tokens: 4000 }, 4000);
 		expect(out.messages).toEqual([
 			{ role: "system", content: "p" },
 			{ role: "user", content: "hi" },
@@ -176,13 +182,28 @@ describe("extendPayload (OpenAI-style)", () => {
 		expect(out.max_tokens).toBeUndefined();
 	});
 
-	it("appends to `input` on Responses", () => {
-		const capture = captureRequest({ ...anthropic, api: "openai-responses" }, { input: [{ role: "user", content: "hi" }], prompt_cache_key: "k" })!;
-		const out = extendPayload(capture, { input: [{ role: "user", content: "q" }], instructions: "ignored" }, 4000);
+	it("appends to `input` on Responses and replaces the cap with an API key", () => {
+		const capture = captureRequest({ ...anthropic, api: "openai-responses" }, { input: [{ role: "user", content: "hi" }], prompt_cache_key: "k", max_output_tokens: 32000 })!;
+		const out = extendPayload(capture, { input: [{ role: "user", content: "q" }], instructions: "ignored", max_output_tokens: 4000 }, 4000);
 		expect(out.input).toEqual([{ role: "user", content: "hi" }, { role: "user", content: "q" }]);
 		expect(out.prompt_cache_key).toBe("k");
 		expect(out.instructions).toBeUndefined();
 		expect(out.max_output_tokens).toBe(4000);
+	});
+
+	it("adds no cap after Sign in with ChatGPT, where pi leaves max_output_tokens off because the endpoint rejects it", () => {
+		// pi-ai openai-responses.js buildParams: `omitUnsupportedFields` for a non-`sk-` credential on api.openai.com.
+		const capture = captureRequest({ ...anthropic, provider: "openai", api: "openai-responses" }, { model: "gpt-6", input: [{ role: "user", content: "hi" }], stream: true, prompt_cache_key: "s", store: false })!;
+		const out = extendPayload(capture, { model: "gpt-6", input: [{ role: "user", content: "recap" }], stream: true, prompt_cache_key: "s", store: false }, 512);
+		expect(out).not.toHaveProperty("max_output_tokens");
+		expect(out.input).toEqual([{ role: "user", content: "hi" }, { role: "user", content: "recap" }]);
+	});
+
+	it("writes the cap at the field pi wrote into the call's body, even where the capture carries none", () => {
+		const capture = captureRequest({ ...anthropic, api: "openai-completions" }, { messages: [{ role: "user", content: "hi" }] })!;
+		const out = extendPayload(capture, { messages: [{ role: "user", content: "q" }], max_tokens: 700 }, 700);
+		expect(out.max_tokens).toBe(700);
+		expect(out).not.toHaveProperty("max_completion_tokens");
 	});
 });
 

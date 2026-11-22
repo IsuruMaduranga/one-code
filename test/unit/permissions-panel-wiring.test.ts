@@ -167,6 +167,21 @@ describe("/permissions wiring", () => {
 		expect(completeMock).toHaveBeenCalledTimes(2);
 	});
 
+	it("approving while a turn runs sends the grant to that turn's next request, with no turn started", async () => {
+		const emitted: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => void emitted.push(data));
+		blockOnce();
+		await bash(`rm -rf ${outside()}`);
+		ctx.isIdle = () => false;
+		await openPanel(ENTER);
+		expect(emitted).toContainEqual({ text: granted(`bash(rm -rf ${outside()})`), placement: "user-prepend", orTail: true });
+		// The breadcrumb still waits for the next prompt.
+		const stdout = emitted.find((data) => (data as { text: string }).text.includes("<local-command-stdout>Approved")) as { placement: string; orTail?: boolean };
+		expect(stdout.placement).toBe("user-prepend");
+		expect(stdout.orTail).toBeUndefined();
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
 	it("keeps an approved denial's grant across /reload, which re-runs the factory, but not into another session", async () => {
 		// pi builds a fresh extension instance for every session start.
 		const restart = async (reason: string) => {

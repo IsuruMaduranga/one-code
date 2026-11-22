@@ -5,16 +5,20 @@
  * The runtime itself is not started here; the live checks are in
  * working-docs/features/sandbox/.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import { Type } from "typebox";
-import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
-import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { bareRepositoryFiles, checkoutProtectedFiles, DIRECTORY_STUB_CHILD, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, resolvedSpelling, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { createEndChecks } from "../../extensions/lib/shell-run/sandbox-end-checks.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -99,6 +103,7 @@ describe("sandbox settings", () => {
 			excludedCommands: ["docker *"],
 			filesystem: block.filesystem,
 			network: block.network,
+			denyRulePaths: SANDBOX_OFF.denyRulePaths,
 		});
 	});
 
@@ -136,10 +141,240 @@ describe("sandbox settings", () => {
 	it("builds the runtime's rules: the working directory and the session's own dirs writable, the gate's files never", () => {
 		const settings = mergeSandboxBlock(ON, { filesystem: { allowWrite: ["~/out"], denyWrite: ["*.pem"], denyRead: ["~/.aws"] }, network: { allowedDomains: ["registry.npmjs.org"] } }, false);
 		const scope = { cwd: "/work", writableDirs: ["/tmp/session"], protectedFiles: ["/work/.claude/settings.json"] };
-		expect(sandboxRuntimeConfig(settings, scope)).toEqual({
+		// The platform is named: on Linux a protected file that does not exist takes the folder placeholder's spelling.
+		expect(sandboxRuntimeConfig(settings, scope, { platform: "darwin" })).toEqual({
 			network: { allowedDomains: ["registry.npmjs.org"], deniedDomains: [] },
 			filesystem: { allowWrite: ["/work", "/tmp/session", "~/out"], denyWrite: ["/work/.claude/settings.json", "*.pem"], denyRead: ["~/.aws"], allowRead: [] },
 		});
+	});
+});
+
+// The sandbox runs on macOS and Linux only, whose paths these are.
+describe.skipIf(process.platform === "win32")("the permission deny rules in the sandbox", () => {
+	const home = "/home/u";
+	/** The paths as the runtime gets them; a glob expanded per command as `expand:<glob>`. */
+	const shown = (paths: RuleDenyPath[]) => paths.map((path) => (path.kind === "path" ? path.path : path.kind === "literal" ? `literal:${path.path}` : `expand:${path.glob}`));
+	const write = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "write", "/work", home, platform));
+	const read = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "read", "/work", home, platform));
+
+	it("takes the path patterns of the edit family's deny rules for writes and of Read's for reads", () => {
+		const rules = parseRules(["Edit(a.txt)", "Write(b.txt)", "NotebookEdit(c.ipynb)", "Read(.env)", "Edit", "Bash(rm:*)", "Grep(secrets/**)", "Edit(a.txt)"]);
+		expect(denyRulePaths(rules)).toEqual({ write: ["a.txt", "b.txt", "c.ipynb"], read: [".env"] });
+	});
+
+	it("makes every spelling of the rule syntax an absolute path", () => {
+		expect(write("//etc/hosts")).toEqual(["/etc/hosts"]);
+		expect(write("~/.zshrc")).toEqual([`${home}/.zshrc`]);
+		expect(read("~")).toEqual([home]);
+		expect(write("config/prod.yaml")).toEqual(["/work/config/prod.yaml"]);
+		expect(write("./config/prod.yaml")).toEqual(["/work/config/prod.yaml"]);
+		expect(write("../shared/env")).toEqual(["/shared/env"]);
+		expect(write("config/")).toEqual(["/work/config"]);
+		// The gate reads `/x` as the absolute path, Claude Code against the project: both are denied.
+		expect(write("/config/prod.yaml")).toEqual(["/config/prod.yaml", "/work/config/prod.yaml"]);
+	});
+
+	it("keeps the spaces of a pattern, as the gate matches it", () => {
+		const [trailing, leading] = parseRules(["Read(secret.txt )", "Edit( notes.md)"]);
+		expect(denyRulePaths([trailing, leading])).toEqual({ write: [" notes.md"], read: ["secret.txt "] });
+		expect(read("secret.txt ")).toEqual(["/work/secret.txt "]);
+		expect(write(" notes.md")).toEqual(["/work/ notes.md"]);
+		// The gate denies exactly the file with the space, which is what the sandbox gets.
+		expect(ruleMatches(trailing, "read", "/work/secret.txt ", "/work")).toBe(true);
+		expect(ruleMatches(trailing, "read", "/work/secret.txt", "/work")).toBe(false);
+	});
+
+	it("passes a glob where the runtime reads it as the gate does, and expands a Linux write glob per command", () => {
+		expect(write("config/*.yaml")).toEqual(["/work/config/*.yaml"]);
+		expect(read("~/.aws/**")).toEqual([`${home}/.aws/**`]);
+		// Linux reads: the runtime expands the glob against the disk.
+		expect(read("**/.env", "linux")).toEqual(["/work/**/.env"]);
+		// Linux writes: bubblewrap binds real paths only and the runtime skips a write glob, so each command gets the matching files.
+		expect(write("config/*.yaml", "linux")).toEqual(["expand:/work/config/*.yaml"]);
+		expect(write("**/.env", "linux")).toEqual(["expand:/work/**/.env"]);
+		// A trailing `/**` is the directory itself, which the runtime binds.
+		expect(write("secrets/**", "linux")).toEqual(["/work/secrets/**"]);
+	});
+
+	describe("a glob expanded per command", () => {
+		let root: string;
+		const put = (...parts: string[]) => {
+			mkdirSync(dirname(join(root, ...parts)), { recursive: true });
+			writeFileSync(join(root, ...parts), "x");
+		};
+		afterEach(() => rmSync(root, { recursive: true, force: true }));
+		const literal = (...parts: string[]) => ({ path: join(root, ...parts), literal: true });
+
+		it("denies the files it matches when the command's rules are built, as the gate matches them, never the whole directory", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put(".env");
+			put("app", "nested", ".env");
+			put("app", "main.ts");
+			put("[id]", "x.yaml");
+			put("config", "a.yaml");
+			put("config", "deep", "b.yaml");
+			const found = expandDenyGlobs([join(root, "**", ".env"), join(root, "config", "*.yaml"), join(root, "*", "x.yaml")]);
+			expect(found.get(join(root, "**", ".env"))).toEqual(expect.arrayContaining([literal(".env"), literal("app", "nested", ".env")]));
+			expect(found.get(join(root, "**", ".env"))).toHaveLength(2);
+			// `*` stays within one name: the walk does not go below the depth the glob reaches.
+			expect(found.get(join(root, "config", "*.yaml"))).toEqual([literal("config", "a.yaml")]);
+			// A matched name that holds glob syntax goes to the runtime as a literal path.
+			expect(found.get(join(root, "*", "x.yaml"))).toEqual([literal("[id]", "x.yaml")]);
+		});
+
+		it("denies a directory that matches whole, and falls back to the directory the glob starts in when the walk runs out of budget", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("a", "secrets", "key");
+			put("b", "c", "d.txt");
+			expect(expandDenyGlobs([join(root, "**", "secrets", "**")]).get(join(root, "**", "secrets", "**"))).toEqual([literal("a", "secrets")]);
+			expect(expandDenyGlobs([join(root, "**", ".env")], 2).get(join(root, "**", ".env"))).toEqual([root]);
+			expect(expandDenyGlobs([join(root, "missing", "**", ".env")]).get(join(root, "missing", "**", ".env"))).toEqual([]);
+		});
+
+		it("stays out of node_modules and .git, whose size alone would run past the budget, unless a glob names one", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put(".env");
+			put("app", ".env");
+			for (let index = 0; index < 30; index++) put("node_modules", `pkg${index}`, "index.js");
+			for (let index = 0; index < 30; index++) put(".git", "objects", `o${index}`);
+			put("node_modules", "pkg0", ".env");
+			const glob = join(root, "**", ".env");
+			// 4 entries outside the two folders, 2 for the folders themselves: well under a budget their contents would pass.
+			expect(expandDenyGlobs([glob], 10).get(glob)).toEqual(expect.arrayContaining([literal(".env"), literal("app", ".env")]));
+			expect(expandDenyGlobs([glob], 10).get(glob)).toHaveLength(2);
+			const named = join(root, "node_modules", "**", ".env");
+			expect(expandDenyGlobs([named]).get(named)).toEqual([literal("node_modules", "pkg0", ".env")]);
+		});
+
+		it("keeps the section's text the pattern while each command gets the files that exist as it starts", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("app", ".env");
+			const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["**/.env"], read: [] } };
+			const scope = { cwd: root, writableDirs: [], protectedFiles: [] };
+			const host = { home, platform: "linux" as const };
+			const shownBefore = JSON.stringify(sandboxFilesystem(settings, scope, host));
+			expect(sandboxFilesystem(settings, scope, host).denyWrite).toEqual([join(root, "**", ".env")]);
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).toEqual([literal("app", ".env")]);
+			expect(sandboxRuntimeConfig(settings, scope, host).filesystem.denyWrite).toEqual([literal("app", ".env")]);
+			put("lib", ".env");
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).toEqual(expect.arrayContaining([literal("app", ".env"), literal("lib", ".env")]));
+			expect(JSON.stringify(sandboxFilesystem(settings, scope, host))).toBe(shownBefore);
+			// The working directory itself stays writable.
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).not.toContain(root);
+		});
+
+		it("hides the files a Linux read glob with a literal `?` matches as the gate reads it, not the working directory", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("logs", "what?.txt");
+			put("logs", "whatX.txt");
+			const settings: SandboxSettings = { ...ON, denyRulePaths: { write: [], read: ["**/what?.txt"] } };
+			const fs = sandboxCommandFilesystem(settings, { cwd: root, writableDirs: [], protectedFiles: [] }, { home, platform: "linux" });
+			expect(fs.denyRead).toEqual([literal("logs", "what?.txt")]);
+		});
+	});
+
+	it("marks an exact path literal where the runtime would read its characters as glob syntax, never widening it to its folder", () => {
+		for (const platform of ["darwin", "linux"] as const) {
+			expect(write("notes/a\\*b.txt", platform)).toEqual(["literal:/work/notes/a*b.txt"]);
+			expect(write("app/[id]/page.tsx", platform)).toEqual(["literal:/work/app/[id]/page.tsx"]);
+			expect(read("logs/what?.txt", platform)).toEqual(["literal:/work/logs/what?.txt"]);
+			expect(read("secret[1].txt", platform)).toEqual(["literal:/work/secret[1].txt"]);
+			expect(write("src/page.tsx", platform)).toEqual(["/work/src/page.tsx"]);
+		}
+		// The section shows the path itself; the runtime gets it marked literal.
+		const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["app/[id]/page.tsx"], read: ["secret[1].txt"] } };
+		const scope = { cwd: "/work", writableDirs: [], protectedFiles: [] };
+		for (const platform of ["darwin", "linux"] as const) {
+			expect(sandboxFilesystem(settings, scope, { home, platform })).toMatchObject({ denyWrite: ["/work/app/[id]/page.tsx"], denyRead: ["/work/secret[1].txt"] });
+			expect(sandboxCommandFilesystem(settings, scope, { home, platform })).toMatchObject({ denyWrite: [{ path: "/work/app/[id]/page.tsx", literal: true }], denyRead: [{ path: "/work/secret[1].txt", literal: true }] });
+		}
+	});
+
+	it("widens a glob that also holds such characters on macOS, and expands it on Linux, where a writable folder would be bound back over a hidden one", () => {
+		expect(write("src/*/[id].tsx")).toEqual(["/work/src"]);
+		expect(read("**/what?.txt")).toEqual(["/work"]);
+		expect(write("src/*/[id].tsx", "linux")).toEqual(["expand:/work/src/*/[id].tsx"]);
+		expect(read("**/what?.txt", "linux")).toEqual(["expand:/work/**/what?.txt"]);
+	});
+
+	it("leaves out an allowRead entry a Read deny rule's path covers, since the runtime would let it win, and keeps the others", () => {
+		const allowRead = ["/work/secret.txt", "/work/keys/pub", "/work/a/secrets/x", "~/proj", "~/proj/*", "/work/docs", "/data/*", "/work/*"];
+		const settings: SandboxSettings = { ...ON, filesystem: { ...ON.filesystem, allowRead }, denyRulePaths: { write: [], read: ["secret.txt", "keys/**", "**/secrets", "~/proj/.env"] } };
+		for (const platform of ["darwin", "linux"] as const) {
+			const host = { home, platform };
+			expect(shadowedAllowRead(settings, "/work", host)).toEqual(["/work/secret.txt", "/work/keys/pub", "/work/a/secrets/x", "~/proj/*", "/work/*"]);
+			const kept = ["~/proj", "/work/docs", "/data/*"];
+			expect(sandboxFilesystem(settings, { cwd: "/work", writableDirs: [], protectedFiles: [] }, host).allowRead).toEqual(kept);
+			expect(sandboxCommandFilesystem(settings, { cwd: "/work", writableDirs: [], protectedFiles: [] }, host).allowRead).toEqual(kept);
+		}
+		// Without Read deny rules every entry stays.
+		expect(shadowedAllowRead({ ...settings, denyRulePaths: { write: ["secret.txt"], read: [] } }, "/work", { home })).toEqual([]);
+	});
+
+	it("leaves out an allowRead entry that names a denied file through a linked folder, as the runtime resolves it", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandbox-alias-"));
+		try {
+			mkdirSync(join(root, "data"));
+			writeFileSync(join(root, "data", "notes.txt"), "n");
+			writeFileSync(join(root, "other.txt"), "o");
+			symlinkSync(join(root, "data"), join(root, "alias"));
+			const allowRead = ["alias/notes.txt", "alias/*", "alias", "other.txt", "data/other.txt"];
+			const ruled = (read: string[]): SandboxSettings => ({ ...ON, filesystem: { ...ON.filesystem, allowRead }, denyRulePaths: { write: [], read } });
+			for (const platform of ["darwin", "linux"] as const) {
+				const host = { home, platform };
+				// The same file by either spelling; the folder allow only holds it and stays, as do unrelated files.
+				expect(shadowedAllowRead(ruled(["data/notes.txt"]), root, host)).toEqual(["alias/notes.txt", "alias/*"]);
+				expect(shadowedAllowRead(ruled(["alias/notes.txt"]), root, host)).toEqual(["alias/notes.txt", "alias/*"]);
+				expect(shadowedAllowRead(ruled(["data/**"]), root, host)).toEqual(["alias/notes.txt", "alias/*", "data/other.txt"]);
+			}
+			expect(resolvedSpelling(join(root, "alias", "missing", "x"))).toBe(join(realpathSync(root), "data", "missing", "x"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("adds the rules' paths after the settings' own lists, once each, for the command's directory", () => {
+		const settings: SandboxSettings = { ...ON, filesystem: { ...ON.filesystem, denyWrite: ["/work/config/prod.yaml"], denyRead: ["~/.aws"] }, denyRulePaths: { write: ["config/prod.yaml", "~/.zshrc"], read: ["~/.ssh/**"] } };
+		const scope = { cwd: "/work", writableDirs: [], protectedFiles: ["/work/.claude/settings.json"] };
+		expect(sandboxFilesystem(settings, scope, { home, platform: "darwin" })).toEqual({
+			allowWrite: ["/work"],
+			denyWrite: ["/work/.claude/settings.json", "/work/config/prod.yaml", `${home}/.zshrc`],
+			denyRead: ["~/.aws", `${home}/.ssh/**`],
+			allowRead: [],
+		});
+		// A command in a worktree has the relative rules under the worktree.
+		expect(sandboxFilesystem(settings, { ...scope, cwd: "/wt" }, { home, platform: "darwin" }).denyWrite).toContain("/wt/config/prod.yaml");
+	});
+
+	it("reads the deny rules from every settings file, a repository's too, and never an allow or ask rule", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandbox-deny-"));
+		const cwd = join(root, "project");
+		const userHome = join(root, "home");
+		const put = (path: string, settings: object) => {
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, JSON.stringify(settings));
+		};
+		try {
+			mkdirSync(cwd, { recursive: true });
+			// The profile names the files: the product's user file always, and a repository's file where the profile reads one.
+			const sources = settingsSources(cwd, userHome);
+			put(productSettingsPath(userHome), { sandbox: { enabled: true }, permissions: { deny: ["Edit(~/.zshrc)"], allow: ["Edit(src/**)"], ask: ["Read(notes.md)"] } });
+			const repo = sources.find(isRepoFile);
+			if (repo) put(repo.path, { permissions: { deny: ["Write(config/prod.yaml)", "Read(.env)"], allow: ["Read(~/.ssh/**)"], ask: ["NotebookEdit(nb.ipynb)"] } });
+			const settings = loadSandboxSettings(cwd, userHome);
+			expect(settings.denyRulePaths).toEqual(repo ? { write: ["~/.zshrc", "config/prod.yaml"], read: [".env"] } : { write: ["~/.zshrc"], read: [] });
+			const fs = sandboxFilesystem(settings, { cwd, writableDirs: [], protectedFiles: [] }, { home: userHome, platform: "darwin" });
+			expect(fs.denyWrite).toEqual([join(userHome, ".zshrc"), ...(repo ? [join(cwd, "config", "prod.yaml")] : [])]);
+			expect(fs.denyRead).toEqual(repo ? [join(cwd, ".env")] : []);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("shows the model the denied paths in the sandbox section", () => {
+		const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["//etc/hosts"], read: ["//etc/shadow"] } };
+		const section = sandboxSectionText(text, { settings, platform: "darwin", unavailable: undefined, cwd: "/work", active: fakeSandbox(settings) });
+		expect(section).toContain(JSON.stringify({ read: { denyOnly: ["/etc/shadow"], allowWithinDeny: [] }, write: { allowOnly: ["/work", "/tmp/session"], denyWithinAllow: ["/work/.claude/settings.json", "/etc/hosts"] } }).replace(/"/g, '\\"'));
 	});
 });
 
@@ -190,6 +425,144 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		expect(sandbox.open.count).toBe(0);
 	});
 
+	it("never ends a wrap twice, even when ending it threw", async () => {
+		const sandbox = fakeSandbox(ON);
+		let ends = 0;
+		sandbox.ended = () => {
+			ends++;
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+		};
+		sandbox.release = () => {
+			throw new Error("release failed");
+		};
+		setSandboxForTest(ON, sandbox);
+		grantCommandHosts("call-1", ["registry.npmjs.org"]);
+		const run = await sandboxedCommand(request);
+		if (!("run" in run) || !run.run) throw new Error("not sandboxed");
+		// Releasing the hosts failed, and the wrap is ended all the same.
+		expect(() => run.run?.finish()).toThrow();
+		expect(ends).toBe(1);
+		run.run.finish();
+		expect(ends).toBe(1);
+	});
+
+	it("runs every check after a command on its own, reporting a failure instead of throwing", () => {
+		const removed: string[] = [];
+		const renamed: string[] = [];
+		const notices: string[] = [];
+		const denied = () => {
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+		};
+		const checks = createEndChecks(
+			{
+				cleanup: denied,
+				plantableCommondirs: () => [join("/repo", ".git", "commondir"), join("/other", ".git", "commondir")],
+				looksLikeBareRepository: () => false,
+				exists: () => true,
+				remove: (path) => {
+					if (path === join("/repo", ".git", "commondir")) denied();
+					removed.push(path);
+				},
+				rename: (from) => void renamed.push(from),
+			},
+			(message) => void notices.push(message),
+		);
+		checks.started("run-1", "/work");
+		let bareNow = false;
+		const bare = createEndChecks({ cleanup: () => {}, plantableCommondirs: () => [], looksLikeBareRepository: () => bareNow, exists: () => false, remove: () => {}, rename: denied }, (message) => void notices.push(message));
+		bare.started("run-1", "/work");
+		// The directory became a bare repository while the command ran, and its HEAD cannot be moved.
+		bareNow = true;
+		expect(() => checks.ended("run-1")).not.toThrow();
+		expect(() => bare.ended("run-1")).not.toThrow();
+		expect(removed).toEqual([join("/other", ".git", "commondir")]);
+		expect(notices).toHaveLength(3);
+		expect(notices[0]).toMatch(/could not clean up/);
+		expect(notices[1]).toContain(join("/repo", ".git", "commondir"));
+		expect(notices[2]).toContain(join("/work", "HEAD"));
+	});
+
+	it("sets a planted HEAD aside without replacing one set aside earlier, and forgets a run whose wrap failed", () => {
+		const present = new Set<string>([join("/work", "HEAD.set-aside-by-sandbox"), join("/work", "HEAD.set-aside-by-sandbox.2")]);
+		const renamed: [string, string][] = [];
+		let bare = false;
+		const checks = createEndChecks(
+			{
+				cleanup: () => {},
+				plantableCommondirs: () => [],
+				looksLikeBareRepository: () => bare,
+				exists: (path) => present.has(path),
+				remove: () => {},
+				rename: (from, to) => void renamed.push([from, to]),
+			},
+			() => {},
+		);
+		checks.started("a", "/work");
+		bare = true;
+		checks.ended("a");
+		expect(renamed).toEqual([[join("/work", "HEAD"), join("/work", "HEAD.set-aside-by-sandbox.3")]]);
+		// A wrap that failed never ends: its observation is dropped and nothing is undone for it later.
+		bare = false;
+		checks.started("b", "/work");
+		checks.discard("b");
+		bare = true;
+		checks.ended("b");
+		expect(renamed).toHaveLength(1);
+	});
+
+	it("undoes after a command only what appeared while that command ran, once, however runs overlap", () => {
+		const commondir = join("/work", ".git", "commondir");
+		const disk = { commondir: false, bare: false };
+		const removed: string[] = [];
+		const renamed: string[] = [];
+		let cleanups = 0;
+		const checks = createEndChecks(
+			{
+				cleanup: () => void cleanups++,
+				plantableCommondirs: () => (disk.commondir ? [] : [commondir]),
+				looksLikeBareRepository: () => disk.bare,
+				exists: () => disk.commondir,
+				remove: (path) => {
+					removed.push(path);
+					disk.commondir = false;
+				},
+				rename: (from) => {
+					renamed.push(from);
+					disk.bare = false;
+				},
+			},
+			() => {},
+		);
+		// A run that found an ordinary directory ends; the user then makes a real bare repository there.
+		checks.started("a", "/work");
+		checks.ended("a");
+		disk.bare = true;
+		checks.started("b", "/work");
+		checks.ended("b");
+		expect(renamed).toEqual([]);
+		// Two runs overlap and one of them plants both: the first to end undoes them, the other finds nothing left.
+		disk.bare = false;
+		checks.started("c", "/work");
+		checks.started("d", "/work");
+		disk.commondir = true;
+		disk.bare = true;
+		checks.ended("c");
+		checks.ended("d");
+		expect(removed).toEqual([commondir]);
+		expect(renamed).toEqual([join("/work", "HEAD")]);
+		// A name that was there when a run started is not that run's to undo; the earlier run's end does it.
+		checks.started("e", "/work");
+		disk.commondir = true;
+		checks.started("f", "/work");
+		checks.ended("f");
+		expect(removed).toHaveLength(1);
+		checks.ended("e");
+		expect(removed).toHaveLength(2);
+		// The runtime cleans up once per ended wrap, an unknown id included.
+		checks.ended("never-started");
+		expect(cleanups).toBe(7);
+	});
+
 	it("reads another directory's settings for a session that starts there", () => {
 		setSandboxForTest({ ...ON, excludedCommands: ["docker *"] }, fakeSandbox(ON));
 		useSandboxSettingsFor(process.cwd());
@@ -230,16 +603,140 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 			"/wt/.git": "gitdir: /repo/.git/worktrees/wt\n",
 			"/repo/.git/worktrees/wt/commondir": "../..\n",
 		};
+		const reads: string[] = [];
 		const read = (path: string) => {
+			reads.push(path);
 			const file = files[path];
 			if (file === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 			return typeof file === "string" ? file : file();
 		};
-		const main = checkoutProtectedFiles("/repo/packages/app", read);
+		const exists = (path: string) => path in files;
+		const main = checkoutProtectedFiles("/repo/packages/app", read, "darwin");
 		expect(main).toEqual(expect.arrayContaining(["/repo/.git/commondir", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/hooks", "/repo/.git/config", "/repo/.mcp.json", "/repo/packages/app/.mcp.json", "/repo/.pi", "/repo/.gitmodules"]));
-		const linked = checkoutProtectedFiles("/wt", read);
+		const linked = checkoutProtectedFiles("/wt", read, "darwin");
 		expect(linked).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/worktrees/wt/gitdir", "/repo/.git/worktrees/wt/config.worktree", "/repo/.git/hooks", "/repo/.git/config", "/repo/.git/commondir"]));
-		expect(checkoutProtectedFiles("/nowhere", read)).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
+		expect(checkoutProtectedFiles("/nowhere", read, "darwin")).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
+		files["/repo/.git/config"] = "[core]\n";
+		files["/repo/.mcp.json"] = "{}";
+		reads.length = 0;
+		// Every name is listed on Linux too; what is there is asked per command, below.
+		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux");
+		// (A missing HEAD is the one exception, bareRepositoryFiles.)
+		expect(onLinux).toEqual(expect.arrayContaining(main.filter((path) => basename(path) !== "HEAD")));
+		// Only the `.git` entries whose contents name another directory are read,
+		// never a protected file (a FIFO there would block, a large file be read whole).
+		expect(reads.every((path) => basename(path) === ".git" || basename(path) === "commondir")).toBe(true);
+		// A command's rules: what exists as it is, what is missing through a name
+		// beneath it, so bubblewrap's stub there is an empty read-only directory that
+		// git ignores (a stub file is listed as untracked and breaks `git add -A`).
+		const scope = { cwd: "/repo/packages/app", writableDirs: [], protectedFiles: onLinux };
+		const denied = sandboxCommandFilesystem(ON, scope, { platform: "linux", exists }).denyWrite;
+		const stub = (path: string) => join(path, DIRECTORY_STUB_CHILD);
+		expect(denied).toEqual(expect.arrayContaining(["/repo/.git/config", "/repo/.mcp.json", ...["/repo/.pi", "/repo/packages/app/.pi", "/repo/.gitmodules", "/repo/.vscode", "/repo/.bashrc", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/gitdir", "/repo/.git/hooks"].map(stub)]));
+		expect(denied).not.toContain("/repo/.pi");
+		// Where a directory would break git or help plant a repository, nothing: the end-of-command checks undo those.
+		for (const kept of ["/repo/.git/commondir", "/repo/packages/app/objects", "/repo/packages/app/refs"]) {
+			expect(denied).not.toContain(kept);
+			expect(denied).not.toContain(stub(kept));
+		}
+		// macOS denies by rule, with nothing put at the path, and the prompt shows the names either way.
+		expect(sandboxCommandFilesystem(ON, scope, { platform: "darwin", exists }).denyWrite).toEqual(expect.arrayContaining(["/repo/.pi", "/repo/.git/commondir"]));
+		expect(sandboxFilesystem(ON, scope, { platform: "linux" }).denyWrite).toEqual(expect.arrayContaining(["/repo/.pi", "/repo/.git/commondir"]));
+		// A name that appears later is denied as it is from the next command on.
+		files["/repo/.pi"] = eisdir;
+		expect(sandboxCommandFilesystem(ON, scope, { platform: "linux", exists }).denyWrite).toContain("/repo/.pi");
+		// The one name that redirects the harness's own git is removed after a command if it appears.
+		expect(plantableCommondirs("/repo/packages/app", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
+		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux");
+		expect(linkedOnLinux).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/config"]));
+		expect(sandboxCommandFilesystem(ON, { ...scope, cwd: "/wt", protectedFiles: linkedOnLinux }, { platform: "linux", exists }).denyWrite).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", stub("/repo/.git/worktrees/wt/gitdir")]));
+		expect(plantableCommondirs("/wt", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
+		expect(plantableCommondirs("/repo/packages/app", read, "darwin", exists)).toEqual([]);
+	});
+
+	it.skipIf(process.platform === "win32")("reads a git pointer without waiting on a FIFO, and tells what is there by its metadata", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sandbox-fifo-"));
+		try {
+			execFileSync("mkfifo", [join(dir, ".git"), join(dir, ".mcp.json")]);
+			// A FIFO with no writer would hang an ordinary read; this one throws at once.
+			expect(() => readGitPointer(join(dir, ".git"))).toThrow(/not a regular file/);
+			expect(() => readGitPointer(dir)).toThrow(/EISDIR/);
+			writeFileSync(join(dir, "pointer"), "gitdir: /x\n");
+			expect(readGitPointer(join(dir, "pointer"))).toBe("gitdir: /x\n");
+			expect(pathExists(join(dir, ".mcp.json"))).toBe(true);
+			expect(pathExists(join(dir, "missing"))).toBe(false);
+			expect(pathExists(join(dir, "pointer", "below"))).toBe(false);
+			// A link to nothing is something at the name: the command could create its target.
+			symlinkSync(join(dir, "nowhere"), join(dir, ".pi"));
+			expect(pathExists(join(dir, ".pi"))).toBe(true);
+			// Neither FIFO is opened on the way.
+			expect(checkoutProtectedFiles(dir, undefined, "linux")).toEqual(expect.arrayContaining([join(dir, ".mcp.json"), join(dir, ".pi")]));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("tells a directory git would take for a repository: HEAD beside objects and refs", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sandbox-bare-"));
+		try {
+			expect(looksLikeBareRepository(dir)).toBe(false);
+			mkdirSync(join(dir, "objects"));
+			mkdirSync(join(dir, "refs"));
+			expect(looksLikeBareRepository(dir)).toBe(false);
+			writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
+			expect(looksLikeBareRepository(dir)).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	describe.skipIf(process.platform === "win32")("the names that make a directory a bare repository", () => {
+		let dir: string;
+		const made: string[] = [];
+		const make = (...entries: Array<[string, "file" | "dir"]>) => {
+			dir = mkdtempSync(join(tmpdir(), "sandbox-bare-"));
+			made.push(dir);
+			for (const [name, kind] of entries) {
+				if (kind === "dir") mkdirSync(join(dir, name), { recursive: true });
+				else {
+					mkdirSync(dirname(join(dir, name)), { recursive: true });
+					writeFileSync(join(dir, name), "x");
+				}
+			}
+		};
+		const at = (...names: string[]) => names.map((name) => join(dir, name));
+		afterEach(() => {
+			for (const each of made.splice(0)) rmSync(each, { recursive: true, force: true });
+		});
+
+		it("never lets objects and refs be written, and a missing HEAD only on macOS, where denying it plants no file", () => {
+			make();
+			expect(bareRepositoryFiles(dir, "darwin")).toEqual(at("objects", "refs", "HEAD"));
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs"));
+			make(["HEAD", "file"], ["objects", "dir"], ["refs", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD"));
+		});
+
+		it("leaves an ordinary project's config and hooks folders writable, denying only a .git inside one", () => {
+			make(["config", "dir"], ["hooks", "dir"], ["config/.git", "dir"]);
+			for (const platform of ["darwin", "linux"] as const) {
+				const found = bareRepositoryFiles(dir, platform);
+				expect(found).not.toContain(join(dir, "config"));
+				expect(found).not.toContain(join(dir, "hooks"));
+				expect(found).toContain(join(dir, "config", ".git"));
+				expect(found).not.toContain(join(dir, "hooks", ".git"));
+			}
+		});
+
+		it("denies config and hooks beside a HEAD, and a config file always, with the lock git writes it through", () => {
+			make(["HEAD", "file"], ["config", "dir"], ["hooks", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD", "hooks", "config"));
+			make(["config", "file"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "config", "config.lock"));
+			// A folder named HEAD is no head: the project's hooks folder stays writable.
+			make(["HEAD", "dir"], ["hooks", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD"));
+		});
 	});
 
 	it("believes a worktree's git directory that names it by its real path, and never through a `.git` symlink", () => {

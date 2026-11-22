@@ -68,7 +68,6 @@ import {
 	type McpContentBlock,
 	type McpResourceContents,
 	namespacedToolLabel,
-	maxToolNameLength,
 	namespacedToolName,
 } from "./schema.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
@@ -79,6 +78,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { failureOf } from "./failure.ts";
 import { mcpResultText, mcpResourcesResultText } from "./text.ts";
+import { maxToolNameLength, namesOverLimit, WIDEST_TOOL_NAME_LENGTH } from "../../lib/request/tool-name-limit.ts";
 
 /** Shared "server name not found" tool result for the resource read/list-dir tools. */
 function unknownServerError(name: string) {
@@ -144,7 +144,7 @@ function mcpExtension(pi: ExtensionAPI) {
 	 */
 	const resultsDir = (ctx: ExtensionContext | undefined): string => sessionResultsDir(ctx);
 
-	/** The API of the session's model, for the provider's tool-name limit; unknown until a session starts. */
+	/** The API of the session's model, for naming in /mcp the tools its provider refuses; unknown until a session starts. */
 	let modelApi: string | undefined;
 	pi.on("model_select", (event) => {
 		modelApi = (event as { model?: { api?: string } }).model?.api ?? modelApi;
@@ -153,20 +153,19 @@ function mcpExtension(pi: ExtensionAPI) {
 	const registerToolsFor = (connection: Connection) => {
 		// Names other extensions own, read once per batch (getAllTools builds every definition).
 		let taken: Set<string> | undefined;
-		const max = maxToolNameLength(modelApi);
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
-			// A provider caps a tool name (128 characters on Anthropic, 64 on the
-			// OpenAI family) and rejects the whole request when one is longer. A
-			// deferred definition rides every request from request 1 where the
-			// provider defers natively, and every request after `tool_search` loads
-			// it elsewhere, so one over-long name would fail every later turn of
-			// the session with an opaque error. Leave it out here, before any
-			// request carries it, with a clear reason in `/mcp`.
-			if (name.length > max) {
+			// No provider takes a name over the widest limit, and a deferred
+			// definition rides every request where the provider defers natively,
+			// so one such name would fail every turn: leave it out with a reason in
+			// /mcp. A name within it but over the current model's limit (64 on the
+			// OpenAI family) is registered: the model can change, and tool-search
+			// keeps it out of the active set while the model's provider refuses it
+			// (lib/request/tool-name-limit.ts).
+			if (name.length > WIDEST_TOOL_NAME_LENGTH) {
 				failures.push({
 					server: connection.server,
-					error: mcpResultText.failure({ kind: "nameTooLong", tool: tool.name, length: name.length, max }),
+					error: mcpResultText.failure({ kind: "nameTooLong", tool: tool.name, length: name.length, max: WIDEST_TOOL_NAME_LENGTH }),
 				});
 				continue;
 			}
@@ -653,6 +652,14 @@ function mcpExtension(pi: ExtensionAPI) {
 		connections.clear();
 	});
 
+	/** A note naming the first of a connection's tools the current model's provider refuses (tool-search keeps them inactive), or undefined. */
+	const overLimitNote = (connection: Connection): string | undefined => {
+		const byName = new Map(connection.tools.map((tool) => [namespacedToolName(connection.server.name, tool.name), tool.name]));
+		const [name] = namesOverLimit([...byName.keys()].filter((candidate) => registered.get(candidate)?.server === connection.server.name), modelApi);
+		if (name === undefined) return undefined;
+		return mcpResultText.failure({ kind: "nameOverModelLimit", tool: byName.get(name) ?? name, length: name.length, max: maxToolNameLength(modelApi) });
+	};
+
 	// Single source of truth for a server's status, shared by the /plugins status
 	// snapshot, the /mcp panel entries, and the text fallback.
 	const deriveStatus = (server: McpServer): { status: McpEntryStatus; detail?: string; toolCount?: number } => {
@@ -664,8 +671,8 @@ function mcpExtension(pi: ExtensionAPI) {
 			// A server can connect yet warn (e.g. listTools/listResources failed);
 			// adoptConnection files those under `failures`. Surface it so the warning
 			// isn't collected-but-invisible.
-			const warning = failures.find((f) => f.server.name === server.name);
-			return { status: "connected", toolCount: connection.tools.length, detail: warning?.error };
+			const warning = failures.find((f) => f.server.name === server.name)?.error ?? overLimitNote(connection);
+			return { status: "connected", toolCount: connection.tools.length, detail: warning };
 		}
 		if (oauthNeeded.has(server.name)) return { status: "authNeeded" };
 		if (server.missingEnv?.length) {

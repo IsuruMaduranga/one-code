@@ -82,14 +82,44 @@ the sandbox, so the sandbox needs a Bash on your `PATH`.
   the sandbox.
 - The paths you list in `filesystem.allowWrite`.
 
-Inside those locations, some paths are never writable: the settings files
+Inside those locations, some paths are never writable: the paths your
+`Edit`, `Write`, and `NotebookEdit` deny rules name, the settings files
 that hold permission rules, the project's `skills`, `hooks`, `commands`,
 `agents`, `rules`, and `workflows` folders, shell startup files, Git hooks,
-and Git configuration.
+and Git configuration. So a deny rule such as `Edit(config/prod.yaml)` also
+stops `sed -i` or a script from writing that file.
+
+The sandbox also stops a command from making the working directory look
+like a bare Git repository, which would let Git outside the sandbox run
+settings the command planted. On macOS, `objects`, `refs`, and `HEAD` at
+the top of the working directory are never writable. A `config` or `hooks`
+entry there is protected when a `HEAD` file sits beside it, or when `config`
+is a file. Your project's own `config/` and `hooks/` folders stay writable.
+
+On Linux, bubblewrap protects a path that doesn't exist yet by putting a
+placeholder there while the command runs. For a missing protected name,
+such as `.mcp.json`, `.pi`, a `.vscode` folder or `.git/info/attributes`,
+One Code makes that placeholder an empty, read-only folder, which Git
+ignores. The command can't create anything at that name or inside it. While
+it runs, the command sees an empty folder there: `test -e .mcp.json` is
+true, `test -f .mcp.json` is false, and `cat .mcp.json` reports `Is a
+directory`. The placeholders are removed when the command ends. Which names
+exist is checked before every command, so a protected file you create
+during a session is read-only from the next command on.
+
+A few names can't hold a folder without breaking Git, so on Linux they stay
+creatable while they are missing: `.git/commondir`, and `objects`, `refs`,
+and `HEAD` at the top of the working directory. One Code checks them after
+each command instead. A `commondir` file that appeared in the project's
+`.git` while the command ran is removed, and if the command turned the
+working directory into a bare repository, its `HEAD` is renamed to
+`HEAD.set-aside-by-sandbox`. If either step fails, One Code tells you, so
+you can remove the file yourself before you run Git there.
 
 **Reads.** A sandboxed command can read any file your account can read,
-except the paths you list in `filesystem.denyRead`. The sandbox doesn't hide
-your credentials by default. To hide them, list them.
+except the paths you list in `filesystem.denyRead` and the paths your
+`Read` deny rules name. The sandbox doesn't hide your credentials by
+default. To hide them, list them.
 
 **Network.** Connections go through a filtering proxy. A host you list in
 `network.allowedDomains` is allowed, and a host in `network.deniedDomains`
@@ -182,7 +212,7 @@ Claude Code uses.
 | `filesystem.allowWrite` | none | More writable paths. |
 | `filesystem.denyWrite` | none | Paths that are never writable. |
 | `filesystem.denyRead` | none | Paths a sandboxed command can't read. |
-| `filesystem.allowRead` | none | Exceptions inside a `denyRead` path. |
+| `filesystem.allowRead` | none | Exceptions inside a `denyRead` path. An entry that a `Read` deny rule covers is left out, and One Code tells you so when the session starts. |
 | `network.allowedDomains` | none | Hosts a sandboxed command can reach without a question, such as `registry.npmjs.org` or `*.pythonhosted.org`. |
 | `network.deniedDomains` | none | Hosts that are always refused. |
 | `network.allowLocalBinding` | `false` | Lets a sandboxed command listen on a local port, which a development server needs. |
@@ -212,7 +242,29 @@ holds whatever another file sets.
 - The sandbox doesn't cover the file tools, hooks, or MCP servers. The
   permission gate is what guards those.
 - A sandboxed command can read your files unless you list them in
-  `filesystem.denyRead`.
+  `filesystem.denyRead` or deny them with a `Read` rule.
+- The sandbox takes your deny rules when it starts. A deny rule you add
+  during a session binds the permission gate at once and the sandbox from
+  the next start.
+- On Linux, bubblewrap protects only real paths, so a write-deny rule with
+  a wildcard protects the files that match it when each command starts. For
+  `Edit(**/.env)`, One Code looks for `.env` files before every sandboxed
+  command and makes each one it finds read-only. A file the command creates
+  itself isn't covered. The search stays out of `node_modules` and `.git`
+  unless the rule names one of them, so a match inside those two folders is
+  left to the permission rules. In a folder still too large to search
+  quickly (more than 20,000 entries), the whole folder the pattern starts in
+  becomes read-only instead. On macOS the pattern applies as written, to
+  files created later too.
+- On Linux, the placeholder folders for missing protected names show up
+  inside a sandboxed command: `ls -A` and `find` list them, and `git clean
+  -d` and `git stash -u` warn that they can't remove them and exit with
+  status 1, although the rest of their work is done. `git status`, `git
+  add`, and `git commit` don't see them.
+- On Linux, a sandboxed command can create `.git/commondir`, or `objects`,
+  `refs`, and `HEAD` in the working directory, while they are missing. One
+  Code undoes them when the command ends, so a long background command
+  leaves a window in which they exist.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.

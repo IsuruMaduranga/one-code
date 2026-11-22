@@ -37,6 +37,9 @@ describe("the MCP text", () => {
 		expect(mcpResultText.failure({ kind: "nameTooLong", tool: "t", length: 130, max: 128 })).toBe(
 			'tool "t" skipped: its namespaced name is 130 characters, over the 128-character limit the provider enforces',
 		);
+		expect(mcpResultText.failure({ kind: "nameOverModelLimit", tool: "t", length: 70, max: 64 })).toBe(
+			'tool "t" unavailable on this model: its namespaced name is 70 characters, over the 64-character limit its provider enforces',
+		);
 		expect(mcpResultText.failure({ kind: "nameTaken", tool: "a.b", name: "mcp__s__a_b" })).toBe(
 			'tool "a.b" skipped: its registered name "mcp__s__a_b" is already taken by another tool',
 		);

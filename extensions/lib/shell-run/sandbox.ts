@@ -16,13 +16,15 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { processState } from "../profile/process-state.ts";
 import { shellQuote } from "../shell/shell-quote.ts";
 import { probeSandbox } from "./sandbox-probe.ts";
 import { bashSpawn } from "./shell-spawn.ts";
 import { isShellToolName } from "./shell-tools.ts";
-import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
+import { createEndChecks } from "./sandbox-end-checks.ts";
+import { commandHosts, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, pathExists, plantableCommondirs, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
 export interface SandboxCall {
@@ -56,13 +58,13 @@ export interface ActiveSandbox {
 	/** The run `id` is over: its host list no longer applies. */
 	release(id: string): void;
 	/**
-	 * One wrapped command is over. The runtime counts its wraps and removes
-	 * what a command left on disk (bubblewrap's mount points for paths that
-	 * did not exist) only once every wrap was ended, so this is called exactly
-	 * once per successful `wrap`.
+	 * The wrapped command of run `id` is over. The runtime counts its wraps
+	 * and removes what a command left on disk (bubblewrap's mount points for
+	 * paths that did not exist) only once every wrap was ended, so this is
+	 * called exactly once per successful `wrap`, with the id that wrap got.
 	 */
-	ended(): void;
-	/** The filesystem rules of a command run in `cwd`, for the prompt. */
+	ended(id: string): void;
+	/** The filesystem rules of a command run in `cwd`, for the prompt: a per-command glob as its pattern, never its expansion. */
 	filesystem(cwd: string): ReturnType<typeof sandboxFilesystem>;
 }
 
@@ -143,7 +145,9 @@ export function sandboxSettled(): Promise<void> {
  * take effect at once, since neither changes a tool's schema nor the running
  * sandbox's rules: whether a sandboxed command skips the prompt, and whether
  * the model may ask to leave the sandbox. Everything else (on or off, the
- * paths, the hosts) holds until the next start. Returns what the files now
+ * paths, the deny rules' paths, the hosts) holds until the next start, so a
+ * deny rule added in `/permissions` binds the gate at once and the sandbox
+ * from the next start. Returns what the files now
  * say, so the caller can tell the user what waits for a restart.
  */
 export function reloadSandboxSettings(): SandboxSettings {
@@ -158,19 +162,30 @@ export function sandboxUnavailable(): string | undefined {
 }
 
 
+/** What {@link startSandbox} is given. */
+export interface SandboxStartOptions {
+	scopeFor: (cwd: string) => SandboxScope;
+	cwd: string;
+	tempDir?: string;
+	ask: SandboxHostAsk;
+	notice?: (message: string) => void;
+}
+
 /**
  * Start the session's sandbox. `scopeFor` gives what a command run in a
  * directory may write and must never write; `ask` decides a host the
- * settings do not list. Returns why it could not start, or undefined.
+ * settings do not list; `notice` tells the user what a check after a command
+ * could not undo (default: stderr). Returns why it could not start, or
+ * undefined.
  */
-export function startSandbox(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }): Promise<string | undefined> {
+export function startSandbox(opts: SandboxStartOptions): Promise<string | undefined> {
 	const slot = state();
 	const start = startRuntime(opts, slot.starting);
 	slot.starting = start;
 	return start;
 }
 
-async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
+async function startRuntime(opts: SandboxStartOptions, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
 	const slot = state();
 	const settings = sandboxSettings();
 	// One manager per process: an earlier session's sandbox is stopped first.
@@ -200,12 +215,34 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 		// The runtime points TMPDIR at a path every user of the machine shares;
 		// the session's own private directory replaces it.
 		const prefix = opts.tempDir ? `export TMPDIR=${shellQuote(opts.tempDir)}; ` : "";
+		// On Linux what the sandbox cannot deny without breaking git is checked when a command ends (sandbox-end-checks.ts).
+		const linux = sandboxPlatform() === "linux";
+		const checks = createEndChecks(
+			{
+				cleanup: () => SandboxManager.cleanupAfterCommand(),
+				plantableCommondirs: (cwd) => (linux ? plantableCommondirs(cwd) : []),
+				looksLikeBareRepository: (dir) => !linux || looksLikeBareRepository(dir),
+				exists: pathExists,
+				remove: (path) => rmSync(path, { recursive: true, force: true }),
+				rename: renameSync,
+			},
+			opts.notice ?? ((message) => process.stderr.write(`${message}\n`)),
+		);
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
-			wrap: (command, call) =>
-				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
+			wrap: async (command, call) => {
+				checks.started(call.id, call.cwd);
+				try {
+					// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
+					return await SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
+				} catch (error) {
+					// No command came back, so no `ended` follows: the run's observation goes with it.
+					checks.discard(call.id);
+					throw error;
+				}
+			},
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
-			ended: () => SandboxManager.cleanupAfterCommand(),
+			ended: (id) => checks.ended(id),
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),
 			release: (id) => SandboxManager.unregisterCommandNetworkLists(id),
 		};
@@ -319,11 +356,21 @@ export async function sandboxedCommand(request: SandboxRequest, platform: NodeJS
 		}
 	}
 	let wrapped = false;
+	// Each piece of the run's state is consumed before it is acted on, so a step
+	// that throws is never repeated by a second call, and the wrap is ended
+	// whatever releasing the hosts did.
 	const finish = () => {
-		if (listed) sandbox.release(id);
-		listed = false;
-		if (wrapped) sandbox.ended();
-		wrapped = false;
+		try {
+			if (listed) {
+				listed = false;
+				sandbox.release(id);
+			}
+		} finally {
+			if (wrapped) {
+				wrapped = false;
+				sandbox.ended(id);
+			}
+		}
 	};
 	try {
 		const command = await sandbox.wrap(request.line?.() ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });

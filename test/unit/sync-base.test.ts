@@ -8,13 +8,14 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyBase, checkBase, fetchBase, isProductPath, PRODUCT_PATHS, SYNC_FILE, syncTarget } from "../../scripts/sync-base.mjs";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 const made: string[] = [];
 afterEach(() => {
 	for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
 function write(dir: string, files: Record<string, string>) {
 	for (const [file, text] of Object.entries(files)) {
@@ -26,7 +27,7 @@ function write(dir: string, files: Record<string, string>) {
 function repo(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "sync-base-test-"));
 	made.push(dir);
-	git(dir, "init", "-q");
+	initTestRepo(dir);
 	write(dir, files);
 	git(dir, "add", "-A");
 	git(dir, "commit", "-q", "-m", "one", "--allow-empty");
@@ -176,6 +177,45 @@ describe("sync-base", () => {
 		const next = nextBase(base, () => write(base, { "extensions/new.ts": "the base's" }));
 		expect(() => applyBase(product, next.dir, { commit: next.commit })).toThrow(/extensions\/new\.ts/);
 		expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("my draft");
+	});
+
+	describe.each([
+		["the product's .git/info/exclude", (product: string) => write(product, { ".git/info/exclude": "extensions/new.ts\n" })],
+		["a global ignore file", (product: string) => {
+			write(product, { ".git/ignore-list": "extensions/new.ts\n" });
+			git(product, "config", "core.excludesFile", join(product, ".git/ignore-list"));
+		}],
+	])("a base path ignored through %s", (_name, ignore) => {
+		it("stops before overwriting a file there, and checks a synced one as equal to the base", () => {
+			const { base, product } = synced();
+			git(product, "add", "-A");
+			git(product, "commit", "-q", "-m", "synced");
+			ignore(product);
+			write(product, { "extensions/new.ts": "my draft" });
+			const next = nextBase(base, () => write(base, { "extensions/new.ts": "the base's" }));
+			expect(() => applyBase(product, next.dir, { commit: next.commit })).toThrow(/extensions\/new\.ts/);
+			expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("my draft");
+
+			// Once the file is gone, the sync writes it, and a check finds it equal to the base.
+			rmSync(join(product, "extensions/new.ts"));
+			applyBase(product, next.dir, { commit: next.commit });
+			expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("the base's");
+			expect(checkBase(product, next.dir)).toEqual([]);
+			writeFileSync(join(product, "extensions/new.ts"), "edited");
+			expect(checkBase(product, next.dir)).toEqual(["extensions/new.ts: differs from the base"]);
+		});
+
+		it("checks an ignored directory where the base has a file as differing from the base", () => {
+			const { base, product } = synced();
+			git(product, "add", "-A");
+			git(product, "commit", "-q", "-m", "synced");
+			const next = nextBase(base, () => write(base, { "extensions/new.ts": "the base's" }));
+			applyBase(product, next.dir, { commit: next.commit });
+			rmSync(join(product, "extensions/new.ts"));
+			ignore(product);
+			write(product, { "extensions/new.ts/inner.ts": "a directory now" });
+			expect(checkBase(product, next.dir)).toEqual(["extensions/new.ts: differs from the base"]);
+		});
 	});
 
 	// Windows has no executable bit, so the check compares bytes alone there.

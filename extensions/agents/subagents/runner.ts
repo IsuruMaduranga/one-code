@@ -137,6 +137,8 @@ export interface SubagentRunOptions extends ChildSessionSpec {
 
 export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"> {
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
+	/** Fires at the start of EVERY turn, before the child's first event; `onTurnEnd` is its pair. */
+	onTurnStart?: () => void;
 	/** Fires at the end of EVERY turn (initial task and later messages alike). */
 	onTurnEnd: (outcome: ChildOutcome) => void;
 	/** Fires once when the resident exits; a returned promise (worktree cleanup) is part of kill()'s settle. */
@@ -726,6 +728,7 @@ export class SubagentRuntime {
 		const startTurn = (message: string): void => {
 			tracker.beginTurn();
 			turnActive = true;
+			options.onTurnStart?.();
 			// The cap measures the turn's own work, so it is armed when the prompt
 			// actually starts — after any wait behind the prefix gate.
 			const armTurnCap = () => {

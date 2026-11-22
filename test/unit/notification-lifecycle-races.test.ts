@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	abortKeepsQueue,
 	createTaskNotifier,
 	NOTIFICATION_ID_KEY,
 	TASK_COMPLETION_KEY,
@@ -12,10 +13,89 @@ const completion = (taskId: string) => taskNotification({ kind: "shell", taskId,
 /** A completion's details, as its producer marks them. */
 const completes = (taskId: string) => ({ taskId, [TASK_COMPLETION_KEY]: true });
 const textAt = (fake: FakePi, index: number) => (fake.sentMessages[index].message.content as Array<{ text: string }>)[0].text;
-const interrupt = async (fake: FakePi) => {
+/** An abort in `mode`: the TUI's (Esc) clears pi's queues first, the others (RPC `abort`) keep them. */
+const interrupt = async (fake: FakePi, mode = "tui") => {
 	await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
-	await fake.fire("agent_settled", {});
+	await fake.fire("agent_settled", {}, createFakeCtx({ mode }));
 };
+/** pi drains a queued steer: the message_end carrying the details it was sent with. */
+const drain = (fake: FakePi, index: number) => fake.fire("message_end", { message: { role: "custom", details: fake.sentMessages[index].message.details } });
+
+describe("abortKeepsQueue", () => {
+	it("is false only where pi clears its queues before an abort (the TUI) or the mode is unknown", () => {
+		expect(abortKeepsQueue("tui")).toBe(false);
+		expect(abortKeepsQueue(undefined)).toBe(false);
+		for (const mode of ["rpc", "json", "print"]) expect(abortKeepsQueue(mode)).toBe(true);
+	});
+});
+
+describe("a notification steered just before an abort", () => {
+	const steerThenAbort = async (mode: string) => {
+		const fake = createFakePi();
+		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 0 });
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		notify("task-notification", completion("b1"), { taskId: "b1" });
+		expect(fake.sentMessages[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		await interrupt(fake, mode);
+		return fake;
+	};
+
+	it("RPC abort: pi keeps the steer, so the next prompt carries it once and the notifier sends no copy", async () => {
+		const fake = await steerThenAbort("rpc");
+		expect(fake.sentMessages).toHaveLength(1);
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		// The new run drains pi's queue before its first request.
+		await drain(fake, 0);
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "rpc" }));
+		expect(fake.sentMessages).toHaveLength(1);
+	});
+
+	it("RPC abort after the client cleared pi's queue: the next settle finds it undelivered and sends it once", async () => {
+		const fake = await steerThenAbort("rpc");
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "rpc" }));
+		expect(fake.sentMessages).toHaveLength(2);
+		expect(textAt(fake, 1)).toContain("<task-id>b1</task-id>");
+		// Not confirmed again: dropped, not looped.
+		await fake.fire("agent_start", {});
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "rpc" }));
+		expect(fake.sentMessages).toHaveLength(2);
+	});
+
+	it("RPC abort twice before pi drains it: pi still holds the steer, so no copy is sent and the next run's drain confirms it", async () => {
+		const fake = await steerThenAbort("rpc");
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		await interrupt(fake, "rpc");
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		expect(fake.sentMessages).toHaveLength(1);
+		await drain(fake, 0);
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "rpc" }));
+		expect(fake.sentMessages).toHaveLength(1);
+	});
+
+	it("TUI abort (Esc): pi cleared the queue, so the next prompt carries the held copy, once", async () => {
+		const fake = await steerThenAbort("tui");
+		expect(fake.sentMessages).toHaveLength(1);
+		await fake.fire("before_agent_start", {});
+		expect(fake.sentMessages).toHaveLength(2);
+		expect(fake.sentMessages[1].options).toEqual({ deliverAs: "nextTurn" });
+		expect(textAt(fake, 1)).toContain("<task-id>b1</task-id>");
+		await fake.fire("agent_start", {});
+		await drain(fake, 1);
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "tui" }));
+		expect(fake.sentMessages).toHaveLength(2);
+	});
+});
 
 describe("notification lifecycle races", () => {
 	afterEach(() => vi.useRealTimers());

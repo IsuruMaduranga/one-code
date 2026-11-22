@@ -135,10 +135,13 @@ export function applyBase(product, base, record) {
 	const tracked = new Set(lines(git(product, "ls-files", "-z")));
 	// Nothing git could not bring back is deleted or overwritten: an untracked
 	// file the base no longer has, or one at a path the base now writes with
-	// other bytes, stops the sync before anything changes.
+	// other bytes, stops the sync before anything changes. The second kind is
+	// found among the base's files, not the checkout's: a file the product
+	// ignores (through .gitignore, .git/info/exclude or a global ignore file)
+	// is not in the checkout list, yet the sync would overwrite it.
 	const lost = [
 		...stale.filter((file) => !tracked.has(file)),
-		...present.filter((file) => wanted.has(file) && !STAMPED.includes(file) && !tracked.has(file) && !readFileSync(join(base, file)).equals(readFileSync(join(product, file)))),
+		...baseFiles.filter((file) => !STAMPED.includes(file) && !tracked.has(file) && statSync(join(product, file), { throwIfNoEntry: false })?.isFile() && !readFileSync(join(base, file)).equals(readFileSync(join(product, file)))),
 	];
 	if (lost.length > 0) {
 		throw new Error(`these files are not the base's and sit outside the product's paths:\n  ${lost.join("\n  ")}\nMove each under profile/, list it in "own" in ${SYNC_FILE}, or delete it.`);
@@ -204,11 +207,14 @@ export function checkBase(product, base) {
 		const own = ownPaths(record);
 		applyBase(copy, base, record);
 		const expected = filesUnder(copy).filter((file) => !file.startsWith(".git/") && !isProductPath(file, own));
+		// A base file the product ignores is on disk but not in `files`, so presence is read from the disk.
+		// Only a regular file (or a link to one) can match: anything else at the path, an ignored folder
+		// for one, differs before its bytes are read.
 		const actual = new Set(files.filter((file) => !isProductPath(file, own)));
 		const executable = (path) => (statSync(path).mode & 0o111) !== 0;
 		const differing = expected.filter(
 			(file) =>
-				!actual.has(file) ||
+				!statSync(join(product, file), { throwIfNoEntry: false })?.isFile() ||
 				!readFileSync(join(copy, file)).equals(readFileSync(join(product, file))) ||
 				(process.platform !== "win32" && executable(join(copy, file)) !== executable(join(product, file))),
 		);

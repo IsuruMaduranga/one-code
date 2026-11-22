@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { approveMcpServers, readClaudeMcpjsonPolicy } from "../../extensions/tools/mcp/trust.ts";
 import { makeMcpTrustDirs, stdio, trustDeps } from "./helpers/mcp-trust.ts";
 import { borrowedLadderPaths, type LadderPaths, useBorrowedLadder } from "./helpers/settings-files.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 useBorrowedLadder();
 
@@ -59,7 +60,7 @@ describe("readClaudeMcpjsonPolicy: which file may approve", () => {
 	});
 
 	it("never reads the repository's checked-in file, for approvals or disables", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		write("project", { ...approveAll, disabledMcpjsonServers: ["x"] });
 		expect(await policy()).toEqual(nothing);
 		expect(await connectsUnasked()).toBe(false);
@@ -74,16 +75,14 @@ describe("readClaudeMcpjsonPolicy: which file may approve", () => {
 	it("ignores an untracked local file in a directory that carries its own .git (a copied checkout)", async () => {
 		// A tarball of someone's working copy: `.git`, a `.mcp.json`, and their
 		// untracked local settings approving everything.
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		write("local", approveAll);
 		expect(await policy()).toEqual(nothing);
 		expect(await connectsUnasked()).toBe(false);
 	});
 
 	it("ignores a git-tracked local file (a repository cannot approve its own servers)", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
-		execFileSync("git", ["config", "user.email", "t@t"], { cwd });
-		execFileSync("git", ["config", "user.name", "t"], { cwd });
+		initTestRepo(cwd);
 		const local = write("local", approveAll);
 		// -f: a global gitignore may ignore the file; the point is that it is tracked.
 		execFileSync("git", ["add", "-f", "--", local], { cwd });
@@ -99,7 +98,7 @@ describe("readClaudeMcpjsonPolicy: which file may approve", () => {
 	});
 
 	it("never lets the local file approve servers, its own or .mcp.json's", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		const local = write("local", { enableAllProjectMcpServers: true });
 		const out = await approveMcpServers([stdio("own", local), projectServer("shipped")], new Set(), cwd, home, trustDeps(storePath, { hasUI: false }).deps);
 		expect(out.approved).toEqual([]);
