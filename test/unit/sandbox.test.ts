@@ -6,7 +6,7 @@
  * working-docs/features/sandbox/.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,7 +17,7 @@ import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matc
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, resolvedSpelling, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -307,6 +307,28 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 		}
 		// Without Read deny rules every entry stays.
 		expect(shadowedAllowRead({ ...settings, denyRulePaths: { write: ["secret.txt"], read: [] } }, "/work", { home })).toEqual([]);
+	});
+
+	it("leaves out an allowRead entry that names a denied file through a linked folder, as the runtime resolves it", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandbox-alias-"));
+		try {
+			mkdirSync(join(root, "data"));
+			writeFileSync(join(root, "data", "notes.txt"), "n");
+			writeFileSync(join(root, "other.txt"), "o");
+			symlinkSync(join(root, "data"), join(root, "alias"));
+			const allowRead = ["alias/notes.txt", "alias/*", "alias", "other.txt", "data/other.txt"];
+			const ruled = (read: string[]): SandboxSettings => ({ ...ON, filesystem: { ...ON.filesystem, allowRead }, denyRulePaths: { write: [], read } });
+			for (const platform of ["darwin", "linux"] as const) {
+				const host = { home, platform };
+				// The same file by either spelling; the folder allow only holds it and stays, as do unrelated files.
+				expect(shadowedAllowRead(ruled(["data/notes.txt"]), root, host)).toEqual(["alias/notes.txt", "alias/*"]);
+				expect(shadowedAllowRead(ruled(["alias/notes.txt"]), root, host)).toEqual(["alias/notes.txt", "alias/*"]);
+				expect(shadowedAllowRead(ruled(["data/**"]), root, host)).toEqual(["alias/notes.txt", "alias/*", "data/other.txt"]);
+			}
+			expect(resolvedSpelling(join(root, "alias", "missing", "x"))).toBe(join(realpathSync(root), "data", "missing", "x"));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("adds the rules' paths after the settings' own lists, once each, for the command's directory", () => {

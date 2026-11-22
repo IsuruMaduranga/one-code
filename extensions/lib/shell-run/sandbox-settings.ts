@@ -601,6 +601,13 @@ function filesystemRules(settings: SandboxSettings, scope: SandboxScope, host: S
  * a glob is dropped when its folder and a deny's overlap at all, since what
  * it matches cannot be told apart from the deny's. (A write needs none of
  * this: the runtime's write denies always win over its write allows.)
+ *
+ * The runtime resolves symbolic links on the way to a path before it
+ * compares an allow with a deny, so two spellings of one file through a
+ * linked folder (`alias/notes.txt` and `data/notes.txt` with `alias` a link
+ * to `data`) are the same file to it. Each allow and each deny is compared as
+ * written and as {@link resolvedSpelling} gives it, and any pair that meets
+ * drops the allow.
  */
 export function shadowedAllowRead(settings: SandboxSettings, cwd: string, host: SandboxHost = {}): string[] {
 	if (settings.denyRulePaths.read.length === 0 || settings.filesystem.allowRead.length === 0) return [];
@@ -609,24 +616,52 @@ export function shadowedAllowRead(settings: SandboxSettings, cwd: string, host: 
 	const fold = platform === "darwin" || platform === "win32";
 	const same = (path: string) => (fold ? path.toLowerCase() : path);
 	const atOrUnder = (path: string, dir: string) => same(path) === same(dir) || same(path).startsWith(`${same(dir).replace(/\/+$/, "")}/`);
+	const spellings = (path: string) => [...new Set([path, resolvedSpelling(path)])];
+	const meet = (paths: readonly string[], dirs: readonly string[]) => paths.some((path) => dirs.some((dir) => atOrUnder(path, dir)));
 	const denies = settings.denyRulePaths.read.flatMap((pattern) => ruleDenyPaths(pattern, "read", cwd, home, platform));
 	return settings.filesystem.allowRead.filter((entry) => {
 		const path = entry === "~" || entry.startsWith("~/") ? resolve(home, `.${entry.slice(1)}`) : resolve(cwd, entry);
 		const allowGlob = RUNTIME_GLOB.test(path);
-		const allowBase = allowGlob ? literalDirectory(path) : path;
+		const allowBases = spellings(allowGlob ? literalDirectory(path) : path);
 		return denies.some((deny) => {
-			if (deny.kind !== "expand" && !(deny.kind === "path" && hasUnescapedWildcard(deny.path))) return atOrUnder(allowBase, deny.path) || (allowGlob && atOrUnder(deny.path, allowBase));
+			if (deny.kind !== "expand" && !(deny.kind === "path" && hasUnescapedWildcard(deny.path))) {
+				const denied = spellings(deny.path);
+				return meet(allowBases, denied) || (allowGlob && meet(denied, allowBases));
+			}
 			const glob = deny.kind === "expand" ? deny.glob : deny.path;
 			const base = literalDirectory(glob);
-			if (allowGlob) return atOrUnder(allowBase, base) || atOrUnder(base, allowBase);
+			const bases = spellings(base);
+			if (allowGlob) return meet(allowBases, bases) || meet(bases, allowBases);
 			// The allow is a path: covered when it, or a folder above it, matches the deny glob as the gate reads it.
-			const regex = pathGlobRegex(glob, fold);
-			for (let at = path; ; at = dirname(at)) {
-				if (regex.test(at)) return true;
-				if (dirname(at) === at) return false;
-			}
+			const tail = glob.slice(base.length).replace(/^\//, "");
+			const regexes = bases.map((at) => pathGlobRegex(`${at.replace(/\/+$/, "")}/${tail}`, fold));
+			return allowBases.some((allow) => {
+				for (let at = allow; ; at = dirname(at)) {
+					if (regexes.some((regex) => regex.test(at))) return true;
+					if (dirname(at) === at) return false;
+				}
+			});
 		});
 	});
+}
+
+/**
+ * `path` with the part of it that exists resolved through symbolic links and
+ * the rest kept as written: the file the runtime takes the spelling for.
+ * The path itself when nothing on it can be resolved.
+ */
+export function resolvedSpelling(path: string, real: (path: string) => string = realpathSync): string {
+	const rest: string[] = [];
+	for (let at = path; ; ) {
+		try {
+			return join(real(at), ...rest.reverse());
+		} catch {
+			const parent = dirname(at);
+			if (parent === at) return path;
+			rest.push(basename(at));
+			at = parent;
+		}
+	}
 }
 
 const mapLists = <A, B>(lists: SandboxFilesystem<A>, entries: (entry: A) => B[]): SandboxFilesystem<B> => ({
