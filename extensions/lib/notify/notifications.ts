@@ -612,7 +612,7 @@ export const DEFAULT_COALESCE_MS = 250;
  * `aborted` settle outside `ctx.mode === "tui"`, an unconfirmed entry stays
  * pending as `queued` (pi still holds it): neither re-sent nor held, and the
  * next run's `message_end` confirms it. Re-sending it there delivered the
- * notification twice (plan 11.2). If a client cleared the queue itself (RPC
+ * notification twice. If a client cleared the queue itself (RPC
  * `clear_queue`), the next settle finds the entry still unconfirmed and treats
  * it as discarded then. `abortKeepsQueue` reads the mode.
  *
