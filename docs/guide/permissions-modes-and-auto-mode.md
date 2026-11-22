@@ -80,7 +80,8 @@ automatically: you are asked, or in auto mode the classifier decides.
 
 This check sees the writes One Code can read from the command line:
 redirects and the operands of commands such as `rm`, `mv`, and `cp`. It
-cannot see a write made inside a script or by a tool such as `sed -i`. To
+cannot see a write made inside a script or by a tool such as `sed -i`; with
+the [command sandbox](sandbox.md) on, the sandbox blocks those writes too. To
 remove a denied file with a shell command, remove the rule first. A
 PowerShell command that writes the file is not refused either; it loses the
 automatic approval, like the folder case.
