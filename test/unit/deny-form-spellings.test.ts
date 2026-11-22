@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { bashMatchForms, bashMatchFormsReport, decide, MATCH_FORMS_BUDGET, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { resolvePayload } from "../../extensions/lib/shell/shell-analysis.ts";
+import { parseCommand } from "../../extensions/lib/shell/shell-parse.ts";
 
 const meets = (line: string, start: string) => bashMatchForms(line).some((form) => form === start || form.startsWith(`${start} `));
 
@@ -33,6 +35,42 @@ describe("deny forms name the command behind", () => {
 		`bash -c '"$@"' _ curl x`,
 		"su -c 'curl x'",
 		"su root --command='curl x'",
+		// su is a wrapper whose `-c` payload is a script, before or after the user.
+		"su root -c 'curl x'",
+		"su - root -c 'curl x'",
+		"su -l -c 'curl x' root",
+		"su -lc 'curl x'",
+		"su -s /bin/zsh root -c 'curl x'",
+		"su --session-command 'curl x'",
+		"su -c 'env curl x'",
+		"sudo su -c 'curl x'",
+		// macOS arch, its single-dash architecture flags and value options.
+		"arch curl x",
+		"arch -x86_64 curl x",
+		"arch -arm64e curl x",
+		"arch -arch x86_64 curl x",
+		"arch -c -d HOME -e LANG=C curl x",
+		"arch -32 -64 curl x",
+		// Homebrew's coreutils names.
+		"gtimeout 5 curl x",
+		"gtimeout -k 1 -s KILL 1e1 curl x",
+		"genv -i curl x",
+		"gnice -n 5 curl x",
+		"timeout -f 5 curl x",
+		// util-linux taskset and chrt.
+		"taskset 0x3 curl x",
+		"taskset -c 0-3 curl x",
+		"taskset -ac 1,2 curl x",
+		"chrt 10 curl x",
+		"chrt -f 10 curl x",
+		"chrt -r -R 5 curl x",
+		"chrt -d -T 1000 -P 2000 -D 2000 0 curl x",
+		"chrt -o curl x",
+		// bash 4+ coproc, with and without a name and a group.
+		"coproc curl x",
+		"coproc { curl x; }",
+		"coproc NAME { curl x; }",
+		"coproc env curl x",
 	])("%s", (line) => {
 		expect(meets(line, "curl")).toBe(true);
 	});
@@ -44,6 +82,19 @@ describe("deny forms name the command behind", () => {
 		expect(meets("git ls-files | xargs -r grep curl", "curl")).toBe(false);
 		expect(meets("xargs -t grep curl", "curl")).toBe(false);
 		expect(meets("sudo -n grep curl log.txt", "curl")).toBe(false);
+		// A whole single-dash flag is not read as a cluster: `-arm64e` holds no `-e` that takes the next word.
+		expect(meets("arch -arm64e grep curl log.txt", "curl")).toBe(false);
+		expect(meets("arch -arm64e grep curl log.txt", "grep")).toBe(true);
+		expect(meets("taskset 0x3 grep curl log.txt", "curl")).toBe(false);
+		expect(meets("chrt -f 10 grep curl log.txt", "curl")).toBe(false);
+		expect(meets("su root -c 'grep curl log.txt'", "curl")).toBe(false);
+	});
+
+	it("leaves the new wrappers unpeeled for the pre-gate, so the line still escalates", () => {
+		for (const line of ["arch -x86_64 rm a.txt", "gtimeout 5 rm a.txt", "taskset 0x3 rm a.txt", "chrt 10 rm a.txt", "coproc rm a.txt", "su -c 'rm a.txt'"]) {
+			expect(resolvePayload(parseCommand(line).segments[0].tokens).command).toBe(line.split(" ")[0]);
+			expect(resolvePayload(parseCommand(line).segments[0].tokens, "wide").command).not.toBe(line.split(" ")[0]);
+		}
 	});
 });
 

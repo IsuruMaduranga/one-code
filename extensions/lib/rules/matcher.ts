@@ -255,15 +255,6 @@ export function bashSubcommands(command: string): string[] | undefined {
 /** Redirect targets that are devices, never files: always fine under an allow rule. */
 const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"]);
 
-/** The command line `su -c '…'` / `su --command='…'` runs, if any. */
-function suScript(args: string[]): string | undefined {
-	for (const [index, arg] of args.entries()) {
-		if (arg.startsWith("--command=")) return arg.slice("--command=".length);
-		if (arg === "-c" || arg === "--command" || arg === "--session-command") return args[index + 1];
-	}
-	return undefined;
-}
-
 /**
  * The first innermost `{…}` group of `line` that holds a comma, in the shape
  * of a regex match (`index`, the whole group, its inside). One pass: a regex
@@ -449,7 +440,7 @@ function expandForms(command: string, walk: FormsWalk): string[] {
 		const tokens = leadTokens(segment);
 		if (tokens.length === 0) continue;
 		// The wide reading also peels sudo/doas and returns the command lines
-		// wrapper options carry (`flock -c`, `env -S`).
+		// wrapper options carry (`flock -c`, `env -S`, `su -c`).
 		const payload = resolvePayload(tokens, "wide");
 		nested.push(...payload.scripts);
 		if (!payload.command) continue;
@@ -458,10 +449,6 @@ function expandForms(command: string, walk: FormsWalk): string[] {
 		// A wrapper option the peel does not know may take the next word as its
 		// value (`env -P dir cmd`, `env -a name cmd`): then the command starts a word later.
 		if (payload.opaque.length > 0) nested.push(args.join(" "));
-		if (payload.command === "su") {
-			const script = suScript(args);
-			if (script) nested.push(script);
-		}
 		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
 			nested.push(...(inlineShellScripts(args, "wide") ?? []).filter(Boolean));
 		}
@@ -1372,7 +1359,8 @@ const RUNNER_GROUPS: Record<RunnerKind, readonly string[]> = {
 	wrapper: [
 		"exec", "env", "xargs", "nohup", "setsid", "timeout", "time", "nice", "ionice", "stdbuf", "flock", "script", "command", "builtin",
 		"sudo", "doas", "su", "runuser", "pkexec", "chroot", "nsenter", "unshare", "fakeroot", "firejail", "sandbox-exec", "watch",
-		"busybox", "parallel", "caffeinate", "taskset", "unbuffer", "chronic", "dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
+		"busybox", "parallel", "caffeinate", "taskset", "chrt", "coproc", "genv", "gnice", "gtimeout", "unbuffer", "chronic",
+		"dbus-run-session", "xvfb-run", "arch", "xcrun", "ssh",
 		"strace", "ltrace", "valgrind", "gdb", "lldb", "hyperfine", "direnv", "mise", "asdf", "nix-shell", "nix", "entr",
 		"invoke-expression", "invoke-command", "start-process", "start-job",
 	],

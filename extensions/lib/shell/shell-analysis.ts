@@ -205,19 +205,29 @@ interface WrapperSpec {
 	 * position, so the command escalates; the wide reading skips it.
 	 */
 	unsafeValues?: readonly string[];
-	/** Options whose value is a command line of its own (`flock -c`, `env -S`): the wide reading returns it. */
+	/** Options whose value is a command line of its own (`flock -c`, `env -S`, `su -c`): the wide reading returns it. */
 	scripts?: readonly string[];
-	/** The first operand is a file, not the command (`flock LOCK cmd`, `script LOG cmd`). */
-	fileFirst?: boolean;
-	/** The first operand is a duration (`timeout 30 cmd`). */
-	durationFirst?: boolean;
+	/**
+	 * The first operand is never the command: a file (`flock LOCK cmd`,
+	 * `script LOG cmd`), a CPU mask (`taskset 0x3 cmd`) or a user (`su root
+	 * -c '…'`). Options may follow it too.
+	 */
+	operandFirst?: boolean;
+	/** The first operand is a value when it has this shape (`timeout 30 cmd`, `chrt 10 cmd`). */
+	valueFirst?: RegExp;
+	/** Wraps a compound command, after an optional name: `coproc { cmd; }`, `coproc NAME { cmd; }`. */
+	compound?: boolean;
 	/**
 	 * Whether an in-project payload stays contained (`containedNonNetwork`).
 	 * xargs takes its targets from stdin, and flock and script write the
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
-	/** Options that take no value and leave the payload and where it runs unchanged. */
+	/**
+	 * Options that take no value and leave the payload and where it runs
+	 * unchanged. A single-dash word listed whole (`-x86_64`, `-`) is one flag,
+	 * never a cluster of letters.
+	 */
 	flags?: readonly string[];
 	/** Peeled only for deny/ask forms; the pre-gate treats it as an unknown command. */
 	denyFormsOnly?: boolean;
@@ -232,29 +242,80 @@ interface WrapperSpec {
  * (PREGATE-REVIEW-2026-09-23 P6). `sudo`/`doas` are peeled for deny forms
  * only: the pre-gate peeling them would clear `sudo rm` as a contained delete.
  */
+const ENV: WrapperSpec = {
+	values: ["-u", "--unset"],
+	unsafeValues: ["-C", "--chdir"],
+	scripts: ["-S", "--split-string"],
+	flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"],
+	contained: true,
+};
+const NICE: WrapperSpec = { values: ["-n", "--adjustment"], contained: true };
+/** Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`, `0x1p3`, `inf`. */
+const TIMEOUT: WrapperSpec = {
+	values: ["-s", "--signal", "-k", "--kill-after"],
+	flags: ["-f", "--foreground", "--preserve-status", "-v", "--verbose", "-p"],
+	valueFirst: /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i,
+	contained: true,
+};
+
 const WRAPPERS: Record<string, WrapperSpec> = {
+	// macOS `arch -x86_64 cmd` runs cmd as that architecture; `-e NAME=value` sets its environment.
+	arch: {
+		values: ["-arch", "-d"],
+		unsafeValues: ["-e"],
+		flags: ["-32", "-64", "-i386", "-x86_64", "-x86_64h", "-arm64", "-arm64e", "-c", "-h"],
+		contained: true,
+		denyFormsOnly: true,
+	},
 	// `builtin cd x` runs the builtin `cd` (PR #12 review: it hid a `cd` from the worktree guard).
 	builtin: { contained: true },
 	// Runs its argument as the command of that name (`busybox rm x`).
 	busybox: { contained: false, denyFormsOnly: true },
 	caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], contained: true, denyFormsOnly: true },
+	// util-linux `chrt [policy] [priority] cmd`; the priority may be left out for some policies.
+	chrt: {
+		values: ["-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"],
+		flags: [
+			"-a", "--all-tasks", "-b", "--batch", "-d", "--deadline", "-e", "--ext", "-f", "--fifo", "-i", "--idle", "-o", "--other", "-r", "--rr",
+			"-R", "--reset-on-fork", "-p", "--pid", "-v", "--verbose", "-m", "--max",
+		],
+		valueFirst: /^\d+$/,
+		contained: true,
+		denyFormsOnly: true,
+	},
 	command: { flags: ["-p", "-v", "-V"], contained: true },
+	// bash 4+: `coproc cmd`, `coproc { cmd; }`, `coproc NAME { cmd; }` run cmd beside the shell.
+	coproc: { compound: true, contained: false, denyFormsOnly: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], flags: ["-n", "-s", "-L"], contained: false, denyFormsOnly: true },
 	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
-	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"], contained: true },
-	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], fileFirst: true, contained: false },
+	env: ENV,
+	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], operandFirst: true, contained: false },
+	// Homebrew's coreutils names for env, nice and timeout.
+	genv: { ...ENV, denyFormsOnly: true },
+	gnice: { ...NICE, denyFormsOnly: true },
+	gtimeout: { ...TIMEOUT, denyFormsOnly: true },
 	ionice: { values: ["-c", "--class", "-n", "--classdata"], flags: ["-t", "--ignore"], contained: true },
-	nice: { values: ["-n", "--adjustment"], contained: true },
+	nice: NICE,
 	nohup: { contained: true },
 	script: {
 		values: ["-t", "-E", "--echo", "-m", "--logging-format"],
 		unsafeValues: ["-T", "--log-timing", "-I", "--log-in", "-O", "--log-out", "-B", "--log-io"],
 		scripts: ["-c", "--command"],
-		fileFirst: true,
+		operandFirst: true,
 		contained: false,
 	},
 	setsid: { flags: ["-w", "--wait", "-f", "--fork", "-c", "--ctty"], contained: true },
 	stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], contained: true },
+	// `su [options] [-] [user [args]]`: the user's shell runs `-c`'s script; util-linux takes options after the user too.
+	su: {
+		values: ["-g", "--group", "-G", "--supp-group", "-w", "--whitelist-environment"],
+		unsafeValues: ["-s", "--shell"],
+		scripts: ["-c", "--command", "--session-command"],
+		flags: ["-", "-f", "--fast", "-l", "--login", "-m", "-p", "--preserve-environment", "-P", "--pty"],
+		operandFirst: true,
+		contained: false,
+		denyFormsOnly: true,
+	},
 	sudo: {
 		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
 		unsafeValues: ["-C", "-D", "-R", "--close-from", "--chdir", "--chroot"],
@@ -262,8 +323,10 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 		contained: false,
 		denyFormsOnly: true,
 	},
+	// util-linux `taskset [options] mask cmd`; with `-p` the operand after the mask is a process id.
+	taskset: { flags: ["-a", "--all-tasks", "-c", "--cpu-list", "-p", "--pid"], operandFirst: true, contained: true, denyFormsOnly: true },
 	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], flags: ["-p", "-l", "-v", "--portability", "--verbose"], contained: true },
-	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
+	timeout: TIMEOUT,
 	watch: { values: ["-n", "--interval", "-q", "--equexit"], flags: ["-d", "-t", "-b", "-e", "-g", "-c", "-x", "-p", "-w", "--differences", "--no-title", "--beep", "--errexit", "--chgexit", "--color", "--exec", "--precise", "--no-wrap"], contained: false, denyFormsOnly: true },
 	xargs: {
 		values: ["-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
@@ -511,7 +574,15 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			}
 			let option: string | undefined;
 			let attached: string | undefined;
-			if (word.startsWith("--")) {
+			// A single-dash word the spec lists whole is one option (`arch -arm64e`,
+			// `arch -arch x86_64`), never letters that might name another (`-e`).
+			if (spec.flags?.includes(word)) {
+				index++;
+				continue;
+			}
+			if (kind(spec, word)) {
+				option = word;
+			} else if (word.startsWith("--")) {
 				const eq = word.indexOf("=");
 				option = eq > 0 ? word.slice(0, eq) : word;
 				attached = eq > 0 ? word.slice(eq + 1) : undefined;
@@ -563,13 +634,17 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 		payload.peeled.push(name);
 		index++;
 		skipOptions(spec);
-		if (spec.fileFirst && index < tokens.length) {
+		if (spec.operandFirst && index < tokens.length) {
 			index++;
-			// `flock LOCK -c '…'`: options may follow the file too.
+			// `flock LOCK -c '…'`, `su root -c '…'`: options may follow the operand too.
 			skipOptions(spec);
 		}
-		// Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`.
-		if (spec.durationFirst && index < tokens.length && /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
+		if (spec.valueFirst && index < tokens.length && spec.valueFirst.test(tokens[index].value)) index++;
+		// `coproc { cmd; }` and `coproc NAME { cmd; }`: the group's first command is the payload.
+		if (spec.compound) {
+			if (tokens[index]?.value === "{") index++;
+			else if (tokens[index + 1]?.value === "{") index += 2;
+		}
 	}
 }
 
