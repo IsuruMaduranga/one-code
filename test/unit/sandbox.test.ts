@@ -14,7 +14,7 @@ import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settin
 import { Type } from "typebox";
 import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
-import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
@@ -435,6 +435,57 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		const linked = checkoutProtectedFiles("/wt", read);
 		expect(linked).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/worktrees/wt/gitdir", "/repo/.git/worktrees/wt/config.worktree", "/repo/.git/hooks", "/repo/.git/config", "/repo/.git/commondir"]));
 		expect(checkoutProtectedFiles("/nowhere", read)).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
+		// The names that would make git take the directory for a bare repository come along.
+		expect(checkoutProtectedFiles("/nowhere", read, "linux")).toEqual(expect.arrayContaining(["/nowhere/objects", "/nowhere/refs"]));
+	});
+
+	describe.skipIf(process.platform === "win32")("the names that make a directory a bare repository", () => {
+		let dir: string;
+		const made: string[] = [];
+		const make = (...entries: Array<[string, "file" | "dir"]>) => {
+			dir = mkdtempSync(join(tmpdir(), "sandbox-bare-"));
+			made.push(dir);
+			for (const [name, kind] of entries) {
+				if (kind === "dir") mkdirSync(join(dir, name), { recursive: true });
+				else {
+					mkdirSync(dirname(join(dir, name)), { recursive: true });
+					writeFileSync(join(dir, name), "x");
+				}
+			}
+		};
+		const at = (...names: string[]) => names.map((name) => join(dir, name));
+		afterEach(() => {
+			for (const each of made.splice(0)) rmSync(each, { recursive: true, force: true });
+		});
+
+		it("never lets objects and refs be written, and a missing HEAD only on macOS, where denying it plants no file", () => {
+			make();
+			expect(bareRepositoryFiles(dir, "darwin")).toEqual(at("objects", "refs", "HEAD"));
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs"));
+			make(["HEAD", "file"], ["objects", "dir"], ["refs", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD"));
+		});
+
+		it("leaves an ordinary project's config and hooks folders writable, denying only a .git inside one", () => {
+			make(["config", "dir"], ["hooks", "dir"], ["config/.git", "dir"]);
+			for (const platform of ["darwin", "linux"] as const) {
+				const found = bareRepositoryFiles(dir, platform);
+				expect(found).not.toContain(join(dir, "config"));
+				expect(found).not.toContain(join(dir, "hooks"));
+				expect(found).toContain(join(dir, "config", ".git"));
+				expect(found).not.toContain(join(dir, "hooks", ".git"));
+			}
+		});
+
+		it("denies config and hooks beside a HEAD, and a config file always, with the lock git writes it through", () => {
+			make(["HEAD", "file"], ["config", "dir"], ["hooks", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD", "hooks", "config"));
+			make(["config", "file"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "config", "config.lock"));
+			// A folder named HEAD is no head: the project's hooks folder stays writable.
+			make(["HEAD", "dir"], ["hooks", "dir"]);
+			expect(bareRepositoryFiles(dir, "linux")).toEqual(at("objects", "refs", "HEAD"));
+		});
 	});
 
 	it("believes a worktree's git directory that names it by its real path, and never through a `.git` symlink", () => {

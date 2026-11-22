@@ -89,6 +89,14 @@ that hold permission rules, the project's `skills`, `hooks`, `commands`,
 and Git configuration. So a deny rule such as `Edit(config/prod.yaml)` also
 stops `sed -i` or a script from writing that file.
 
+The sandbox also stops a command from making the working directory look
+like a bare Git repository, which would let Git outside the sandbox run
+settings the command planted. `objects` and `refs` at the top of the
+working directory are never writable, and neither is `HEAD` (on Linux, only
+when it already exists). A `config` or `hooks` entry there is protected
+when a `HEAD` file sits beside it, or when `config` is a file. Your
+project's own `config/` and `hooks/` folders stay writable.
+
 **Reads.** A sandboxed command can read any file your account can read,
 except the paths you list in `filesystem.denyRead` and the paths your
 `Read` deny rules name. The sandbox doesn't hide your credentials by

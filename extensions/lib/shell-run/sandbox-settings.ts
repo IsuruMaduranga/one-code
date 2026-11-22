@@ -16,7 +16,7 @@
  * cannot see in a command line (`sed -i`, a script) still cannot reach it.
  */
 
-import { readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
@@ -377,13 +377,14 @@ export function linkedWorktreeGitDirs(dir: string, read: (path: string) => strin
  * (session start, an isolated agent's hand-back) run a filter or fsmonitor
  * command of its choosing. `info/attributes` assigns such a filter, and
  * `config.worktree` is config. pi loads `.pi` (extensions, settings) into the
- * harness at the next start.
+ * harness at the next start. The names that make git take `dir` itself for
+ * a bare repository are in {@link bareRepositoryFiles}.
  */
-export function checkoutProtectedFiles(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8")): string[] {
+export function checkoutProtectedFiles(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), platform: NodeJS.Platform = process.platform): string[] {
 	const ROOT_NAMES = [".gitconfig", ".gitmodules", ".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".profile", ".ripgreprc", ".mcp.json", ".vscode", ".idea", ".pi"];
 	const gitDirFiles = (gitDir: string) => ["commondir", "gitdir", "config.worktree"].map((name) => join(gitDir, name));
 	const commonFiles = (common: string) => ["hooks", "config", join("info", "attributes")].map((name) => join(common, name));
-	const found = new Set(ROOT_NAMES.map((name) => join(dir, name)));
+	const found = new Set([...ROOT_NAMES.map((name) => join(dir, name)), ...bareRepositoryFiles(dir, platform)]);
 	for (let root = resolve(dir); ; root = dirname(root)) {
 		const dotGit = join(root, ".git");
 		let pointer: string | undefined;
@@ -417,6 +418,56 @@ export function checkoutProtectedFiles(dir: string, read: (path: string) => stri
 		break;
 	}
 	return [...found];
+}
+
+/**
+ * The paths in `dir` that would let a sandboxed command make git take `dir`
+ * itself for a bare repository: git does when it finds `HEAD`, `objects/`
+ * and `refs/` there, and then runs that directory's `config` (an fsmonitor
+ * or filter command) and `hooks` for the harness's own git outside the
+ * sandbox. Claude Code's sandbox protects the same names, and this follows
+ * what it does with each (2.1.330):
+ *
+ * - `objects` and `refs` are never writable. Where they are missing, Claude
+ *   Code denies them on macOS and deletes them after each command on Linux;
+ *   One Code denies them on both (on Linux the runtime holds an empty mount
+ *   point there while the command runs), so the three names are never all
+ *   there and git never takes `dir` for a repository.
+ * - `HEAD` is never writable when it exists. A missing one is denied on
+ *   macOS only: on Linux the runtime's mount point would be a file named
+ *   `HEAD` in the directory, and git inside the command would then read
+ *   `git log HEAD` as ambiguous between the revision and that file.
+ * - `hooks` and `config` are denied when they exist and `HEAD` exists as
+ *   something other than a folder, and a `config` that is a file always
+ *   (with the `config.lock` git writes it through). An ordinary project's
+ *   `config/` or `hooks/` folder stays writable; only a `.git` inside it is
+ *   denied, as Claude Code does. A missing one is left alone.
+ *
+ * What exists is read when the command's scope is built, so the answers
+ * hold until the scope is built again.
+ */
+export function bareRepositoryFiles(dir: string, platform: NodeJS.Platform = process.platform): string[] {
+	const kind = (path: string, follow = false): "directory" | "other" | undefined => {
+		try {
+			return (follow ? statSync(path) : lstatSync(path)).isDirectory() ? "directory" : "other";
+		} catch {
+			return undefined;
+		}
+	};
+	const at = (name: string) => join(dir, name);
+	const found = [at("objects"), at("refs")];
+	if (platform === "darwin" || kind(at("HEAD"), true) !== undefined) found.push(at("HEAD"));
+	const head = kind(at("HEAD"));
+	for (const name of ["hooks", "config"]) {
+		const what = kind(at(name));
+		if (what === undefined) continue;
+		const configFile = name === "config" && what === "other";
+		if (configFile || (head !== undefined && head !== "directory")) {
+			found.push(at(name));
+			if (configFile) found.push(at("config.lock"));
+		} else if (what === "directory" && kind(join(at(name), ".git")) !== undefined) found.push(join(at(name), ".git"));
+	}
+	return found;
 }
 
 /** Where a command's rules are built: the home directory `~/` names, and the platform that decides what a glob can be. */
