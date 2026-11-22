@@ -710,38 +710,96 @@ export function findBashAllowRule(
  * darwin and win32 compare case-insensitively, like their filesystems.
  */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
+	const { glob, absolute } = pathPatternReading(pattern, subject, cwd);
+	// Case-insensitive where the filesystem is (darwin, win32): `Read(~/Notes/**)`
+	// covers `~/notes/a.md`, the same file there — the rule every other
+	// containment check in this file compares by (comparablePath).
+	const regex = globToRegex(glob, true, foldsCase());
+	for (const candidate of pathCandidates(absolute, cwd)) {
+		if (regex.test(candidate)) return true;
+	}
+	return false;
+}
+
+/** A path pattern as {@link matchesPathPattern} reads it, and the subject made absolute. */
+function pathPatternReading(pattern: string, subject: string, cwd: string): { glob: string; absolute: string } {
 	const home = homedir();
-	const win32 = process.platform === "win32";
 	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
 	// doubled slash distinguishes it from `/path`, which CC reads relative to
 	// the project root). `Read(//etc/**)` is the form CC's own suggestions write.
 	// A Windows pattern spelled with backslash separators is read as its `/`
 	// form; `\*` and `\\` stay the literal escapes globToRegex documents.
-	const spelled = win32 ? pattern.replace(/\\(?![*\\])/g, "/") : pattern;
+	const spelled = process.platform === "win32" ? pattern.replace(/\\(?![*\\])/g, "/") : pattern;
 	// `~` in a pattern expands to the home dir spelled with `/` (never `join`,
 	// whose backslashes would read as escapes on Windows); it matches the
 	// `C:/Users/x/…` candidate below.
 	const expandHome = (p: string) => (p === "~" ? forwardSlashes(home) : p.startsWith("~/") ? `${forwardSlashes(home)}/${p.slice(2)}` : p);
-	const expandedPattern = expandHome(spelled.startsWith("//") ? spelled.slice(1) : spelled);
+	const glob = expandHome(spelled.startsWith("//") ? spelled.slice(1) : spelled);
 	const expandedSubject = expandTilde(subject, home);
+	return { glob, absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
+}
 
+/**
+ * The spellings of an absolute path a path pattern is matched against: its
+ * POSIX form (and `C:/…` on Windows), and its cwd-relative and `~/`-relative
+ * forms where it lies inside those. With `under`, each is the directory
+ * prefix every path beneath it starts with (`config/`), and the working
+ * directory or home folder, or a directory holding one, gives the empty or
+ * `~/` prefix every relative or `~/` spelling starts with.
+ */
+function pathCandidates(absolute: string, cwd: string, under = false): Set<string> {
+	const home = resolve(homedir());
 	const candidates = new Set<string>();
-	const absolute = isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject);
-	candidates.add(toPosixPath(absolute));
-	if (win32) candidates.add(forwardSlashes(absolute));
+	const slash = (p: string) => (under ? `${p.replace(/\/+$/, "")}/` : p);
+	candidates.add(slash(toPosixPath(absolute)));
+	if (process.platform === "win32") candidates.add(slash(forwardSlashes(absolute)));
 	const rel = relative(cwd, absolute);
-	if (isRelativeInside(rel)) candidates.add(forwardSlashes(rel));
-	const homeRel = relative(resolve(home), absolute);
-	if (isRelativeInside(homeRel)) candidates.add(`~/${forwardSlashes(homeRel)}`);
+	if (isRelativeInside(rel)) candidates.add(slash(forwardSlashes(rel)));
+	else if (under && isAtOrInside(cwd, absolute)) candidates.add("");
+	const homeRel = relative(home, absolute);
+	if (isRelativeInside(homeRel)) candidates.add(slash(`~/${forwardSlashes(homeRel)}`));
+	else if (under && isAtOrInside(home, absolute)) candidates.add("~/");
+	return candidates;
+}
 
-	// Case-insensitive where the filesystem is (darwin, win32): `Read(~/Notes/**)`
-	// covers `~/notes/a.md`, the same file there — the rule every other
-	// containment check in this file compares by (comparablePath).
-	const regex = globToRegex(expandedPattern, true, foldsCase());
-	for (const candidate of candidates) {
-		if (regex.test(candidate)) return true;
+/** Whether `path` is `dir` or lies beneath it. */
+function isAtOrInside(path: string, dir: string): boolean {
+	const rel = relative(dir, path);
+	return rel === "" || isRelativeInside(rel);
+}
+
+/**
+ * Whether a shell write at `target` may write a path an edit-family rule's
+ * pattern names: the target itself, or, when the target is a directory, a path
+ * beneath it, since a recursive removal or a move takes the directory's
+ * contents with it (`rm -r config` removes `config/prod.yaml`). The pattern is
+ * a glob, so the comparison is conservative: its literal start (up to the
+ * first wildcard or escape) and the directory's prefix must agree as far as
+ * the shorter one goes, in either direction; an exact pattern must start with
+ * the directory's prefix. For the deny and ask write check only: it may only
+ * withhold an allow, and allow rules stay exact.
+ */
+export function writeTargetMeetsPathPattern(pattern: string, target: string, cwd: string): boolean {
+	if (matchesPathPattern(pattern, target, cwd)) return true;
+	const { glob, absolute } = pathPatternReading(pattern, target, cwd);
+	if (!isDirectory(absolute)) return false;
+	const fold = (p: string) => (foldsCase() ? p.toLowerCase() : p);
+	const cut = glob.search(/[*\\]/);
+	const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
+	return [...pathCandidates(absolute, cwd, true)].some((prefix) => {
+		const dir = fold(prefix);
+		// The empty prefix stands for the relative spellings: an absolute literal never starts one.
+		if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
+		return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
+	});
+}
+
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
 	}
-	return false;
 }
 
 /**
@@ -1481,7 +1539,7 @@ export function decide(params: DecideInput): Decision {
 		if (blocked === undefined) {
 			const patterns = familyPatterns;
 			blocked = evidence.writes.some((write) =>
-				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => patterns.some((pattern) => matchesPathPattern(pattern, path, cwd))),
+				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => patterns.some((pattern) => writeTargetMeetsPathPattern(pattern, path, cwd))),
 			);
 			blockedPaths.set(evidence, blocked);
 		}

@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules, writeTargetMeetsPathPattern } from "../../extensions/lib/rules/matcher.ts";
 import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 useShippedProfileWithAllTools();
@@ -16,6 +16,8 @@ mkdirSync(join(cwd, "config"));
 writeFileSync(join(cwd, "config", "prod.yaml"), "x: 1\n");
 writeFileSync(join(cwd, "config", "dev.yaml"), "x: 1\n");
 writeFileSync(join(cwd, "nb.ipynb"), "{}");
+mkdirSync(join(cwd, "build", "out"), { recursive: true });
+writeFileSync(join(cwd, "build", "out", "a.js"), "");
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
 
 type Mode = "auto" | "acceptEdits" | "default" | "bypassPermissions" | "dontAsk";
@@ -68,6 +70,42 @@ describe("a path ask rule on one writing tool", () => {
 		expect(run(ask, "write", prod, "acceptEdits")).toBe("ask");
 		expect(run(ask, "write", prod, "dontAsk")).toBe("deny");
 		expect(run(ask, "write", dev, "auto")).toBe("allow");
+	});
+});
+
+describe("a shell line that writes a directory holding a path such a rule names", () => {
+	const deny = { deny: ["Edit(config/prod.yaml)"] };
+
+	it.each(["rm -r config", "rm -rf config", "rm -rf ./config/", "rm -r build config"])("%s takes no fast path", (command) => {
+		expect(run(deny, "bash", command, "auto")).toBe("classify");
+		expect(run(deny, "bash", command, "acceptEdits")).toBe("ask");
+		expect(run(deny, "bash", command, "dontAsk")).toBe("deny");
+		expect(run(deny, "bash", command, "default", true, { sandboxed: true })).toBe("ask");
+	});
+
+	it("reads the rule as a glob: a wildcard rule may lie under any directory its literal start allows", () => {
+		expect(run({ deny: ["Edit(config/**)"] }, "bash", "rm -r config", "acceptEdits")).toBe("ask");
+		expect(run({ ask: ["Write(**/prod.yaml)"] }, "bash", "rm -r config", "acceptEdits")).toBe("ask");
+		expect(run({ deny: ["Edit(conf*/prod.yaml)"] }, "bash", "rm -r config", "acceptEdits")).toBe("ask");
+		// Only the rule's literal start can rule a directory out, so a wildcard
+		// rule that starts with one withholds the fast path from every directory.
+		expect(run({ deny: ["Edit(**/*.pem)"] }, "bash", "rm -r build", "acceptEdits")).toBe("ask");
+	});
+
+	it("keeps the fast path for a directory no rule's path can lie under", () => {
+		expect(run(deny, "bash", "rm -r build", "auto")).toBe("allow");
+		expect(run(deny, "bash", "rm -rf build/out", "acceptEdits")).toBe("allow");
+		expect(run({ deny: ["Edit(config/**)"] }, "bash", "rm -r build", "acceptEdits")).toBe("allow");
+		// A file holds nothing beneath it.
+		expect(run({ deny: ["Edit(config/dev.yaml/**)"] }, "bash", "rm config/dev.yaml", "acceptEdits")).toBe("allow");
+	});
+
+	it("counts the working directory itself as holding every relative rule path", () => {
+		expect(writeTargetMeetsPathPattern("config/prod.yaml", cwd, cwd)).toBe(true);
+		expect(writeTargetMeetsPathPattern("config/prod.yaml", join(cwd, "config"), cwd)).toBe(true);
+		expect(writeTargetMeetsPathPattern("config/prod.yaml", join(cwd, "build"), cwd)).toBe(false);
+		// An exact rule path that only starts with the directory's name is not beneath it.
+		expect(writeTargetMeetsPathPattern("configs/prod.yaml", join(cwd, "config"), cwd)).toBe(false);
 	});
 });
 
