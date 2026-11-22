@@ -37,6 +37,7 @@ import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { dirname } from "node:path";
 import { isWithin, resolveForContainment, resolveThroughLinks, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
+import { findGitRoot } from "../context/git.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
@@ -936,7 +937,12 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string }, onFileReads: (words: Token[]) => void): string | undefined {
+function gitEscalationReason(
+	args: Token[],
+	dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string },
+	onFileReads: (words: Token[]) => void,
+	repositoryAbove: (from?: string) => boolean,
+): string | undefined {
 	let index = 0;
 	/** Where git stands after the `-C` options read so far: git applies each one from the one before. */
 	let chained: string | undefined;
@@ -983,6 +989,13 @@ function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: 
 		return `runs git ${subcommand} with an operand and no --list, which creates a ref`;
 	}
 	if (GIT_FILE_OPERANDS.has(subcommand)) onFileReads(check.parsed.positionals);
+	// From a subdirectory of a larger repository, `git grep --untracked` with a
+	// top-level pathspec (`:/`, `../..`) prints files above the working
+	// directory that no commit holds, an ignored `.env` at the root included.
+	// (The committed ones any history read prints anyway: `git log -p`.)
+	if (subcommand === "grep" && check.parsed.seen.has("--untracked") && repositoryAbove(chained)) {
+		return "runs git grep --untracked in a repository whose root is above the working directory, where a pathspec can read untracked files above it";
+	}
 	return undefined;
 }
 
@@ -1407,6 +1420,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 						return { outside: resolved === undefined || !isWithin(containmentRoot, resolved), at };
 					},
 					(words) => fileReads.push(...words),
+					(from) => {
+						const dir = resolveForContainment(from ?? effectiveCwd);
+						const root = dir === undefined ? undefined : findGitRoot(dir);
+						return dir === undefined || (root !== undefined && !isWithin(containmentRoot, root));
+					},
 				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
 			// git resolves a relative operand from its final `-C` directory, not
