@@ -111,6 +111,30 @@ describe("a fork child with the ledger and fork-cache", () => {
 		expect(blocks(first)).toEqual(whole);
 		expect(blocks(second)).toEqual([...whole, "assistant:fork reply 1", "user:tool result"]);
 	});
+	// pi-ai's strict-tools fallback renders the request again in the same call,
+	// from the same cut context (only the fork's tail): that body needs the
+	// capture as much as the first, and the record must match what went out.
+	it("sends the capture again when pi-ai re-sends the fork's epoch request in the same call", async () => {
+		const parent = new LedgerSim();
+		await parent.sessionStart();
+		parent.message("user", "U1");
+		await parent.request("A1");
+		const u2 = parent.message("user", "U2");
+		const sent = await parent.request("A2");
+		parent.add({ type: "custom", customType: RECORD.epoch, data: { v: 1, by: "test", cause: "fold" } });
+		const fork = await forkOf(parent, captureOf(sent, u2.message as SimMessage));
+
+		const inherited = fork.records("request").length;
+		const first = await fork.request("fork reply 1", "stop", 2, 1000, (payload) => ({ ...payload, tools: [] }));
+		const whole = ["user:U1", "assistant:A1", "user:U2", "assistant:A2", "user:btw Q", "assistant:btw A", "user:fork task"];
+		expect(blocks(first)).toEqual(whole);
+		// The re-send is the first body again: one record.
+		expect(fork.records("request")).toHaveLength(inherited + 1);
+		fork.message("toolResult", "tool result");
+		const second = await fork.request("fork reply 2");
+		expect(blocks(second)).toEqual([...whole, "assistant:fork reply 1", "user:tool result"]);
+	});
+
 	// The parent sent U1 before the value was registered and keeps sending it as
 	// sent. A fork's epoch must not redact inside the capture: those bytes are
 	// what the parent cached, and only the fork's own tail is new.

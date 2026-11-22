@@ -131,8 +131,15 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 			}
 		});
 
-		/** Set by the context step for the request it shaped; the payload step splices only then. */
+		/**
+		 * Set by the context step for the request it shaped, and kept until the
+		 * next one: pi-ai can render that request again in the same call (its
+		 * strict-tools fallback), from the same cut context, and that body needs
+		 * the capture as much as the first.
+		 */
 		let shaped = false;
+		/** The ledger took this request's body in its epoch: the payload step leaves it alone. */
+		let ledgerTook = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */
 		let baseline: Set<string> | undefined;
 
@@ -155,7 +162,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		pi.events.on(LEDGER_EPOCH_BODY_CHANNEL, (data) => {
 			// `shaped` is set only for a request whose model the capture matches.
 			if (!shaped) return;
-			shaped = false;
+			ledgerTook = true;
 			const body = data as LedgerEpochBody;
 			body.payload = splice(body.payload);
 			// The capture's elements the splice left as they were are the parent's
@@ -171,6 +178,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 
 		pi.on("context_with_system", (event, ctx) => {
 			shaped = false;
+			ledgerTook = false;
 			if (ledgerExtends) return undefined;
 			const covers = capture.covers;
 			// Bedrock and Google nest their tools and need joined turns and the
@@ -196,8 +204,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		});
 
 		pi.on("before_provider_request", (event, ctx) => {
-			if (!shaped || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
-			shaped = false;
+			if (!shaped || ledgerTook || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
 			// No ledger in this session took the body in its epoch: splice it here.
 			return splice(event.payload as Record<string, unknown>);
 		});

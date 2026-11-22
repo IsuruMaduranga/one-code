@@ -45,6 +45,20 @@ describe("forkCacheExtension", () => {
 		expect(payload?.messages).toEqual([{ role: "system", content: "parent" }, { role: "user", content: "hi" }, { role: "user", content: "fork task" }]);
 	});
 
+	it("splices a body pi-ai renders again in the same call, until the next context pass", async () => {
+		const { fake, ctx, messages } = setup(32000);
+		await fake.fireOne("context_with_system", { messages }, ctx);
+		const body = () => ({ payload: { messages: [{ role: "system", content: "fork" }, { role: "user", content: "fork task" }], tools: [] } });
+		const spliced = [{ role: "system", content: "parent" }, { role: "user", content: "hi" }, { role: "user", content: "fork task" }];
+		for (let send = 0; send < 2; send++) {
+			const payload = await fake.fireOne<Record<string, unknown>>("before_provider_request", body(), ctx);
+			expect(payload?.messages).toEqual(spliced);
+		}
+		// A context pass that shapes nothing (here: no covered message) ends it.
+		await fake.fireOne("context_with_system", { messages: [{ role: "user", content: "other", timestamp: 99 }] }, ctx);
+		expect(await fake.fireOne("before_provider_request", body(), ctx)).toBeUndefined();
+	});
+
 	it("sends the fork whole when the tail leaves too little output room", async () => {
 		const { fake, ctx, messages } = setup(1000);
 		expect(await fake.fireOne("context_with_system", { messages }, ctx)).toBeUndefined();
