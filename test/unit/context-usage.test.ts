@@ -371,6 +371,29 @@ describe("renderContextUsage", () => {
 		]);
 	});
 
+	it("collapses each list to a count and its tokens, as Claude Code's fullscreen does", () => {
+		const usage = { ...ccUsage(), memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }] };
+		const lines = renderContextUsage(usage, { width: 160, collapsed: true });
+		expect(lines.slice(13)).toEqual([
+			"",
+			"     Auto-compact window:  1m tokens",
+			"",
+			"     MCP tools · /mcp (loaded on-demand)",
+			"     └ 4 tools · 304 tokens",
+			"",
+			"     Memory files · /memory",
+			"     └ 1 file · 1.2k tokens",
+			"",
+			"     Skills · /skills",
+			"     └ 2 skills · 2.2k tokens",
+			"",
+			"     /context all to expand",
+		]);
+		// Nothing to list: no hint.
+		const bare = { ...ccUsage(), skills: [], mcp: { loaded: [], available: [] } };
+		expect(renderContextUsage(bare, { width: 160, collapsed: true }).join("\n")).not.toContain("/context all");
+	});
+
 	it("fits a 70-column terminal with the narrow grid", () => {
 		const lines = renderContextUsage(ccUsage(), { width: 70 });
 		expect(lines[1]).toBe("     ⛀ ⛀ ⛀ ⛀ ⛀   Opus 5.5");

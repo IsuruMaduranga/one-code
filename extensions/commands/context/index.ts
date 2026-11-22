@@ -12,6 +12,11 @@
  * build it (`nextRequest`), read through queries that keep, record and tell
  * nothing; nothing here sends a request or touches the prompt cache.
  *
+ * In the fullscreen TUI each list (MCP tools, memory files, skills) shows as one
+ * count-and-tokens row, and `/context all` expands them, as Claude Code
+ * 2.1.330 does (`collapseDetailSections`); regular mode, RPC and one-shot runs
+ * always get the full lists.
+ *
  * Shown as a local command result, like `/doctor report`: in the TUI a
  * display-only transcript entry (appendEntry: never in the model's context)
  * drawn at the terminal's width; in RPC a plain-text notice; in a one-shot
@@ -46,6 +51,22 @@ const TEXT_WIDTH = 100;
 
 interface ContextEntryData {
 	usage: ContextUsage;
+	/** Drawn with each list collapsed to one row (fullscreen, no `all`). */
+	collapsed?: boolean;
+	/** What followed `/context` on the command line, echoed above the result. */
+	args?: string;
+}
+
+/** Whether pi's TUI runs fullscreen: its own rule, the `--tui-mode` flag over the `tuiMode` setting (default fullscreen). */
+function fullscreenTui(ctx: ExtensionCommandContext): boolean {
+	const at = process.argv.indexOf("--tui-mode");
+	const flag = at >= 0 ? process.argv[at + 1] : undefined;
+	if (flag === "regular" || flag === "fullscreen") return flag === "fullscreen";
+	try {
+		return SettingsManager.create(ctx.cwd, getAgentDir()).getTuiMode() !== "regular";
+	} catch {
+		return true;
+	}
 }
 
 /** pi's auto-compaction settings for `model`, or none when its settings cannot be read. */
@@ -132,17 +153,22 @@ function contextExtension(pi: ExtensionAPI) {
 		if (!usage) return undefined;
 		const paint = safeThemePaint(theme);
 		const bold = safeThemeBold(theme);
+		const collapsed = entry.data?.collapsed === true;
+		const args = entry.data?.args ? ` ${entry.data.args}` : "";
 		// The command line above its result, as Claude Code's transcript shows it.
-		return linesComponent((width) => [`${paint("dim", USER_MARKER)} /context`, ...renderContextUsage(usage, { width, paint, bold })]);
+		return linesComponent((width) => [`${paint("dim", USER_MARKER)} /context${args}`, ...renderContextUsage(usage, { width, paint, bold, collapsed })]);
 	});
 
 	registerLocalCommand(pi, "context", {
-		description: "Show what fills the context",
+		description: "Show what fills the context (all: expand every list)",
 		reportsResult: true,
-		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const usage = measure(ctx);
-			const text = renderContextUsage(usage, { width: TEXT_WIDTH }).join("\n");
-			if (canShowCustomUi(ctx)) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage });
+			const ui = canShowCustomUi(ctx);
+			// Claude Code collapses the lists only in its fullscreen presentation, unless asked for all.
+			const collapsed = ui && args.trim().toLowerCase() !== "all" && fullscreenTui(ctx);
+			const text = renderContextUsage(usage, { width: TEXT_WIDTH, collapsed }).join("\n");
+			if (ui) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage, collapsed, ...(args.trim() ? { args: args.trim() } : {}) });
 			else if (ctx.hasUI) ctx.ui.notify(text, "info");
 			else printAnswer(ctx, text);
 			return text;

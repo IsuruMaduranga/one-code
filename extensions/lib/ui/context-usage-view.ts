@@ -5,7 +5,9 @@
  * name, model id, the total, "Estimated usage by category" and a row per
  * category, then free space and the autocompact buffer), the auto-compact
  * window, and the per-item lists (MCP tools loaded and available, memory
- * files, skills). With an identity `paint` the lines are the plain text RPC,
+ * files, skills), or with `collapsed` one count-and-tokens row per list and
+ * the "/context all to expand" hint (Claude Code's fullscreen presentation,
+ * `collapseDetailSections`). With an identity `paint` the lines are the plain text RPC,
  * one-shot runs and the command's stdout get.
  *
  * The grid follows Claude Code's sizes (`gridSize`), 5 columns under 80. When
@@ -52,6 +54,8 @@ const NARROW_BELOW = 80;
 
 export interface ContextViewOptions {
 	width: number;
+	/** Each list as one count-and-tokens row plus a "/context all to expand" hint, as Claude Code shows them in fullscreen. */
+	collapsed?: boolean;
 	paint?: (color: string, text: string) => string;
 	bold?: (text: string) => string;
 }
@@ -129,6 +133,21 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	const sized = (item: ContextItem, prefix = "") => `${item.name}: ${dim(`${prefix}${formatContextTokens(item.tokens)} tokens`)}`;
 	const { loaded, available } = usage.mcp;
 	const hasMcp = loaded.length > 0 || available.length > 0;
+	if (options.collapsed) {
+		const sum = (items: readonly ContextItem[]) => items.reduce((total, item) => total + item.tokens, 0);
+		const summary = (title: string, note: string, count: number, noun: string, tokens: number) => [
+			"",
+			`${INDENT}${bold(title)}${dim(` · ${note}`)}`,
+			`${INDENT}${dim(`└ ${count} ${noun}${count === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`,
+		];
+		if (hasMcp) out.push(...summary("MCP tools", `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`, loaded.length + available.length, "tool", sum(loaded)));
+		if (usage.memoryFiles.length > 0) out.push(...summary("Memory files", "/memory", usage.memoryFiles.length, "file", sum(usage.memoryFiles)));
+		// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
+		const skillTokens = usage.categories.find((row) => row.key === "skills")?.tokens ?? sum(usage.skills);
+		if (usage.skills.length > 0) out.push(...summary("Skills", "/skills", usage.skills.length, "skill", skillTokens));
+		if (hasMcp || usage.memoryFiles.length > 0 || usage.skills.length > 0) out.push("", `${INDENT}${dim("/context all to expand")}`);
+		return out;
+	}
 	// Claude Code runs the lists after MCP's together; the first list still gets a blank line above it.
 	if (!hasMcp && (usage.memoryFiles.length > 0 || usage.skills.length > 0)) out.push("");
 	if (hasMcp) {
