@@ -4,7 +4,7 @@
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 
@@ -66,6 +66,16 @@ describe("chained git -C", () => {
 		symlinkSync(cwd, join(cwd, "deep", "link"));
 		expect(analyze("git -C deep/link -C .. status").notes.join("\n")).toContain(`runs git -C .., which points outside the working directory`);
 		expect(analyze("git -C deep/link status").verdict).toBe("safe");
+	});
+
+	// The kernel follows the link before it applies the `..` after it.
+	posixOnly("walks one -C word in filesystem order, a link before the .. after it", () => {
+		mkdirSync(join(cwd, "deep"));
+		symlinkSync(cwd, join(cwd, "deep", "link"));
+		expect(analyze("git -C deep/link/.. status").notes.join("\n")).toContain("which points outside the working directory");
+		expect(analyze("git -C deep/link/../" + basename(cwd) + " status").verdict).toBe("safe");
+		expect(analyze("git -C deep/.. status").verdict).toBe("safe");
+		expect(analyze("git -C ./deep/../deep/link status").verdict).toBe("safe");
 	});
 
 	posixOnly("judges the checkout from that directory too", () => {

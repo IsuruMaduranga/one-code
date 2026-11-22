@@ -34,6 +34,7 @@ import { productReadOnlySubcommands } from "../profile/profile.ts";
 import { isNameOperand } from "./product-read-only.ts";
 import { isProtectedPath } from "../rules/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
+import { dirname } from "node:path";
 import { isWithin, resolveForContainment, resolveThroughLinks, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
@@ -918,11 +919,27 @@ function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: 
  * pointing at the working directory, `git -C deep/link -C .. status` runs
  * one level above it. `resolved` is the containment form, undefined when
  * nothing of the path resolves (`at` is then the lexical path).
+ *
+ * The word itself is walked in filesystem order too: the kernel follows a
+ * link before it applies the `..` after it, so `-C deep/link/..` is the
+ * parent of where the link points, not `deep`. Each run of names between
+ * `..` segments is resolved before the climb.
  */
 function gitDirectoryStep(from: string, word: string, home: string): { at: string; resolved: string | undefined } {
-	const lexical = toAbsoluteBash(resolveThroughLinks(from) ?? from, word, home);
-	const real = resolveThroughLinks(lexical);
-	return { at: real ?? lexical, resolved: resolveForContainment(lexical) };
+	let at = resolveThroughLinks(from) ?? from;
+	/** Change into a run of names (the part of the word between two `..`), resolving where it lands. */
+	const land = (names: string) => {
+		if (names === "" || names === ".") return;
+		const lexical = toAbsoluteBash(at, names, home);
+		at = resolveThroughLinks(lexical) ?? lexical;
+	};
+	// A word that starts at the root keeps its leading slash on the first run.
+	const runs = word.split(/(?:^|\/)\.\.(?=\/|$)/);
+	runs.forEach((run, index) => {
+		if (index > 0) at = dirname(at);
+		land(index === 0 ? (run === "" && word.startsWith("/") ? "/" : run) : run.replace(/^\/+/, ""));
+	});
+	return { at, resolved: resolveForContainment(at) };
 }
 
 /** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them ({@link gitDirectoryStep}). */
