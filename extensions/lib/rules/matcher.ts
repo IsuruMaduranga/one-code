@@ -1522,36 +1522,44 @@ export function decide(params: DecideInput): Decision {
 	}
 
 	/**
-	 * The deny or ask rule that binds this call. A rule with a path on one of
-	 * the file-writing tools binds the other two for that path, as Claude Code
-	 * applies its Edit rules to every tool that edits files: `Edit(config/prod.yaml)`
-	 * denied must not leave `write` or `notebook_edit` free to replace the file.
-	 * Allow rules stay exact (`ruleCoversTool`): widening one would be a grant.
+	 * The deny or ask rule that binds this call. A rule on one of the
+	 * file-writing tools binds the other two, with a path or bare, as Claude
+	 * Code applies its Edit rules to every tool that edits files:
+	 * `Edit(config/prod.yaml)` denied must not leave `write` or `notebook_edit`
+	 * free to replace the file, nor a bare `Edit` leave them free to write
+	 * anywhere. Allow rules stay exact (`ruleCoversTool`): widening one would be a grant.
 	 */
 	const blockingRule = (rules: readonly PermissionRule[]): PermissionRule | undefined =>
 		rules.find(
 			(r) =>
 				ruleMatches(r, toolName, subject, cwd) ||
 				// The rule's own tool was just tried; only another tool of the family is read again.
-				(!!r.pattern && r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
+				(r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
 		);
 	/**
-	 * Whether a shell line writes a path that such a rule names, by the
-	 * pre-gate's recorded write targets. The line then takes no fast path: it
-	 * is classified in auto mode, asked in acceptEdits and refused in dontAsk.
-	 * This only withholds an allow; the pre-gate itself gains no deny path.
+	 * The first edit-family rule of `rules` whose path one of a shell line's
+	 * recorded write targets meets (a bare rule meets every target). Such a
+	 * line takes no fast path: it is classified in auto mode, asked in
+	 * acceptEdits and refused in dontAsk. This only withholds an allow; the
+	 * pre-gate itself gains no deny path.
 	 */
-	let familyPatterns: string[] | undefined;
+	const familyRuleWritten = (rules: readonly PermissionRule[], evidence: ShellEvidence): PermissionRule | undefined =>
+		rules.find(
+			(r) =>
+				EDIT_TOOLS.has(r.tool) &&
+				evidence.writes.some(
+					(write) =>
+						!r.pattern ||
+						[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => writeTargetMeetsPathPattern(r.pattern as string, path, cwd)),
+				),
+		);
+	const hasFamilyRule = [...deny, ...ask].some((r) => EDIT_TOOLS.has(r.tool));
 	const blockedPaths = new WeakMap<ShellEvidence, boolean>();
 	const writesBlockedPath = (evidence: ShellEvidence): boolean => {
-		familyPatterns ??= [...deny, ...ask].filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool)).map((r) => r.pattern as string);
-		if (familyPatterns.length === 0) return false;
+		if (!hasFamilyRule) return false;
 		let blocked = blockedPaths.get(evidence);
 		if (blocked === undefined) {
-			const patterns = familyPatterns;
-			blocked = evidence.writes.some((write) =>
-				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => patterns.some((pattern) => writeTargetMeetsPathPattern(pattern, path, cwd))),
-			);
+			blocked = familyRuleWritten(deny, evidence) !== undefined || familyRuleWritten(ask, evidence) !== undefined;
 			blockedPaths.set(evidence, blocked);
 		}
 		return blocked;

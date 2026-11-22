@@ -56,11 +56,38 @@ describe("a path deny rule on one writing tool", () => {
 		expect(run({ deny: ["NotebookEdit(nb.ipynb)"] }, "write", nb, "acceptEdits")).toBe("deny");
 	});
 
-	it("leaves another path, a reading tool and a pathless rule alone", () => {
+	it("leaves another path and a reading tool alone", () => {
 		expect(run(deny, "write", dev, "auto")).toBe("allow");
 		expect(run(deny, "read", prod, "default")).toBe("allow");
-		// A bare `Edit` rule names the tool, not a path: it binds edit only.
-		expect(run({ deny: ["Edit"] }, "write", dev, "auto")).toBe("allow");
+	});
+});
+
+describe("a bare rule on one writing tool", () => {
+	it.each(MODES)("refuses all three writing tools anywhere in %s mode, and leaves the read tools alone", (mode) => {
+		for (const rule of ["Edit", "Write", "NotebookEdit"]) {
+			expect(run({ deny: [rule] }, "edit", dev, mode)).toBe("deny");
+			expect(run({ deny: [rule] }, "write", dev, mode)).toBe("deny");
+			expect(run({ deny: [rule] }, "notebook_edit", nb, mode)).toBe("deny");
+			expect(run({ deny: [rule] }, "read", dev, mode)).not.toBe("deny");
+		}
+	});
+
+	it("asks for all three as an ask rule, and refuses with no one to ask", () => {
+		expect(run({ ask: ["Edit"] }, "write", dev, "auto")).toBe("ask");
+		expect(run({ ask: ["Edit"] }, "notebook_edit", nb, "acceptEdits")).toBe("ask");
+		expect(run({ ask: ["Edit"] }, "write", dev, "dontAsk")).toBe("deny");
+	});
+
+	it("withholds the shell fast path from a line that writes anything, not from a read", () => {
+		expect(run({ deny: ["Edit"] }, "bash", "rm config/dev.yaml", "auto")).toBe("classify");
+		expect(run({ ask: ["Write"] }, "bash", "printf '' > config/dev.yaml", "acceptEdits")).toBe("ask");
+		expect(run({ deny: ["Edit"] }, "bash", "rm config/dev.yaml", "default", true, { sandboxed: true })).toBe("ask");
+		expect(run({ deny: ["Edit"] }, "bash", "cat config/dev.yaml", "auto")).toBe("allow");
+	});
+
+	it("leaves a bare allow rule exact", () => {
+		expect(run({ allow: ["Edit"] }, "edit", join(cwd, "..", "elsewhere.txt"), "default")).toBe("allow");
+		expect(run({ allow: ["Edit"] }, "write", join(cwd, "..", "elsewhere.txt"), "default")).toBe("ask");
 	});
 });
 
