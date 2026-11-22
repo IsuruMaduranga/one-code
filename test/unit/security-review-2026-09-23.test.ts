@@ -17,6 +17,7 @@ import { gitStatusMeta, gitStatusMetaArgs } from "../../extensions/safety/permis
 import { gitStatusOutput, HARNESS_GIT_CONFIG } from "../../extensions/lib/context/git.ts";
 import { createLspTrustGate, isLspRootTrusted, persistLspTrust } from "../../extensions/tools/lsp/trust.ts";
 import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 let root: string;
 let cwd: string;
@@ -313,7 +314,7 @@ describe("M4: project-code language servers need project trust", () => {
 
 describe("M5: harness git ignores the checkout's fsmonitor", () => {
 	posixOnly("does not run core.fsmonitor from the checkout's config", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		const marker = join(root, "fsmonitor-ran");
 		const hook = join(root, "hook.sh");
 		writeFileSync(hook, `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
@@ -324,9 +325,9 @@ describe("M5: harness git ignores the checkout's fsmonitor", () => {
 	});
 
 	posixOnly("does not run the checkout's post-index-change hook", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		execFileSync("git", ["add", "a.txt"], { cwd });
-		execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd });
+		execFileSync("git", ["commit", "-qm", "init"], { cwd });
 		const marker = join(root, "hook-ran");
 		writeFileSync(join(cwd, ".git", "hooks", "post-index-change"), `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
 		// A touched file makes status refresh the index, which would write it.
@@ -431,11 +432,11 @@ describe("PR #8 review follow-ups", () => {
 	});
 
 	posixOnly("lists ignored files and dirty submodules so a clean line is not claimed over them", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		writeFileSync(join(cwd, ".gitignore"), ".env\n");
 		writeFileSync(join(cwd, ".env"), "SECRET=1\n");
 		execFileSync("git", ["add", ".gitignore", "a.txt"], { cwd });
-		execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd });
+		execFileSync("git", ["commit", "-qm", "init"], { cwd });
 		const wide = await gitStatusOutput(cwd, gitStatusMetaArgs(true));
 		expect(wide).toContain("!! .env");
 		expect(gitStatusMeta(wide ?? "")).toBeUndefined();
@@ -470,7 +471,7 @@ describe("PR #8 review: a checkout's git config can make a git read run a progra
 	});
 
 	posixOnly("escalates a git read in a checkout whose config or hooks run a program", () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		expect(verdict("git status")).toBe("safe");
 		expect(verdict("git log --oneline")).toBe("safe");
 
@@ -494,10 +495,10 @@ describe("PR #8 review: a checkout's git config can make a git read run a progra
 	});
 
 	posixOnly("judges the checkout git runs in: after cd and -C, and a nested repository's own", () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		const nested = join(cwd, "vendor", "lib");
 		mkdirSync(nested, { recursive: true });
-		execFileSync("git", ["init", "-q"], { cwd: nested });
+		initTestRepo(nested);
 		writeFileSync(join(nested, ".git", "hooks", "post-index-change"), "#!/bin/sh\n", { mode: 0o755 });
 		expect(verdict("git status")).toBe("safe");
 		expect(verdict("git -C vendor/lib status")).toBe("escalate");
@@ -506,7 +507,7 @@ describe("PR #8 review: a checkout's git config can make a git read run a progra
 	});
 
 	posixOnly("reads every submodule's config: nested, and wherever a .gitmodules path's .git points", () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		const nested = join(cwd, ".git", "modules", "libs", "a", "modules", "b");
 		mkdirSync(nested, { recursive: true });
 		writeFileSync(join(nested, "HEAD"), "ref: refs/heads/main\n");
@@ -528,7 +529,7 @@ describe("PR #8 review: a checkout's git config can make a git read run a progra
 
 	posixOnly("treats a config it cannot read as naming a program", () => {
 		if (process.getuid?.() === 0) return; // root reads a mode-000 file
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		const config = join(cwd, ".git", "config");
 		chmodSync(config, 0o000);
 		try {

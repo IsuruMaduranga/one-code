@@ -6,17 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/lib/agents/agent-worktree.ts";
 import { releaseWorktreeIsolation, worktreeIsolationFor } from "../../extensions/lib/agents/worktree-isolation.ts";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 // Every repository here lives in a temp directory, never in a real checkout.
-const git = (cwd: string, ...args: string[]) =>
-	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8" }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
 let repo: string;
 let worktree: Worktree | undefined;
 
 beforeEach(() => {
 	repo = mkdtempSync(join(tmpdir(), "subagent-wt-repo-"));
-	git(repo, "init", "-q");
+	initTestRepo(repo);
 	writeFileSync(join(repo, "a.txt"), "a\n");
 	git(repo, "add", "a.txt");
 	git(repo, "commit", "-qm", "init");

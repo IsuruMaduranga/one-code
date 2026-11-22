@@ -6,12 +6,12 @@
  * test/unit/mcp-trust-settings.test.ts. The base's approval flow:
  * test/unit/mcp-trust.test.ts.
  */
-import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { approveMcpServers, readClaudeMcpjsonPolicy } from "../../extensions/tools/mcp/trust.ts";
 import { makeMcpTrustDirs, stdio, trustDeps } from "../../test/unit/helpers/mcp-trust.ts";
+import { initTestRepo } from "../../test/unit/helpers/git-repo.ts";
 
 let root: string;
 let cwd: string;
@@ -28,7 +28,7 @@ const projectServer = (name: string, command?: string) => stdio(name, join(cwd, 
 
 describe("MCP approval from Claude Code's settings files", () => {
 	it("reads approvals from ~/.claude/settings.json, disables from .claude/settings.local.json too, never the checked-in .claude/settings.json", async () => {
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
 		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
 		writeFileSync(

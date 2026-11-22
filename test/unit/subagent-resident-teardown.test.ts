@@ -13,6 +13,7 @@ import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts"
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 let agentDir: string;
 beforeEach(() => {
@@ -135,8 +136,8 @@ describe("resident kill()", () => {
 describe("an isolated resident's exit", () => {
 	it("returns its worktree cleanup, so kill() can wait for it", async () => {
 		const repo = mkdtempSync(join(tmpdir(), "resident-teardown-repo-"));
-		const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, encoding: "utf8" });
-		git("init", "-q");
+		const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+		initTestRepo(repo);
 		writeFileSync(join(repo, "a.txt"), "a\n");
 		git("add", "a.txt");
 		git("commit", "-qm", "init");

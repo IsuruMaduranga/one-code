@@ -8,13 +8,14 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyBase, checkBase, fetchBase, isProductPath, PRODUCT_PATHS, SYNC_FILE, syncTarget } from "../../scripts/sync-base.mjs";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 const made: string[] = [];
 afterEach(() => {
 	for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8" });
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" });
 
 function write(dir: string, files: Record<string, string>) {
 	for (const [file, text] of Object.entries(files)) {
@@ -26,7 +27,7 @@ function write(dir: string, files: Record<string, string>) {
 function repo(files: Record<string, string>): string {
 	const dir = mkdtempSync(join(tmpdir(), "sync-base-test-"));
 	made.push(dir);
-	git(dir, "init", "-q");
+	initTestRepo(dir);
 	write(dir, files);
 	git(dir, "add", "-A");
 	git(dir, "commit", "-q", "-m", "one", "--allow-empty");

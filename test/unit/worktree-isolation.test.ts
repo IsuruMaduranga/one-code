@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +13,7 @@ import {
 } from "../../extensions/lib/agents/worktree-isolation.ts";
 import type { WorktreeGuardRefusal } from "../../extensions/lib/rules/worktree-guard-text.ts";
 import { captureToolCallHandler } from "./helpers/permission-gate-harness.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 import { worktreeGuardText } from "../../extensions/lib/rules/worktree-guard-text.ts";
 
 /**
@@ -85,7 +85,7 @@ describe("worktreeGuardFactory", () => {
 
 	it("lets clean git and non-bash tools through", async () => {
 		const { handler, cwd } = guardedCwd();
-		execFileSync("git", ["init", "-q"], { cwd });
+		initTestRepo(cwd);
 		registerWorktreeIsolation(cwd, "/repo");
 		try {
 			expect(await handler({ toolName: "bash", input: { command: "git status" } })).toBeUndefined();

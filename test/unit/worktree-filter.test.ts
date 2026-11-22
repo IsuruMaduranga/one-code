@@ -7,16 +7,16 @@ import { createWorktree, type Worktree } from "../../extensions/lib/agents/agent
 import { releaseWorktreeIsolation } from "../../extensions/lib/agents/worktree-isolation.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { subagentResultText } from "../../extensions/lib/agents/subagent-text.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 
 it("refuses isolation before a repository checkout filter can execute", async () => {
 	const repo = mkdtempSync(join(tmpdir(), "worktree-filter-"));
 	const marker = join(repo, "filter-ran.txt");
-	const git = (...args: string[]) =>
-		execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.invalid", ...args], { cwd: repo, encoding: "utf8" }).trim();
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
 	let worktree: Worktree | undefined;
 	vi.stubEnv(envName("WORKTREE_FILTER_MARKER"), marker);
 	try {
-		git("init", "-q");
+		initTestRepo(repo);
 		writeFileSync(join(repo, "a.txt"), "text\n");
 		writeFileSync(join(repo, ".gitattributes"), "a.txt filter=fixture\n");
 		git("add", ".");

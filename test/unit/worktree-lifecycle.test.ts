@@ -8,9 +8,10 @@ import { resetProcessStateForTest } from "../../extensions/lib/profile/process-s
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import worktreeExtension from "../../extensions/safety/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { initTestRepo } from "./helpers/git-repo.ts";
 import { worktreeResultText } from "../../extensions/safety/worktree/text.ts";
 
-const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 type Result = { isError?: boolean; content: { text: string }[]; details: { worktreeState?: unknown } };
 let root: string;
 let repo: string;
@@ -32,7 +33,7 @@ beforeEach(() => {
 	root = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-lifecycle-")));
 	repo = join(root, "repo");
 	mkdirSync(repo);
-	git(repo, "init", "-q");
+	initTestRepo(repo);
 	// Windows runners default core.autocrlf to true, which rewrites checkouts with CRLF.
 	git(repo, "config", "core.autocrlf", "false");
 	writeFileSync(join(repo, "a.txt"), "original\n");
