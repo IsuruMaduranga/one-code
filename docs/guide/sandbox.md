@@ -231,10 +231,12 @@ holds whatever another file sets.
   a wildcard protects the files that match it when each command starts. For
   `Edit(**/.env)`, One Code looks for `.env` files before every sandboxed
   command and makes each one it finds read-only. A file the command creates
-  itself isn't covered. In a folder too large to search quickly (more than
-  20,000 entries), the whole folder the pattern starts in becomes read-only
-  instead. On macOS the pattern applies as written, to files created later
-  too.
+  itself isn't covered. The search stays out of `node_modules` and `.git`
+  unless the rule names one of them, so a match inside those two folders is
+  left to the permission rules. In a folder still too large to search
+  quickly (more than 20,000 entries), the whole folder the pattern starts in
+  becomes read-only instead. On macOS the pattern applies as written, to
+  files created later too.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.

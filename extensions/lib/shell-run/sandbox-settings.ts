@@ -216,7 +216,8 @@ export const DENY_GLOB_WALK_BUDGET = 20_000;
  * a Linux write-deny glob becomes for one command, the way the runtime
  * expands a read-deny glob for each command. Globs that start in the same
  * directory share one walk of it ({@link walkTree}: no symbolic link
- * followed, nothing skipped, at most `budget` entries). A path is matched as
+ * followed, `node_modules` and `.git` left out unless a glob names them, at
+ * most `budget` entries). A path is matched as
  * the permission gate matches it (`pathGlobRegex`), so the sandbox denies
  * what the gate denies. A directory that matches is denied whole and not
  * walked further, as is one that cannot be listed; a glob that ends in `/**`
@@ -230,6 +231,14 @@ export const DENY_GLOB_WALK_BUDGET = 20_000;
  * the budget). A file created after the rules are built is not covered; the
  * expansion runs again for the next command.
  */
+/**
+ * Folders the walk stays out of unless a glob names one: a dependency tree or
+ * git's object store alone runs past the budget, which gave every project
+ * that has one the folder widening. A match inside them is left to the
+ * permission gate.
+ */
+const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(["node_modules", ".git"]);
+
 export function expandDenyGlobs(globs: readonly string[], budget = DENY_GLOB_WALK_BUDGET): Map<string, SandboxPathEntry[]> {
 	const byBase = new Map<string, string[]>();
 	for (const glob of new Set(globs)) {
@@ -256,7 +265,8 @@ export function expandDenyGlobs(globs: readonly string[], budget = DENY_GLOB_WAL
 					reading.found.push(path);
 					whole ||= entry.isDirectory();
 				}
-				return whole || relative.split(sep).length >= depth ? "skip" : undefined;
+				if (whole || relative.split(sep).length >= depth) return "skip";
+				return entry.isDirectory() && UNWALKED_DIRECTORIES.has(entry.name) && !group.some((glob) => glob.includes(entry.name)) ? "skip" : undefined;
 			},
 			budget,
 			(relative) => {

@@ -228,6 +228,21 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 			expect(expandDenyGlobs([join(root, "missing", "**", ".env")]).get(join(root, "missing", "**", ".env"))).toEqual([]);
 		});
 
+		it("stays out of node_modules and .git, whose size alone would run past the budget, unless a glob names one", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put(".env");
+			put("app", ".env");
+			for (let index = 0; index < 30; index++) put("node_modules", `pkg${index}`, "index.js");
+			for (let index = 0; index < 30; index++) put(".git", "objects", `o${index}`);
+			put("node_modules", "pkg0", ".env");
+			const glob = join(root, "**", ".env");
+			// 4 entries outside the two folders, 2 for the folders themselves: well under a budget their contents would pass.
+			expect(expandDenyGlobs([glob], 10).get(glob)).toEqual(expect.arrayContaining([literal(".env"), literal("app", ".env")]));
+			expect(expandDenyGlobs([glob], 10).get(glob)).toHaveLength(2);
+			const named = join(root, "node_modules", "**", ".env");
+			expect(expandDenyGlobs([named]).get(named)).toEqual([literal("node_modules", "pkg0", ".env")]);
+		});
+
 		it("keeps the section's text the pattern while each command gets the files that exist as it starts", () => {
 			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
 			put("app", ".env");
