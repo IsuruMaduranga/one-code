@@ -72,13 +72,19 @@ export const SYSTEM_PROMPT_REQUEST_CHANNEL = brandedId("system-prompt-request");
 export interface SystemPromptRequest {
 	/** The requester's context: cwd and model shape the prompt. */
 	ctx: unknown;
+	/**
+	 * pi's base options (a command context's `getSystemPromptOptions`): before
+	 * the first prompt, the listener builds from them what that prompt's
+	 * request will carry, and keeps nothing (/context's estimate).
+	 */
+	options?: unknown;
 	/** Set by the listener before it returns. */
 	prompt?: string;
 }
 
 /** Ask for One Code's system prompt; `undefined` when nobody answered. */
-export function requestSystemPrompt(events: { emit(channel: string, data: unknown): void }, ctx: unknown): string | undefined {
-	const request: SystemPromptRequest = { ctx };
+export function requestSystemPrompt(events: { emit(channel: string, data: unknown): void }, ctx: unknown, options?: unknown): string | undefined {
+	const request: SystemPromptRequest = { ctx, ...(options !== undefined ? { options } : {}) };
 	events.emit(SYSTEM_PROMPT_REQUEST_CHANNEL, request);
 	return typeof request.prompt === "string" ? request.prompt : undefined;
 }

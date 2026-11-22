@@ -28,7 +28,7 @@ import { pluginRoot } from "../../lib/plugins/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../../lib/plugins/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../../lib/ui/prompt-options.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, STACK_QUERY_CHANNEL, type StackQuery } from "../../lib/request/reminders.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -237,6 +237,13 @@ function skillExtension(pi: ExtensionAPI) {
 		if (typeof event.systemPrompt !== "string") return;
 		const stripped = withoutPiSkillsBlock(event.systemPrompt);
 		return stripped === event.systemPrompt ? undefined : { systemPrompt: stripped };
+	});
+	// /context before the first prompt: the listing that prompt will carry, built without announcing it.
+	pi.events.on(STACK_QUERY_CHANNEL, (data) => {
+		const query = data as StackQuery;
+		if (prompted || !query.stack || query.stack.some((entry) => entry.key === "skills")) return;
+		const text = listingText(index((query.ctx as { cwd?: string } | undefined)?.cwd ?? sessionCwd));
+		if (text) query.stack.push({ key: "skills", text, order: CONTEXT_ORDER.skills });
 	});
 	// The first turn a background completion opens (lib/ui/prompt-options.ts)
 	// carries the same listing a typed first prompt would.

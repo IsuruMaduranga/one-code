@@ -83,6 +83,7 @@ export const FEATURES = {
 	lsp: { entries: ["tools/lsp/index.ts"] },
 	mcp: { entries: ["tools/mcp/index.ts"] },
 	doctor: { entries: ["commands/doctor/index.ts"] },
+	context: { entries: ["commands/context/index.ts"] },
 	// Required: a product that registers secret values relies on every result passing through it.
 	"secret-values": { entries: ["safety/secret-values/index.ts"], required: true },
 	"context-management": { entries: ["request/context-management/index.ts"] },
