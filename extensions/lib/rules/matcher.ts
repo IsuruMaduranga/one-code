@@ -288,32 +288,84 @@ function firstCommaBraceGroup(line: string): { index: number; 0: string; 1: stri
 }
 
 /**
- * `line` with its comma brace groups expanded as bash does before it picks
- * the command word (`{curl,x}` runs `curl x`, `cu{r,r}l` runs `curl`), at most 32 spellings. Textual
- * and blind to quotes on purpose: a deny form may only widen.
+ * The work one line's deny forms may cost: a unit per started KiB of each
+ * line parsed and of each brace spelling written. Duplicates are dropped before they cost
+ * anything, so an ordinary line stays far below it; a line built to multiply
+ * its spellings (`echo {a,a}{a,a}…`) reaches it after a few milliseconds
+ * instead of a million parses inside permission handling.
  */
-function braceExpansions(line: string): string[] {
+export const MATCH_FORMS_BUDGET = 2000;
+
+/**
+ * One traversal of a line's deny forms: the forms so far, the lines already
+ * expanded, the work left, and whether the forms are still every spelling
+ * (false once the budget ran out with spellings left unvisited).
+ */
+interface FormsWalk {
+	forms: Set<string>;
+	expanded: Set<string>;
+	left: number;
+	complete: boolean;
+}
+
+/**
+ * Charge the work of one line, a unit per started KiB of it (parsing and
+ * copying it both grow with its length); false, and the walk incomplete,
+ * when the budget cannot pay for it.
+ */
+function spend(walk: FormsWalk, line: string): boolean {
+	const cost = 1 + Math.floor(line.length / 1024);
+	if (walk.left < cost) {
+		walk.complete = false;
+		return false;
+	}
+	walk.left -= cost;
+	return true;
+}
+
+/**
+ * `line` with its comma brace groups expanded as bash does before it picks
+ * the command word (`{curl,x}` runs `curl x`, `cu{r,r}l` runs `curl`), four
+ * groups deep per call (the forms walk expands the rest). Textual and blind
+ * to quotes on purpose: a deny form may only widen. Each distinct spelling
+ * is charged to the walk's budget.
+ */
+function braceExpansions(line: string, walk: FormsWalk): string[] {
 	let lines = [line];
 	for (let round = 0; round < 4; round++) {
-		const next: string[] = [];
+		const next = new Set<string>();
+		const add = (spelling: string): boolean => {
+			if (next.has(spelling)) return true;
+			if (!spend(walk, spelling)) return false;
+			next.add(spelling);
+			return true;
+		};
 		let expanded = false;
+		let exhausted = false;
 		for (const each of lines) {
 			const group = firstCommaBraceGroup(each);
 			if (!group) {
-				next.push(each);
-				continue;
+				// Paid for in the round that wrote it.
+				next.add(each);
+			} else {
+				expanded = true;
+				const before = each.slice(0, group.index);
+				const after = each.slice(group.index + group[0].length);
+				// bash writes one word per part, each with the text around the group:
+				// `{curl,x}` is `curl x`, and `cu{r,r}l` is `curl curl`. The parts side
+				// by side, and the line with each part alone, cover both. A part
+				// repeated is written once, before the line around it is copied.
+				const parts = group[1].split(",");
+				exhausted = !add(`${before}${parts.join(" ")}${after}`);
+				for (const part of new Set(parts)) {
+					if (exhausted) break;
+					exhausted = !add(`${before}${part}${after}`);
+				}
 			}
-			expanded = true;
-			const before = each.slice(0, group.index);
-			const after = each.slice(group.index + group[0].length);
-			// bash writes one word per part, each with the text around the group:
-			// `{curl,x}` is `curl x`, and `cu{r,r}l` is `curl curl`. The parts side
-			// by side, and the line with each part alone, cover both.
-			const parts = group[1].split(",");
-			next.push(`${before}${parts.join(" ")}${after}`, ...parts.map((part) => `${before}${part}${after}`));
+			if (exhausted) break;
 		}
-		lines = next.slice(0, 32);
-		if (!expanded) break;
+		lines = [...next];
+		if (exhausted || !expanded) break;
 	}
 	return lines.filter((each) => each !== line);
 }
@@ -344,20 +396,41 @@ function roughPieces(line: string): string[] {
  * (PERMISSIONS-REVIEW-2026-09-05 M1). Deny/ask only — an allow rule keeps
  * matching the literal spelling (findBashAllowRule), so widening here can only
  * make the gate stricter.
+ *
+ * The whole walk shares one work budget ({@link MATCH_FORMS_BUDGET}), and a
+ * line already expanded is not expanded again. When the budget runs out,
+ * `complete` is false: forms were left unvisited, so the caller must treat
+ * the line as possibly matching every deny and ask pattern
+ * ({@link bashPatternMatchesAny}).
  */
-export function bashMatchForms(command: string, depth = 0): string[] {
-	const forms = new Set<string>();
+export function bashMatchFormsReport(command: string): { forms: string[]; complete: boolean } {
+	const walk: FormsWalk = { forms: new Set(), expanded: new Set(), left: MATCH_FORMS_BUDGET, complete: true };
+	// A queue, not recursion: how deep the lines nest is bounded by the budget alone.
+	const queue = [command];
+	for (let at = 0; at < queue.length; at++) queue.push(...expandForms(queue[at], walk));
+	return { forms: [...walk.forms], complete: walk.complete };
+}
+
+/** The forms of {@link bashMatchFormsReport}, without whether they are all of them. */
+export function bashMatchForms(command: string): string[] {
+	return bashMatchFormsReport(command).forms;
+}
+
+/** Add one line's own forms to the walk; the lines nested in it, still to expand. */
+function expandForms(command: string, walk: FormsWalk): string[] {
+	const { forms } = walk;
 	const trimmed = command.trim();
 	if (!trimmed) return [];
 	forms.add(trimmed);
-	if (depth > 4) return [...forms];
+	if (walk.expanded.has(trimmed) || !spend(walk, trimmed)) return [];
+	walk.expanded.add(trimmed);
 	const nested: string[] = [];
 	// The commands inside `$(…)`, backticks and `<(…)` are segments of their
 	// own. A line that did not parse still gives its best-effort segments, and
 	// its rough pieces besides.
 	const { segments, parseFailed } = parseCommand(trimmed);
 	if (parseFailed) nested.push(...roughPieces(trimmed));
-	nested.push(...braceExpansions(trimmed));
+	nested.push(...braceExpansions(trimmed, walk));
 	// A shell on the line may run its input, a `-c` script included (`sh -c
 	// 'eval "$(cat)"'`). Then every heredoc and here-string on the line, and
 	// the words an `echo`/`printf` prints, may be the script it reads
@@ -408,8 +481,23 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 			}
 		}
 	}
-	for (const script of nested) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
-	return [...forms];
+	return nested;
+}
+
+/**
+ * "Any form matches" with a one-entry memo of the forms: decide() tests every
+ * deny rule, then every ask rule, against the same command, and the forms
+ * depend on the command alone, so the last parse is kept per shell grammar.
+ * Forms that are not all of them (`complete: false`) match every pattern: a
+ * spelling left unvisited may be the one a deny or ask rule names, so the rule
+ * binds rather than the line running past it.
+ */
+function anyFormMatcher(formsOf: (command: string) => { forms: string[]; complete: boolean }, matches: (pattern: string, form: string) => boolean) {
+	let last: { command: string; forms: string[]; complete: boolean } | undefined;
+	return (pattern: string, command: string): boolean => {
+		if (last?.command !== command) last = { command, ...formsOf(command) };
+		return !last.complete || last.forms.some((form) => matches(pattern, form));
+	};
 }
 
 /**
@@ -417,22 +505,9 @@ export function bashMatchForms(command: string, depth = 0): string[] {
  * subcommand of it, or any subcommand's payload form ({@link bashMatchForms}) —
  * wrapping `rm -rf x` in `ls && rm -rf x` or `env rm -rf x` must not slip past
  * `Bash(rm:*)` (CC: "deny/ask rules must match compound commands so they can't
- * be bypassed"). Unparseable lines are matched as a whole only.
+ * be bypassed"). A line whose forms ran past their budget matches every pattern.
  */
-/**
- * "Any form matches" with a one-entry memo of the forms: decide() tests every
- * deny rule, then every ask rule, against the same command, and the forms
- * depend on the command alone, so the last parse is kept per shell grammar.
- */
-function anyFormMatcher(formsOf: (command: string) => string[], matches: (pattern: string, form: string) => boolean) {
-	let last: { command: string; forms: string[] } | undefined;
-	return (pattern: string, command: string): boolean => {
-		if (last?.command !== command) last = { command, forms: formsOf(command) };
-		return last.forms.some((form) => matches(pattern, form));
-	};
-}
-
-const bashPatternMatchesAny = anyFormMatcher(bashMatchForms, matchesBashPattern);
+const bashPatternMatchesAny = anyFormMatcher(bashMatchFormsReport, matchesBashPattern);
 
 /**
  * PowerShell's Bash-pattern match against ONE statement: both sides have their
@@ -448,7 +523,7 @@ export function matchesPowerShellPattern(pattern: string, statement: string): bo
 }
 
 /** Deny/ask semantics for PowerShell: the pattern covers the line, any statement, or any canonical/nested form. */
-const powershellPatternMatchesAny = anyFormMatcher(powershellMatchForms, matchesPowerShellPattern);
+const powershellPatternMatchesAny = anyFormMatcher((command) => ({ forms: powershellMatchForms(command), complete: true }), matchesPowerShellPattern);
 
 /** The tools whose subject is a shell command line and whose rules follow the Bash shape (lib/shell-run/shell-tools.ts). */
 export function isShellTool(toolName: string): boolean {
