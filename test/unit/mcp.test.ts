@@ -94,6 +94,18 @@ describe("loadServers", () => {
 			expect(notes).toEqual([`MCP server "gh" in ${user} is skipped: a \`!command\` value in env or headers is not supported.`]);
 		});
 
+		it("notes an entry with an unsupported type and one with neither a url nor a command, and stays quiet on a disabled one", () => {
+			const { user } = piConfigs();
+			write(user, { sock: { type: "ws", url: "ws://h.example/mcp" }, empty: { args: ["x"] }, off: { command: "x", disabled: true }, old: { type: "sse", url: "https://h.example/sse" } });
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
+			expect(servers.map((server) => server.name)).toEqual(["old", "sock"]);
+			expect(notes).toEqual([
+				`MCP server "sock" in ${user} has type "ws", which is not supported; it is tried as Streamable HTTP.`,
+				`MCP server "empty" in ${user} has neither a url nor a command, so it is ignored.`,
+			]);
+		});
+
 		it("reads servers other extensions registered, below every file, with the extension as the source", () => {
 			const { user } = piConfigs();
 			write(user, { shared: { command: "from-pi" } });

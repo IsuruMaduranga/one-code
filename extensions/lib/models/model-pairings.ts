@@ -43,8 +43,11 @@ interface PairingRow {
 	classifier: string;
 }
 
-/** The data date: Artificial Analysis (Intelligence Index v5.0.1) and OpenRouter rankings, 2026-11-15. */
-export const PAIRINGS_AS_OF = "2026-11-15";
+/**
+ * The data date: Artificial Analysis (Intelligence Index v5) scores, prices and deprecation marks, 2026-11-22.
+ * Which models get a row still follows the OpenRouter rankings of 2026-11-13, plus the flagships released since.
+ */
+export const PAIRINGS_AS_OF = "2026-11-22";
 
 const SESSION = "session";
 
@@ -74,16 +77,19 @@ export const PAIRING_TABLE: readonly PairingRow[] = [
 	{ sessions: ["anthropic/claude-opus-5"], subagent: "anthropic/claude-haiku-5-5", classifier: "anthropic/claude-haiku-5-5" },
 	{ sessions: ["anthropic/claude-sonnet-5-5"], subagent: SESSION, classifier: "anthropic/claude-haiku-5-5" },
 	{ sessions: ["anthropic/claude-haiku-5-5"], subagent: SESSION, classifier: SESSION },
-	// OpenAI. GPT-6.1 Terra is 5.6 points below Astra at a tenth of the price; GPT-6.1 Sol is 8.5 below it at low effort.
-	{ sessions: ["openai/gpt-6-astra"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.1-sol" },
+	// OpenAI. GPT-6.1 Terra is 10.8 points below GPT-6.2 Astra and 6.0 below GPT-6.2 Sol at half of Sol's price. At low
+	// effort GPT-6.2 Sol is 5.1 below GPT-6.2 Astra, and Terra is 11.2 below GPT-6.2 Sol, so that Sol screens itself.
+	// GPT-6 Astra and GPT-6.1 Sol are deprecated: sessions still, never picks.
+	{ sessions: ["openai/gpt-6.2-astra", "openai/gpt-6-astra"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.2-sol" },
+	{ sessions: ["openai/gpt-6.2-sol"], subagent: "openai/gpt-6.1-terra", classifier: SESSION },
 	{ sessions: ["openai/gpt-6.1-sol", "openai/gpt-6-sol"], subagent: "openai/gpt-6.1-terra", classifier: "openai/gpt-6.1-terra" },
 	{ sessions: ["openai/gpt-5.6-terra", "openai/gpt-5.6-luna"], subagent: "openai/gpt-6-luna", classifier: "openai/gpt-6-luna" },
 	{ sessions: ["openai/gpt-6.1-terra", "openai/gpt-6-luna"], subagent: SESSION, classifier: SESSION },
-	// Google. Gemini 4 Hydrogen is 6.1 below Carbon and above Argon at a lower price; Argon's classifier is the user's call (2026-11-15).
-	{ sessions: ["google/gemini-4-carbon"], subagent: "google/gemini-4-hydrogen", classifier: SESSION },
-	{ sessions: ["google/gemini-4-argon"], subagent: "google/gemini-4-hydrogen", classifier: "google/gemini-3.8-flash" },
-	{ sessions: ["google/gemini-4-hydrogen"], subagent: SESSION, classifier: "google/gemini-3.8-flash" },
-	{ sessions: ["google/gemini-3.8-flash"], subagent: SESSION, classifier: SESSION },
+	// Google. Gemini 4 Hydrogen is 7.5 below Neon and 6.1 below Carbon, and above Argon, at the lowest price of the four.
+	// At low effort nothing cheaper is within 10 points of Neon, Carbon or Hydrogen (Gemini 3.8 Flash is deprecated).
+	{ sessions: ["google/gemini-4-neon", "google/gemini-4-carbon"], subagent: "google/gemini-4-hydrogen", classifier: SESSION },
+	{ sessions: ["google/gemini-4-argon"], subagent: "google/gemini-4-hydrogen", classifier: "google/gemini-4-hydrogen" },
+	{ sessions: ["google/gemini-4-hydrogen", "google/gemini-3.8-flash"], subagent: SESSION, classifier: SESSION },
 	// DeepSeek. V4.1 Flash 1017 outscores V4 Pro by 9.5 points at under a quarter of its price.
 	{ sessions: ["deepseek/deepseek-v4-pro-0813"], subagent: "deepseek/deepseek-v4.1-flash-1017", classifier: "deepseek/deepseek-v4.1-flash-1017" },
 	{ sessions: ["deepseek/deepseek-v4.1-flash-1017"], subagent: SESSION, classifier: SESSION },
@@ -98,8 +104,10 @@ export const PAIRING_TABLE: readonly PairingRow[] = [
 	// Muse Ember is 7.6 below Muse Wonder; the deprecated Muse Spark 1.3 is never a pick.
 	{ sessions: ["meta/muse-wonder-1.0"], subagent: "meta/muse-ember-1.0", classifier: "meta/muse-ember-1.0" },
 	{ sessions: ["meta/muse-ember-1.0"], subagent: SESSION, classifier: SESSION },
+	// Alibaba. Qwen4 Max outscores the deprecated Qwen3.8 Max (0902) by 9.2 points at three quarters of its price.
+	{ sessions: ["alibaba/qwen3.8-max-0902"], subagent: "alibaba/qwen4-max", classifier: "alibaba/qwen4-max" },
 	// No scored same-vendor model within 15 points: the session model serves both roles.
-	{ sessions: ["alibaba/qwen3.8-max-0902"], subagent: SESSION, classifier: SESSION },
+	{ sessions: ["alibaba/qwen4-max"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["moonshotai/kimi-k3.1-pro"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["tencent/hy4"], subagent: SESSION, classifier: SESSION },
 	{ sessions: ["xai/grok-4.7"], subagent: SESSION, classifier: SESSION },

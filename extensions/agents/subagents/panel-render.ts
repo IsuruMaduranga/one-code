@@ -6,7 +6,7 @@
  * index.ts; this file owns layout only, mirroring agents/workflow/viewer.ts.
  */
 
-import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../../lib/ui/tui-render.ts";
+import { cutPlainText as cut, formatDuration, hintLines, splitCell, splitRow, visibleWidth, wrapProse } from "../../lib/ui/tui-render.ts";
 import { formatTokenCount } from "../../lib/agents/usage.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 import { type LiveRun, type LiveStatus, longReplyNote, streamingText, type TranscriptBlock } from "./live-runs.ts";
@@ -170,7 +170,11 @@ export function stripHint(rows: PanelRow[], selected: number, viewedId: string |
 export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
-	if (input.selected !== undefined) out.push(paint.fg("dim", cut(stripHint(input.rows, input.selected, input.viewedId, input.stopAll), width)));
+	// The full hint is 77 columns: on a narrower terminal it wraps at its
+	// separators, so no key goes unhinted. The widget counts the rows it gets.
+	if (input.selected !== undefined) {
+		for (const line of hintLines(stripHint(input.rows, input.selected, input.viewedId, input.stopAll), width)) out.push(paint.fg("dim", cut(line, width)));
+	}
 	const current = input.viewedId ?? "main";
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {

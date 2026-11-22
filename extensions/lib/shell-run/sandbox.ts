@@ -120,6 +120,14 @@ export function sandboxConfigured(): boolean {
 	return sandboxSettings().enabled && sandboxPlatform() !== undefined;
 }
 
+/** Why no sandbox runs on a platform the runtime does not cover. */
+export const SANDBOX_UNSUPPORTED = "this platform has no command sandbox";
+
+/** Whether the settings ask for a sandbox on a platform that has none (native Windows). */
+export function sandboxUnsupported(platform: NodeJS.Platform = process.platform): boolean {
+	return sandboxSettings().enabled && sandboxPlatform(platform) === undefined;
+}
+
 /** The running sandbox, or undefined. */
 export function activeSandbox(): ActiveSandbox | undefined {
 	return state().active;
@@ -284,15 +292,19 @@ function leavesSandbox(settings: SandboxSettings, call: { disable: boolean; orig
  * leave it and may (the permission gate has judged that request by then,
  * lib/rules/matcher.ts `unsandboxed`).
  */
-export async function sandboxedCommand(request: SandboxRequest): Promise<SandboxedCommand> {
-	if (!sandboxConfigured()) return { command: request.command };
+export async function sandboxedCommand(request: SandboxRequest, platform: NodeJS.Platform = process.platform): Promise<SandboxedCommand> {
 	const settings = sandboxSettings();
+	/** The sandbox cannot run this command: refused when the user required it, a plain run otherwise. */
+	const unavailable = (reason: string): SandboxedCommand => (settings.failIfUnavailable ? { refused: { kind: "unavailable", reason } } : { command: request.command });
+	// A platform with no sandbox is an unavailable one: the user who required it gets a refusal, not a silent plain run.
+	if (sandboxUnsupported(platform)) return unavailable(SANDBOX_UNSUPPORTED);
+	if (!sandboxConfigured()) return { command: request.command };
 	const slot = state();
 	await slot.starting?.catch(() => undefined);
 	const hosts = slot.grantedHosts?.get(request.id) ?? [];
 	slot.grantedHosts?.delete(request.id);
 	const sandbox = activeSandbox();
-	if (!sandbox) return settings.failIfUnavailable ? { refused: { kind: "unavailable", reason: sandboxUnavailable() ?? "it has not started" } } : { command: request.command };
+	if (!sandbox) return unavailable(sandboxUnavailable() ?? "it has not started");
 	if (leavesSandbox(settings, request)) return { command: request.command };
 	if (!request.bash) return { refused: { kind: "noBash" } };
 	// The command presents this id to the proxy, which finds its hosts by it: 128 random bits, as the runtime requires.

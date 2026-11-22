@@ -1090,12 +1090,20 @@ function backgroundExtension(pi: ExtensionAPI) {
 		);
 		return messages ? { messages } : undefined;
 	});
+	// Everything a switch or a reload stops, from the one list every extension
+	// answers into: the registry's tasks (this extension's own answer) and the
+	// work that never enters the registry (a running workflow, a resident
+	// agent's turn that no task covers).
+	const runningWork = (): Array<{ id: string; description: string }> =>
+		querySessionWork(pi.events)
+			.tasks.filter((task) => task.status === "running")
+			.map(({ id, description }) => ({ id, description }));
 	// A switch stops everything below, so ask first. pi can cancel a switch but
 	// not a quit; the /tasks dialog says that quitting stops it (switch-guard.ts).
 	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
 		if (!ctx.hasUI) return undefined;
 		const title = switchWarning(
-			registry.running().map((t) => ({ id: t.id, label: t.description })),
+			runningWork().map((t) => ({ id: t.id, label: t.description })),
 			cron.list().map((j) => ({ id: j.id, label: describeCadence(j.cron) })),
 			action,
 		);
@@ -1113,7 +1121,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 		// running dies with this instance — the replacement instance has no handle
 		// on it — and the replacement is told (see shutdownNotice); a quit
 		// needs no note. A reload keeps the conversation, so its note says so.
-		const running = registry.running();
+		const running = runningWork();
 		// A reload re-arms the jobs from the branch: only the tasks stop.
 		const jobs = event.reason === "reload" ? [] : cron.list();
 		if ((running.length > 0 || jobs.length > 0) && event.reason !== "quit") {

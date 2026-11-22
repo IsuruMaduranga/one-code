@@ -24,6 +24,7 @@ const SENSITIVE_DIR_SEGMENTS = new Set([
 	".kube",
 	".m2", // Maven settings.xml holds plaintext repository credentials
 	".npm",
+	".password-store", // pass: one GPG-encrypted file per secret
 	".ssh",
 	".terraform.d",
 	"gcloud", // under .config/
@@ -31,10 +32,19 @@ const SENSITIVE_DIR_SEGMENTS = new Set([
 	".config/gcloud",
 ]);
 
-/** Two-segment sensitive suffixes, checked against the resolved path tail. */
+/** Runs of two or more folder names that are sensitive together, wherever they sit in the resolved path. */
 const SENSITIVE_DIR_PAIRS = [
 	[".config", "gcloud"],
 	[".config", "gh"],
+	[".config", "hub"], // GitHub's older CLI: an OAuth token
+	[".config", "op"], // 1Password CLI: account and device keys
+	[".config", "rclone"], // rclone.conf: remote passwords and tokens
+	[".config", "sops"], // sops/age/keys.txt: age private keys
+	[".config", "google-chrome"], // browser profiles: cookies, saved logins
+	[".config", "chromium"],
+	["application support", "google", "chrome"], // macOS: ~/Library/Application Support/Google/Chrome (a bare google/chrome is any project's folder)
+	// A project's own gradle.properties is ordinary; the user-level one holds signing and repository credentials.
+	[".gradle", "gradle.properties"],
 	[".local", "share"],
 	[".huggingface", "token"],
 	["library", "keychains"], // macOS keychain databases
@@ -50,6 +60,11 @@ const SENSITIVE_BASENAMES = new Set([
 	"credentials.toml", // cargo
 	".vault-token",
 	".gitconfig", // credential helpers, embedded tokens
+	".boto", // gsutil and boto: access keys
+	".my.cnf", // MySQL client password
+	".s3cfg", // s3cmd access keys
+	"oauth_creds.json", // Gemini CLI's login
+	"rclone.conf",
 	".bash_history",
 	".bash_profile",
 	".bashrc",
@@ -112,9 +127,9 @@ export function isSensitivePath(candidate: string): boolean {
 	for (const segment of segments) {
 		if (SENSITIVE_DIR_SEGMENTS.has(segment)) return true;
 	}
-	for (const [first, second] of SENSITIVE_DIR_PAIRS) {
-		for (let i = 0; i + 1 < segments.length; i++) {
-			if (segments[i] === first && segments[i + 1] === second) return true;
+	for (const run of SENSITIVE_DIR_PAIRS) {
+		for (let i = 0; i + run.length <= segments.length; i++) {
+			if (run.every((name, offset) => segments[i + offset] === name)) return true;
 		}
 	}
 

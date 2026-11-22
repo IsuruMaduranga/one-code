@@ -54,6 +54,8 @@
  */
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
+import { LEDGER_EPOCH_BODY_CHANNEL, LEDGER_PLAN_CHANNEL, type LedgerEpochBody, type RequestPlan } from "../../lib/request/ledger/plan.ts";
+import { listKey } from "../../lib/request/ledger/wire.ts";
 import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -129,13 +131,55 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 			}
 		});
 
-		/** Set by the context step for the request it shaped; the payload step splices only then. */
+		/**
+		 * Set by the context step for the request it shaped, and kept until the
+		 * next one: pi-ai can render that request again in the same call (its
+		 * strict-tools fallback), from the same cut context, and that body needs
+		 * the capture as much as the first.
+		 */
 		let shaped = false;
+		/** The ledger took this request's body in its epoch: the payload step leaves it alone. */
+		let ledgerTook = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */
 		let baseline: Set<string> | undefined;
 
+		// One mechanism shapes a fork's request. The fork's own ledger does when
+		// it extends a recorded request (its `context` hook, which runs first,
+		// has already cut the messages that record covers): cutting and splicing
+		// again here sent the record's list a second time after the capture, and
+		// the following requests lost the messages between the two. This
+		// extension does only when the ledger opens an epoch, and then inside
+		// the ledger's payload hook (`LEDGER_EPOCH_BODY_CHANNEL`), so the record
+		// holds the capture and the tail and the next request extends both.
+		let ledgerExtends = false;
+		pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
+			ledgerExtends = (data as RequestPlan).epoch === false;
+		});
+		const splice = (payload: Record<string, unknown>): Record<string, unknown> => {
+			baseline ??= forkBaselineNames(payload, capture.api);
+			return forkRequestPayload(capture, payload, baseline);
+		};
+		pi.events.on(LEDGER_EPOCH_BODY_CHANNEL, (data) => {
+			// `shaped` is set only for a request whose model the capture matches.
+			if (!shaped) return;
+			ledgerTook = true;
+			const body = data as LedgerEpochBody;
+			body.payload = splice(body.payload);
+			// The capture's elements the splice left as they were are the parent's
+			// cached bytes: the ledger must not redact or re-lay them. A capture's
+			// last turn the fork's first one was joined into is the fork's again.
+			const key = listKey(capture.api);
+			const base = Array.isArray(capture.payload[key]) ? (capture.payload[key] as unknown[]) : [];
+			const list = Array.isArray(body.payload[key]) ? (body.payload[key] as unknown[]) : [];
+			let kept = 0;
+			while (kept < base.length && list[kept] === base[kept]) kept++;
+			body.kept = kept;
+		});
+
 		pi.on("context_with_system", (event, ctx) => {
 			shaped = false;
+			ledgerTook = false;
+			if (ledgerExtends) return undefined;
 			const covers = capture.covers;
 			// Bedrock and Google nest their tools and need joined turns and the
 			// fork's own abort signal, which the fork splice does not handle: their
@@ -160,11 +204,9 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		});
 
 		pi.on("before_provider_request", (event, ctx) => {
-			if (!shaped || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
-			shaped = false;
-			const payload = event.payload as Record<string, unknown>;
-			baseline ??= forkBaselineNames(payload, capture.api);
-			return forkRequestPayload(capture, payload, baseline);
+			if (!shaped || ledgerTook || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
+			// No ledger in this session took the body in its epoch: splice it here.
+			return splice(event.payload as Record<string, unknown>);
 		});
 	};
 }

@@ -15,6 +15,8 @@
  */
 
 import type { ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { sandboxedCommand } from "../../lib/shell-run/sandbox.ts";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { bashSpawn, type ShellSpawn, spawnShellCommand } from "../../lib/shell-run/shell-spawn.ts";
 import { shellQuote } from "../../lib/shell/shell-quote.ts";
@@ -22,6 +24,32 @@ import { splitShellPlaceholders, substituteArguments } from "./template.ts";
 import { pluginsText as words } from "./text.ts";
 
 export const SHELL_TIMEOUT_MS = 30_000;
+/**
+ * Run one placeholder command as a shell tool call runs: inside the session's
+ * command sandbox when one is configured. The permission gate judges a
+ * placeholder as a bash call and, with `autoAllowBashIfSandboxed`, clears it
+ * without a prompt on the promise that the sandbox holds it, so it must not
+ * run outside. A sandbox that refuses the call (required and not running)
+ * fails the placeholder with the reason.
+ */
+export async function runSandboxedPlaceholder(
+	command: string,
+	cwd: string,
+	opts: { spec?: ShellSpawn; timeoutMs?: number; maxOutputChars?: number; wrap?: typeof sandboxedCommand } = {},
+): Promise<string> {
+	const spec = opts.spec ?? bashSpawn().spawn;
+	const wrapped = await (opts.wrap ?? sandboxedCommand)({ command, original: command, disable: false, cwd, bash: spec?.shell, id: randomUUID() });
+	if ("refused" in wrapped) {
+		return words.placeholderFailed({ osMessage: `the command sandbox refused it (${wrapped.refused.kind === "noBash" ? words.noBash : wrapped.refused.reason})` });
+	}
+	try {
+		const output = await runPlaceholderCommand(wrapped.command, cwd, spec ? { ...opts, spec } : opts);
+		return wrapped.run ? wrapped.run.withViolations(output) : output;
+	} finally {
+		wrapped.run?.finish();
+	}
+}
+
 /** A placeholder output past this many characters stops being collected, and says so. */
 const MAX_OUTPUT_CHARS = 2 * 1024 * 1024;
 

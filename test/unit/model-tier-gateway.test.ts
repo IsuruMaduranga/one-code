@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { classifierCandidates } from "../../extensions/lib/models/classifier-model.ts";
+import { catalogModelFor } from "../../extensions/lib/models/model-catalog.ts";
+import { PAIRINGS_AS_OF } from "../../extensions/lib/models/model-pairings.ts";
 import { bundledSources, setCatalogSourcesForTest } from "../../extensions/lib/models/model-catalog-data.ts";
 import { acceptsAnthropicWire, anthropicModelId, modelIdentity, modelSpec } from "../../extensions/lib/models/model-policy.ts";
 import { classifyModelTier, intrinsicTier, resolveModelTier, usesClaudeCodeFastPaths } from "../../extensions/lib/models/model-tier.ts";
@@ -32,6 +34,20 @@ beforeAll(async () => {
 });
 beforeEach(() => setCatalogSourcesForTest(bundledSources()));
 
+/**
+ * pi's catalog as the pairing table knew it: without the models released after
+ * PAIRINGS_AS_OF. A vendor's newer model switches that vendor's rows off (the
+ * staleness rule, model-pairings.test.ts), so the tests of the rows themselves
+ * run on the catalog the rows were written for.
+ */
+const knownToTable = (): Model<Api>[] => {
+	const asOf = Date.parse(`${PAIRINGS_AS_OF}T23:59:59Z`);
+	return catalog.filter((model) => {
+		const released = catalogModelFor(model)?.released;
+		return released === undefined || released <= asOf;
+	});
+};
+
 const row = (spec: string): Model<Api> => {
 	const found = catalog.find((model) => modelSpec(model) === spec);
 	if (!found) throw new Error(`${spec} is not in pi's catalog`);
@@ -48,21 +64,26 @@ const GATEWAY_FRONTIER = new Set([
 	...["5", "5.1", "5.2"].map((v) => `openrouter/anthropic/claude-fable-${v}`),
 	...["4.8", "5", "5.5"].map((v) => `openrouter/anthropic/claude-opus-${v}`),
 	"openrouter/anthropic/claude-sonnet-5.5",
-	...["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6.1-sol", "gpt-6.1-sol-pro"].map((id) => `openrouter/openai/${id}`),
+	...["gpt-6-astra", "gpt-6-astra-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6.1-sol", "gpt-6.1-sol-pro", "gpt-6.2-astra", "gpt-6.2-astra-pro", "gpt-6.2-sol", "gpt-6.2-sol-pro"].map(
+		(id) => `openrouter/openai/${id}`,
+	),
 	...["fable-5", "fable-5.1", "fable-5.2", "fable-5.2-fast", "opus-4.8", "opus-4.8-fast", "opus-5", "opus-5-fast", "opus-5.5", "opus-5.5-fast", "sonnet-5.5"].map(
 		(id) => `vercel-ai-gateway/anthropic/claude-${id}`,
 	),
-	...["gpt-6-astra", "gpt-6-astra-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast"].map((id) => `vercel-ai-gateway/openai/${id}`),
-	...["claude-fable-5", "claude-fable-5-1", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol"].map(
+	...["gpt-6-astra", "gpt-6-astra-fast", "gpt-6-sol", "gpt-6-sol-fast", "gpt-6.1-sol", "gpt-6.1-sol-fast", "gpt-6.2-astra", "gpt-6.2-astra-fast", "gpt-6.2-sol", "gpt-6.2-sol-fast"].map(
+		(id) => `vercel-ai-gateway/openai/${id}`,
+	),
+	...["claude-fable-5", "claude-fable-5-1", "claude-fable-5-2", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-astra", "gpt-6.2-sol"].map(
 		(id) => `cloudflare-ai-gateway/${id}`,
 	),
+	...["openrouter", "vercel-ai-gateway"].flatMap((gateway) => ["gemini-4-carbon", "gemini-4-hydrogen"].map((id) => `${gateway}/google/${id}`)),
 ]);
 
 const labRows = () => catalog.filter((model) => GATEWAYS.includes(model.provider) && LABS.has(modelIdentity(model).profile ?? ""));
 
 describe("frontier on a known gateway", () => {
 	it("lists every expected row in pi's catalog", () => {
-		for (const spec of GATEWAY_FRONTIER) expect(() => row(spec), spec).not.toThrow();
+		for (const spec of [...GATEWAY_FRONTIER, ...GATEWAY_FRONTIER_AFTER_TABLE]) expect(() => row(spec), spec).not.toThrow();
 	});
 
 	it("puts exactly the version-gated rows of each gateway in frontier, for the prompt and the capability tier alike", () => {
@@ -70,11 +91,11 @@ describe("frontier on a known gateway", () => {
 		expect(rows.length).toBeGreaterThan(100);
 		for (const model of rows) {
 			const spec = modelSpec(model);
-			const frontier = GATEWAY_FRONTIER.has(spec);
+			const frontier = GATEWAY_FRONTIER.has(spec) || GATEWAY_FRONTIER_AFTER_TABLE.has(spec);
 			expect(intrinsicTier(model) === "frontier", spec).toBe(frontier);
 			// Haiku 5.5 aside (below), the prompt tier is the capability tier.
 			if (!/claude-haiku-5/.test(model.id)) expect(resolveModelTier(model, noEnv) === "frontier", spec).toBe(frontier);
-			if (frontier) expect(classifyModelTier(model, noEnv).reason).toMatch(/^(anthropic|openai) frontier allowlist \(gateway\)$/);
+			if (frontier) expect(classifyModelTier(model, noEnv).reason).toMatch(/^(anthropic|openai|google) frontier allowlist \(gateway\)$/);
 		}
 	});
 
@@ -143,9 +164,16 @@ describe("frontier on a known gateway", () => {
 	});
 
 	it("keeps Claude Code's fast paths for every row it moves, as workhorse had them", () => {
-		for (const spec of GATEWAY_FRONTIER) expect(usesClaudeCodeFastPaths(row(spec)), spec).toBe(true);
+		for (const spec of [...GATEWAY_FRONTIER, ...GATEWAY_FRONTIER_AFTER_TABLE]) expect(usesClaudeCodeFastPaths(row(spec)), spec).toBe(true);
 	});
 });
+
+/**
+ * Gateway rows that pass the gate and that the pairing table (PAIRINGS_AS_OF)
+ * does not know yet: a model released after it goes here until the table is
+ * refreshed. Empty since the 2026-11-22 refresh.
+ */
+const GATEWAY_FRONTIER_AFTER_TABLE = new Set<string>([]);
 
 describe("Google's frontier rule", () => {
 	// pi's catalog has only Gemini 4 Argon of the Gemini 4 line; Carbon and Hydrogen are built from its record.
@@ -182,7 +210,7 @@ describe("Google's frontier rule", () => {
 
 describe("the auto-mode classifier for a gateway frontier session", () => {
 	const chain = (sessionModel: Model<Api>, extra: Model<Api>[] = []) => {
-		const result = classifierCandidates({ available: [...catalog, ...extra], sessionModel });
+		const result = classifierCandidates({ available: [...knownToTable(), ...extra], sessionModel });
 		return { candidates: result.candidates.map((c) => `${modelSpec(c.model)} ${c.source}`), notices: result.notices, fallback: result.fallback?.reason };
 	};
 
@@ -250,7 +278,7 @@ describe("every gateway row the frontier rule lifts keeps a paired classifier an
 	it("pairs each one through the table (a -pro or -fast SKU like its base line), or keeps the session silently where the table says so", () => {
 		const unpaired: string[] = [];
 		for (const spec of GATEWAY_FRONTIER) {
-			const result = classifierCandidates({ available: catalog, sessionModel: row(spec) });
+			const result = classifierCandidates({ available: knownToTable(), sessionModel: row(spec) });
 			expect(result.notices, spec).toEqual([]);
 			const head = result.candidates[0];
 			if (result.fallback) expect(result.fallback.reason, spec).toBe("paired-session");
@@ -271,13 +299,15 @@ describe("every gateway row the frontier rule lifts keeps a paired classifier an
 	});
 
 	it("gives a -pro or -fast OpenAI SKU its base line's classifier and subagent default", () => {
-		const head = (spec: string) => modelSpec(classifierCandidates({ available: catalog, sessionModel: row(spec) }).candidates[0].model);
+		const head = (spec: string) => modelSpec(classifierCandidates({ available: knownToTable(), sessionModel: row(spec) }).candidates[0].model);
 		expect(head("openrouter/openai/gpt-6.1-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
 		expect(head("openrouter/openai/gpt-6-sol-pro")).toBe("openrouter/openai/gpt-6.1-terra");
-		expect(head("openrouter/openai/gpt-6-astra-pro")).toBe("openrouter/openai/gpt-6.1-sol");
-		expect(head("vercel-ai-gateway/openai/gpt-6-astra-fast")).toBe("vercel-ai-gateway/openai/gpt-6.1-sol");
+		// GPT-6.1 Sol is deprecated since the 2026-11-22 read: both Astra lines screen with GPT-6.2 Sol.
+		expect(head("openrouter/openai/gpt-6-astra-pro")).toBe("openrouter/openai/gpt-6.2-sol");
+		expect(head("vercel-ai-gateway/openai/gpt-6-astra-fast")).toBe("vercel-ai-gateway/openai/gpt-6.2-sol");
+		expect(head("openrouter/openai/gpt-6.2-astra-pro")).toBe("openrouter/openai/gpt-6.2-sol");
 		for (const spec of ["openrouter/openai/gpt-6-sol-pro", "openrouter/openai/gpt-6-astra-pro", "vercel-ai-gateway/openai/gpt-6-astra-fast", "openrouter/openai/gpt-6.1-sol-pro"]) {
-			const resolved = resolveSubagentModel({ sessionModel: row(spec), available: catalog });
+			const resolved = resolveSubagentModel({ sessionModel: row(spec), available: knownToTable() });
 			expect(resolved.model && modelSpec(resolved.model), spec).toBe(`${spec.slice(0, spec.indexOf("/openai/"))}/openai/gpt-6.1-terra`);
 		}
 	});

@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-15T11:45:37.821Z",
+	"fetchedAt": "2026-11-21T17:50:02.539Z",
 	"source": "https://huggingface.co/api/models/",
 	"payload": {
 		"ByteDance-Seed/UI-TARS-1.5-7B": 8292166656,
@@ -59,6 +59,7 @@
 		"Qwen/Qwen3.8-2.4T-A95B": 2446182725504,
 		"Qwen/Qwen3.8-27B": 27781427952,
 		"Qwen/Qwen3.8-Flash-Next": 179999981459,
+		"RadixArk/DaisyRose-27B": 27781427952,
 		"RecursiveSI/flint": 39785287456,
 		"RekaAI/reka-edge-2603": 7128509568,
 		"RekaAI/reka-flash-3": 20905482240,
@@ -178,9 +179,11 @@
 		"tencent/Hy3": 298786155776,
 		"tencent/Hy3-preview": 298786155776,
 		"tencent/Hy4": null,
+		"tencent/Hy4-flash": 220251201958,
 		"tencent/Hy4-preview": 779960992733,
 		"thedrummer/cydonia-24b-v4.1": 23572403200,
 		"thinkingmachines/Inkling": 952377623626,
+		"thinkingmachines/Inkling-2-Mini": 26388646440,
 		"thinkingmachines/Inkling-2-Small": 594050672720,
 		"thinkingmachines/Inkling-Small": 265956439090,
 		"zai-org/GLM-4.5": 358337791296,

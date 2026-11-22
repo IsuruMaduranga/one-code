@@ -188,6 +188,65 @@ export function linkedWorktreeGitDirs(dir: string, read: (path: string) => strin
 	}
 }
 
+/**
+ * The files of the checkout holding `dir` that run or steer a program outside
+ * the sandbox once written, to deny whatever allows the directory.
+ *
+ * The runtime denies its own list (`.git/hooks`, `.git/config`, the shell and
+ * git startup files, `.mcp.json`, `.vscode`, `.idea`), but anchors it at the
+ * process's directory. A session of another directory, a workspace directory
+ * and an isolated subagent's worktree get none of it, so the same names are
+ * listed here under `dir` and under its checkout's root.
+ *
+ * The runtime's list also misses what redirects git itself. Git takes its
+ * config from the directory a git dir's `commondir` file names, and a
+ * worktree's from where its `.git` file and `gitdir` back-reference point, so
+ * a sandboxed command that writes one makes the harness's own `git status`
+ * (session start, an isolated agent's hand-back) run a filter or fsmonitor
+ * command of its choosing. `info/attributes` assigns such a filter, and
+ * `config.worktree` is config. pi loads `.pi` (extensions, settings) into the
+ * harness at the next start.
+ */
+export function checkoutProtectedFiles(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8")): string[] {
+	const ROOT_NAMES = [".gitconfig", ".gitmodules", ".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".profile", ".ripgreprc", ".mcp.json", ".vscode", ".idea", ".pi"];
+	const gitDirFiles = (gitDir: string) => ["commondir", "gitdir", "config.worktree"].map((name) => join(gitDir, name));
+	const commonFiles = (common: string) => ["hooks", "config", join("info", "attributes")].map((name) => join(common, name));
+	const found = new Set(ROOT_NAMES.map((name) => join(dir, name)));
+	for (let root = resolve(dir); ; root = dirname(root)) {
+		const dotGit = join(root, ".git");
+		let pointer: string | undefined;
+		try {
+			pointer = /^gitdir:\s*(.+)$/m.exec(read(dotGit))?.[1]?.trim();
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT" || code === "ENOTDIR") {
+				if (dirname(root) === root) break;
+				continue;
+			}
+			// A directory: an ordinary checkout, its own git dir and common dir.
+			for (const name of ROOT_NAMES) found.add(join(root, name));
+			for (const file of [...gitDirFiles(dotGit), ...commonFiles(dotGit)]) found.add(file);
+			break;
+		}
+		for (const name of ROOT_NAMES) found.add(join(root, name));
+		// A linked worktree: the pointer file itself, and both ends of what it names.
+		found.add(dotGit);
+		if (pointer) {
+			const gitDir = resolve(root, pointer);
+			for (const file of gitDirFiles(gitDir)) found.add(file);
+			try {
+				const common = resolve(gitDir, read(join(gitDir, "commondir")).trim());
+				for (const file of [...gitDirFiles(common), ...commonFiles(common)]) found.add(file);
+			} catch {
+				// No common dir to read: the git dir is its own.
+				for (const file of commonFiles(gitDir)) found.add(file);
+			}
+		}
+		break;
+	}
+	return [...found];
+}
+
 /** The filesystem rules of one command, in the runtime's shape. Writes are allow-only; reads are deny-only. */
 export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope): { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] } {
 	return {

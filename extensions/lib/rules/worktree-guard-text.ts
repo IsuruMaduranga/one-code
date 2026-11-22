@@ -155,6 +155,10 @@ export function checkoutProgram(program: CheckoutProgram): string {
 			return `the checkout's git config sets ${program.key}, which names a program git runs`;
 		case "submoduleConfig":
 			return `a submodule's git config ${program.key ? `sets ${program.key}, which names a program git runs` : "cannot be read"}`;
+		case "bareRepository":
+			return `${program.dir} is laid out as a git repository of its own, whose config git reads`;
+		case "promisorRemote":
+			return `the checkout is a partial clone (${program.key}), so a read of a missing object fetches from its remote`;
 		case "hook":
 			return `the checkout has a ${program.hook} hook, which git runs`;
 	}

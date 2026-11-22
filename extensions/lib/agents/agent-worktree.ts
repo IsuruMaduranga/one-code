@@ -15,7 +15,7 @@ import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "./worktree-isolation.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS } from "../context/git.ts";
-import { checkoutGitRunsProgram } from "../shell/git-checkout-programs.ts";
+import { checkoutRunsOwnProgram } from "../shell/git-checkout-programs.ts";
 import { subagentResultText } from "./subagent-text.ts";
 
 const run = promisify(execFile);
@@ -42,7 +42,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 
 /** Creates a worktree on a new throwaway branch at the current HEAD. */
 export async function createWorktree(cwd: string, label: string): Promise<Worktree> {
-	const program = checkoutGitRunsProgram(cwd, homedir(), []);
+	const program = checkoutRunsOwnProgram(cwd, homedir(), []);
 	if (program) {
 		throw new Error(subagentResultText().worktreeRefused({ program }));
 	}

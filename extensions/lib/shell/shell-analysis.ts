@@ -34,7 +34,8 @@ import { productReadOnlySubcommands } from "../profile/profile.ts";
 import { isNameOperand } from "./product-read-only.ts";
 import { isProtectedPath } from "../rules/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
-import { isWithin, resolveForContainment, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
+import { dirname } from "node:path";
+import { isWithin, resolveForContainment, resolveThroughLinks, toAbsoluteBash, touchesGuardedPath } from "./paths.ts";
 import { type CheckoutProgram, checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
@@ -216,6 +217,8 @@ interface WrapperSpec {
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
+	/** Options that take no value and leave the payload and where it runs unchanged. */
+	flags?: readonly string[];
 	/** Peeled only for deny/ask forms; the pre-gate treats it as an unknown command. */
 	denyFormsOnly?: boolean;
 }
@@ -234,13 +237,13 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	builtin: { contained: true },
 	// Runs its argument as the command of that name (`busybox rm x`).
 	busybox: { contained: false, denyFormsOnly: true },
-	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
-	command: { contained: true },
-	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
+	caffeinate: { values: ["-t", "-w"], flags: ["-d", "-i", "-m", "-s", "-u"], contained: true, denyFormsOnly: true },
+	command: { flags: ["-p", "-v", "-V"], contained: true },
+	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], flags: ["-n", "-s", "-L"], contained: false, denyFormsOnly: true },
 	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
-	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], contained: true },
-	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], fileFirst: true, contained: false },
-	ionice: { values: ["-c", "--class", "-n", "--classdata"], contained: true },
+	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], flags: ["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"], contained: true },
+	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], flags: ["-s", "-x", "-e", "-n", "-u", "-o", "--shared", "--exclusive", "--nonblock", "--nb", "--unlock", "--close", "--verbose"], fileFirst: true, contained: false },
+	ionice: { values: ["-c", "--class", "-n", "--classdata"], flags: ["-t", "--ignore"], contained: true },
 	nice: { values: ["-n", "--adjustment"], contained: true },
 	nohup: { contained: true },
 	script: {
@@ -250,20 +253,22 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 		fileFirst: true,
 		contained: false,
 	},
-	setsid: { contained: true },
+	setsid: { flags: ["-w", "--wait", "-f", "--fork", "-c", "--ctty"], contained: true },
 	stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], contained: true },
 	sudo: {
 		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
 		unsafeValues: ["-C", "-D", "-R", "--close-from", "--chdir", "--chroot"],
+		flags: ["-n", "-E", "-H", "-i", "-s", "-k", "-K", "-S", "-b", "-A", "-P", "-B", "--non-interactive", "--preserve-env", "--set-home", "--login", "--shell", "--stdin", "--background", "--askpass", "--reset-timestamp", "--preserve-groups", "--bell"],
 		contained: false,
 		denyFormsOnly: true,
 	},
-	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], contained: true },
-	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], durationFirst: true, contained: true },
-	watch: { values: ["-n", "--interval", "-q", "--equexit"], contained: false, denyFormsOnly: true },
+	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], flags: ["-p", "-l", "-v", "--portability", "--verbose"], contained: true },
+	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], flags: ["--foreground", "--preserve-status", "-v", "--verbose", "-p"], durationFirst: true, contained: true },
+	watch: { values: ["-n", "--interval", "-q", "--equexit"], flags: ["-d", "-t", "-b", "-e", "-g", "-c", "-x", "-p", "-w", "--differences", "--no-title", "--beep", "--errexit", "--chgexit", "--color", "--exec", "--precise", "--no-wrap"], contained: false, denyFormsOnly: true },
 	xargs: {
-		values: ["-I", "-L", "-n", "-P", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
+		values: ["-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
 		unsafeValues: ["-a", "--arg-file"],
+		flags: ["-0", "-r", "-t", "-p", "-x", "-o", "--null", "--no-run-if-empty", "--verbose", "--interactive", "--exit", "--open-tty"],
 		contained: false,
 	},
 };
@@ -366,6 +371,17 @@ function acceptEditsOperands(name: string, args: Token[]): Token[] | undefined {
 	return check.ok ? check.parsed.positionals : undefined;
 }
 
+/** Whether the file at `path` (written `word`) is a symbolic link, or a directory or glob that may hold one. */
+function mayCarryLink(path: string, word: string): boolean {
+	if (hasGlob(word)) return true;
+	try {
+		const stat = lstatSync(path);
+		return stat.isSymbolicLink() || stat.isDirectory();
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ENOENT";
+	}
+}
+
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
 function hasGlob(token: string): boolean {
 	return /[*?\[\]]/.test(token);
@@ -452,6 +468,13 @@ export interface Payload {
 	pathNamed: string[];
 	/** Wide reading only: command lines a wrapper option runs (`flock -c '…'`, `env -S '…'`). */
 	scripts: string[];
+	/**
+	 * Words skipped after a wrapper without knowing what they do: an option its
+	 * spec does not list (`env -a`, `env --chd=/tmp`) and an assignment that is
+	 * not inert (`env PATH=./bin`). The payload named may not be what runs, or
+	 * not where, so the pre-gate proves nothing about such a line.
+	 */
+	opaque: string[];
 }
 
 /**
@@ -466,7 +489,7 @@ export interface Payload {
  */
 export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "strict"): Payload {
 	const wide = reading === "wide";
-	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [] };
+	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [], opaque: [] };
 	let index = 0;
 
 	const kind = (spec: WrapperSpec, option: string) =>
@@ -505,6 +528,8 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			// stays in command position, so the command escalates uncontained.
 			if (!wide && attached !== undefined && (type === "unsafe" || type === "script")) return;
 			index++;
+			// `nice -10` is an adjustment; any other unlisted option is unknown.
+			if (type === undefined && !knownFlags(spec, word) && !/^-\d+$/.test(word)) payload.opaque.push(word);
 			if (type === undefined || attached !== undefined) {
 				if (wide && type === "script" && attached !== undefined) payload.scripts.push(attached);
 				continue;
@@ -518,7 +543,12 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 
 	for (;;) {
 		// Leading `VAR=value` assignments are not the command.
-		while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index].value)) index++;
+		for (; index < tokens.length; index++) {
+			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(tokens[index].value);
+			if (!assigned) break;
+			// Before the first word the caller judges it; after a wrapper (`env NAME=value cmd`) nothing else does.
+			if (payload.peeled.length > 0 && !isInertAssignment(tokens[index].value)) payload.opaque.push(tokens[index].value);
+		}
 		if (index >= tokens.length) return payload;
 
 		if (/[\\/]/.test(tokens[index].value)) payload.pathNamed.push(tokens[index].value);
@@ -538,8 +568,16 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 			// `flock LOCK -c '…'`: options may follow the file too.
 			skipOptions(spec);
 		}
-		if (spec.durationFirst && index < tokens.length && /^[0-9.]+[smhd]?$/.test(tokens[index].value)) index++;
+		// Every spelling `timeout` takes for its duration: `30`, `2.5m`, `+5`, `1e1`, `0x5`.
+		if (spec.durationFirst && index < tokens.length && /^\+?(inf(inity)?|0x[0-9a-f.]+(p[+-]?[0-9]+)?|[0-9.]+(e[+-]?[0-9]+)?)[smhd]?$/i.test(tokens[index].value)) index++;
 	}
+}
+
+/** Whether `word` is made only of the wrapper's listed flags (`-i`, `--null`, or a cluster such as `-iv`). */
+function knownFlags(spec: WrapperSpec, word: string): boolean {
+	const flags = spec.flags ?? [];
+	if (word.startsWith("--")) return flags.includes(word);
+	return word.length > 1 && [...word.slice(1)].every((letter) => flags.includes(`-${letter}`));
 }
 
 /** Whether every peeled wrapper keeps an in-project payload contained (see `WrapperSpec.contained`). */
@@ -549,6 +587,48 @@ function wrappersContained(peeled: readonly string[]): boolean {
 
 /** Shells whose `-c` argument is a command line of its own. */
 export const INLINE_SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+
+/** Shell options that take the next word as their value. */
+const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+
+/**
+ * The command lines a shell invocation's `-c` runs, given the shell's
+ * arguments, or undefined when it has no `-c` (alone or in a cluster such as
+ * `-lc` or `-ce`, anywhere among the leading options, whose values are
+ * skipped: `bash -c -o pipefail 'x'` runs `x`). The script is the first
+ * operand; the words after it are `$0`, `$1`, … (`bash -c 'echo ok' 'git
+ * status'` runs no git), unless the script expands them (`bash -c '"$@"' _
+ * git status`), when they are a command line too. The one reader of `-c` for
+ * the deny forms and the worktree guard.
+ */
+export function inlineShellScripts(args: readonly string[], reading: "strict" | "wide" = "strict"): string[] | undefined {
+	const cluster = (value: string) => /^-[A-Za-z]+$/.test(value) && value.includes("c");
+	let command = false;
+	let i = 0;
+	for (; i < args.length; i++) {
+		const value = args[i];
+		if (value === "--" || value === "-") {
+			i++;
+			break;
+		}
+		if (!/^[-+]/.test(value)) break;
+		if (cluster(value)) command = true;
+		// `-o`/`-O` take the next word, last in a cluster too: `-euo pipefail`.
+		if (SHELL_VALUE_OPTIONS.has(value) || /^[-+][A-Za-z]*[oO]$/.test(value)) i++;
+	}
+	if (!command) {
+		// The wide reading (deny forms, which may only widen) also takes a `-c`
+		// past the first operand, which bash hands to the script it names.
+		const late = reading === "wide" ? args.findIndex(cluster) : -1;
+		if (late < 0) return undefined;
+		i = late + 1;
+	}
+	const [script, ...positional] = args.slice(i);
+	if (script === undefined) return [];
+	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.
+	if (!/\$(?:[0-9@*]|\{[0-9@*])/.test(script) || positional.length === 0) return [script];
+	return [script, positional.join(" "), positional.slice(1).join(" ")];
+}
 
 /** Commands that change the shell's working directory. */
 export const DIRECTORY_MOVERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
@@ -637,6 +717,13 @@ const INERT_ASSIGNMENTS = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|NO_COLOR|FORCE_COLOR|CLI
 function isInertValue(name: string, value: string): boolean {
 	if (name === "TZ") return /^([A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*)?$/.test(value);
 	return /^[A-Za-z0-9_.,@:+-]*$/.test(value);
+}
+
+/** Whether a `NAME=value` word sets an inert variable to a value that keeps it inert. */
+function isInertAssignment(word: string): boolean {
+	const eq = word.indexOf("=");
+	const name = word.slice(0, eq);
+	return INERT_ASSIGNMENTS.test(name) && isInertValue(name, word.slice(eq + 1));
 }
 
 /**
@@ -774,8 +861,10 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean, onFileReads: (words: Token[]) => void): string | undefined {
+function gitEscalationReason(args: Token[], dirOutsideCwd: (dir: string, from?: string) => { outside: boolean; at: string }, onFileReads: (words: Token[]) => void): string | undefined {
 	let index = 0;
+	/** Where git stands after the `-C` options read so far: git applies each one from the one before. */
+	let chained: string | undefined;
 	while (index < args.length) {
 		const token = args[index].value;
 		if (!token.startsWith("-")) break;
@@ -788,7 +877,9 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 			// `-C` retargets git at another directory; outside the working directory
 			// the operation is no longer provably in-project (was review gap: `git
 			// -C /etc status` classified safe).
-			if (!dir || isDirOutsideCwd(dir)) return `runs git -C ${dir ?? ""}, which points outside the working directory`;
+			const judged = dir ? dirOutsideCwd(dir, chained) : undefined;
+			if (!judged || judged.outside) return `runs git -C ${dir ?? ""}, which points outside the working directory`;
+			chained = judged.at;
 			index += 2;
 			continue;
 		}
@@ -802,7 +893,7 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 		const eq = token.indexOf("=");
 		const flag = eq > 0 ? token.slice(0, eq) : token;
 		const value = eq > 0 ? token.slice(eq + 1) : undefined;
-		if ((flag === "--git-dir" || flag === "--work-tree") && value !== undefined && isDirOutsideCwd(value)) {
+		if ((flag === "--git-dir" || flag === "--work-tree") && value !== undefined && dirOutsideCwd(value).outside) {
 			return `runs git ${flag} ${value}, which points outside the working directory`;
 		}
 		return `passes git ${flag}, which can point git at another repository or configuration`;
@@ -820,14 +911,45 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 	return undefined;
 }
 
-/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them. */
+/**
+ * One `-C <word>` step of the directory chain git walks: `word` applied from
+ * the real directory `from` lands on, then resolved through symbolic links.
+ * git changes into each directory in turn, so a later `-C ..` climbs from
+ * where a link pointed, not from the link's own parent: with `deep/link`
+ * pointing at the working directory, `git -C deep/link -C .. status` runs
+ * one level above it. `resolved` is the containment form, undefined when
+ * nothing of the path resolves (`at` is then the lexical path).
+ *
+ * The word itself is walked in filesystem order too: the kernel follows a
+ * link before it applies the `..` after it, so `-C deep/link/..` is the
+ * parent of where the link points, not `deep`. Each run of names between
+ * `..` segments is resolved before the climb.
+ */
+function gitDirectoryStep(from: string, word: string, home: string): { at: string; resolved: string | undefined } {
+	let at = resolveThroughLinks(from) ?? from;
+	/** Change into a run of names (the part of the word between two `..`), resolving where it lands. */
+	const land = (names: string) => {
+		if (names === "" || names === ".") return;
+		const lexical = toAbsoluteBash(at, names, home);
+		at = resolveThroughLinks(lexical) ?? lexical;
+	};
+	// A word that starts at the root keeps its leading slash on the first run.
+	const runs = word.split(/(?:^|\/)\.\.(?=\/|$)/);
+	runs.forEach((run, index) => {
+		if (index > 0) at = dirname(at);
+		land(index === 0 ? (run === "" && word.startsWith("/") ? "/" : run) : run.replace(/^\/+/, ""));
+	});
+	return { at, resolved: resolveForContainment(at) };
+}
+
+/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them ({@link gitDirectoryStep}). */
 function gitWorkingDirectory(args: Token[], cwd: string, home: string): string {
 	let dir = cwd;
 	for (let index = 0; index < args.length; ) {
 		const token = args[index].value;
 		if (token === "-C") {
 			const next = args[index + 1]?.value;
-			if (next) dir = toAbsoluteBash(dir, next, home);
+			if (next) dir = gitDirectoryStep(dir, next, home).at;
 			index += 2;
 		} else if (GIT_GLOBAL_SAFE.has(token)) {
 			index++;
@@ -854,10 +976,8 @@ const GIT_FILE_OPERANDS = new Set(["diff"]);
  * run a program (git-checkout-programs.ts), or undefined.
  */
 function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, CheckoutProgram | undefined>, hooks: readonly string[] = READ_HOOKS): string | undefined {
-	let dir = cwd;
-	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
-		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
-	}
+	// Only `-C` and the safe global options lead a command that reaches this check.
+	const dir = gitWorkingDirectory(args, cwd, home);
 	// Memoized for one analysis only: nothing runs between its segments, but the
 	// model can rewrite `.git/config` between calls.
 	const key = `${hooks.join(",")}\0${dir}`;
@@ -940,6 +1060,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	 * was in-project mutation (`containedNonNetwork`).
 	 */
 	let uncontained = false;
+	/** The segments whose contained `mv` or `cp` may move a symbolic link. */
+	const relocating = new Set<Segment>();
 	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
 	let escalatedBeyondReads = false;
 	/** Set by any escalation that is neither an outside-cwd read nor a read naming a guarded path (see readsOnly). */
@@ -1113,11 +1235,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of segment.tokens) {
 			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(token.value)?.[1];
 			if (!assigned) break;
-			const inert = INERT_ASSIGNMENTS.test(assigned) && isInertValue(assigned, token.value.slice(assigned.length + 1));
-			if (!inert) escalate(`sets ${assigned}, which can change what the command runs or reads`);
+			if (!isInertAssignment(token.value)) escalate(`sets ${assigned}, which can change what the command runs or reads`);
 		}
 
-		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
+		const { command: name, args, peeled, pathNamed, opaque } = resolvePayload(segment.tokens);
+		for (const word of opaque) escalate(`passes ${word} to ${peeled.join(" → ")}, which can change what runs or where`);
 		if (!PIPE_FILTERS.has(name) && !NO_FILE_OPERANDS.has(name)) readsNoFile = false;
 		if (dynamicKinds.has("substitution") && !PURE_OUTPUT.has(name)) {
 			escalate(`passes a command substitution's output to ${name || "the shell"}, and its words are unknown here`);
@@ -1204,10 +1326,10 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			const reason =
 				gitEscalationReason(
 					args,
-					(dir) => {
-						if (isUnknownTilde(dir)) return true;
-						const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-						return resolved === undefined || !isWithin(containmentRoot, resolved);
+					(dir, from) => {
+						const { at, resolved } = gitDirectoryStep(from ?? effectiveCwd, dir, home);
+						if (isUnknownTilde(dir)) return { outside: true, at };
+						return { outside: resolved === undefined || !isWithin(containmentRoot, resolved), at };
 					},
 					(words) => fileReads.push(...words),
 				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
@@ -1233,6 +1355,10 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// (tar/dd/ln/…) stays uncontained.
 		const fileOperands = acceptEditsOperands(name, args);
 		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: fileOperands !== undefined });
+		// A source that is a symbolic link, or a directory or glob that may hold one, carries the link to its new place.
+		if (fileOperands !== undefined && (name === "mv" || name === "cp") && fileOperands.slice(0, -1).some((source) => mayCarryLink(toAbsoluteBash(effectiveCwd, source.value, home), source.value))) {
+			relocating.add(segment);
+		}
 
 
 		// A read-only command is proved read-only by its options, not its name:
@@ -1395,6 +1521,20 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		for (const token of writeTokens) checkWriteTarget(token);
+	}
+
+	// A moved or copied relative symlink points somewhere else afterwards, and
+	// every path on the line was judged on the files as they were before it
+	// ran: `mv sub/rel link && echo x > link` writes where `sub/rel` pointed
+	// from its new place. So a line that moves what may be a link is contained
+	// only when the move is all it does. A source that does not exist yet was
+	// made earlier on the line by a command judged here, and is no link.
+	// Two such moves retarget each other the same way, so neither exempts the other.
+	if (relocating.size > 1 || (relocating.size > 0 && segments.some((segment) => !relocating.has(segment) && (segment.redirects.length > 0 || segment.inputs.length > 0 || segment.tokens.length > 1)))) {
+		escalate("moves or copies a file and names another path on the same line, which the move can retarget");
+	}
+	if ([...relocating].some((segment) => segment.redirects.length > 0)) {
+		escalate("moves or copies a file and redirects on the same line, which the move can retarget");
 	}
 
 	// The command escalated, but every reason was an acceptEdits file command on

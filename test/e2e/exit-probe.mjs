@@ -74,8 +74,8 @@ const EXIT_DEADLINE_MS = 30_000;
 const EXIT_GRACE_MS = 3_000;
 /** After a session switch: an MCP close waits 2 s for the server, signals it, then waits 2 s more. The held SIGINT waits all of it. */
 const SWITCH_GRACE_MS = 8_000;
-/** The most an interactive pi gets to take the terminal and start its session before the prompt is typed. */
-const TUI_START_MS = 6_000;
+/** The most an interactive pi gets to take the terminal and start its session before the prompt is typed. Polled, so a quick start costs nothing; running out is reported as a problem. */
+const TUI_START_MS = 20_000;
 /** Before a command is typed into the TUI: how long its output must stay quiet (the turn settled), and the most that wait takes. */
 const TUI_QUIET_MS = 1_000;
 const TUI_SETTLE_MS = 6_000;
@@ -433,7 +433,10 @@ async function runEnding(ending) {
 		} else if (ending.tui) {
 			pi = startPi(world, [], { tui: true });
 			// Ready once the TUI has the terminal (bracketed paste on) and the session has started (its SessionStart hook ran).
-			await pollUntil(() => pi.output().includes("\x1b[?2004h") && commandScan(tag).some((p) => spawnerOf(p.command, tag) === "hook"), Date.now() + TUI_START_MS);
+			const ready = () => pi.output().includes("\x1b[?2004h") && commandScan(tag).some((p) => spawnerOf(p.command, tag) === "hook");
+			await pollUntil(ready, Date.now() + TUI_START_MS);
+			// The prompt is typed either way, so a slow start still gets its chance; a run that passes only because of that is still reported.
+			if (!ready()) result.problems.push(`${ending.id}: the TUI was not ready within ${TUI_START_MS / 1000} s (bracketed paste on and the SessionStart hook run); the prompt was typed anyway`);
 			pi.write(`${PROMPT}\r`);
 			const seen = await waitForSpawners(tag, ending.starts, pi.pid);
 			if (ending.id === "tui-crash") {

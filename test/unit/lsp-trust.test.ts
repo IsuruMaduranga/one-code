@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLspTrustGate } from "../../extensions/tools/lsp/trust.ts";
+import { createLspTrustGate, needsProjectTrust } from "../../extensions/tools/lsp/trust.ts";
 
 describe("createLspTrustGate: a shared trust dialog", () => {
 	it("lets a caller still live ask again when the one that opened the dialog aborts", async () => {
@@ -21,5 +21,14 @@ describe("createLspTrustGate: a shared trust dialog", () => {
 		answers[1](true);
 		expect(await second).toBe(true);
 		expect(persisted).toEqual(["/proj"]);
+	});
+});
+
+describe("needsProjectTrust", () => {
+	it("asks for the TypeScript server only while a command sandbox is configured", () => {
+		expect(needsProjectTrust("typescript-language-server", false)).toBe(false);
+		expect(needsProjectTrust("typescript-language-server", true)).toBe(true);
+		expect(needsProjectTrust("rust-analyzer", false)).toBe(true);
+		expect(needsProjectTrust("pyright-langserver", true)).toBe(false);
 	});
 });

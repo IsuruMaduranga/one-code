@@ -21,7 +21,21 @@ import { comparablePath, isPathAtOrUnder } from "../../lib/profile/paths.ts";
 import { singleFlight } from "../../lib/core/single-flight.ts";
 
 /** Built-in server commands that execute project code. */
-export const PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["rust-analyzer", "jdtls"]);
+const PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["rust-analyzer", "jdtls"]);
+
+/**
+ * Servers that load code from the project's own dependencies, which only a
+ * command sandbox makes a risk: typescript-language-server runs the
+ * project's `node_modules/typescript/lib/tsserver.js`, a file a sandboxed
+ * command (an install script, say) may rewrite. Without a sandbox that
+ * command already ran with the user's rights, so the server adds nothing.
+ */
+const SANDBOX_PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["typescript-language-server"]);
+
+/** Whether a built-in server needs the project trusted before it starts; `sandboxed` is whether a command sandbox is configured. */
+export function needsProjectTrust(command: string, sandboxed: boolean): boolean {
+	return PROJECT_CODE_SERVERS.has(command) || (sandboxed && SANDBOX_PROJECT_CODE_SERVERS.has(command));
+}
 
 /* What each of those runs is worded by the profile (text.ts `projectCodeReason`). */
 

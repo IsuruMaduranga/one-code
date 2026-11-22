@@ -309,6 +309,10 @@ describe("renderStrip", () => {
 		expect(agentRow).toMatch(/^❯ ◯ general-purpose {2}/);
 		expect(agentRow).toContain("58.8k");
 
+		// Narrower than the hint: it wraps at its separators, so every key stays on screen.
+		const narrow = renderStrip({ rows, selected: 1, width: 40, now: 5000, stopAll: true }, paint).map(strip);
+		expect(narrow.slice(0, 2)).toEqual(["Enter to view · x to stop", "ctrl+x ctrl+k stop all · esc back"]);
+
 		// Viewing the agent: ↑/↓ selects, and the viewed row carries the filled dot.
 		const viewing = renderStrip({ rows, selected: 0, viewedId: "a", width: 80, now: 5000, stopAll: true }, paint).map(strip);
 		expect(viewing[0]).toBe("↑/↓ to select · Enter to view · ctrl+x ctrl+k stop all · esc back");

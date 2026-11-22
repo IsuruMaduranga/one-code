@@ -18,6 +18,27 @@ import type { Coverage, EpochCause, ToldFact } from "./records.ts";
 export const LEDGER_PLAN_CHANNEL = brandedId("ledger-plan");
 
 /**
+ * Published by the ledger's payload hook for a request that opens an epoch,
+ * before it records the body: a listener may replace `payload` with the body
+ * that will go on the wire. A fork's `fork-cache` puts the parent's captured
+ * request in front of the fork's tail here, so the record holds the whole
+ * list and the fork's next request extends it. Spliced after the record, the
+ * record held only the tail and the next request lost the conversation.
+ */
+export const LEDGER_EPOCH_BODY_CHANNEL = brandedId("ledger-epoch-body");
+
+export interface LedgerEpochBody {
+	payload: Record<string, unknown>;
+	/**
+	 * Set by a listener that put an already-sent request in front: how many
+	 * leading list elements are that request's, unchanged. The ledger leaves
+	 * them as sent (no redaction, layout or repair there), as it leaves a
+	 * record's prefix: another session's cache holds those bytes.
+	 */
+	kept?: number;
+}
+
+/**
  * Published by the ledger's payload hook with the request as it goes out
  * (`LedgerSent`): the spliced, validated body, before cache-marks adds its
  * look-back mark. A pi cache warm publishes it again.

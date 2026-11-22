@@ -394,8 +394,14 @@ export const READ_ONLY_SPECS: Record<string, OptionSpec> = {
 	jq: JQ,
 	ls: {
 		...LENIENT,
-		optionsReason: (seen) =>
-			(seen.has("-L") || seen.has("--dereference")) && (seen.has("-R") || seen.has("--recursive")) ? `passes -L with -R, so it ${FOLLOWS_WHILE_RECURSING}` : undefined,
+		// GNU ls takes any unambiguous prefix of a long option (`--recurs`, `--deref`).
+		// `--dereference-command-line…` is a prefix match of neither spelling here, and counting it costs one escalation.
+		optionsReason: (seen) => {
+			const long = (name: string, shortest: string) => [...seen].some((option) => option.startsWith(shortest) && name.startsWith(option));
+			return (seen.has("-L") || long("--dereference", "--d")) && (seen.has("-R") || long("--recursive", "--rec"))
+				? `passes -L with -R, so it ${FOLLOWS_WHILE_RECURSING}`
+				: undefined;
+		},
 	},
 	md5sum: CHECKSUM,
 	nl: LENIENT,
@@ -606,7 +612,7 @@ const GIT_DIFF = merge(
 	GIT_COLOR,
 	table({
 		none:
-			"-p -u -s -D -R -a -b -w -W -z -t -m -c --patch --no-patch --raw --patch-with-raw --patch-with-stat --numstat --shortstat --cumulative --summary --name-only --name-status --no-color-moved --no-renames --rename-empty --no-rename-empty --check --full-index --binary --find-copies-harder --irreversible-delete --pickaxe-all --pickaxe-regex --no-relative --text --ignore-cr-at-eol --ignore-space-at-eol --ignore-space-change --ignore-all-space --ignore-blank-lines --function-context --exit-code --quiet --no-ext-diff --no-textconv --no-prefix --default-prefix --ita-invisible-in-index --ita-visible-in-index --minimal --patience --histogram --compact-summary --indent-heuristic --no-indent-heuristic --cc --dd --no-diff-merges --combined-all-paths --remerge-diff --no-abbrev",
+			"-p -u -s -D -R -a -b -w -W -z -t -m -c --patch --no-patch --raw --patch-with-raw --patch-with-stat --numstat --shortstat --cumulative --summary --name-only --name-status --no-color-moved --no-renames --rename-empty --no-rename-empty --check --full-index --binary --find-copies-harder --irreversible-delete --pickaxe-all --pickaxe-regex --no-relative --text --ignore-cr-at-eol --ignore-space-at-eol --ignore-space-change --ignore-all-space --ignore-blank-lines --function-context --exit-code --quiet --no-ext-diff --no-textconv --no-prefix --default-prefix --ita-invisible-in-index --ita-visible-in-index --minimal --patience --histogram --compact-summary --indent-heuristic --no-indent-heuristic --cc --dd --no-diff-merges --combined-all-paths --no-abbrev",
 		optional:
 			"--stat --dirstat --submodule --color-moved --word-diff --color-words --abbrev -B --break-rewrites -M --find-renames -C --find-copies --relative --ignore-submodules",
 		required:

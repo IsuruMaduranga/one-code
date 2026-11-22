@@ -44,18 +44,24 @@ export type ReplayApi =
 /**
  * Where the output cap lives, first match in the captured body wins: a
  * top-level field, or one level down (Bedrock's `inferenceConfig.maxTokens`,
- * Google's `config.maxOutputTokens`). Codex sends none.
+ * Google's `config.maxOutputTokens`).
  */
 const CAP_PATHS: Record<ReplayApi, ReadonlyArray<readonly string[]>> = {
 	"anthropic-messages": [["max_tokens"]],
 	"openai-completions": [["max_completion_tokens"], ["max_tokens"]],
 	"openai-responses": [["max_output_tokens"]],
 	"azure-openai-responses": [["max_output_tokens"]],
-	"openai-codex-responses": [],
+	"openai-codex-responses": [["max_output_tokens"]],
 	"bedrock-converse-stream": [["inferenceConfig", "maxTokens"]],
 	"google-generative-ai": [["config", "maxOutputTokens"]],
 	"google-vertex": [["config", "maxOutputTokens"]],
 };
+
+/**
+ * APIs whose cap is written only where the captured body carries one. Codex
+ * sends one from pi 1.6.0 and took none before, so on an older pi nothing is written.
+ */
+const CAP_ONLY_WHERE_SENT: ReadonlySet<ReplayApi> = new Set<ReplayApi>(["openai-codex-responses"]);
 
 const REPLAY_APIS: ReadonlySet<string> = new Set<ReplayApi>([
 	"anthropic-messages",
@@ -78,7 +84,8 @@ function capAt(payload: Record<string, unknown>, path: readonly string[]): numbe
 /** The path of the cap `payload` carries for `api`, or the first one the API takes. */
 function capPath(api: ReplayApi, payload: Record<string, unknown>): readonly string[] | undefined {
 	const paths = CAP_PATHS[api];
-	return paths.find((path) => capAt(payload, path) !== undefined) ?? paths[0];
+	const found = paths.find((path) => capAt(payload, path) !== undefined);
+	return found ?? (CAP_ONLY_WHERE_SENT.has(api) ? undefined : paths[0]);
 }
 
 /** `payload` with `value` at `path`, copying only the objects on the way. */
@@ -360,7 +367,7 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const parentDeclared = captureDeclarations(capture);
 	// The child's own prelude and system messages go; a Responses load item its
 	// tool_search placed in the tail stays, less what the capture declares.
-	const tail = childList.slice(preludeLength(childList, capture.api)).flatMap((entry): WireMessage[] => {
+	const tail = childList.slice(preludeLength(childList, capture.api, child)).flatMap((entry): WireMessage[] => {
 		if (isToolsItem(entry)) {
 			const tools = entry.tools.filter((tool) => !parentDeclared.has(toolName(tool) ?? ""));
 			return tools.length > 0 ? [{ ...entry, tools } as WireMessage] : [];

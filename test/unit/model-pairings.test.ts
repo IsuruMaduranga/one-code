@@ -243,8 +243,12 @@ describe("PAIRING_TABLE against its scores", () => {
 	});
 
 	it("never picks a deprecated model, however close and cheap", () => {
-		const picks = [...new Set(PAIRING_TABLE.flatMap((row) => [row.subagent, row.classifier]))].filter((id) => id !== "session");
-		expect(picks.filter((id) => SCORED.get(id)?.deprecated)).toEqual([]);
+		// A listed override is the user's own call and is checked by its own test below; the rule's picks are never deprecated.
+		const overridden = (session: string, role: "subagent" | "classifier") => SCORES.overrides.some((entry) => entry.session === session && entry.role === role);
+		const picks = PAIRING_TABLE.flatMap((row) =>
+			(["subagent", "classifier"] as const).filter((role) => !row.sessions.every((session) => overridden(session, role))).map((role) => row[role]),
+		).filter((id) => id !== "session");
+		expect([...new Set(picks)].filter((id) => SCORED.get(id)?.deprecated)).toEqual([]);
 		const models = [scored("v/big", 50, 40, 4), scored("v/old", 49, 39, 0.1, true), scored("v/mid", 45, 35, 1)];
 		expect(derivedPick("v/big", "classifier", noneTiny, models)).toBe("v/mid");
 		expect(derivedPick("v/big", "subagent", noneTiny, models)).toBe("v/mid");
@@ -280,10 +284,10 @@ describe("PAIRING_TABLE against its scores", () => {
 		expect(derivedPick("anthropic/claude-fable-5-2", "classifier", isTiny)).toBe("session");
 	});
 
-	it("screens Gemini 4 Argon with Gemini 3.8 Flash, the user's call over the rule's Hydrogen", () => {
+	it("screens Gemini 4 Argon with Gemini 4 Hydrogen, the rule's pick, with no override left", () => {
 		const isTiny = tinyInBundledCatalog();
 		expect(derivedPick("google/gemini-4-argon", "classifier", isTiny)).toBe("google/gemini-4-hydrogen");
-		expect(SCORES.overrides).toEqual([expect.objectContaining({ session: "google/gemini-4-argon", role: "classifier", pick: "google/gemini-3.8-flash" })]);
-		expect(PAIRING_TABLE.find((row) => row.sessions.includes("google/gemini-4-argon"))?.classifier).toBe("google/gemini-3.8-flash");
+		expect(SCORES.overrides).toEqual([]);
+		expect(PAIRING_TABLE.find((row) => row.sessions.includes("google/gemini-4-argon"))?.classifier).toBe("google/gemini-4-hydrogen");
 	});
 });

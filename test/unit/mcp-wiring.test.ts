@@ -174,6 +174,56 @@ describe("mcp wiring", () => {
 		expect(ctx._notified).toContainEqual({ message: stdout, type: "info" });
 	});
 
+	// A skipped entry's note is shown once at startup; /mcp keeps showing it,
+	// in every form, so a later look still says why the server is missing.
+	describe("keeps the config load's notes for /mcp", () => {
+		const note = (path: string) => `MCP server "broken" in ${path} has neither a url nor a command, so it is ignored.`;
+
+		it("in the no-servers message when no server loads", async () => {
+			writeUserServers({ broken: { args: ["x"] } });
+			await boot();
+			const ctx = createFakeCtx({ cwd, hasUI: true, mode: "tui" });
+			await fake.commands.get("mcp")!.handler("", ctx);
+			expect(ctx._notified).toContainEqual({ message: `${noMcpServersMessage(BORROWED_MCP_WHERE)}\n${note(borrowedMcpPaths(cwd, home).user)}`, type: "info" });
+		});
+
+		it("in the text listing", async () => {
+			writeUserServers({ broken: { args: ["x"] }, demo: { command: "demo-server" } });
+			await boot();
+			const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+			await fake.commands.get("mcp")!.handler("", ctx);
+			const listing = (ctx._notified as Array<{ message: string }>).at(-1)!.message;
+			expect(listing.split("\n").at(-1)).toBe(note(borrowedMcpPaths(cwd, home).user));
+		});
+
+		it("in the panel", async () => {
+			writeUserServers({ broken: { args: ["x"] }, demo: { command: "demo-server" } });
+			await boot();
+			let component: { handleInput: (data: string) => void; render: (w: number) => string[] } | undefined;
+			const ctx = createFakeCtx({
+				cwd,
+				hasUI: true,
+				ui: {
+					custom: vi.fn(
+						(factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: unknown) => void) => unknown) =>
+							new Promise((resolve) => {
+								const tui = { requestRender: () => {}, terminal: { rows: 40 } };
+								Promise.resolve(factory(tui, {}, {}, (result: unknown) => resolve(result))).then((built) => {
+									component = built as typeof component;
+								});
+							}),
+					),
+				},
+			});
+			const panelDone = fake.commands.get("mcp")!.handler("", ctx);
+			await vi.waitFor(() => expect(component).toBeDefined());
+			const shown = component!.render(400).join(" ").replace(/\s+/g, " ");
+			expect(shown).toContain(note(borrowedMcpPaths(cwd, home).user));
+			component!.handleInput("\x03");
+			await panelDone;
+		});
+	});
+
 	it("records the RPC read-only notice with the text-mode status listing", async () => {
 		writeUserServers({ demo: { command: "demo-server", args: [] } });
 		await boot();
@@ -324,6 +374,25 @@ describe("mcp wiring", () => {
 		releaseSlow();
 		await starting;
 		expect(renderInEpoch(fake.events, told).join("\n")).not.toContain("slow");
+	});
+
+	it("leaves out a tool whose name is over the limit of the session model's provider, and says so", async () => {
+		const long = "list_pull_request_review_comments_for_repository_and_branch"; // with "mcp__demo__", 70 characters
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }, { name: long }] });
+		mcpExtension(fake.pi as never);
+		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "openai-completions" } });
+		expect(fake.tools.has("mcp__demo__foo")).toBe(true);
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(false);
+	});
+
+	it("keeps a 65 to 128 character tool name where the provider takes it", async () => {
+		const long = "list_pull_request_review_comments_for_repository_and_branch";
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: long }] });
+		mcpExtension(fake.pi as never);
+		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "anthropic-messages" } });
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(true);
 	});
 
 	it("execute() on a registered MCP tool calls through the live connection", async () => {

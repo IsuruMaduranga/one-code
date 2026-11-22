@@ -47,6 +47,13 @@ describe("the request identity", () => {
 		expect(requestIdentity({ ...sonnet, compat: {} }, "off")).not.toHaveProperty("effortMarkers");
 	});
 
+	it("keeps the markers on Codex while thinking is off, where pi sends off as an effort of its own", () => {
+		const codex = { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-6.1-sol", reasoning: true, compat: { supportsMidConvoEffort: true } };
+		expect(requestIdentity(codex, "high")?.effortMarkers).toBe(true);
+		expect(requestIdentity(codex, "off")?.effortMarkers).toBe(true);
+		expect(requestIdentity({ ...codex, thinkingLevelMap: { off: null } }, "off")?.effortMarkers).toBe(false);
+	});
+
 	it("opens an epoch when thinking turns off where pi marks effort per message", () => {
 		const on = requestIdentity(sonnet, "high") as RequestIdentity;
 		const branch = [
@@ -71,6 +78,47 @@ describe("mergeDeclarations", () => {
 		const recorded = tool("v1", { id: { type: "string" } }, { defer_loading: true });
 		const live = tool("v2", { id: { type: "string" }, project: { type: "string" } });
 		expect(mergeDeclarations([recorded], [live])).toEqual([{ ...live, defer_loading: true }]);
+	});
+
+	// pi 1.6 sends the root `additionalProperties` on Anthropic; a deferred
+	// declaration and one recorded on an earlier pi lack it. A load must not
+	// move the tools array for that keyword alone.
+	it.each([true, false])("keeps the recorded bytes when only the root additionalProperties (%s) differs", (additionalProperties) => {
+		const recorded = tool("text", { id: { type: "string" } }, { defer_loading: true });
+		const live = { name: "lookup", description: "text", eager_input_streaming: true, input_schema: { type: "object", properties: { id: { type: "string" } }, additionalProperties } };
+		expect(mergeDeclarations([recorded], [live])).toEqual([recorded]);
+		expect(mergeDeclarations([live], [recorded])).toEqual([live]);
+	});
+
+	// pi keeps a schema's root `$defs` and `definitions` (from 1.5.1); a deferred
+	// declaration drops them. Loading such an MCP tool must not move the array.
+	it.each(["$defs", "definitions"])("keeps the recorded bytes when only one side carries the root %s", (keyword) => {
+		const recorded = tool("text", { id: { $ref: `#/${keyword}/Id` } }, { defer_loading: true });
+		const live = { name: "lookup", description: "text", input_schema: { type: "object", properties: { id: { $ref: `#/${keyword}/Id` } }, [keyword]: { Id: { type: "string" } } } };
+		expect(mergeDeclarations([recorded], [live])).toEqual([recorded]);
+	});
+
+	it("takes the live declaration when both sides carry a root keyword and it changed", () => {
+		const withDefs = (type: string) => ({ name: "lookup", description: "text", input_schema: { type: "object", properties: { id: { $ref: "#/$defs/Id" } }, $defs: { Id: { type } }, additionalProperties: false } });
+		expect(mergeDeclarations([withDefs("string")], [withDefs("number")])).toEqual([withDefs("number")]);
+		const open = { name: "lookup", description: "text", input_schema: { type: "object", properties: {}, additionalProperties: true } };
+		const closed = { name: "lookup", description: "text", input_schema: { type: "object", properties: {}, additionalProperties: false } };
+		expect(mergeDeclarations([open], [closed])).toEqual([closed]);
+	});
+
+	// A flat schema with every property required is the same strict or not, but for the root keyword the merge ignores.
+	it("takes the live declaration when the strict flag changed", () => {
+		const schema = { type: "object", properties: { path: { type: "string" } }, required: ["path"] };
+		const recorded = { type: "function", function: { name: "write", description: "text", strict: true, parameters: { ...schema, additionalProperties: false } } };
+		const live = { type: "function", function: { name: "write", description: "text", parameters: schema } };
+		expect(mergeDeclarations([recorded], [live])).toEqual([live]);
+		expect(mergeDeclarations([live], [{ ...live, function: { ...live.function, strict: false } }])).toEqual([live]);
+	});
+
+	it("still takes the live declaration when a nested additionalProperties changed", () => {
+		const recorded = tool("v1", { opts: { type: "object", properties: {} } });
+		const live = tool("v1", { opts: { type: "object", properties: {}, additionalProperties: false } });
+		expect(mergeDeclarations([recorded], [live])).toEqual([live]);
 	});
 });
 

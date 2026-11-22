@@ -855,10 +855,68 @@ export function scopedTracker<T>(initial: T): { get(segment: Pick<Segment, "scop
 export const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_statement"]);
 
 /**
+ * The text to parse when a backslash before a line end may make the grammar
+ * read other words than bash runs, or undefined when the line has none.
+ *
+ * bash deletes a backslash-newline pair before it splits words, wherever the
+ * pair is outside single quotes: `.\<nl>./x` is the one word `../x`, and
+ * `"$\<nl>(cmd)"` is a command substitution. The grammar treats the pair as
+ * blank space between two words, or leaves it inside a string. A backslash
+ * before a carriage return and a newline is no continuation to bash (it
+ * escapes the carriage return and the newline ends the command), yet the
+ * grammar joins the lines.
+ *
+ * Such a line is parsed as bash joins it, so rules and the control-file scan
+ * see the joined words, and it always counts as a failed parse: the joined
+ * reading is wrong inside single quotes and heredocs, so nothing may be
+ * proved from it. A pair with blank space on either side only separates
+ * words, which the grammar reads as bash does; those lines are left alone.
+ */
+function continuationReading(command: string): string | undefined {
+	if (!command.includes("\\\n") && !command.includes("\\\r")) return undefined;
+	let suspicious = false;
+	let text = "";
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch !== "\\") {
+			text += ch;
+			continue;
+		}
+		const next = command[i + 1];
+		if (next === "\r") {
+			suspicious = true;
+			text += " ";
+			i++;
+			continue;
+		}
+		if (next === "\n") {
+			const before = command[i - 1];
+			const after = command[i + 2];
+			const blank = (c: string | undefined) => c === undefined || c === " " || c === "\t" || c === "\n";
+			// A list or pipe operator ends a word as blank space does (`a &&\<nl>b`,
+			// `a\<nl>| b`). Redirect operators and `$(` do not count: the next word
+			// belongs to them (`>&\<nl>1`, `"$\<nl>(cmd)"`).
+			const two = command.slice(i - 2, i);
+			const endsWord = before === ";" || before === "(" || two === "&&" || two === "||" || (before === "|" && command[i - 2] !== ">");
+			const startsOperator = before !== ">" && before !== "<" && (after === ";" || after === ")" || after === "|" || command.slice(i + 2, i + 4) === "&&");
+			if (!blank(before) && !blank(after) && !endsWord && !startsOperator) suspicious = true;
+			i++;
+			continue;
+		}
+		// An escaped character, a backslash included: keep the pair whole.
+		text += ch + (next ?? "");
+		i++;
+	}
+	return suspicious ? text : undefined;
+}
+
+/**
  * Split a command into its simple commands (see the module header). Returns
  * `parseFailed` with no segments while the grammar is not loaded.
  */
-export function parseCommand(command: string): ParseResult {
+export function parseCommand(raw: string): ParseResult {
+	const joined = continuationReading(raw);
+	const command = joined ?? raw;
 	const tree = parseBash(command);
 	if (!tree) return { segments: [], parseFailed: true, unavailable: bashParserUnavailable(), background: false, substitutions: [], pipelines: [] };
 	try {
@@ -870,7 +928,7 @@ export function parseCommand(command: string): ParseResult {
 			.map(({ start: _start, ...segment }) => segment);
 		return {
 			segments,
-			parseFailed: tree.rootNode.hasError || walker.failed,
+			parseFailed: joined !== undefined || tree.rootNode.hasError || walker.failed,
 			unknownQuoting: walker.unknownQuoting,
 			complex: walker.complex,
 			unattributedExpansion: walker.unattributedExpansion,

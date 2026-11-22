@@ -171,8 +171,21 @@ export function encodeRequest(
 	return { identity, keep, append: hashes.slice(keep), head: headHash, blobs };
 }
 
-/** APIs whose list starts with the system prompt as an instruction message (Chat Completions, Responses but not Codex, Mistral). */
+/** APIs whose list starts with the system prompt as an instruction message (Chat Completions, Responses, Mistral). Codex: `promptInList`. */
 const PROMPT_IN_LIST: ReadonlySet<string> = new Set(["openai-completions", "openai-responses", "azure-openai-responses", "mistral-conversations"]);
+
+/**
+ * Whether a request's list starts with the system prompt. Codex sent it as the
+ * top-level `instructions` field up to pi 1.5 and sends it as the list's first
+ * developer item from pi 1.6.0, with no `instructions` field. The payload says
+ * which: on the earlier shape a leading developer item is a message of the
+ * conversation and stays in the tail. Without a payload to read, Codex counts
+ * as the earlier shape.
+ */
+function promptInList(api: string, payload: WirePayload | undefined): boolean {
+	if (api === "openai-codex-responses") return payload !== undefined && !("instructions" in payload);
+	return PROMPT_IN_LIST.has(api);
+}
 
 /**
  * Whether `element` is a Responses `additional_tools` item: tools declared in
@@ -209,12 +222,13 @@ const isInstruction = (element: unknown): boolean => isPlainObject(element) && (
  * request's leading `additional_tools` item (pi 1.4.0 and later), then the
  * system prompt where the API puts it in the list. A request that sends only
  * its tail through pi still gets them, and the record already holds them.
- * Read from the elements, never from pi's version: an element this does not
- * recognize stays in the tail, which costs tokens but never a declaration.
+ * Read from the elements and the `payload` they came in, never from pi's
+ * version: an element this does not recognize stays in the tail, which costs
+ * tokens but never a declaration.
  */
-export function preludeLength(list: readonly unknown[], api: string): number {
+export function preludeLength(list: readonly unknown[], api: string, payload?: WirePayload): number {
 	let at = api.endsWith("-responses") && isToolsItem(list[0]) ? 1 : 0;
-	if (PROMPT_IN_LIST.has(api) && isInstruction(list[at])) at++;
+	if (promptInList(api, payload) && isInstruction(list[at])) at++;
 	return at;
 }
 
@@ -295,6 +309,37 @@ function inputSchemaOf(tool: unknown): unknown {
 	return tool.input_schema ?? tool.parameters ?? tool.parametersJsonSchema;
 }
 
+/** Root keywords pi's converter copies on some versions and APIs and drops on others, and a deferred declaration built here leaves out. */
+const ROOT_KEYWORDS = ["additionalProperties", "$defs", "definitions"] as const;
+
+/** A declaration's `strict` flag, wherever its API keeps it; absent reads as false. */
+function strictOf(tool: unknown): boolean {
+	if (!isPlainObject(tool)) return false;
+	return (isPlainObject(tool.function) ? tool.function.strict : tool.strict) === true;
+}
+
+/**
+ * Whether two declarations of one tool take the same input, as the merge
+ * compares them. A root `additionalProperties`, `$defs` or `definitions` that
+ * only one side carries is not a difference: pi 1.6 began sending the first
+ * on Anthropic and pi 1.5.1 the other two (earlier versions dropped them),
+ * and a deferred declaration built here has none, so a declaration recorded
+ * without one differs from pi's live one in that keyword alone. That is not
+ * a changed tool: the recorded bytes stay, and pi validates a call against
+ * the tool's own schema either way. When both sides carry the keyword it is
+ * compared like the rest. A changed `strict` flag is a difference: a strict
+ * declaration promises the API a schema the live tool no longer has.
+ */
+function sameInput(a: unknown, b: unknown): boolean {
+	if (strictOf(a) !== strictOf(b)) return false;
+	const left = inputSchemaOf(a);
+	const right = inputSchemaOf(b);
+	if (!isPlainObject(left) || !isPlainObject(right)) return contentHash(left) === contentHash(right);
+	const onOneSide: string[] = ROOT_KEYWORDS.filter((key) => (left[key] === undefined) !== (right[key] === undefined));
+	const without = (schema: Record<string, unknown>) => Object.fromEntries(Object.entries(schema).filter(([key]) => !onOneSide.includes(key)));
+	return contentHash(without(left)) === contentHash(without(right));
+}
+
 /** The live declaration with the recorded one's `defer_loading`: a load or a deferral moves that flag, never the tool. */
 function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
 	if (!isPlainObject(live) || !isPlainObject(recorded)) return live;
@@ -308,7 +353,7 @@ function withRecordedDeferral(live: unknown, recorded: unknown): unknown {
  * as pi built it (its cache marker included); one that differs only in its
  * text or its deferral takes the recorded bytes, so a description variant or a
  * load never moves the tools array. One whose input schema changed (an
- * upgrade, an MCP server's new schema) takes the live
+ * upgrade, an MCP server's new schema; `sameInput`) takes the live
  * declaration, with the recorded deferral: pi validates and runs a call
  * against the live schema, so the wire must offer that one. Nameless markers
  * that end the live list (Bedrock `cachePoint`) end it.
@@ -327,7 +372,7 @@ export function mergeDeclarations(recorded: readonly unknown[], live: readonly u
 		seen.add(name);
 		const current = liveByName.get(name);
 		if (current !== undefined && contentHash(current) === contentHash(tool)) out.push(current);
-		else if (current !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool))) out.push(withRecordedDeferral(current, tool));
+		else if (current !== undefined && !sameInput(current, tool)) out.push(withRecordedDeferral(current, tool));
 		else out.push(structuredClone(tool));
 	}
 	for (const tool of live) {
@@ -503,7 +548,7 @@ export function appendPoint(list: readonly unknown[], api: string): number {
  */
 export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: string): WirePayload {
 	const list = payloadList(payload, api);
-	const tail = list.slice(preludeLength(list, api));
+	const tail = list.slice(preludeLength(list, api, payload));
 	const at = appendPoint(base.list, api);
 	const out = underRecordedHead(base, payload, api, [...structuredClone(base.list.slice(0, at)), ...tail]);
 	return api.endsWith("-responses") && !Array.isArray(base.head.tools) ? withLiveDeclarations(out, payload, api, base, at) : out;
@@ -574,7 +619,7 @@ function withLiveDeclarations(out: WirePayload, live: WirePayload, api: string, 
 	const sent = responsesDeclarations(out, api);
 	const needed = [...responsesDeclarations(live, api)].filter(([name, tool]) => {
 		const current = sent.get(name);
-		return current === undefined || (recordItem !== undefined && contentHash(inputSchemaOf(current)) !== contentHash(inputSchemaOf(tool)));
+		return current === undefined || (recordItem !== undefined && !sameInput(current, tool));
 	});
 	if (needed.length === 0) return out;
 	const tools = needed.map(([, tool]) => stripMarkers(tool));

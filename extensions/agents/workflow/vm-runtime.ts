@@ -7,9 +7,13 @@
  *
  * Only agent()/workflow() RPCs and log/phase notices reach the host, through
  * the gated globals. The vm context is a determinism guard for resume replay,
- * NOT a security sandbox: a script can reach the worker realm through the
- * prototype chain of its globals, so what it gets is the worker's process, not
- * pi's — the same class of exposure as before, one thread further away.
+ * and the worker keeps every object of its own realm out of the script's
+ * reach, because one would give the script that realm's `Function`
+ * constructor and, through `process`, the shell (the header in
+ * `script-worker.mjs` says how). A workflow launches without a permission
+ * check on the strength of that. `node:vm` is still no hardened sandbox: the
+ * script shares the worker's thread and memory, so the two layers there are
+ * a boundary against the known routes, not a proof against V8 bugs.
  */
 import { Worker } from "node:worker_threads";
 import { performance } from "node:perf_hooks";

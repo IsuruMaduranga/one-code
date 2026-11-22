@@ -181,11 +181,11 @@ describe("renderBtwPanel", () => {
 		const history = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }));
 		const text = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
 		for (const height of [8, 10, 12]) {
-			const lines = render({ history, body: { kind: "answer", text }, height });
+			const lines = render({ history, body: { kind: "answer", text }, height, width: 100 });
 			expect(lines.length).toBeLessThanOrEqual(height);
 			expect(lines.some((line) => line.includes("line 0"))).toBe(true);
 		}
-		expect(render({ history, height: 12 })).toContain("  (+4 earlier /btw)");
+		expect(render({ history, height: 12, width: 100 })).toContain("  (+4 earlier /btw)");
 	});
 
 	it("keeps a browsed question listed on a short dock", () => {
@@ -193,7 +193,7 @@ describe("renderBtwPanel", () => {
 		for (const height of [8, 10]) {
 			const state = initialBtwState();
 			state.selected = 3; // the oldest of the five browsable
-			const lines = render({ state, history, height });
+			const lines = render({ state, history, height, width: 100 });
 			expect(lines.length).toBeLessThanOrEqual(height);
 			expect(lines).toContain("  /btw q3");
 			expect(lines).toContain("    a3");
@@ -205,6 +205,56 @@ describe("renderBtwPanel", () => {
 		const row = lines.find((line) => line.startsWith("  /btw "));
 		expect(row).toContain("…");
 		expect(lines.filter((line) => line.includes("why is this")).length).toBe(1);
+	});
+
+	it("wraps the key hints onto more rows on a narrow terminal instead of cutting them", () => {
+		const history = [{ question: "earlier", answer: "then" }];
+		const hints = ["⇧←/→ to browse", "c to copy", "f to fork", "x to clear history", "Esc to close"];
+		for (const width of [30, 40]) {
+			const state = initialBtwState();
+			const lines = render({ state, history, canFork: true, width, height: 20 });
+			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+			const rows = plain(lines);
+			for (const hint of hints) expect(rows).toContain(hint);
+			expect(lines.length).toBeLessThanOrEqual(20);
+		}
+	});
+
+	it("keeps each hint's colour when the hints wrap", () => {
+		// SGR codes, as a real theme paints: zero columns wide, unlike visible tags.
+		const sgr: Record<string, string> = { muted: "90", error: "31" };
+		const theme = { fg: (color: string, text: string) => `\x1b[${sgr[color] ?? "0"}m${text}\x1b[0m` };
+		const state = initialBtwState();
+		state.copyError = "Copy failed: no clipboard";
+		const lines = renderBtwPanel({ state, history: [{ question: "e", answer: "a" }], question: "q", body: { kind: "answer", text: "a" }, width: 30, height: 20 }, theme);
+		const rows = plain(lines);
+		expect(rows).toContain("\x1b[90m⇧←/→ to browse\x1b[0m");
+		expect(rows).toContain("\x1b[31mCopy failed: no clipboard\x1b[0m");
+		expect(rows).toContain("\x1b[90mEsc to close\x1b[0m");
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(30);
+	});
+
+	it("counts the wrapped hint rows in the height budget", () => {
+		const history = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }));
+		const text = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+		for (const height of [10, 12]) {
+			const lines = render({ history, canFork: true, body: { kind: "answer", text }, width: 30, height });
+			expect(lines.length).toBeLessThanOrEqual(height);
+			expect(plain(lines)).toContain("Esc to close");
+		}
+	});
+
+	it("compacts the rule and blank rows when wrapped hints leave the dock no room for them", () => {
+		// Four hint rows at width 30: the dock's eight rows hold them, the question
+		// and one answer row only once the blank rows give way.
+		const hints = ["⇧←/→ to browse", "c to copy", "f to fork", "x to clear history", "Esc to close"];
+		const lines = render({ history: [{ question: "earlier", answer: "then" }], canFork: true, body: { kind: "answer", text: "the answer" }, width: 30, height: 8 });
+		expect(lines.length).toBeLessThanOrEqual(8);
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(30);
+		expect(lines).toContain("  /btw q");
+		expect(lines).toContain("    the answer");
+		for (const hint of hints) expect(plain(lines)).toContain(hint);
+		expect(lines[0]).not.toBe("");
 	});
 
 	it("never emits a line wider than the width", () => {
@@ -222,7 +272,7 @@ describe("renderBtwPanel", () => {
 
 describe("copyAnswer", () => {
 	const render = (state: ReturnType<typeof initialBtwState>) =>
-		renderBtwPanel({ state, history: [], question: "q", body: { kind: "answer", text: "a" }, width: 100, height: 20 }).at(-1);
+		renderBtwPanel({ state, history: [], question: "q", body: { kind: "answer", text: "a" }, width: 100, height: 20 }).join("\n");
 
 	it("shows the reason in the hint when no clipboard route works, instead of rejecting", async () => {
 		const state = initialBtwState();

@@ -178,3 +178,59 @@ return { one, both }
 		await expect(result).resolves.toBe("undefined");
 	});
 });
+
+// A workflow launches without a permission check because its script can touch
+// nothing itself. One object of the worker's own realm would give the script
+// that realm's Function constructor, and from there `process` and the shell.
+describe("a script cannot reach the worker's realm", () => {
+	const probe = (expression: string) => `
+		try {
+			const made = (${expression})('return typeof process');
+			return 'escaped: ' + made();
+		} catch (error) {
+			return 'blocked';
+		}`;
+
+	/**
+	 * The probe on the error `attempt` throws. An attempt that does not throw
+	 * leaves nothing to probe, so it says so rather than reading as blocked.
+	 */
+	const probeCaught = (attempt: string) => `let caught; try { ${attempt} } catch (error) { caught = error }
+		if (caught === undefined) return 'did not throw';` + probe("caught.constructor.constructor");
+
+	it.each([
+		["a global function's constructor", "agent.constructor"],
+		["the global object's constructor chain", "globalThis.constructor.constructor"],
+		["this at the top level of a function", "(function () { return this })().constructor.constructor"],
+		["a pending call's promise", "agent('x').constructor.constructor"],
+		["the arguments", "args.constructor.constructor"],
+		["the arguments' prototype", "args.__proto__.constructor.constructor"],
+		["the budget", "budget.spent.constructor"],
+		["the console", "console.log.constructor"],
+		["a combinator", "parallel.constructor"],
+	])("through %s", async (_name, expression) => {
+		await expect(run(META + probe(expression), { files: ["a"] }).result).resolves.toBe("blocked");
+	});
+
+	it("through a call's result or its rejection", async () => {
+		const resolved = `const value = await agent('x');` + probe("Object(value).constructor.constructor");
+		await expect(run(META + resolved, undefined, undefined, { agentCall: async () => ({ value: { ok: true }, tokens: { input: 0, output: 1, total: 1 }, cost: 0 }) }).result).resolves.toBe("blocked");
+		const rejected = probeCaught("await agent('x')");
+		// A failed agent resolves to null; only an authoring mistake reaches the script as a rejection.
+		await expect(run(META + rejected, undefined, undefined, { agentCall: async () => { throw new WorkflowScriptError("unknown agentType"); } }).result).resolves.toBe("blocked");
+	});
+
+	it("through an error the runtime throws into the script, or the one a dynamic import rejects with", async () => {
+		await expect(run(META + probeCaught("await parallel('not an array')")).result).resolves.toBe("blocked");
+		await expect(run(META + probeCaught("await import('node:child_process')")).result).resolves.toBe("blocked");
+	});
+
+	it("tells an attempt that did not throw from a blocked one", async () => {
+		await expect(run(META + probeCaught("await Promise.resolve(1)")).result).resolves.toBe("did not throw");
+	});
+
+	it("still hands the script its arguments, results and budget as plain values", async () => {
+		const body = `const first = await agent('a'); return { args, first, spent: typeof budget.spent(), list: await parallel([() => agent('b')]) }`;
+		await expect(run(META + body, { files: ["a", "b"], deep: { n: 1 } }).result).resolves.toEqual({ args: { files: ["a", "b"], deep: { n: 1 } }, first: "agent(a)", spent: "number", list: ["agent(b)"] });
+	});
+});

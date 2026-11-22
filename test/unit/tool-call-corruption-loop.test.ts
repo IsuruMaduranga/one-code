@@ -75,7 +75,12 @@ describe("corruption guard against pi's offline agent loop", () => {
 			expect(ctx.abort).toHaveBeenCalledTimes(1);
 			expect(execute).not.toHaveBeenCalled();
 			expect(providerCall).toHaveBeenCalledTimes(1);
-			expect(stream).toHaveBeenCalledTimes(damage === "schema-invalid" ? 2 : 1);
+			// pi 1.6.0 gives the sibling call an "Operation aborted" result with no
+			// `terminate`, so the batch no longer ends the loop: pi asks for one more
+			// reply on the aborted signal, which the provider answers as aborted
+			// without sending a request (`providerCall` stays at one).
+			expect(stream).toHaveBeenCalledTimes(2);
+			expect(messages.filter((message) => message.role === "toolResult")).toHaveLength(2);
 			expect(notice).toHaveBeenCalledTimes(1);
 			expect(notice).toHaveBeenCalledWith(expect.stringContaining("Morph"));
 			const result = messages.find((message) => message.role === "toolResult");

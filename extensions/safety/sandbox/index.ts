@@ -29,7 +29,7 @@ import { projectConfigDir } from "../../lib/profile/sources.ts";
 import { gateControlFiles } from "../../lib/profile/settings-files.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact, untoldBlockFact } from "../../lib/request/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
-import { activeSandbox, reloadSandboxSettings, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, startSandbox, stopSandbox, useSandboxSettingsFor } from "../../lib/shell-run/sandbox.ts";
+import { activeSandbox, reloadSandboxSettings, SANDBOX_UNSUPPORTED, sandboxConfigured, sandboxPlatform, sandboxSettings, sandboxSettled, sandboxUnavailable, sandboxUnsupported, startSandbox, stopSandbox, useSandboxSettingsFor } from "../../lib/shell-run/sandbox.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../../lib/rules/workspace-channel.ts";
@@ -37,7 +37,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
+import { checkoutProtectedFiles, linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
@@ -52,6 +52,11 @@ import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLi
  */
 const PROTECTED_CONFIG_CHILDREN = ["skills", "hooks", "commands", "agents", "rules", "workflows"];
 const protectedConfig = (dir: string): string[] => PROTECTED_CONFIG_CHILDREN.map((child) => join(projectConfigDir(dir), child));
+
+/** What a session is told when its settings ask for a sandbox the platform does not have. */
+function unsupportedSandboxMessage(required: boolean): string {
+	return `The command sandbox is turned on, but ${SANDBOX_UNSUPPORTED}. ${required ? "Shell commands are refused (sandbox.failIfUnavailable)." : "Shell commands run without it."}`;
+}
 
 /** The told fact of the sandbox section. */
 const SANDBOX_FACT = "sandbox:section";
@@ -192,14 +197,28 @@ function sandboxExtension(pi: ExtensionAPI) {
 		useSandboxSettingsFor(ctx.cwd);
 		if (!sandboxConfigured()) {
 			void stopSandbox();
+			// Asked for where the runtime has none: say so once, as a failed start does.
+			if (sandboxUnsupported() && !warned) {
+				warned = true;
+				const message = unsupportedSandboxMessage(sandboxSettings().failIfUnavailable);
+				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+				else process.stderr.write(`${message}\n`);
+			}
 			return;
 		}
 		const home = homedir();
 		const tempDir = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		scopes = new Map();
+		/** What a directory holds that must stay unwritable: its config folder's children and its checkout's files. */
+		const protectedIn = (dir: string): string[] => [...protectedConfig(dir), ...checkoutProtectedFiles(dir)];
+		// The workspace directories are the same for every scope until they change: read their checkouts once per set.
+		let workspaceProtected: { dirs: string[]; files: string[] } | undefined;
 		const scopeFor = (dir: string): SandboxScope => {
 			let scope = scopes.get(dir);
-			if (!scope) scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...[dir, ...workspace].flatMap(protectedConfig)] }));
+			if (!scope) {
+				if (workspaceProtected?.dirs !== workspace) workspaceProtected = { dirs: workspace, files: workspace.flatMap(protectedIn) };
+				scopes.set(dir, (scope = { cwd: dir, writableDirs: [...(tempDir ? [tempDir] : []), ...workspace, ...linkedWorktreeGitDirs(dir)], protectedFiles: [...gateControlFiles(dir, home), ...protectedIn(dir), ...workspaceProtected.files] }));
+			}
 			return scope;
 		};
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).

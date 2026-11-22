@@ -20,7 +20,7 @@
  *    and bundled agents exactly as a `pi install` would, and turns off pi's
  *    built-in tool search and MCP, which ours replace.
  * 3. Rewrites the few plain-stdout lines where pi prints its own command name
- *    (the resume hint, --help usage): under isolation `pi --session <id>`
+ *    (the resume hint, --help usage): under isolation `pi [--session-dir <dir>] --session <id>`
  *    would not just be mis-branded but broken, since stock pi cannot see the
  *    app's sessions.
  * 4. Suppresses pi's own update check and installs the app's instead
@@ -45,6 +45,18 @@ import { brand, envName, productBrand, withoutProfileFlags } from "../profile/br
 import { withCompactionKeepBackfilled } from "./compaction-keep.mjs";
 import { withReplacedBuiltinsOff } from "./replaced-builtins.mjs";
 import { createUpdateCheck, minReleaseAgeFor, UPGRADE_COMMANDS } from "./update-check.mjs";
+
+/**
+ * pi's exit hint with the app's command name. pi prints the label (dim, so
+ * ANSI codes may follow it), then `pi [--session-dir <dir>] --session <id>`
+ * after a space (before pi 1.6.0) or on its own line (pi 1.6.0 on). Only the
+ * command word right after the label changes: a session directory whose path
+ * holds " pi --session " stays as written.
+ */
+export function rebrandResumeHint(chunk, bin) {
+	if (!chunk.includes("To resume this session:")) return chunk;
+	return chunk.replace(/(To resume this session:(?:\x1b\[[0-9;]*m)*\s+)pi (--session(?:-dir)? )/, `$1${bin} $2`);
+}
 
 /**
  * Launch the app.
@@ -262,11 +274,7 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 		const originalWrite = process.stdout.write.bind(process.stdout);
 		process.stdout.write = (chunk, ...rest) => {
 			if (typeof chunk === "string") {
-				// The label may carry ANSI styling (chalk.dim), so match the command
-				// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
-				if (chunk.includes("To resume this session:")) {
-					chunk = chunk.replaceAll(" pi --session ", ` ${brand.bin} --session `);
-				}
+				chunk = rebrandResumeHint(chunk, brand.bin);
 				if (rewriteHelp) {
 					// Standalone word "pi" only: preceded by start/whitespace/quote, and
 					// NOT followed by a word char, "." or "-". The negative lookahead means

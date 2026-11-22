@@ -15,6 +15,7 @@ import workflowExtension from "../../extensions/agents/workflow/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
 import { workflowResultText } from "../../extensions/agents/workflow/text.ts";
+import { pendingWork, querySessionWork } from "../../extensions/lib/notify/session-work.ts";
 
 describe("workflow wiring: the ultracode keyword", () => {
 	let fake: FakePi;
@@ -175,6 +176,21 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		await vi.waitFor(() => expect(delivered()).toHaveLength(2), { timeout: 5_000 });
 		expect(delivered()[1]).toContain("SECOND");
 		expect(delivered()[1]).toContain("c2");
+	}, 15_000);
+
+	// yield's wait, the turn-end "Waiting for 1 workflow to finish" line and the
+	// Stop hook's background_tasks all read this answer; without it a model that
+	// yields on a running workflow is told nothing is running.
+	it("answers the session-work query with a running workflow, and stops answering once the run ends", async () => {
+		const fake = createFakePi();
+		workflowExtension(fake.pi as never);
+		expect(querySessionWork(fake.events).tasks).toEqual([]);
+		const waiting = "export const meta = { name: 'wait-probe', description: 'waits until stopped' }\nawait new Promise(() => {})";
+		const started = (await fake.tools.get("workflow")!.execute("c1", { script: waiting }, undefined, undefined, ctxFor("tui"))) as { details: { runId: string } };
+		expect(querySessionWork(fake.events).tasks).toEqual([{ id: started.details.runId, type: "workflow", status: "running", description: "waits until stopped" }]);
+		expect(pendingWork(fake.events)).toEqual({ agents: 0, workflows: 1, others: 0 });
+		await fake.fire("session_shutdown", {}, ctxFor("tui"));
+		await vi.waitFor(() => expect(querySessionWork(fake.events).tasks).toEqual([]), { timeout: 5_000 });
 	}, 15_000);
 
 	it.each(["tui", "rpc"])("in %s the same call still goes to the background", async (mode) => {

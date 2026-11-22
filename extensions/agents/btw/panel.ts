@@ -16,7 +16,7 @@
 
 import type { BtwExchange } from "./prompt.ts";
 import { keyId, keyText } from "../../lib/ui/key-input.ts";
-import { panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../../lib/ui/tui-render.ts";
+import { hintLines, panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../../lib/ui/tui-render.ts";
 
 export const BTW_MAX_HEIGHT = 24;
 
@@ -222,6 +222,40 @@ export interface BtwPanelInput {
 	renderAnswer?: AnswerRenderer;
 }
 
+/** Between two hints; the same text `wrapHints` breaks a row at. */
+const HINT_SEPARATOR = " · ";
+
+interface BtwHint {
+	text: string;
+	color: string;
+}
+
+/**
+ * The hint rows at `width`: the plain hints wrapped at their separators
+ * (`hintLines`), then each hint painted in its own colour. A hint cut with an
+ * ellipsis (wider than the row alone) takes the colour of the hint it came from.
+ */
+function hintRows(hints: readonly BtwHint[], width: number, paint: (color: string, text: string) => string): string[] {
+	const pad = " ".repeat(LIST_INDENT);
+	const rows = hintLines(hints.map((hint) => hint.text).join(HINT_SEPARATOR), width, pad);
+	let next = 0;
+	return rows.map((row) => {
+		let rest = row.slice(pad.length);
+		let painted = pad;
+		while (rest) {
+			const hint = hints[next++];
+			const text = hint && rest.startsWith(hint.text) ? hint.text : rest;
+			painted += paint(hint?.color ?? "muted", text);
+			rest = rest.slice(text.length);
+			if (rest.startsWith(HINT_SEPARATOR)) {
+				painted += paint("muted", HINT_SEPARATOR);
+				rest = rest.slice(HINT_SEPARATOR.length);
+			}
+		}
+		return painted;
+	});
+}
+
 /** One question on one line, whitespace collapsed, cut to fit (Claude Code's list row). */
 function questionLine(question: string, width: number): string {
 	return truncateLine(question.replace(/\s+/g, " ").trim(), Math.max(20, width - 7));
@@ -242,11 +276,31 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 	if (state.selected !== null && (state.selected < 0 || state.selected >= history.length)) state.selected = null;
 	const selected = state.selected === null ? undefined : history[state.selected];
 
-	// On a short dock, list fewer earlier questions rather than overflow it: the
-	// rule, blanks, current question, one answer row and the hint always fit.
+	const currentAnswer = body.kind === "answer" && body.text !== "";
+	const hasAnswer = Boolean(selected) || currentAnswer;
+	const hints: BtwHint[] = [];
+	if (input.forking) {
+		hints.push({ text: "Forking…", color: "muted" });
+	} else {
+		if (history.length > 0) hints.push({ text: "⇧←/→ to browse", color: "muted" });
+		else if (body.kind !== "loading") hints.push({ text: "↑/↓ to scroll", color: "muted" });
+		if (hasAnswer) {
+			if (state.copyError) hints.push({ text: state.copyError, color: "error" });
+			else hints.push(state.copied ? { text: "Copied to clipboard", color: "success" } : { text: "c to copy", color: "muted" });
+		}
+		if (input.canFork && !selected && currentAnswer) hints.push({ text: "f to fork", color: "muted" });
+		if (history.length > 0) hints.push({ text: "x to clear history", color: "muted" });
+		hints.push({ text: "Esc to close", color: "muted" });
+	}
+	// Hints wrap at their separators, so the list and answer budgets count the rows.
+	const hint = hintRows(hints, inner, paint);
+
+	// On a short dock, list fewer earlier questions rather than overflow it: they
+	// show only where the rule, blanks, current question, one answer row and the
+	// hint rows all fit.
 	// A browsed question the trimmed list leaves out takes the list's first row
 	// (the count's, if that is the only one), so its answer never shows alone.
-	const listRows = Math.max(0, height - 7);
+	const listRows = Math.max(0, height - 6 - hint.length);
 	let shownCount = Math.min(SHOWN_HISTORY, history.length);
 	while (shownCount > 0 && shownCount + (history.length > shownCount ? 1 : 0) > listRows) shownCount--;
 	let start = history.length - shownCount;
@@ -275,33 +329,19 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 				? wrapPlainText(body.message, answerWidth).map((line) => paint("error", line))
 				: [paint("muted", "Answering…")];
 
-	const header = [panelTopRule(paint, inner), "", ...list, ""];
-	const footerRows = 2; // blank + hint
-	const capacity = Math.max(1, height - header.length - footerRows);
+	// The question list, one answer row and every hint row always show. The rule
+	// and the three blank rows take what the dock has left, the rule first and
+	// the blank under it last, so a narrow, short dock wraps its hints without
+	// growing past its height.
+	const spare = height - (list.length + 1 + hint.length);
+	const header = [...(spare >= 1 ? [panelTopRule(paint, inner)] : []), ...(spare >= 4 ? [""] : []), ...list, ...(spare >= 3 ? [""] : [])];
+	const footer = [...(spare >= 2 ? [""] : []), ...hint];
+	const capacity = Math.max(1, height - header.length - footer.length);
 	state.viewport = capacity;
 	state.maxOffset = Math.max(0, answerLines.length - capacity);
 	state.offset = Math.min(Math.max(0, state.offset), state.maxOffset);
 	const indent = " ".repeat(ANSWER_INDENT);
 	const visible = answerLines.slice(state.offset, state.offset + capacity).map((line) => `${indent}${line}`);
 
-	const currentAnswer = body.kind === "answer" && body.text !== "";
-	const hasAnswer = Boolean(selected) || currentAnswer;
-	let hint: string;
-	if (input.forking) {
-		hint = paint("muted", "Forking…");
-	} else {
-		const parts: string[] = [];
-		if (history.length > 0) parts.push(paint("muted", "⇧←/→ to browse"));
-		else if (body.kind !== "loading") parts.push(paint("muted", "↑/↓ to scroll"));
-		if (hasAnswer) {
-			if (state.copyError) parts.push(paint("error", state.copyError));
-			else parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
-		}
-		if (input.canFork && !selected && currentAnswer) parts.push(paint("muted", "f to fork"));
-		if (history.length > 0) parts.push(paint("muted", "x to clear history"));
-		parts.push(paint("muted", "Esc to close"));
-		hint = parts.join(paint("muted", " · "));
-	}
-
-	return [...header, ...visible, "", `${pad}${hint}`].map((line) => truncateLine(line, inner));
+	return [...header, ...visible, ...footer].map((line) => truncateLine(line, inner));
 }

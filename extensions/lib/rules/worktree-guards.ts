@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "../shell/paths.ts";
 import type { GitTargetProblem, StashRisk, WorktreeGuardRefusal } from "./worktree-guard-text.ts";
-import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../shell/shell-analysis.ts";
+import { gitSubcommand, INLINE_SCRIPT_SHELLS, inlineShellScripts, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../shell/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -141,36 +141,14 @@ export function worktreeBashGuardReason(context: WorktreeGuardContext): Worktree
 /** Builtins that run a script in this shell. */
 const SCRIPT_RUNNERS: ReadonlySet<string> = new Set(["eval", "source", "."]);
 
-/** Shell options that take the next word as their value. */
-const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
-
 /**
- * The command lines a shell invocation runs: with `-c` (alone or in a cluster
- * such as `-lc`), the first operand; the words after it are `$0`, `$1`, …
- * (`bash -c 'echo ok' 'git status'` runs no git), unless the script expands
- * them (`bash -c '"$@"' _ git status`), when they are a command line too.
- * Without `-c`, every argument, since which one is a script file is not known.
+ * The command lines a shell invocation runs: its `-c` script and what that
+ * expands (`inlineShellScripts`). Without `-c`, every argument, since which
+ * one is a script file is not known.
  */
 function shellScripts(args: Token[]): string[] {
-	let command = false;
-	let i = 0;
-	for (; i < args.length; i++) {
-		const value = args[i].value;
-		if (value === "--" || value === "-") {
-			i++;
-			break;
-		}
-		if (!/^[-+]/.test(value)) break;
-		if (SHELL_VALUE_OPTIONS.has(value)) i++;
-		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
-	}
 	const values = args.map((arg) => arg.value);
-	if (!command) return values;
-	const [script, ...positional] = values.slice(i);
-	if (script === undefined) return [];
-	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.
-	if (!/\$(?:[0-9@*]|\{[0-9@*])/.test(script) || positional.length === 0) return [script];
-	return [script, positional.join(" "), positional.slice(1).join(" ")];
+	return inlineShellScripts(values) ?? values;
 }
 
 /** Whether git appears as a word in `text`, read with quotes and backslashes removed (`gi\t`, `g"it"`). */
