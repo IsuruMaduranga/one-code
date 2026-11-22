@@ -237,6 +237,18 @@ sandbox off, add writable paths, allow hosts, or exclude commands.
 If your user settings set `allowUnsandboxedCommands` to `false`, that value
 holds whatever another file sets.
 
+### When a product sets the sandbox
+
+A product built on One Code can ship its own starting settings, for example
+with the sandbox already on. Your settings files then apply over the
+product's, as described above. A product can also lock its settings. When it
+does, every settings file, your user settings included, is treated like a
+project's: you can still tighten the sandbox, but nothing you write turns it
+off, adds writable or readable paths, allows hosts or sockets, excludes
+commands, or turns on `autoAllowBashIfSandboxed`. `/sandbox` says when the
+product sets or locks the settings, and when the session starts One Code
+tells you which of your settings the lock ignored.
+
 ## Limits
 
 - The sandbox doesn't cover the file tools, hooks, or MCP servers. The

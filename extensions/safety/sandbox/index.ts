@@ -193,10 +193,20 @@ function sandboxExtension(pi: ExtensionAPI) {
 	let warned = false;
 	/** The allowRead entries the user was last told the sandbox leaves out. */
 	let toldShadowed = "";
+	/** The settings the user was last told the product's lock ignored. */
+	let toldIgnored = "";
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		liveCtx = ctx;
 		// A session of another directory than the process started in reads that directory's settings.
 		useSandboxSettingsFor(ctx.cwd);
+		// Settings the product's lock kept out (lib/shell-run/sandbox-settings.ts loadSandboxSettings): say so once per list.
+		const ignored = sandboxSettings().product?.ignored.join(", ") ?? "";
+		if (ignored && ignored !== toldIgnored) {
+			toldIgnored = ignored;
+			const message = `The product locks the command sandbox's settings, so these settings were ignored: ${ignored}`;
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			else process.stderr.write(`${message}\n`);
+		}
 		if (!sandboxConfigured()) {
 			void stopSandbox();
 			// Asked for where the runtime has none: say so once, as a failed start does.

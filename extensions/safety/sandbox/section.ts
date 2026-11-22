@@ -41,8 +41,20 @@ export function sandboxSectionText(text: ShellSandboxText, facts: SandboxFacts &
 	return text.section({ platform: facts.platform, ...sandboxRules(facts.active, facts.cwd), unsandboxedAllowed: facts.settings.allowUnsandboxedCommands });
 }
 
-/** What `/sandbox` shows the user. */
+/** What the user is told about the product's own sandbox settings, when the profile supplies them: whether they are locked, and what the lock ignored. */
+export function productSandboxLine(product: NonNullable<SandboxSettings["product"]>): string {
+	if (!product.locked) return "The product sets the sandbox's starting settings; your settings apply over them.";
+	const ignored = product.ignored.length > 0 ? ` Ignored because of the lock: ${product.ignored.join(", ")}.` : "";
+	return `The product sets the sandbox's settings and locks them: your settings and a repository's can tighten the sandbox but cannot turn it off or widen it.${ignored}`;
+}
+
+/** What `/sandbox` shows the user, with the product's line second when the profile supplies the settings. */
 export function sandboxStatusLines(facts: SandboxFacts): string[] {
+	const lines = settingsStatusLines(facts);
+	return facts.settings.product ? [lines[0]!, productSandboxLine(facts.settings.product), ...lines.slice(1)] : lines;
+}
+
+function settingsStatusLines(facts: SandboxFacts): string[] {
 	const how = 'Turn it on with "sandbox": { "enabled": true } in your user settings; it applies from the next start.';
 	if (!facts.platform) return ["Command sandbox: not available on this platform (commands run unsandboxed)."];
 	if (!facts.settings.enabled) return ["Command sandbox: off.", how];
