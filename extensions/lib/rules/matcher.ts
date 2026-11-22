@@ -772,7 +772,9 @@ function isAtOrInside(path: string, dir: string): boolean {
  * Whether a shell write at `target` may write a path an edit-family rule's
  * pattern names: the target itself, or, when the target is a directory, a path
  * beneath it, since a recursive removal or a move takes the directory's
- * contents with it (`rm -r config` removes `config/prod.yaml`). The pattern is
+ * contents with it (`rm -r config` removes `config/prod.yaml`). A target that
+ * does not exist yet may become a directory (`cp -r src config` creates
+ * `config/prod.yaml`), so only an existing non-directory is ruled out. The pattern is
  * a glob, so the comparison is conservative: its literal start (up to the
  * first wildcard or escape) and the directory's prefix must agree as far as
  * the shorter one goes, in either direction; an exact pattern must start with
@@ -782,7 +784,7 @@ function isAtOrInside(path: string, dir: string): boolean {
 export function writeTargetMeetsPathPattern(pattern: string, target: string, cwd: string): boolean {
 	if (matchesPathPattern(pattern, target, cwd)) return true;
 	const { glob, absolute } = pathPatternReading(pattern, target, cwd);
-	if (!isDirectory(absolute)) return false;
+	if (!mayBeDirectory(absolute)) return false;
 	const fold = (p: string) => (foldsCase() ? p.toLowerCase() : p);
 	const cut = glob.search(/[*\\]/);
 	const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
@@ -792,6 +794,15 @@ export function writeTargetMeetsPathPattern(pattern: string, target: string, cwd
 		if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
 		return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
 	});
+}
+
+/** A directory, or a path nothing exists at yet. */
+function mayBeDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT";
+	}
 }
 
 function isDirectory(path: string): boolean {

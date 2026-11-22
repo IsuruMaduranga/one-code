@@ -96,6 +96,16 @@ describe("a shell line that writes a directory holding a path such a rule names"
 		expect(run(deny, "bash", "rm -r build", "auto")).toBe("allow");
 		expect(run(deny, "bash", "rm -rf build/out", "acceptEdits")).toBe("allow");
 		expect(run({ deny: ["Edit(config/**)"] }, "bash", "rm -r build", "acceptEdits")).toBe("allow");
+	});
+
+	// `cp -r build staging` creates `staging/secret.yaml`; nothing exists at `staging` to ask.
+	it("counts a target that does not exist yet as a directory that may hold the path", () => {
+		const rule = { deny: ["Edit(staging/secret.yaml)"] };
+		expect(run(rule, "bash", "cp -r build staging", "acceptEdits")).toBe("ask");
+		expect(run(rule, "bash", "cp -r build staging", "auto")).toBe("classify");
+		expect(run(rule, "bash", "cp -r build other", "acceptEdits")).toBe("allow");
+		expect(writeTargetMeetsPathPattern("staging/secret.yaml", join(cwd, "staging"), cwd)).toBe(true);
+		expect(writeTargetMeetsPathPattern("config/prod.yaml/x", join(cwd, "config", "prod.yaml"), cwd)).toBe(false);
 		// A file holds nothing beneath it.
 		expect(run({ deny: ["Edit(config/dev.yaml/**)"] }, "bash", "rm config/dev.yaml", "acceptEdits")).toBe("allow");
 	});
