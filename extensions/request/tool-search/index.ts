@@ -69,7 +69,8 @@ import { foldOnce, sameEntries } from "../../lib/request/ledger/fold-memo.ts";
 import { recordedToolNames } from "../../lib/request/ledger/wire.ts";
 import { MCP_TOOLS_CHANNEL } from "../../lib/plugins/mcp-share.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
-import type { EntryLike } from "../../lib/request/ledger/records.ts";
+import { type EntryLike, stateOnBranch } from "../../lib/request/ledger/records.ts";
+import { recordState } from "../../lib/request/ledger/state.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
@@ -77,7 +78,7 @@ import { toolRenderers } from "../../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
-import { maxToolNameLength } from "../../lib/request/tool-name-limit.ts";
+import { LIMIT_WITHDRAWN_STATE, limitWithdrawals, maxToolNameLength } from "../../lib/request/tool-name-limit.ts";
 
 /** The told mode for "this epoch's message 1 lists deferred tools this run cannot load", said once per epoch. */
 const UNAVAILABLE_MODE = "deferred-unavailable";
@@ -272,11 +273,29 @@ function toolSearchExtension(pi: ExtensionAPI) {
 	 * (turn_start) and whenever the inputs change.
 	 */
 	// Withheld tools plus the tools the profile turns off: never active, pi's
-	// built-ins included (lib/profile/profile.ts).
+	// built-ins included (lib/profile/profile.ts). With the tools the model's
+	// provider refuses by name, they are the tools that are never active.
 	const profileDisabled = activeProfile().disabledTools;
+	const blockedName = (name: string) => withheldNames.has(name) || profileDisabled.has(name);
 	const neverActive = (registered: ReadonlySet<string>, model: typeof currentModel) => {
 		const refused = [...registered].filter((name) => refusedName(name, model));
 		return profileDisabled.size === 0 && refused.length === 0 ? withheldNames : new Set([...withheldNames, ...profileDisabled, ...refused]);
+	};
+	/**
+	 * The active set `next` with the up-front tools the name limit withdrew on
+	 * this branch restored where `model` takes them, recording what is withdrawn
+	 * now (lib/request/tool-name-limit.ts limitWithdrawals). The record is a
+	 * `one-code:state` entry, since what pi's loadout lost to the limit cannot
+	 * be told from the loadout, and it follows the branch. A deferred tool is
+	 * left to the deferral reasons, which bring a loaded one back.
+	 */
+	const withLimitRestores = (branch: EntryLike[], active: readonly string[], next: readonly string[], deferred: ReadonlySet<string>, registered: ReadonlySet<string>, model: typeof currentModel) => {
+		const stored = stateOnBranch(branch, LIMIT_WITHDRAWN_STATE);
+		const recorded = Array.isArray(stored) ? stored.filter((name): name is string => typeof name === "string") : [];
+		const { restore, record } = limitWithdrawals({ active, recorded, refused: (name) => refusedName(name, model), blocked: blockedName, deferred: (name) => deferred.has(name), registered });
+		if (record.length !== recorded.length || record.some((name, i) => name !== recorded[i])) recordState(pi, LIMIT_WITHDRAWN_STATE, record);
+		const back = restore.filter((name) => !next.includes(name));
+		return back.length === 0 ? next : [...next, ...back];
 	};
 	// Tools the profile defers, adopted here however they were registered: pi's
 	// built-ins and a child's injected tools never pass a defer request.
@@ -288,15 +307,16 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		const adopted = profileDeferred.filter((name) => registered.has(name) && !deferredRegistry.has(name) && !withheldNames.has(name));
 		for (const name of adopted) deferredRegistry.add({ name });
 		if (adopted.length > 0 && sessionStarted) publishListing();
+		const branch = branchOf(owner);
 		if (!deferralEnabled(all)) {
 			// Nothing is deferred without the loader, but a withheld tool is still
 			// never active: a /tree switch restores a loadout from before it left.
 			const active = pi.getActiveTools();
-			const next = reconcileActive(active, new Set(), new Set(), neverActive(registered, model), registered);
+			const nothing = new Set<string>();
+			const next = withLimitRestores(branch, active, reconcileActive(active, nothing, nothing, neverActive(registered, model), registered), nothing, registered, model);
 			if (next !== active) pi.setActiveTools([...next]);
 			return;
 		}
-		const branch = branchOf(owner);
 		const use = branchUse(branch);
 		loads = new Map([...use.loads, ...freshLoads]);
 		const deferred = new Set(deferredRegistry.names);
@@ -318,7 +338,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			});
 		}
 		const active = pi.getActiveTools();
-		const next = reconcileActive(active, deferred, callable, neverActive(registered, model), registered);
+		const next = withLimitRestores(branch, active, reconcileActive(active, deferred, callable, neverActive(registered, model), registered), deferred, registered, model);
 		if (next !== active) pi.setActiveTools([...next]);
 	};
 	const reconcileNow = () => reconcile(session, currentModel);

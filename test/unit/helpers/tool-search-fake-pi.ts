@@ -24,6 +24,8 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 	let active: string[] = initialActive;
 	const allTools: Array<{ name: string; description: string }> = [];
 	const registered = new Map<string, { execute: (id: string, params: unknown) => Promise<unknown> }>();
+	/** The entries `pi.appendEntry` wrote, as a session's branch holds them: a test's sessionManager can read them back. */
+	const entries: Array<{ type: string; id: string; customType: string; data: unknown }> = [];
 
 	const pi = {
 		events: {
@@ -57,6 +59,9 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 			allTools.push({ name: tool.name, description: tool.description ?? "" });
 		},
 		registerCommand: () => {},
+		appendEntry: (customType: string, data?: unknown) => {
+			entries.push({ type: "custom", id: `entry-${entries.length + 1}`, customType, data });
+		},
 	};
 
 	/** Register a tool the way its owning extension would (active), then defer it. */
@@ -91,5 +96,5 @@ export function makeToolSearchFakePi(initialActive: string[] = []) {
 		return renderRequest(pi.events, { facts, ...(opts.epoch ? { epoch: true } : {}), model: opts.model });
 	};
 
-	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, render };
+	return { pi, reminders, entries, allTools, setActive: (n: string[]) => (active = n), activeTools: () => active, addDeferred, runTool, unregister, render };
 }
