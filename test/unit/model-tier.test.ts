@@ -13,6 +13,7 @@ import {
 	taskToolsEnabled,
 	tierOverride,
 	usesClaudeCodeFastPaths,
+	withoutContextTag,
 } from "../../extensions/lib/models/model-tier.ts";
 import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
@@ -99,6 +100,22 @@ describe("resolveModelTier", () => {
 		}
 		// A hosted provider is not a gateway: its copy keeps its catalog tier (model-tier-gateway.test.ts covers gateways).
 		expect(resolveModelTier(model("gpt-6-sol", "github-copilot", 2), noEnv)).not.toBe("frontier");
+	});
+
+	it("reads an id with a trailing context tag (`[1m]`) as the model without it, and leaves the id itself alone", () => {
+		pinCatalog(ANTHROPIC);
+		for (const id of ["claude-sonnet-5-5", "claude-opus-4-8", "claude-opus-5", "claude-fable-5-1"]) {
+			const tagged = model(`${id}[1m]`, "anthropic", 3);
+			expect(classifyModelTier(tagged, noEnv)).toEqual(classifyModelTier(model(id, "anthropic", 3), noEnv));
+			expect(intrinsicTier(tagged)).toBe(intrinsicTier(model(id, "anthropic", 3)));
+			expect(tagged.id).toBe(`${id}[1m]`);
+		}
+		// Below frontier, the catalog entry decides as it does for the bare id.
+		expect(classifyModelTier(model("claude-opus-4-7[1m]", "anthropic", 5), noEnv)).toEqual(classifyModelTier(model("claude-opus-4-7", "anthropic", 5), noEnv));
+		// Through a gateway too.
+		expect(resolveModelTier(model("anthropic/claude-sonnet-5.5[1m]", "openrouter", 2), noEnv)).toBe(resolveModelTier(model("anthropic/claude-sonnet-5.5", "openrouter", 2), noEnv));
+		// Only a trailing tag: one inside the id is part of a name nothing knows.
+		expect(withoutContextTag(model("claude-[x]-sonnet", "anthropic")).id).toBe("claude-[x]-sonnet");
 	});
 
 	it("does not read a dated suffix as the minor version", () => {

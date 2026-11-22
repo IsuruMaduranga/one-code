@@ -244,6 +244,19 @@ export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "f
 
 export { claudeFamily, parseClaudeId } from "../profile/claude-id.ts";
 
+/**
+ * `model` with a trailing bracketed tag dropped from its id (`claude-sonnet-5-5[1m]`,
+ * Claude Code's spelling for the 1M-context window, which a user's
+ * `models.json` can carry), for the tier rules only: the tag names a context
+ * window, not another model, and left on it broke the version parse and the
+ * catalog lookups, so a frontier model read as `cheap`. The same object when
+ * there is no tag.
+ */
+export function withoutContextTag<M extends { id: string }>(model: M): M {
+	const id = model.id.replace(/\[[^\]]*\]$/, "");
+	return id === model.id ? model : { ...model, id };
+}
+
 export interface TierClassification {
 	tier: PromptTier;
 	/** Which rule decided, for the catalog-wide snapshot and the doctor report. */
@@ -280,12 +293,14 @@ export function classifyModelTier(
  * (`known`), or a guess for a model none of them knows (no model, an id
  * the catalogs lack, a custom provider, no price), or the prompt-tier knob.
  */
-function classifyWithBasis(model: Model<Api> | undefined, env: NodeJS.ProcessEnv, purpose: TierPurpose): TierClassification & { known: boolean } {
+function classifyWithBasis(given: Model<Api> | undefined, env: NodeJS.ProcessEnv, purpose: TierPurpose): TierClassification & { known: boolean } {
 	const forced = tierOverride(env);
 	if (forced) return { tier: forced, reason: envName("PROMPT_TIER"), known: false };
-	if (!model) return { tier: "tiny", reason: "no model", known: false }; // unknown model → maximum scaffolding
-	const configured = configuredModelTier(model);
+	if (!given) return { tier: "tiny", reason: "no model", known: false }; // unknown model → maximum scaffolding
+	const configured = configuredModelTier(given);
 	if (configured) return { tier: configured, reason: "modelTiers setting", known: true };
+	// Every rule below reads the id without its context tag; the request still sends the id as given.
+	const model = withoutContextTag(given);
 	const frontier = frontierReason(model, purpose);
 	if (frontier) return { tier: "frontier", reason: frontier, known: true };
 	const entry = catalogModelFor(model);
