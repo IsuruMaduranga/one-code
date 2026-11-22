@@ -12,7 +12,8 @@ import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.t
 import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 useShippedProfileWithAllTools();
-const cwd = realpathSync(mkdtempSync(join(tmpdir(), "write-family-")));
+// The native form: on Windows the temp folder is spelled with a short name, which the redirect containment check expands.
+const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), "write-family-")));
 mkdirSync(join(cwd, "config"));
 writeFileSync(join(cwd, "config", "prod.yaml"), "x: 1\n");
 writeFileSync(join(cwd, "config", "dev.yaml"), "x: 1\n");

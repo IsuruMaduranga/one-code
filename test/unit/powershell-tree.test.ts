@@ -143,7 +143,8 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits through decide(): capable tie
 
 	it("reports every path a cleared line writes or removes", async () => {
 		const verdict = await edits("Set-Content src/b.txt x; Remove-Item notes.txt");
-		expect(verdict.writes?.map((write) => write.resolved)).toEqual([join(cwd, "src", "b.txt"), join(cwd, "notes.txt")]);
+		// Resolved paths are forward-slashed on every platform.
+		expect(verdict.writes?.map((write) => write.resolved)).toEqual([join(cwd, "src", "b.txt"), join(cwd, "notes.txt")].map((path) => path.replace(/\\/g, "/")));
 	});
 
 	it("withholds the fast path from an edit onto a path an edit-family deny or ask rule names, or under a bare one", async () => {
