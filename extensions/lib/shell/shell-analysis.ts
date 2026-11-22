@@ -457,6 +457,24 @@ function mayCarryLink(path: string, word: string): boolean {
 	}
 }
 
+/**
+ * A write target: a word as the tokenizer read it, which knows whether bash
+ * expands it, or a bare string (a redirect target, a path built from words),
+ * judged by its text.
+ */
+type WriteWord = string | Token;
+
+/**
+ * Whether bash expands `word` as a glob. The tokenizer knows for a plain word
+ * (`'*'` and `\*` are literal, `config/*'.yaml'` globs). A bare string, a word
+ * with an expansion in it (its value is source text) and one with a brace
+ * (the tokenizer leaves `{a,b}` unexpanded) are judged by their text.
+ */
+function expandsAsGlob(word: WriteWord): boolean {
+	const text = typeof word === "string" ? word : word.value;
+	return typeof word === "string" || word.dynamic || text.includes("{") ? /[*?[]/.test(text) : !!word.glob;
+}
+
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
 function hasGlob(token: string): boolean {
 	return /[*?\[\]]/.test(token);
@@ -847,6 +865,11 @@ export function removalLoses(absolute: string, resolved: string, roots: readonly
 function bashBasename(word: string): string {
 	const trimmed = word.replace(/\/+$/, "");
 	return trimmed.slice(trimmed.lastIndexOf("/") + 1);
+}
+
+/** Where `source` lands when moved or copied into the directory `dir`: `dir/<basename>`, a glob if either word is one. */
+function landingBeneath(dir: Token, source: Token): Token {
+	return { value: `${dir.value.replace(/\/+$/, "")}/${bashBasename(source.value)}`, glob: dir.glob || source.glob || undefined, dynamic: dir.dynamic ?? source.dynamic };
 }
 
 /** The short options that take a value, for the commands with a `-t DIR` option: in a cluster, the letters after one are its value (`-St` is suffix `t`). */
@@ -1263,17 +1286,26 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	 * command positionals, and output-flag targets so all writes get one check.
 	 * `removes` marks an operand of a removing or moving command, whose glob is
 	 * also expanded for the edit-family rule check (`recordGlobWrite`).
+	 * Whether bash expands the word as a glob is {@link expandsAsGlob}.
 	 */
-	const checkWriteTarget = (token: string, removes = false) => {
+	const checkWriteTarget = (word: WriteWord, removes = false) => {
+		const token = typeof word === "string" ? word : word.value;
 		if (token === "/dev/null") return;
+		const globCharacters = /[*?[]/.test(token);
+		const expands = expandsAsGlob(word);
 		// A `~name`/`~-` target or a glob lands wherever bash expands it, which
 		// this check cannot know (SECURITY-REVIEW-2026-09-23 M2).
-		if (isUnknownTilde(token) || /[*?[]/.test(token)) {
-			if (removes && /[*?[]/.test(token)) recordGlobWrite(token);
+		if (isUnknownTilde(token) || expands) {
+			if (removes && expands) recordGlobWrite(token);
 			evidence.writes.push({ token, absolute: token, outsideCwd: true });
 			escalate(`writes to ${token}, which bash expands to a path this check cannot resolve`);
 			return;
 		}
+		// A quoted `'config/*.yaml'` is one literal file name: it is resolved and
+		// recorded like any other target, so a rule naming that exact file sees
+		// it and a rule on a file the pattern would match does not. It still
+		// escalates, as every name with glob characters did before.
+		if (globCharacters) escalate(`writes to ${token}, a quoted file name with glob characters`);
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
 		const outsideCwd = resolved === undefined || !(isWithin(containmentRoot, resolved) || writableRoots.some((root) => isWithin(root, resolved)));
@@ -1597,7 +1629,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
-		const writeTokens: string[] = [];
+		const writeTokens: WriteWord[] = [];
 		if (fileOperands !== undefined) {
 			// Every operand is a path, bare names included. cp and mv write their
 			// last operand and read the rest (mv removes them as well, below), so a
@@ -1627,20 +1659,21 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 			// A move removes its sources, so each is a write target too: a deny
 			// rule on `config/prod.yaml` must see `mv config/prod.yaml old.yaml`.
-			if (name === "mv") writeTokens.push(...reads.map((token) => token.value));
+			if (name === "mv") writeTokens.push(...reads);
 			const destination = copies ? fileOperands.at(-1) : undefined;
 			if (destination === undefined) {
-				writeTokens.push(...fileOperands.map((token) => token.value));
+				writeTokens.push(...fileOperands);
 			} else if (reads.length === 0) {
-				writeTokens.push(destination.value);
+				writeTokens.push(destination);
 			} else {
 				// Into an existing directory, each source lands beneath it (`cp
 				// settings.json .claude` writes `.claude/settings.json`), and a
 				// directory source brings its whole tree along.
 				const intoDirectory = destination.value.endsWith("/") || isDirectory(toAbsoluteBash(effectiveCwd, destination.value, home));
 				for (const source of reads) {
-					const target = intoDirectory ? `${destination.value.replace(/\/+$/, "")}/${bashBasename(source.value)}` : destination.value;
-					writeTokens.push(target);
+					const landing = intoDirectory ? landingBeneath(destination, source) : destination;
+					writeTokens.push(landing);
+					const target = landing.value;
 					const sourceResolved = resolveForContainment(toAbsoluteBash(effectiveCwd, source.value, home));
 					if (sourceResolved !== undefined && touchesGuardedPath(sourceResolved, toAbsoluteBash(effectiveCwd, target, home), guarded)) {
 						escalate(`${name === "cp" ? "copies" : "moves"} ${source.value} to ${target}, which puts files on a protected, credential or execution-primitive path`);
@@ -1654,12 +1687,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// it drops out of containment — the command then reaches the classifier.
 			for (const token of args) {
 				if (token.value.startsWith("-")) continue;
-				if (hasGlob(token.value)) {
+				if (expandsAsGlob(token)) {
 					escalate(`targets ${token.value}, a glob whose expansion cannot be checked`);
 					recordGlobWrite(token.value);
 					continue;
 				}
-				writeTokens.push(token.value);
+				writeTokens.push(token);
 			}
 		} else if (isMutation) {
 			const positionals = args.filter((token) => !token.value.startsWith("-") && looksLikePath(token.value));
@@ -1671,7 +1704,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// install write each operand's name beneath it.
 			const into = name in TARGET_DIRECTORY_COMMANDS ? targetDirectoryOperands(name, args) : undefined;
 			if (name === "mv") {
-				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")).map((token) => token.value));
+				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")));
 			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
 				// The destination is the last operand even when it is a bare name
 				// (`cp --sparse=always x prod.yaml`); rsync's may be a remote spec, so it keeps the path test.

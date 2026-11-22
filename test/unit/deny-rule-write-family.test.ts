@@ -175,6 +175,27 @@ describe("a glob operand of a removing or moving command", () => {
 		expect(run(deny, "bash", "rm config/*.toml", "default")).toBe("allow");
 	});
 
+	it("is a literal file name when quoted or escaped: it names that one file, not what the pattern would match", () => {
+		const shell = (command: string) => analyzeShellCommand({ command, cwd, home: homedir() });
+		for (const command of ["rm 'config/*.yaml'", 'rm "config/*.yaml"', "rm config/'*'.yaml", "rm config/\\*.yaml", "rm --one-file-system 'config/*.yaml'", "mv 'config/*.yaml' build/"]) {
+			const evidence = shell(command);
+			expect(evidence.globWrites, command).toEqual([]);
+			expect(
+				evidence.writes.map((write) => write.absolute),
+				command,
+			).toContain(join(cwd, "config", "*.yaml"));
+			// Still escalated, as every name with glob characters was.
+			expect(evidence.verdict, command).toBe("escalate");
+			expect(run(deny, "bash", command, "default"), command).not.toBe("deny");
+			expect(run(ask, "bash", command, "default"), command).not.toBe("ask");
+		}
+		// An unquoted glob character beside a quoted part still globs.
+		for (const command of ["rm config/*'.yaml'", 'rm "config/"*.yaml']) {
+			expect(shell(command).globWrites.map((glob) => glob.token), command).toEqual(["config/*.yaml"]);
+			expect(run(deny, "bash", command, "default"), command).toBe("deny");
+		}
+	});
+
 	it("withholds the allow, the fast path and the sandbox auto-allow when the matches cannot be enumerated, and refuses nothing", () => {
 		for (const command of ["rm */prod.yaml", "rm config/.*", "mv c*/prod.yaml build/"]) {
 			expect(run(ask, "bash", command, "default"), command).toBe("ask");
