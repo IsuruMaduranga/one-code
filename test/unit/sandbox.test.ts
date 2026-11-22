@@ -5,16 +5,17 @@
  * The runtime itself is not started here; the live checks are in
  * working-docs/features/sandbox/.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import { Type } from "typebox";
 import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
-import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
@@ -440,11 +441,14 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 			"/wt/.git": "gitdir: /repo/.git/worktrees/wt\n",
 			"/repo/.git/worktrees/wt/commondir": "../..\n",
 		};
+		const reads: string[] = [];
 		const read = (path: string) => {
+			reads.push(path);
 			const file = files[path];
 			if (file === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 			return typeof file === "string" ? file : file();
 		};
+		const exists = (path: string) => path in files;
 		const main = checkoutProtectedFiles("/repo/packages/app", read, "darwin");
 		expect(main).toEqual(expect.arrayContaining(["/repo/.git/commondir", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/hooks", "/repo/.git/config", "/repo/.mcp.json", "/repo/packages/app/.mcp.json", "/repo/.pi", "/repo/.gitmodules"]));
 		const linked = checkoutProtectedFiles("/wt", read, "darwin");
@@ -452,18 +456,45 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		expect(checkoutProtectedFiles("/nowhere", read, "darwin")).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
 		// Linux denies a missing path with a stub the command sees (git lists it as
 		// untracked, and fails outright on one at commondir), so only what exists is denied there.
-		expect(checkoutProtectedFiles("/nowhere", read, "linux")).toEqual([]);
+		expect(checkoutProtectedFiles("/nowhere", read, "linux", exists)).toEqual([]);
 		files["/repo/.git/config"] = "[core]\n";
 		files["/repo/.mcp.json"] = "{}";
-		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux");
+		reads.length = 0;
+		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux", exists);
 		expect([...onLinux].sort()).toEqual(["/repo/.git/config", "/repo/.mcp.json"]);
+		// Whether a name is there is asked of its metadata: only the `.git` entries
+		// whose contents name another directory are read, never a protected file
+		// (a FIFO there would block, a large file be read whole).
+		expect(reads.every((path) => basename(path) === ".git" || basename(path) === "commondir")).toBe(true);
 		// The one name that redirects the harness's own git is removed after a command if it appears.
-		expect(plantableCommondirs("/repo/packages/app", read, "linux")).toEqual(["/repo/.git/commondir"]);
-		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux");
+		expect(plantableCommondirs("/repo/packages/app", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
+		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux", exists);
 		expect(linkedOnLinux).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/config"]));
 		expect(linkedOnLinux).not.toContain("/repo/.git/commondir");
-		expect(plantableCommondirs("/wt", read, "linux")).toEqual(["/repo/.git/commondir"]);
-		expect(plantableCommondirs("/repo/packages/app", read, "darwin")).toEqual([]);
+		expect(plantableCommondirs("/wt", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
+		expect(plantableCommondirs("/repo/packages/app", read, "darwin", exists)).toEqual([]);
+	});
+
+	it.skipIf(process.platform === "win32")("reads a git pointer without waiting on a FIFO, and tells what is there by its metadata", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sandbox-fifo-"));
+		try {
+			execFileSync("mkfifo", [join(dir, ".git"), join(dir, ".mcp.json")]);
+			// A FIFO with no writer would hang an ordinary read; this one throws at once.
+			expect(() => readGitPointer(join(dir, ".git"))).toThrow(/not a regular file/);
+			expect(() => readGitPointer(dir)).toThrow(/EISDIR/);
+			writeFileSync(join(dir, "pointer"), "gitdir: /x\n");
+			expect(readGitPointer(join(dir, "pointer"))).toBe("gitdir: /x\n");
+			expect(pathExists(join(dir, ".mcp.json"))).toBe(true);
+			expect(pathExists(join(dir, "missing"))).toBe(false);
+			expect(pathExists(join(dir, "pointer", "below"))).toBe(false);
+			// A link to nothing is something at the name: the command could create its target.
+			symlinkSync(join(dir, "nowhere"), join(dir, ".pi"));
+			expect(pathExists(join(dir, ".pi"))).toBe(true);
+			// Neither FIFO is opened on the way.
+			expect(checkoutProtectedFiles(dir, undefined, "linux")).toEqual(expect.arrayContaining([join(dir, ".mcp.json"), join(dir, ".pi")]));
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("tells a directory git would take for a repository: HEAD beside objects and refs", () => {

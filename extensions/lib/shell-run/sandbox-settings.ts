@@ -16,7 +16,7 @@
  * cannot see in a command line (`sed -i`, a script) still cannot reach it.
  */
 
-import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
@@ -324,6 +324,25 @@ export interface SandboxScope {
 }
 
 /**
+ * The contents of a small git file whose contents matter (a `.git` pointer,
+ * a `commondir`). Opened without blocking and read only when it is a regular
+ * file: a sandboxed command can put a FIFO at such a name, and an ordinary
+ * open of one with no writer would hang the harness. A directory throws
+ * `EISDIR` as a plain read does; anything else that is not a file throws too.
+ */
+export function readGitPointer(path: string): string {
+	const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+	try {
+		const stat = fstatSync(fd);
+		if (stat.isDirectory()) throw Object.assign(new Error(`EISDIR: illegal operation on a directory, read '${path}'`), { code: "EISDIR" });
+		if (!stat.isFile()) throw Object.assign(new Error(`not a regular file: ${path}`), { code: "EINVAL" });
+		return readFileSync(fd, "utf8");
+	} finally {
+		closeSync(fd);
+	}
+}
+
+/**
  * The git paths a command in a linked worktree writes outside the
  * worktree: its own git directory (index, HEAD, its logs), the shared
  * repository's objects, refs and logs, and its packed refs (`packed-refs` and
@@ -345,7 +364,7 @@ export interface SandboxScope {
  * itself: a `.git` symlink planted in another directory does not make it the
  * worktree.
  */
-export function linkedWorktreeGitDirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), real: (path: string) => string = realpathSync): string[] {
+export function linkedWorktreeGitDirs(dir: string, read: (path: string) => string = readGitPointer, real: (path: string) => string = realpathSync): string[] {
 	const sameDir = (a: string, b: string) => {
 		try {
 			return real(a) === real(b);
@@ -390,8 +409,25 @@ export function linkedWorktreeGitDirs(dir: string, read: (path: string) => strin
  * harness at the next start. The names that make git take `dir` itself for
  * a bare repository are in {@link bareRepositoryFiles}.
  */
-export function checkoutProtectedFiles(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), platform: NodeJS.Platform = process.platform): string[] {
-	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => !absentOnLinux(path, read, platform));
+export function checkoutProtectedFiles(dir: string, read: (path: string) => string = readGitPointer, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = pathExists): string[] {
+	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => !absentOnLinux(path, exists, platform));
+}
+
+/**
+ * Whether anything is at `path`, read from its metadata alone: a final
+ * symbolic link is not followed and nothing is opened, so a FIFO is never
+ * waited on and a large file never read. Only a missing path (or a missing
+ * directory on the way) is nothing; one that cannot be looked at for another
+ * reason counts as there, which keeps it denied.
+ */
+export function pathExists(path: string): boolean {
+	try {
+		lstatSync(path);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return code !== "ENOENT" && code !== "ENOTDIR";
+	}
 }
 
 /**
@@ -407,15 +443,8 @@ export function checkoutProtectedFiles(dir: string, read: (path: string) => stri
  * command ends ({@link plantableCommondirs}). macOS denies by rule, with
  * nothing put at the path, so it denies the missing names too.
  */
-function absentOnLinux(path: string, read: (path: string) => string, platform: NodeJS.Platform): boolean {
-	if (platform !== "linux") return false;
-	try {
-		read(path);
-		return false;
-	} catch (error) {
-		// A directory (EISDIR) and an unreadable file exist.
-		return (error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR";
-	}
+function absentOnLinux(path: string, exists: (path: string) => boolean, platform: NodeJS.Platform): boolean {
+	return platform === "linux" && !exists(path);
 }
 
 /**
@@ -425,8 +454,8 @@ function absentOnLinux(path: string, read: (path: string) => string, platform: N
  * the runner removes it when the command ends. A linked worktree's
  * `commondir` exists and stays denied. Empty on macOS.
  */
-export function plantableCommondirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), platform: NodeJS.Platform = process.platform): string[] {
-	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => basename(path) === "commondir" && absentOnLinux(path, read, platform));
+export function plantableCommondirs(dir: string, read: (path: string) => string = readGitPointer, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = pathExists): string[] {
+	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => basename(path) === "commondir" && absentOnLinux(path, exists, platform));
 }
 
 /**
