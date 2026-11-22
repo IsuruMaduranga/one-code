@@ -12,7 +12,11 @@
  * build it (`nextRequest`), read through queries that keep, record and tell
  * nothing; nothing here sends a request or touches the prompt cache.
  *
- * In the fullscreen TUI each list (MCP tools, memory files, skills) shows as one
+ * Custom agents (project, user and plugin agent files) are their own category,
+ * by the Agent tool extension's answer on AGENT_GROUPS_QUERY_CHANNEL; with no
+ * answer every agent row stays in System tools.
+ *
+ * In the fullscreen TUI each list (MCP tools, custom agents, memory files, skills) shows as one
  * count-and-tokens row, and `/context all` expands them, as Claude Code
  * 2.1.330 does (`collapseDetailSections`); regular mode, RPC and one-shot runs
  * always get the full lists.
@@ -30,6 +34,8 @@ import { type ExtensionAPI, type ExtensionCommandContext, getAgentDir, SettingsM
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { branchUsage, breakdownRequest, type ContextUsage, contextUsage, previewRequest } from "../../lib/context/context-usage.ts";
 import { queryDeferred } from "../../lib/request/deferred.ts";
+import { AGENT_GROUPS_QUERY_CHANNEL, type AgentGroupsQuery } from "../../lib/agents/agent-catalog.ts";
+import { projectConfigDirName } from "../../lib/profile/sources.ts";
 import { renderReminders, STACK_QUERY_CHANNEL, type StackQuery } from "../../lib/request/reminders.ts";
 import { instructionRole, messagesKey, systemRoleLayout, withSystemRoleContext } from "../../lib/request/system-role.ts";
 import { requestSystemPrompt } from "../../lib/ui/prompt-options.ts";
@@ -83,6 +89,9 @@ function contextExtension(pi: ExtensionAPI) {
 	const measure = (ctx: ExtensionCommandContext): ContextUsage => {
 		const home = os.homedir();
 		const displayPath = (path: string) => (isPathAtOrUnder(path, ctx.cwd) ? relativeDisplayPath(ctx.cwd, path) : tildify(path, home));
+		const groups: AgentGroupsQuery = { cwd: ctx.cwd };
+		pi.events.emit(AGENT_GROUPS_QUERY_CHANNEL, groups);
+		const agentGroups = new Map((groups.agents ?? []).map((agent) => [agent.name, agent.group]));
 		const branch = ctx.sessionManager.getBranch() as Parameters<typeof branchUsage>[0];
 		const last = foldSession(ctx.sessionManager, sessionIdentity(pi, ctx.model)).lastRequest;
 		const replied = branchUsage(branch);
@@ -90,14 +99,15 @@ function contextExtension(pi: ExtensionAPI) {
 		// A recorded request describes the context until a compaction replaces it; before one, or after a compaction, estimate the next.
 		const recorded = last && !replied.compacted ? last : undefined;
 		const preview = recorded ? undefined : replied.compacted ? "compaction" : "first";
-		const next = recorded ? undefined : nextBreakdown(ctx, displayPath);
-		const breakdown = recorded ? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath }) : next?.breakdown;
+		const next = recorded ? undefined : nextBreakdown(ctx, { displayPath, agentGroups });
+		const breakdown = recorded ? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath, agentGroups }) : next?.breakdown;
 		return contextUsage({
 			model: { name: ctx.model?.name ?? "No model", id: ctx.model?.id ?? "" },
 			window: piUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0,
 			compaction: compactionSettings(ctx),
 			compacted: replied.compacted,
 			breakdown,
+			agentsDir: `${projectConfigDirName()}/agents/`,
 			...(breakdown && preview ? { preview } : {}),
 			...(next?.error !== undefined ? { estimateError: next.error } : {}),
 			reported: recorded && replied.prompt !== undefined && typeof piUsage?.tokens === "number" ? { prompt: replied.prompt, total: piUsage.tokens } : undefined,
@@ -105,9 +115,9 @@ function contextExtension(pi: ExtensionAPI) {
 	};
 
 	/** The breakdown of the request the next prompt will send, or why estimating it failed: a broken estimate must not break /context, and the screen names the failure. */
-	const nextBreakdown = (ctx: ExtensionCommandContext, displayPath: (path: string) => string): { breakdown?: ReturnType<typeof breakdownRequest>; error?: string } => {
+	const nextBreakdown = (ctx: ExtensionCommandContext, options: Parameters<typeof breakdownRequest>[1]): { breakdown?: ReturnType<typeof breakdownRequest>; error?: string } => {
 		try {
-			return { breakdown: breakdownRequest(nextRequest(ctx), { displayPath }) };
+			return { breakdown: breakdownRequest(nextRequest(ctx), options) };
 		} catch (error) {
 			return { error: error instanceof Error ? error.message : String(error) };
 		}

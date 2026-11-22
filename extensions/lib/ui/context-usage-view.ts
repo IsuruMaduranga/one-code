@@ -26,13 +26,15 @@ import { wrapProse } from "./tui-render.ts";
  * Theme colours per category, after Claude Code's: grays for the system
  * prompt and tools, cyan for MCP tools, the brand colour for memory files,
  * amber for skills, violet for messages. Claude Code's colour for MCP server
- * instructions is not in the evidence; blue is our choice.
+ * instructions is not in the evidence; blue is our choice, and the syntax type
+ * colour for custom agents (lavender in Claude Code's screen).
  */
 const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
 	systemPrompt: "muted",
 	systemTools: "dim",
 	mcpTools: "mdCode",
 	mcpInstructions: "mdLink",
+	agents: "syntaxType",
 	memory: "accent",
 	skills: "warning",
 	messages: "syntaxNumber",
@@ -70,6 +72,20 @@ export function contextNote(usage: ContextUsage): string | undefined {
 	if (usage.preview === "compaction") return "Estimated from what the next request will send: nothing sent since the compaction.";
 	if (usage.unreconciled !== undefined) return `Rows are estimates: the provider counted ${formatContextTokens(usage.unreconciled)} tokens for the last request.`;
 	return undefined;
+}
+
+/** Claude Code's order of agent groups: Project, User, then each plugin by name, then anything else. */
+const GROUP_ORDER = ["Project", "User"];
+
+/** `items` by group in Claude Code's order, each group's items as they came (largest first). */
+function byGroup(items: readonly ContextItem[]): Array<[string, ContextItem[]]> {
+	const groups = new Map<string, ContextItem[]>();
+	for (const item of items) {
+		const group = item.group ?? "";
+		groups.set(group, [...(groups.get(group) ?? []), item]);
+	}
+	const rank = (group: string) => (GROUP_ORDER.includes(group) ? GROUP_ORDER.indexOf(group) : group.startsWith("Plugin") ? GROUP_ORDER.length : GROUP_ORDER.length + 1);
+	return [...groups].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 /** A tree list: `├` for every item but the last, which takes `└`. */
@@ -133,6 +149,9 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	const sized = (item: ContextItem, prefix = "") => `${item.name}: ${dim(`${prefix}${formatContextTokens(item.tokens)} tokens`)}`;
 	const { loaded, available } = usage.mcp;
 	const hasMcp = loaded.length > 0 || available.length > 0;
+	const agents = usage.agents ?? [];
+	const agentsNote = usage.agentsDir ?? "agents/";
+	const hasLists = hasMcp || agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
 	if (options.collapsed) {
 		const sum = (items: readonly ContextItem[]) => items.reduce((total, item) => total + item.tokens, 0);
 		const summary = (title: string, note: string, count: number, noun: string, tokens: number) => [
@@ -141,19 +160,24 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 			`${INDENT}${dim(`└ ${count} ${noun}${count === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`,
 		];
 		if (hasMcp) out.push(...summary("MCP tools", `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`, loaded.length + available.length, "tool", sum(loaded)));
+		if (agents.length > 0) out.push(...summary("Custom agents", agentsNote, agents.length, "agent", sum(agents)));
 		if (usage.memoryFiles.length > 0) out.push(...summary("Memory files", "/memory", usage.memoryFiles.length, "file", sum(usage.memoryFiles)));
 		// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
 		const skillTokens = usage.categories.find((row) => row.key === "skills")?.tokens ?? sum(usage.skills);
 		if (usage.skills.length > 0) out.push(...summary("Skills", "/skills", usage.skills.length, "skill", skillTokens));
-		if (hasMcp || usage.memoryFiles.length > 0 || usage.skills.length > 0) out.push("", `${INDENT}${dim("/context all to expand")}`);
+		if (hasLists) out.push("", `${INDENT}${dim("/context all to expand")}`);
 		return out;
 	}
 	// Claude Code runs the lists after MCP's together; the first list still gets a blank line above it.
-	if (!hasMcp && (usage.memoryFiles.length > 0 || usage.skills.length > 0)) out.push("");
+	if (!hasMcp && hasLists) out.push("");
 	if (hasMcp) {
 		out.push("", `${INDENT}${bold("MCP tools")}${dim(` · /mcp${available.length > 0 ? " (loaded on-demand)" : ""}`)}`);
 		if (loaded.length > 0) out.push("", `${INDENT}${dim("Loaded")}`, ...tree(loaded.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 		if (available.length > 0) out.push("", `${INDENT}${dim("Available")}`, ...tree(available).map((line) => `${INDENT}${dim(line)}`));
+	}
+	if (agents.length > 0) {
+		out.push(`${INDENT}${bold("Custom agents")}${dim(` · ${agentsNote}`)}`);
+		for (const [group, items] of byGroup(agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 	}
 	if (usage.memoryFiles.length > 0) {
 		out.push(`${INDENT}${bold("Memory files")}${dim(" · /memory")}`, ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));

@@ -36,7 +36,7 @@ import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
-import { type AgentDefinition, agentFileSources, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../../lib/agents/agent-catalog.ts";
+import { AGENT_GROUPS_QUERY_CHANNEL, type AgentDefinition, type AgentGroupsQuery, agentFileSources, agentGroup, agentSourcesStamp, BUNDLED_AGENTS_DIR, discoverAgents } from "../../lib/agents/agent-catalog.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../../lib/models/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../../lib/models/model-unusable.ts";
 import { applicableSubagentDefault, AUTO_SUBAGENT_MODEL, loadSubagentDefault, persistSubagentModel, SUBAGENT_MODEL_KNOB, type SubagentDefault } from "../../lib/models/subagent-default.ts";
@@ -590,6 +590,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 		catalog = discoverAgents([...(guide ? [{ agents: [guide] }] : []), ...fileSources]);
 		return catalog;
 	};
+
+	// /context asks which agents are custom, and from where (lib/agents/agent-catalog.ts agentGroup).
+	pi.events.on(AGENT_GROUPS_QUERY_CHANNEL, (data) => {
+		const query = data as AgentGroupsQuery;
+		const home = os.homedir();
+		query.agents = loadAgents(query.cwd).flatMap((agent) => {
+			const group = agentGroup(agent, query.cwd, home);
+			return group ? [{ name: agent.name, group }] : [];
+		});
+	});
 
 	/**
 	 * What an agent may use, for its catalog row (the profile words the

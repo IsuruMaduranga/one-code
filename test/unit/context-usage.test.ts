@@ -123,6 +123,24 @@ describe("breakdownRequest", () => {
 		expect(out.mcpAvailable).toEqual(["mcp__docs__search"]);
 	});
 
+	it("counts a custom agent's row as Custom agents and a built-in one as System tools", () => {
+		const listing = `${BLOCK_HEADS.agents}\n- explore: Fast search.\n- reviewer: Reviews code\nacross two lines.\n- pr:checker: Checks pull requests.\n\nWhen you launch multiple agents, send them together.`;
+		const request = { api: "anthropic-messages", head: { model: "m" }, list: [{ role: "user", content: [{ type: "text", text: reminder(listing) }] }] };
+		const plain = breakdownRequest(request);
+		expect(plain.tokens.agents).toBe(0);
+		expect(plain.agents).toEqual([]);
+		const out = breakdownRequest(request, { agentGroups: new Map([["reviewer", "Project"], ["pr:checker", "Plugin (pr)"]]) });
+		const row = (text: string) => estimateTextTokens(text);
+		const reviewer = row("- reviewer: Reviews code") + row("across two lines.");
+		expect(out.agents).toEqual([
+			{ name: "reviewer", tokens: reviewer, group: "Project" },
+			{ name: "pr:checker", tokens: row("- pr:checker: Checks pull requests."), group: "Plugin (pr)" },
+		]);
+		expect(out.tokens.agents).toBe(reviewer + row("- pr:checker: Checks pull requests."));
+		// The rest of the listing (its head, the built-in row and the note) stays System tools.
+		expect(out.tokens.systemTools).toBe(plain.tokens.systemTools - out.tokens.agents);
+	});
+
 	it("counts a deferred tool's schema only once it is loaded", () => {
 		const request = fullRequest();
 		const withoutLoad = { ...request, list: request.list.slice(0, 2) };
@@ -318,6 +336,7 @@ function ccUsage(): ContextUsage {
 		buffer: 33_000,
 		free: 950_300,
 		memoryFiles: [],
+		agents: [],
 		skills: [
 			{ name: "dataviz", tokens: 482 },
 			{ name: "init", tokens: 17 },
@@ -389,9 +408,47 @@ describe("renderContextUsage", () => {
 			"",
 			"     /context all to expand",
 		]);
+		const withAgents = { ...ccUsage(), agents: [{ name: "reviewer", tokens: 300, group: "Project" }, { name: "pr:checker", tokens: 200, group: "Plugin (pr)" }], agentsDir: ".claude/agents/" };
+		const agentLines = renderContextUsage(withAgents, { width: 160, collapsed: true });
+		const at = agentLines.indexOf("     Custom agents · .claude/agents/");
+		expect(agentLines.slice(at, at + 3)).toEqual(["     Custom agents · .claude/agents/", "     └ 2 agents · 500 tokens", ""]);
+		expect(agentLines[at - 2]).toBe("     └ 4 tools · 304 tokens");
 		// Nothing to list: no hint.
 		const bare = { ...ccUsage(), skills: [], mcp: { loaded: [], available: [] } };
 		expect(renderContextUsage(bare, { width: 160, collapsed: true }).join("\n")).not.toContain("/context all");
+	});
+
+	it("lists custom agents by group, Project then User then each plugin, before the memory files", () => {
+		const usage = {
+			...ccUsage(),
+			mcp: { loaded: [], available: [] },
+			agents: [
+				{ name: "zed:helper", tokens: 90, group: "Plugin (zed)" },
+				{ name: "mine", tokens: 120, group: "User" },
+				{ name: "abc:lint", tokens: 80, group: "Plugin (abc)" },
+				{ name: "reviewer", tokens: 300, group: "Project" },
+			],
+			agentsDir: ".claude/agents/",
+			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }],
+		};
+		const lines = renderContextUsage(usage, { width: 160 });
+		const at = lines.indexOf("     Custom agents · .claude/agents/");
+		expect(lines.slice(at, at + 11)).toEqual([
+			"     Custom agents · .claude/agents/",
+			"     Project",
+			"     └ reviewer: 300 tokens",
+			"     User",
+			"     └ mine: 120 tokens",
+			"     Plugin (abc)",
+			"     └ abc:lint: 80 tokens",
+			"     Plugin (zed)",
+			"     └ zed:helper: 90 tokens",
+			"     Memory files · /memory",
+			"     └ CLAUDE.md: 1.2k tokens",
+		]);
+		// A transcript entry stored before the field existed still draws.
+		const { agents: _agents, ...older } = usage;
+		expect(() => renderContextUsage(older as unknown as ContextUsage, { width: 160 })).not.toThrow();
 	});
 
 	it("fits a 70-column terminal with the narrow grid", () => {
