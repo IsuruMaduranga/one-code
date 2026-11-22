@@ -295,8 +295,9 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 	// Hints wrap at their separators, so the list and answer budgets count the rows.
 	const hint = hintRows(hints, inner, paint);
 
-	// On a short dock, list fewer earlier questions rather than overflow it: the
-	// rule, blanks, current question, one answer row and the hint rows always fit.
+	// On a short dock, list fewer earlier questions rather than overflow it: they
+	// show only where the rule, blanks, current question, one answer row and the
+	// hint rows all fit.
 	// A browsed question the trimmed list leaves out takes the list's first row
 	// (the count's, if that is the only one), so its answer never shows alone.
 	const listRows = Math.max(0, height - 6 - hint.length);
@@ -328,14 +329,19 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 				? wrapPlainText(body.message, answerWidth).map((line) => paint("error", line))
 				: [paint("muted", "Answering…")];
 
-	const header = [panelTopRule(paint, inner), "", ...list, ""];
-	const footerRows = 1 + hint.length; // blank + hint rows
-	const capacity = Math.max(1, height - header.length - footerRows);
+	// The question list, one answer row and every hint row always show. The rule
+	// and the three blank rows take what the dock has left, the rule first and
+	// the blank under it last, so a narrow, short dock wraps its hints without
+	// growing past its height.
+	const spare = height - (list.length + 1 + hint.length);
+	const header = [...(spare >= 1 ? [panelTopRule(paint, inner)] : []), ...(spare >= 4 ? [""] : []), ...list, ...(spare >= 3 ? [""] : [])];
+	const footer = [...(spare >= 2 ? [""] : []), ...hint];
+	const capacity = Math.max(1, height - header.length - footer.length);
 	state.viewport = capacity;
 	state.maxOffset = Math.max(0, answerLines.length - capacity);
 	state.offset = Math.min(Math.max(0, state.offset), state.maxOffset);
 	const indent = " ".repeat(ANSWER_INDENT);
 	const visible = answerLines.slice(state.offset, state.offset + capacity).map((line) => `${indent}${line}`);
 
-	return [...header, ...visible, "", ...hint].map((line) => truncateLine(line, inner));
+	return [...header, ...visible, ...footer].map((line) => truncateLine(line, inner));
 }

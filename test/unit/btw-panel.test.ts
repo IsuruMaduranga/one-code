@@ -244,6 +244,19 @@ describe("renderBtwPanel", () => {
 		}
 	});
 
+	it("compacts the rule and blank rows when wrapped hints leave the dock no room for them", () => {
+		// Four hint rows at width 30: the dock's eight rows hold them, the question
+		// and one answer row only once the blank rows give way.
+		const hints = ["⇧←/→ to browse", "c to copy", "f to fork", "x to clear history", "Esc to close"];
+		const lines = render({ history: [{ question: "earlier", answer: "then" }], canFork: true, body: { kind: "answer", text: "the answer" }, width: 30, height: 8 });
+		expect(lines.length).toBeLessThanOrEqual(8);
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(30);
+		expect(lines).toContain("  /btw q");
+		expect(lines).toContain("    the answer");
+		for (const hint of hints) expect(plain(lines)).toContain(hint);
+		expect(lines[0]).not.toBe("");
+	});
+
 	it("never emits a line wider than the width", () => {
 		const width = 30;
 		const lines = render({
