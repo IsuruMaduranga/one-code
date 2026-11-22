@@ -141,7 +141,8 @@ describe("sandbox settings", () => {
 	it("builds the runtime's rules: the working directory and the session's own dirs writable, the gate's files never", () => {
 		const settings = mergeSandboxBlock(ON, { filesystem: { allowWrite: ["~/out"], denyWrite: ["*.pem"], denyRead: ["~/.aws"] }, network: { allowedDomains: ["registry.npmjs.org"] } }, false);
 		const scope = { cwd: "/work", writableDirs: ["/tmp/session"], protectedFiles: ["/work/.claude/settings.json"] };
-		expect(sandboxRuntimeConfig(settings, scope)).toEqual({
+		// The platform is named: on Linux a protected file that does not exist takes the folder placeholder's spelling.
+		expect(sandboxRuntimeConfig(settings, scope, { platform: "darwin" })).toEqual({
 			network: { allowedDomains: ["registry.npmjs.org"], deniedDomains: [] },
 			filesystem: { allowWrite: ["/work", "/tmp/session", "~/out"], denyWrite: ["/work/.claude/settings.json", "*.pem"], denyRead: ["~/.aws"], allowRead: [] },
 		});
