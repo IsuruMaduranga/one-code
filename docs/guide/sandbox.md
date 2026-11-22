@@ -91,11 +91,17 @@ stops `sed -i` or a script from writing that file.
 
 The sandbox also stops a command from making the working directory look
 like a bare Git repository, which would let Git outside the sandbox run
-settings the command planted. `objects` and `refs` at the top of the
-working directory are never writable, and neither is `HEAD` (on Linux, only
-when it already exists). A `config` or `hooks` entry there is protected
-when a `HEAD` file sits beside it, or when `config` is a file. Your
-project's own `config/` and `hooks/` folders stay writable.
+settings the command planted. On macOS, `objects`, `refs`, and `HEAD` at
+the top of the working directory are never writable. A `config` or `hooks`
+entry there is protected when a `HEAD` file sits beside it, or when `config`
+is a file. Your project's own `config/` and `hooks/` folders stay writable.
+
+On Linux, bubblewrap can protect only a file or folder that already exists,
+so the protected names that exist are read-only and the missing ones can be
+created. One Code checks after each command instead: if the command turned
+the working directory into a bare repository, its `HEAD` is renamed to
+`HEAD.set-aside-by-sandbox`, and a `commondir` file planted in the
+project's `.git` is removed.
 
 **Reads.** A sandboxed command can read any file your account can read,
 except the paths you list in `filesystem.denyRead` and the paths your
@@ -237,6 +243,10 @@ holds whatever another file sets.
   quickly (more than 20,000 entries), the whole folder the pattern starts in
   becomes read-only instead. On macOS the pattern applies as written, to
   files created later too.
+- On Linux, a sandboxed command can create a protected file that doesn't
+  exist yet, such as `.mcp.json` or a `.vscode` folder. A file that exists
+  when the session starts is read-only. On macOS, the missing names are
+  protected too.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.
