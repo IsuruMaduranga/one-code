@@ -179,6 +179,33 @@ describe("sync-base", () => {
 		expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("my draft");
 	});
 
+	describe.each([
+		["the product's .git/info/exclude", (product: string) => write(product, { ".git/info/exclude": "extensions/new.ts\n" })],
+		["a global ignore file", (product: string) => {
+			write(product, { ".git/ignore-list": "extensions/new.ts\n" });
+			git(product, "config", "core.excludesFile", join(product, ".git/ignore-list"));
+		}],
+	])("a base path ignored through %s", (_name, ignore) => {
+		it("stops before overwriting a file there, and checks a synced one as equal to the base", () => {
+			const { base, product } = synced();
+			git(product, "add", "-A");
+			git(product, "commit", "-q", "-m", "synced");
+			ignore(product);
+			write(product, { "extensions/new.ts": "my draft" });
+			const next = nextBase(base, () => write(base, { "extensions/new.ts": "the base's" }));
+			expect(() => applyBase(product, next.dir, { commit: next.commit })).toThrow(/extensions\/new\.ts/);
+			expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("my draft");
+
+			// Once the file is gone, the sync writes it, and a check finds it equal to the base.
+			rmSync(join(product, "extensions/new.ts"));
+			applyBase(product, next.dir, { commit: next.commit });
+			expect(readFileSync(join(product, "extensions/new.ts"), "utf8")).toBe("the base's");
+			expect(checkBase(product, next.dir)).toEqual([]);
+			writeFileSync(join(product, "extensions/new.ts"), "edited");
+			expect(checkBase(product, next.dir)).toEqual(["extensions/new.ts: differs from the base"]);
+		});
+	});
+
 	// Windows has no executable bit, so the check compares bytes alone there.
 	it.skipIf(process.platform === "win32")("reports a base file whose executable bit the product lost", () => {
 		const { base, product } = synced();
