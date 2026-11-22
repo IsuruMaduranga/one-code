@@ -278,6 +278,28 @@ describe("a shell line that writes a path such a rule names", () => {
 		}
 	});
 
+	it("sees the file an unmodelled move, copy, link or install puts into an existing directory", () => {
+		const rule = { deny: ["Edit(build/dev.yaml)"] };
+		const writes = (command: string) => analyzeShellCommand({ command, cwd, home: homedir() }).writes.map((write) => write.token);
+		for (const command of [
+			"mv --backup=numbered config/dev.yaml build/",
+			"mv --backup=numbered config/dev.yaml build",
+			"cp --sparse=always config/dev.yaml build",
+			"ln --backup=numbered config/dev.yaml build/",
+			"install --mode=644 config/dev.yaml build",
+		]) {
+			expect(writes(command), command).toContain("build/dev.yaml");
+			expect(run(rule, "bash", command, "auto"), command).toBe("deny");
+		}
+		// A move still removes its source and names its destination.
+		expect(writes("mv --backup=numbered config/dev.yaml build/")).toEqual(expect.arrayContaining(["config/dev.yaml", "build/", "build/dev.yaml"]));
+		// A rename to a name that is not a directory writes that name only.
+		expect(writes("mv --backup=numbered config/dev.yaml notes.md")).toEqual(["config/dev.yaml", "notes.md"]);
+		// One operand: ln makes the link here, under the target's name.
+		expect(writes("ln -s ../shared/notes.md")).toContain("notes.md");
+		expect(run({ deny: ["Edit(notes.md)"] }, "bash", "ln -s ../shared/notes.md", "auto")).toBe("deny");
+	});
+
 	it("counts a move's source as a write, since the move removes it", () => {
 		expect(analyzeShellCommand({ command: "mv config/prod.yaml config/old.yaml", cwd, home: homedir() }).writes.map((write) => write.token)).toEqual(["config/prod.yaml", "config/old.yaml"]);
 		for (const command of ["mv config/prod.yaml config/old.yaml", "mv config/prod.yaml config/dev.yaml .", "mv -f config/prod.yaml config/old/"]) {

@@ -1701,18 +1701,28 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// does not model writes every operand it names, its sources (which it
 			// removes) and `-t`'s directory included, bare names too. With a
 			// target directory (`-t DIR`, `--target-directory=DIR`), mv, cp, ln and
-			// install write each operand's name beneath it.
+			// install write each operand's name beneath it, as they do when the last
+			// operand is an existing directory or ends with a slash.
 			const into = name in TARGET_DIRECTORY_COMMANDS ? targetDirectoryOperands(name, args) : undefined;
+			const operands = args.filter((token) => !token.value.startsWith("-"));
 			if (name === "mv") {
-				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")));
+				writeTokens.push(...operands);
 			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
 				// The destination is the last operand even when it is a bare name
 				// (`cp --sparse=always x prod.yaml`); rsync's may be a remote spec, so it keeps the path test.
-				const operands = name === "rsync" ? positionals : args.filter((token) => !token.value.startsWith("-"));
-				const last = operands[operands.length - 1];
+				const last = (name === "rsync" ? positionals : operands).at(-1);
 				if (last) writeTokens.push(last.value);
+				// `ln -s ../prod.yaml` makes `prod.yaml` here.
+				if (name === "ln" && operands.length === 1) writeTokens.push(bashBasename(operands[0].value));
 			} else if (into?.dir === undefined) {
 				writeTokens.push(...positionals.map((token) => token.value));
+			}
+			if (into !== undefined && into.dir === undefined && operands.length > 1) {
+				// `mv --backup=numbered notes.md archive/` writes `archive/notes.md`.
+				const destination = operands[operands.length - 1];
+				if (destination.value.endsWith("/") || isDirectory(toAbsoluteBash(effectiveCwd, destination.value, home))) {
+					for (const source of operands.slice(0, -1)) writeTokens.push(landingBeneath(destination, source));
+				}
 			}
 			if (into?.dir !== undefined) {
 				const dir = into.dir;
