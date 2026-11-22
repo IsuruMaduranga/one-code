@@ -1537,35 +1537,57 @@ export function decide(params: DecideInput): Decision {
 				(r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
 		);
 	/**
-	 * The first edit-family rule of `rules` whose path one of a shell line's
-	 * recorded write targets meets (a bare rule meets every target). Such a
-	 * line takes no fast path: it is classified in auto mode, asked in
-	 * acceptEdits and refused in dontAsk. This only withholds an allow; the
-	 * pre-gate itself gains no deny path.
+	 * A shell line's write targets against the edit-family rules, as Claude
+	 * Code's Bash tool checks its write paths against Edit rules after its own
+	 * deny and ask rules and before any allow rule (`checkPathConstraints`).
+	 * The targets are the pre-gate's recorded ones (redirects, a mutating
+	 * command's operands, a move's sources), for a line bash runs (`bash`,
+	 * `monitor`). A rule with a path that a target meets denies the line, or
+	 * asks for it, whatever allow rule matches it. A bare rule names no path,
+	 * and Claude Code's path check reads none, so it only withholds the fast
+	 * path and the sandbox auto-allow from a line that writes anything
+	 * (`writesUnderBareFamilyRule`). The pre-gate itself gains no deny path.
 	 */
-	const familyRuleWritten = (rules: readonly PermissionRule[], evidence: ShellEvidence): PermissionRule | undefined =>
-		rules.find(
-			(r) =>
-				EDIT_TOOLS.has(r.tool) &&
-				evidence.writes.some(
-					(write) =>
-						!r.pattern ||
-						[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => writeTargetMeetsPathPattern(r.pattern as string, path, cwd)),
-				),
+	const familyPathRules = (rules: readonly PermissionRule[]) => rules.filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool));
+	const denyPathRules = familyPathRules(deny);
+	const askPathRules = familyPathRules(ask);
+	const bareFamilyRule = [...deny, ...ask].some((r) => !r.pattern && EDIT_TOOLS.has(r.tool));
+	const runsBashLine = !!subject && (tool === "bash" || tool === "monitor");
+	let lineEvidence: ShellEvidence | undefined;
+	/** The first of `rules` whose path one of the line's recorded write targets meets. */
+	const writtenPathRule = (rules: readonly PermissionRule[]): PermissionRule | undefined => {
+		if (!runsBashLine || rules.length === 0) return undefined;
+		lineEvidence ??= shellEvidence(subject);
+		return rules.find((r) =>
+			(lineEvidence as ShellEvidence).writes.some((write) =>
+				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => matchesPathPattern(r.pattern as string, path, cwd)),
+			),
 		);
-	const hasFamilyRule = [...deny, ...ask].some((r) => EDIT_TOOLS.has(r.tool));
-	const blockedPaths = new WeakMap<ShellEvidence, boolean>();
-	const writesBlockedPath = (evidence: ShellEvidence): boolean => {
-		if (!hasFamilyRule) return false;
-		let blocked = blockedPaths.get(evidence);
-		if (blocked === undefined) {
-			blocked = familyRuleWritten(deny, evidence) !== undefined || familyRuleWritten(ask, evidence) !== undefined;
-			blockedPaths.set(evidence, blocked);
+	};
+	/**
+	 * A line that writes anything under a bare rule, or writes a directory that
+	 * may hold a path rule's file (`rm -r config` under `Edit(config/prod.yaml)`).
+	 * The second is a may, not a does, so it withholds the fast path and never
+	 * refuses: the classifier or a prompt reads the line.
+	 */
+	const coveringWrites = new WeakMap<ShellEvidence, boolean>();
+	const writesUnderBareFamilyRule = (evidence: ShellEvidence): boolean => {
+		if (evidence.writes.length === 0) return false;
+		if (bareFamilyRule) return true;
+		if (denyPathRules.length === 0 && askPathRules.length === 0) return false;
+		let covering = coveringWrites.get(evidence);
+		if (covering === undefined) {
+			covering = evidence.writes.some((write) =>
+				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) =>
+					[...denyPathRules, ...askPathRules].some((r) => writeTargetMeetsPathPattern(r.pattern as string, path, cwd)),
+				),
+			);
+			coveringWrites.set(evidence, covering);
 		}
-		return blocked;
+		return covering;
 	};
 
-	const denyRule = blockingRule(deny);
+	const denyRule = blockingRule(deny) ?? writtenPathRule(denyPathRules);
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
 
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
@@ -1752,8 +1774,10 @@ export function decide(params: DecideInput): Decision {
 	}
 
 	// An explicit ask rule is the user's stated intent to be prompted, so it wins
-	// over auto mode too: the classifier never gets to auto-approve a match.
-	const askRule = blockingRule(ask);
+	// over auto mode too: the classifier never gets to auto-approve a match. A
+	// shell line that writes a path an edit-family ask rule names is asked
+	// before any allow rule, as its deny counterpart is refused above.
+	const askRule = blockingRule(ask) ?? writtenPathRule(askPathRules);
 	if (askRule) return askOrDeny(askRule);
 
 	/**
@@ -1853,7 +1877,7 @@ export function decide(params: DecideInput): Decision {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
-		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesBlockedPath(evidence)) {
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderBareFamilyRule(evidence)) {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
@@ -1877,7 +1901,7 @@ export function decide(params: DecideInput): Decision {
 	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
 	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
 		const evidence = shellEvidence(subject);
-		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesBlockedPath(evidence)) return { decision: "allow", cause: "sandboxed" };
+		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderBareFamilyRule(evidence)) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

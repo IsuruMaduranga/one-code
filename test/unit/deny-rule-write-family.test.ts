@@ -21,7 +21,7 @@ mkdirSync(join(cwd, "build", "out"), { recursive: true });
 writeFileSync(join(cwd, "build", "out", "a.js"), "");
 afterAll(() => rmSync(cwd, { recursive: true, force: true }));
 
-type Mode = "auto" | "acceptEdits" | "default" | "bypassPermissions" | "dontAsk";
+type Mode = "auto" | "acceptEdits" | "default" | "bypassPermissions" | "dontAsk" | "plan";
 const run = (rules: { deny?: string[]; ask?: string[]; allow?: string[] }, toolName: string, subject: string, mode: Mode, fast = true, extra: Record<string, unknown> = {}) =>
 	decide({
 		toolName,
@@ -157,37 +157,50 @@ describe("an allow rule stays exact", () => {
 
 describe("a shell line that writes a path such a rule names", () => {
 	const deny = { deny: ["Edit(config/prod.yaml)"] };
+	const SHELL_MODES: Mode[] = [...MODES, "plan"];
 
-	it.each(["printf '' > config/prod.yaml", "rm config/prod.yaml", "cp /dev/null config/prod.yaml"])("%s takes no fast path", (command) => {
-		expect(run(deny, "bash", command, "auto")).toBe("classify");
-		expect(run(deny, "bash", command, "acceptEdits")).toBe("ask");
-		expect(run(deny, "bash", command, "dontAsk")).toBe("deny");
+	it.each(["printf '' > config/prod.yaml", "rm config/prod.yaml", "cp /dev/null config/prod.yaml"])("%s is refused in every mode", (command) => {
+		for (const mode of SHELL_MODES) expect(run(deny, "bash", command, mode)).toBe("deny");
+		expect(run(deny, "bash", command, "default", true, { sandboxed: true })).toBe("deny");
+		expect(run(deny, "monitor", command, "auto")).toBe("deny");
+	});
+
+	it("is refused even when a Bash allow rule matches the line, deny before allow as in Claude Code", () => {
+		for (const mode of ["auto", "acceptEdits", "default", "dontAsk"] as Mode[]) {
+			expect(run({ ...deny, allow: ["Bash(printf:*)"] }, "bash", "printf x > config/prod.yaml", mode)).toBe("deny");
+			expect(run({ ...deny, allow: ["Bash(rm config/prod.yaml)"] }, "bash", "rm config/prod.yaml", mode)).toBe("deny");
+		}
+		expect(run({ ...deny, allow: ["Bash(printf:*)"] }, "bash", "printf x > config/dev.yaml", "default")).toBe("allow");
 	});
 
 	it("counts a move's source as a write, since the move removes it", () => {
 		expect(analyzeShellCommand({ command: "mv config/prod.yaml config/old.yaml", cwd, home: homedir() }).writes.map((write) => write.token)).toEqual(["config/prod.yaml", "config/old.yaml"]);
 		for (const command of ["mv config/prod.yaml config/old.yaml", "mv config/prod.yaml config/dev.yaml .", "mv -f config/prod.yaml config/old/"]) {
-			expect(run(deny, "bash", command, "auto")).toBe("classify");
-			expect(run(deny, "bash", command, "acceptEdits")).toBe("ask");
-			expect(run(deny, "bash", command, "dontAsk")).toBe("deny");
+			for (const mode of SHELL_MODES) expect(run(deny, "bash", command, mode)).toBe("deny");
 		}
 		expect(run(deny, "bash", "mv config/dev.yaml config/old.yaml", "auto")).toBe("allow");
 	});
 
-	it("counts every operand of a move with options it does not model, for the sandbox auto-allow", () => {
-		expect(run(deny, "bash", "mv --backup config/prod.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("ask");
-		expect(run(deny, "bash", "mv -t config/old config/prod.yaml", "default", true, { sandboxed: true })).toBe("ask");
+	it("counts every operand of a move with options it does not model", () => {
+		expect(run(deny, "bash", "mv --backup config/prod.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("deny");
+		expect(run(deny, "bash", "mv -t config/old config/prod.yaml", "default", true, { sandboxed: true })).toBe("deny");
 		expect(run(deny, "bash", "mv --backup config/dev.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("allow");
 	});
 
 	it("keeps the fast path for a line that writes elsewhere", () => {
 		expect(run(deny, "bash", "rm config/dev.yaml", "auto")).toBe("allow");
 		expect(run(deny, "bash", "printf '' > config/dev.yaml", "acceptEdits")).toBe("allow");
+		expect(run(deny, "bash", "rm config/dev.yaml", "default", true, { sandboxed: true })).toBe("allow");
 	});
 
-	it("is not cleared by the sandbox auto-allow, and an ask rule withholds the fast path too", () => {
-		expect(run(deny, "bash", "rm config/prod.yaml", "default", true, { sandboxed: true })).toBe("ask");
-		expect(run(deny, "bash", "rm config/dev.yaml", "default", true, { sandboxed: true })).toBe("allow");
-		expect(run({ ask: ["Write(config/prod.yaml)"] }, "bash", "rm config/prod.yaml", "acceptEdits")).toBe("ask");
+	it("is asked under an ask rule, a matching Bash allow rule and the sandbox auto-allow notwithstanding", () => {
+		const ask = { ask: ["Write(config/prod.yaml)"] };
+		for (const mode of ["auto", "acceptEdits", "default"] as Mode[]) {
+			expect(run(ask, "bash", "rm config/prod.yaml", mode)).toBe("ask");
+			expect(run({ ...ask, allow: ["Bash(rm:*)"] }, "bash", "rm config/prod.yaml", mode)).toBe("ask");
+		}
+		expect(run(ask, "bash", "rm config/prod.yaml", "default", true, { sandboxed: true })).toBe("ask");
+		expect(run(ask, "bash", "rm config/prod.yaml", "dontAsk")).toBe("deny");
+		expect(run({ ...ask, allow: ["Bash(rm:*)"] }, "bash", "rm config/dev.yaml", "default")).toBe("allow");
 	});
 });
