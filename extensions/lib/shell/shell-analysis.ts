@@ -1673,7 +1673,10 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			if (name === "mv") {
 				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")).map((token) => token.value));
 			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
-				const last = positionals[positionals.length - 1];
+				// The destination is the last operand even when it is a bare name
+				// (`cp --sparse=always x prod.yaml`); rsync's may be a remote spec, so it keeps the path test.
+				const operands = name === "rsync" ? positionals : args.filter((token) => !token.value.startsWith("-"));
+				const last = operands[operands.length - 1];
 				if (last) writeTokens.push(last.value);
 			} else if (into?.dir === undefined) {
 				writeTokens.push(...positionals.map((token) => token.value));

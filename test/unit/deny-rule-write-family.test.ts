@@ -249,6 +249,14 @@ describe("a shell line that writes a path such a rule names", () => {
 		expect(run({ ...deny, allow: ["Bash(printf:*)"] }, "bash", "printf x > config/dev.yaml", "default")).toBe("allow");
 	});
 
+	it("sees a bare-name destination behind options the copy check does not model", () => {
+		const rule = { deny: ["Edit(notes.md)"] };
+		for (const command of ["cp --sparse=always config/dev.yaml notes.md", "ln --backup=numbered config/dev.yaml notes.md", "install --mode=644 config/dev.yaml notes.md"]) {
+			expect(analyzeShellCommand({ command, cwd, home: homedir() }).writes.map((write) => write.token), command).toContain("notes.md");
+			expect(run(rule, "bash", command, "auto"), command).toBe("deny");
+		}
+	});
+
 	it("counts a move's source as a write, since the move removes it", () => {
 		expect(analyzeShellCommand({ command: "mv config/prod.yaml config/old.yaml", cwd, home: homedir() }).writes.map((write) => write.token)).toEqual(["config/prod.yaml", "config/old.yaml"]);
 		for (const command of ["mv config/prod.yaml config/old.yaml", "mv config/prod.yaml config/dev.yaml .", "mv -f config/prod.yaml config/old/"]) {
