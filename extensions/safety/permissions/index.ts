@@ -138,6 +138,7 @@ import { announceLocalCommand, registerLocalCommand } from "../../lib/ui/local-c
 import { protectedFiles, userConfigDir, otherToolName, otherToolSettings } from "../../lib/profile/sources.ts";
 import { relativeDisplayPath, tildify, tryRealpath } from "../../lib/profile/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
+import { modeDisplayName } from "./panel/render.ts";
 import { PANEL_FOCUS_CHANNEL, PanelFocus, panelUi } from "../../lib/ui/panel-focus.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -157,6 +158,8 @@ import { announceArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
 import { permissionText, refusalText, unansweredAskReason } from "../../lib/rules/permission-text.ts";
 import { liveUiCtx } from "../../lib/ui/tui-render.ts";
+import { askPermission } from "../../lib/ui/permission-dialog.ts";
+import { askView } from "./ask-view.ts";
 
 /** Shown when a permission prompt is held behind an open panel (serializePrompt). */
 const PROMPT_WAITS_FOR_PANEL = "A permission request is waiting. Close this panel to answer it.";
@@ -1318,8 +1321,10 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const reason = "Auto mode classifier transcript exceeded context window — falling back to manual approval";
 		ctx.ui.notify(reason, "warning");
 		logDecision(ctx, { tool: toolName, subject, outcome: "prompt", source: "user", transcriptTooLong: true, reason });
+		const preview = previewSubject(subject);
+		const view = askView({ toolName, subject: preview, cause: "mode", pausedResume: false, unsandboxed: false, fallback: reason, options: askOptions(undefined) });
 		const choice = await gatePrompt(ctx, desktopNotificationText.reviewFallback(brand.name, ccToolName(toolName)), signal, () =>
-			ctx.ui.select(`${reason}\n\n${askTitle(toolName, previewSubject(subject), "mode", false)}`, askOptions(undefined), { signal }),
+			askPermission(pi.events, ctx, view, `${reason}\n\n${askTitle(toolName, preview, "mode", false)}`, { signal }),
 		);
 		const allowed = !signal?.aborted && choice === YES;
 		logDecision(ctx, { tool: toolName, subject, outcome: allowed ? "allow" : "block", source: "user", transcriptTooLong: true, reason });
@@ -1376,9 +1381,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(productSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			const choice = await bindGatePrompt(pi.events, ctx)(desktopNotificationText.outsideRead(brand.name), signal, () =>
-				ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal }),
-			);
+			const view = { title: OUTSIDE_READ_TITLE, subject: `${toolName} ${path}`, notes: [OUTSIDE_READ_EXPLAINER(settingsFile)], question: OUTSIDE_READ_QUESTION, options: Object.values(OUTSIDE_READ_ANSWERS) };
+			const choice = await bindGatePrompt(pi.events, ctx)(desktopNotificationText.outsideRead(brand.name), signal, () => askPermission(pi.events, ctx, view, title, { signal }));
 			if (signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
 			markOutsideReadPromptSeen(productSettingsPath(home));
@@ -1672,8 +1676,18 @@ function permissionsExtension(pi: ExtensionAPI) {
 			cause: result.cause,
 			home: os.homedir(),
 		});
+		const view = askView({
+			toolName: event.toolName,
+			subject: preview,
+			input: event.input as Record<string, unknown>,
+			cause: result.cause,
+			rule: result.rule?.raw,
+			pausedResume,
+			unsandboxed,
+			options: askOptions(grant),
+		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, ctx.signal), (text, timeout) =>
-			bindGatePrompt(pi.events, ctx)(permissionAttention(event.toolName), ctx.signal, () => ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout })),
+			bindGatePrompt(pi.events, ctx)(permissionAttention(event.toolName), ctx.signal, () => askPermission(pi.events, ctx, view, text, { signal: ctx.signal, timeout })),
 		);
 		if (ctx.signal?.aborted) return { block: true, reason: unansweredAskReason(result.cause, { kind: "stoppedWhileWaiting", who: "turn" }) };
 		if (unanswered) {
@@ -1872,8 +1886,19 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// dead agent's dialog stays on screen and every later prompt waits behind
 		// it (M5).
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
+		const view = askView({
+			toolName,
+			subject: preview,
+			input,
+			cause: result.cause,
+			rule: result.rule?.raw,
+			pausedResume,
+			unsandboxed,
+			agent: call.agent ?? null,
+			options: askOptions(grant),
+		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, (show) => serializePrompt(show, call.signal), (text, timeout) =>
-			bindGatePrompt(pi.events, ctx)(permissionAttention(toolName), call.signal, () => ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout })),
+			bindGatePrompt(pi.events, ctx)(permissionAttention(toolName), call.signal, () => askPermission(pi.events, ctx, view, text, { signal: call.signal, timeout })),
 		);
 		if (call.signal?.aborted) return { block: true, reason: unansweredAskReason(result.cause, { kind: "stoppedWhileWaiting", who: "agent" }) };
 		if (unanswered) {
@@ -1943,7 +1968,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 	/** The status line under the panel's tabs. */
 	const panelStatus = (): string => {
-		const parts = [`Mode: ${mode}`];
+		const parts = [`Mode: ${modeDisplayName(mode)}`];
 		if (mode === "auto" || pauseTracker.stats().lifetime > 0) {
 			parts.push(`${pauseTracker.stats().lifetime} blocked by auto mode this session`);
 			if (pauseTracker.isPaused()) parts.push("auto mode paused (approve a prompt to resume)");
