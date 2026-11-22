@@ -148,6 +148,17 @@ describe("a profile's sandbox block", () => {
 		expect(load({ locked: true }).enabled).toBe(true);
 	});
 
+	it("lists a key the lock newly ignores as soon as the settings are read again", () => {
+		useProfile({ sandbox: LOCKED_ON });
+		setSandboxForTest({ ...SANDBOX_OFF, enabled: true, product: { locked: true, ignored: [] } });
+		// A /sandbox pick writes a widening key into the user's file.
+		userFile({ filesystem: { allowWrite: ["~/out"] } });
+		reloadSandboxSettings();
+		expect(sandboxSettings().product?.ignored).toEqual([expect.stringMatching(/^sandbox\.filesystem\.allowWrite in /)]);
+		// What a reload may change still holds the start's other settings.
+		expect(sandboxSettings().filesystem.allowWrite).toEqual([]);
+	});
+
 	it("applies the same block and lock when the settings are read again or for another directory", () => {
 		useProfile({ sandbox: { enabled: true, allowUnsandboxedCommands: false, locked: true } });
 		setSandboxForTest({ ...SANDBOX_OFF, enabled: true, allowUnsandboxedCommands: true, autoAllowBashIfSandboxed: true });

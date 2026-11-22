@@ -152,7 +152,8 @@ export function sandboxSettled(): Promise<void> {
  */
 export function reloadSandboxSettings(): SandboxSettings {
 	const loaded = loadSandboxSettings(state().settingsCwd ?? process.cwd(), homedir());
-	state().settings = { ...sandboxSettings(), autoAllowBashIfSandboxed: loaded.autoAllowBashIfSandboxed, allowUnsandboxedCommands: loaded.allowUnsandboxedCommands };
+	// The product's lock report follows the files too, so /sandbox lists a key the lock now ignores at once.
+	state().settings = { ...sandboxSettings(), autoAllowBashIfSandboxed: loaded.autoAllowBashIfSandboxed, allowUnsandboxedCommands: loaded.allowUnsandboxedCommands, ...(loaded.product ? { product: loaded.product } : {}) };
 	return loaded;
 }
 
