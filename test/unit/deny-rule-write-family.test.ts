@@ -5,9 +5,9 @@
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { decide, parseRules, writeTargetMeetsPathPattern } from "../../extensions/lib/rules/matcher.ts";
+import { decide, matchesPathPattern, parseRules, writeTargetMeetsPathPattern } from "../../extensions/lib/rules/matcher.ts";
 import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
@@ -145,6 +145,40 @@ describe("a shell line that writes a directory holding a path such a rule names"
 		expect(writeTargetMeetsPathPattern("config/prod.yaml", join(cwd, "build"), cwd)).toBe(false);
 		// An exact rule path that only starts with the directory's name is not beneath it.
 		expect(writeTargetMeetsPathPattern("configs/prod.yaml", join(cwd, "config"), cwd)).toBe(false);
+	});
+});
+
+// Claude Code reads `/x` against the project root (`//x` is its absolute form).
+describe("a deny or ask rule written with a single leading slash", () => {
+	it("names the path under the working directory for the file tools and the read tools", () => {
+		for (const mode of MODES) {
+			expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "edit", prod, mode)).toBe("deny");
+			expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "write", prod, mode)).toBe("deny");
+			expect(run({ deny: ["Read(/config/**)"] }, "read", prod, mode)).toBe("deny");
+		}
+		expect(run({ ask: ["Edit(/config/prod.yaml)"] }, "write", prod, "auto")).toBe("ask");
+		expect(run({ ask: ["Read(/config/prod.yaml)"] }, "read", prod, "default")).toBe("ask");
+		expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "edit", dev, "auto")).toBe("allow");
+	});
+
+	it("names it for a shell line's write targets", () => {
+		expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "bash", "rm config/prod.yaml", "auto")).toBe("deny");
+		expect(run({ ask: ["Write(/config/prod.yaml)"], allow: ["Bash(rm:*)"] }, "bash", "rm config/prod.yaml", "default")).toBe("ask");
+		expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "bash", "rm -r config", "acceptEdits")).toBe("ask");
+		expect(run({ deny: ["Edit(/config/prod.yaml)"] }, "bash", "rm -r build", "acceptEdits")).toBe("allow");
+		expect(writeTargetMeetsPathPattern("/config/prod.yaml", join(cwd, "config"), cwd)).toBe(true);
+		expect(writeTargetMeetsPathPattern("/config/prod.yaml", join(cwd, "build"), cwd)).toBe(false);
+	});
+
+	it("keeps its absolute reading", () => {
+		expect(matchesPathPattern("/config/prod.yaml", resolve("/config/prod.yaml"), cwd, true)).toBe(process.platform !== "win32");
+		expect(matchesPathPattern("/config/prod.yaml", resolve("/config/prod.yaml"), cwd)).toBe(process.platform !== "win32");
+	});
+
+	it("leaves an allow rule with the absolute reading only", () => {
+		expect(matchesPathPattern("/config/prod.yaml", prod, cwd)).toBe(false);
+		expect(run({ allow: ["Edit(/config/prod.yaml)"] }, "edit", prod, "default")).toBe("ask");
+		expect(run({ allow: ["Edit(config/prod.yaml)"] }, "edit", prod, "default")).toBe("allow");
 	});
 });
 

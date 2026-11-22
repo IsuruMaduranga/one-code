@@ -214,7 +214,7 @@ function restoreAllowed(ctx: ExtensionContext): (path: string) => boolean {
 		return (path) => {
 			const real = tryRealpath(path);
 			if (!real || !isPathAtOrUnder(real, root)) return false;
-			return !rules.some((rule) => ruleMatches(rule, "read", path, ctx.cwd) || ruleMatches(rule, "read", real, ctx.cwd));
+			return !rules.some((rule) => ruleMatches(rule, "read", path, ctx.cwd, true) || ruleMatches(rule, "read", real, ctx.cwd, true));
 		};
 	} catch {
 		return () => false;

@@ -695,21 +695,36 @@ export function findBashAllowRule(
  * Windows rules such as `Read(//c/Users/x/**)` are written in) — and also as
  * `C:/Users/x/docs/a.md`, so a rule spelled with the drive letter works too.
  * darwin and win32 compare case-insensitively, like their filesystems.
+ *
+ * `restricts` marks a deny or ask rule, which reads a single leading `/` both
+ * ways it may be meant ({@link pathPatternReading}); an allow rule leaves it
+ * unset and keeps the one absolute reading, so it never widens.
  */
-export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
-	const { glob, absolute } = pathPatternReading(pattern, subject, cwd);
+export function matchesPathPattern(pattern: string, subject: string, cwd: string, restricts = false): boolean {
+	const { globs, absolute } = pathPatternReading(pattern, subject, cwd, restricts);
+	const candidates = pathCandidates(absolute, cwd);
 	// Case-insensitive where the filesystem is (darwin, win32): `Read(~/Notes/**)`
 	// covers `~/notes/a.md`, the same file there — the rule every other
 	// containment check in this file compares by (comparablePath).
-	const regex = globToRegex(glob, true, foldsCase());
-	for (const candidate of pathCandidates(absolute, cwd)) {
-		if (regex.test(candidate)) return true;
-	}
-	return false;
+	return globs.some((glob) => {
+		const regex = globToRegex(glob, true, foldsCase());
+		for (const candidate of candidates) {
+			if (regex.test(candidate)) return true;
+		}
+		return false;
+	});
 }
 
-/** A path pattern as {@link matchesPathPattern} reads it, and the subject made absolute. */
-function pathPatternReading(pattern: string, subject: string, cwd: string): { glob: string; absolute: string } {
+/**
+ * A path pattern as {@link matchesPathPattern} reads it, and the subject made
+ * absolute. A pattern has one reading, except that a deny or ask rule
+ * (`restricts`) written with a single leading `/` has two: the absolute path
+ * this matcher has always read it as, and the path under the working
+ * directory, which is how Claude Code reads it (`//path` is its absolute
+ * form). A rule copied from Claude Code then protects the file it named there,
+ * and a rule written for this matcher keeps protecting what it did.
+ */
+function pathPatternReading(pattern: string, subject: string, cwd: string, restricts = false): { globs: string[]; absolute: string } {
 	const home = homedir();
 	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
 	// doubled slash distinguishes it from `/path`, which CC reads relative to
@@ -725,8 +740,11 @@ function pathPatternReading(pattern: string, subject: string, cwd: string): { gl
 	// that kept it (`Read(./.env)`, the form Claude Code's docs write) matched nothing.
 	const plain = spelled.replace(/^(?:\.\/+)+/, "");
 	const glob = expandHome(plain.startsWith("//") ? plain.slice(1) : plain);
+	// The working directory spelled as a literal glob prefix (`C:/x` on Windows,
+	// matching the `C:/…` candidate), so `/config/prod.yaml` also names `<cwd>/config/prod.yaml`.
+	const underCwd = restricts && /^\/(?!\/)/.test(plain) ? [`${escapeLiteral(forwardSlashes(cwd)).replace(/\/+$/, "")}${plain}`] : [];
 	const expandedSubject = expandTilde(subject, home);
-	return { glob, absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
+	return { globs: [glob, ...underCwd], absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
 }
 
 /**
@@ -769,20 +787,23 @@ function isAtOrInside(path: string, dir: string): boolean {
  * first wildcard or escape) and the directory's prefix must agree as far as
  * the shorter one goes, in either direction; an exact pattern must start with
  * the directory's prefix. For the deny and ask write check only: it may only
- * withhold an allow, and allow rules stay exact.
+ * withhold an allow, and allow rules stay exact, so a single leading `/` is
+ * read both ways a deny or ask rule reads it.
  */
 export function writeTargetMeetsPathPattern(pattern: string, target: string, cwd: string): boolean {
-	if (matchesPathPattern(pattern, target, cwd)) return true;
-	const { glob, absolute } = pathPatternReading(pattern, target, cwd);
+	if (matchesPathPattern(pattern, target, cwd, true)) return true;
+	const { globs, absolute } = pathPatternReading(pattern, target, cwd, true);
 	if (!mayBeDirectory(absolute)) return false;
 	const fold = (p: string) => (foldsCase() ? p.toLowerCase() : p);
-	const cut = glob.search(/[*\\]/);
-	const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
-	return [...pathCandidates(absolute, cwd, true)].some((prefix) => {
-		const dir = fold(prefix);
-		// The empty prefix stands for the relative spellings: an absolute literal never starts one.
-		if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
-		return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
+	const prefixes = [...pathCandidates(absolute, cwd, true)].map(fold);
+	return globs.some((glob) => {
+		const cut = glob.search(/[*\\]/);
+		const literal = fold(cut < 0 ? glob : glob.slice(0, cut));
+		return prefixes.some((dir) => {
+			// The empty prefix stands for the relative spellings: an absolute literal never starts one.
+			if (dir === "" && literal !== "" && (literal.startsWith("/") || /^[a-z]:\//i.test(literal))) return false;
+			return literal.startsWith(dir) || (cut >= 0 && dir.startsWith(literal));
+		});
 	});
 }
 
@@ -963,8 +984,10 @@ export function isAtOrInsideDir(candidate: string, dir: string, cwd: string): bo
 /**
  * Whether one rule matches a call. For bash this is the deny/ask ("any
  * subcommand") semantics — allow rules go through {@link findBashAllowRule}.
+ * `restricts` marks a deny or ask rule, whose path pattern a single leading
+ * `/` gives two readings ({@link matchesPathPattern}).
  */
-export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
+export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string, restricts = false): boolean {
 	if (!ruleCoversTool(rule.tool, toolName)) return false;
 	if (!rule.pattern) return true;
 	if (!subject) return false;
@@ -974,7 +997,7 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 				? powershellPatternMatchesAny(rule.pattern, subject)
 				: bashPatternMatchesAny(rule.pattern, subject);
 		case "path":
-			return matchesPathPattern(rule.pattern, subject, cwd);
+			return matchesPathPattern(rule.pattern, subject, cwd, restricts);
 		case "url":
 			return matchesUrlPattern(rule.pattern, subject);
 		case "text":
@@ -1524,9 +1547,9 @@ export function decide(params: DecideInput): Decision {
 	const blockingRule = (rules: readonly PermissionRule[]): PermissionRule | undefined =>
 		rules.find(
 			(r) =>
-				ruleMatches(r, toolName, subject, cwd) ||
+				ruleMatches(r, toolName, subject, cwd, true) ||
 				// The rule's own tool was just tried; only another tool of the family is read again.
-				(r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd)),
+				(r.tool !== tool && EDIT_TOOLS.has(r.tool) && EDIT_TOOLS.has(tool) && ruleMatches({ ...r, tool }, toolName, subject, cwd, true)),
 		);
 	/**
 	 * A shell line's write targets against the edit-family rules, as Claude
@@ -1548,7 +1571,7 @@ export function decide(params: DecideInput): Decision {
 	const pathRuleMet = (
 		rules: readonly PermissionRule[],
 		targets: readonly { absolute: string; resolved?: string }[],
-		meets: (pattern: string, path: string, cwd: string) => boolean = matchesPathPattern,
+		meets: (pattern: string, path: string, cwd: string) => boolean = (pattern, path, at) => matchesPathPattern(pattern, path, at, true),
 	): PermissionRule | undefined =>
 		rules.find((r) =>
 			targets.some((target) =>
@@ -1686,7 +1709,7 @@ export function decide(params: DecideInput): Decision {
 	 */
 	const planShellLine = (line: { writes: boolean; readOnly: boolean; readOnlyOutside: boolean; ruleMayCover: () => boolean }): Decision => {
 		if (line.writes) return { decision: "deny", cause: "plan-mode" };
-		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
+		const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd, true));
 		if (askRule) return line.readOnly || line.readOnlyOutside ? askOrDeny(askRule) : { decision: "ask", rule: askRule, cause: "plan-unproven" };
 		if (line.readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (line.readOnlyOutside) return { decision: "ask", cause: "working-dir" };

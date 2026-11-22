@@ -86,6 +86,13 @@ remove a denied file with a shell command, remove the rule first. A
 PowerShell command that writes the file is not refused either; it loses the
 automatic approval, like the folder case.
 
+A path that starts with one slash, such as `Edit(/config/prod.yaml)`, means
+a file in your project in Claude Code, where `//` starts an absolute path.
+In `deny` and `ask` rules One Code reads it both ways, as the project's
+`config/prod.yaml` and as the absolute `/config/prod.yaml`, so a rule copied
+from Claude Code protects the same file. In `allow` rules it stays the
+absolute path; write `config/prod.yaml` to allow the project's file.
+
 `allow` rules stay exact: `Edit(src/**)` in `allow` does not allow `Write`.
 
 ### Bash rule patterns
