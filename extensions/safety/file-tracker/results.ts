@@ -50,3 +50,21 @@ export function fileToolResultContent<B extends Block>(result: FileToolResult & 
 	const outcome = fileToolOutcome(result, first.text);
 	return outcome === undefined ? undefined : [{ ...first, text: words.toolResult(outcome) }, ...rest];
 }
+
+/**
+ * Which of the file-tracker's refusals `text` is, found by generating each
+ * one for this call: `unread`, `failed` for the others, undefined for any
+ * other text. For the transcript's short line only (lib/ui/result-summary-files.ts):
+ * a refusal is a blocked call, whose result pi gives no details to carry it.
+ */
+export function refusalKind(text: string, call: { path: string; tool: string }, words: FileTrackerText): "unread" | "failed" | undefined {
+	const same = (generated: string) => text === generated.trim();
+	if (same(words.unread(call))) return "unread";
+	if (same(words.unreadable(call)) || same(words.notRegularFile(call)) || same(words.stale({ path: call.path }))) return "failed";
+	return undefined;
+}
+
+/** What a failed read, write or edit that ran records on its details for the transcript: a missing file, or another failure. */
+export function executedErrorKind(result: FileToolResult, text: string): "missing" | "failed" {
+	return fileToolOutcome(result, text)?.kind === "missing" ? "missing" : "failed";
+}
