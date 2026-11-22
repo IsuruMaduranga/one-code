@@ -63,6 +63,30 @@ A rule naming an MCP server, such as `mcp__github`, covers every tool that
 server provides. A rule naming a single MCP tool, such as
 `mcp__github__create_issue`, covers only that tool.
 
+### File rules protect the path, not the tool
+
+A `deny` or `ask` rule on `Edit`, `Write`, or `NotebookEdit` covers all three
+tools. `Edit(config/prod.yaml)` in `deny` also stops `Write` and
+`NotebookEdit` on that file, and a rule with no path, such as `Edit`, covers
+every file.
+
+The same rule covers shell commands that write the file. With
+`Edit(config/prod.yaml)` denied, `echo x > config/prod.yaml`,
+`rm config/prod.yaml`, and `mv config/prod.yaml old.yaml` are refused in
+every mode, and no `Bash` allow rule lets them through. An `ask` rule asks
+instead. A command that removes or replaces a folder that might contain the
+file, such as `rm -r config`, is not refused, but it is never approved
+automatically: you are asked, or in auto mode the classifier decides.
+
+This check sees the writes One Code can read from the command line:
+redirects and the operands of commands such as `rm`, `mv`, and `cp`. It
+cannot see a write made inside a script or by a tool such as `sed -i`. To
+remove a denied file with a shell command, remove the rule first. A
+PowerShell command that writes the file is not refused either; it loses the
+automatic approval, like the folder case.
+
+`allow` rules stay exact: `Edit(src/**)` in `allow` does not allow `Write`.
+
 ### Bash rule patterns
 
 Bash rules follow Claude Code's matching rules:
@@ -692,8 +716,10 @@ session unattended:
   ruleset says to block.
 - **A known, accepted gap:** a write or edit tool can reach a file that only
   a `Bash` deny rule protects, because in-project writes take the
-  deterministic fast path and are never classified. Write a `deny` rule for
-  the write tools too if a path must stay untouched.
+  deterministic fast path and are never classified. To keep a path
+  untouched, write the `deny` rule for `Edit` with that path; it covers the
+  other write tools and the shell's writes (see
+  [File rules protect the path, not the tool](#file-rules-protect-the-path-not-the-tool)).
 - The license carries an autonomous-execution notice: the permission rules,
   classifier, and safety checks are best-effort measures, not guarantees.
   Keep backups and version control of anything you care about.
