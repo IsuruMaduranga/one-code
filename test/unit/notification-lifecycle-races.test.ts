@@ -68,15 +68,18 @@ describe("a notification steered just before an abort", () => {
 		expect(fake.sentMessages).toHaveLength(2);
 	});
 
-	it("RPC abort twice before pi drains it: the second abort holds it for the next prompt, sent once", async () => {
+	it("RPC abort twice before pi drains it: pi still holds the steer, so no copy is sent and the next run's drain confirms it", async () => {
 		const fake = await steerThenAbort("rpc");
 		await fake.fire("before_agent_start", {});
 		await fake.fire("agent_start", {});
 		await interrupt(fake, "rpc");
-		expect(fake.sentMessages).toHaveLength(1);
 		await fake.fire("before_agent_start", {});
-		expect(fake.sentMessages).toHaveLength(2);
-		expect(fake.sentMessages[1].options).toEqual({ deliverAs: "nextTurn" });
+		await fake.fire("agent_start", {});
+		expect(fake.sentMessages).toHaveLength(1);
+		await drain(fake, 0);
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] });
+		await fake.fire("agent_settled", {}, createFakeCtx({ mode: "rpc" }));
+		expect(fake.sentMessages).toHaveLength(1);
 	});
 
 	it("TUI abort (Esc): pi cleared the queue, so the next prompt carries the held copy, once", async () => {

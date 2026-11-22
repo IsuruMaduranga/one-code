@@ -613,7 +613,7 @@ export const DEFAULT_COALESCE_MS = 250;
  * pending as `queued` (pi still holds it): neither re-sent nor held, and the
  * next run's `message_end` confirms it. Re-sending it there delivered the
  * notification twice. If a client cleared the queue itself (RPC
- * `clear_queue`), the next settle finds the entry still unconfirmed and treats
+ * `clear_queue`), the next settle that was not an abort finds the entry still unconfirmed and treats
  * it as discarded then. `abortKeepsQueue` reads the mode.
  *
  * After an interrupt, notifications wait for the user. A turn the user stopped
@@ -882,12 +882,13 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		const stillQueued = settled === "aborted" && abortKeepsQueue(ctx?.mode);
 		for (const [id, entry] of [...pending]) {
 			// pi kept it through the abort (see the header): its next run drains it.
-			if (stillQueued && !entry.queued) {
+			// A run aborted again before it drained the queue leaves it there too.
+			if (stillQueued) {
 				entry.queued = true;
 				continue;
 			}
-			// Queued through an earlier abort and a whole run went by without
-			// draining it: the client cleared pi's queue, so it was discarded.
+			// Queued through an earlier abort and a run that was not aborted went
+			// by without draining it: the client cleared pi's queue, so it was discarded.
 			entry.queued = false;
 			if (entry.resent) {
 				pending.delete(id);
