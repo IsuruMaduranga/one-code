@@ -167,9 +167,17 @@ export function walkTree(root: string, visit: (relative: string, entry: Dirent) 
 	let seen = 0;
 	while (stack.length > 0) {
 		const relative = stack.pop() as string;
+		const path = join(root, relative);
 		let entries;
 		try {
-			entries = readdirSync(join(root, relative), { withFileTypes: true });
+			// The entry was a directory when its parent was listed, but
+			// `readdirSync` follows a symbolic link: one swapped in since then
+			// would list a folder outside `root` under in-root names. Checking
+			// again just before the read narrows that window without closing it
+			// (Node has no portable no-follow directory open); a swapped entry is
+			// left out, as a walk that never follows links would treat a link.
+			if (relative !== "" && !lstatSync(path).isDirectory()) continue;
+			entries = readdirSync(path, { withFileTypes: true });
 		} catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code !== "ENOENT" && code !== "ENOTDIR") unreadable?.(relative);
