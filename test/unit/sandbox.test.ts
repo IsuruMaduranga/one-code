@@ -18,6 +18,7 @@ import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requested
 import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, resolvedSpelling, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { createEndChecks } from "../../extensions/lib/shell-run/sandbox-end-checks.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -421,6 +422,63 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		run.run.finish();
 		run.run.finish();
 		expect(sandbox.open.count).toBe(0);
+	});
+
+	it("never ends a wrap twice, even when ending it threw", async () => {
+		const sandbox = fakeSandbox(ON);
+		let ends = 0;
+		sandbox.ended = () => {
+			ends++;
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+		};
+		sandbox.release = () => {
+			throw new Error("release failed");
+		};
+		setSandboxForTest(ON, sandbox);
+		grantCommandHosts("call-1", ["registry.npmjs.org"]);
+		const run = await sandboxedCommand(request);
+		if (!("run" in run) || !run.run) throw new Error("not sandboxed");
+		// Releasing the hosts failed, and the wrap is ended all the same.
+		expect(() => run.run?.finish()).toThrow();
+		expect(ends).toBe(1);
+		run.run.finish();
+		expect(ends).toBe(1);
+	});
+
+	it("runs every check after a command on its own, reporting a failure instead of throwing", () => {
+		const removed: string[] = [];
+		const renamed: string[] = [];
+		const notices: string[] = [];
+		const denied = () => {
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" });
+		};
+		const checks = createEndChecks(
+			{
+				cleanup: denied,
+				plantableCommondirs: () => [join("/repo", ".git", "commondir"), join("/other", ".git", "commondir")],
+				looksLikeBareRepository: () => false,
+				exists: () => true,
+				remove: (path) => {
+					if (path.startsWith("/repo")) denied();
+					removed.push(path);
+				},
+				rename: (from) => void renamed.push(from),
+			},
+			(message) => void notices.push(message),
+		);
+		checks.started("/work");
+		let bareNow = false;
+		const bare = createEndChecks({ cleanup: () => {}, plantableCommondirs: () => [], looksLikeBareRepository: () => bareNow, exists: () => false, remove: () => {}, rename: denied }, (message) => void notices.push(message));
+		bare.started("/work");
+		// The directory became a bare repository while the command ran, and its HEAD cannot be moved.
+		bareNow = true;
+		expect(() => checks.ended()).not.toThrow();
+		expect(() => bare.ended()).not.toThrow();
+		expect(removed).toEqual([join("/other", ".git", "commondir")]);
+		expect(notices).toHaveLength(3);
+		expect(notices[0]).toMatch(/could not clean up/);
+		expect(notices[1]).toContain(join("/repo", ".git", "commondir"));
+		expect(notices[2]).toContain(join("/work", "HEAD"));
 	});
 
 	it("reads another directory's settings for a session that starts there", () => {

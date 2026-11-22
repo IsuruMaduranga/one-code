@@ -238,6 +238,11 @@ function sandboxExtension(pi: ExtensionAPI) {
 			scopeFor,
 			// A host the settings do not list (hosts.ts).
 			ask: hosts.ask,
+			// What a check after a command could not undo, on the session's latest context.
+			notice: (message) => {
+				if (liveCtx?.hasUI) liveCtx.ui.notify(message, "warning");
+				else process.stderr.write(`${message}\n`);
+			},
 		}).then((failure) => {
 			if (!failure || warned) return;
 			warned = true;

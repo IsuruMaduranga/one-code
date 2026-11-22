@@ -16,15 +16,15 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, renameSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { processState } from "../profile/process-state.ts";
 import { shellQuote } from "../shell/shell-quote.ts";
 import { probeSandbox } from "./sandbox-probe.ts";
 import { bashSpawn } from "./shell-spawn.ts";
 import { isShellToolName } from "./shell-tools.ts";
-import { commandHosts, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, plantableCommondirs, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
+import { createEndChecks } from "./sandbox-end-checks.ts";
+import { commandHosts, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, pathExists, plantableCommondirs, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
 export interface SandboxCall {
@@ -162,19 +162,30 @@ export function sandboxUnavailable(): string | undefined {
 }
 
 
+/** What {@link startSandbox} is given. */
+export interface SandboxStartOptions {
+	scopeFor: (cwd: string) => SandboxScope;
+	cwd: string;
+	tempDir?: string;
+	ask: SandboxHostAsk;
+	notice?: (message: string) => void;
+}
+
 /**
  * Start the session's sandbox. `scopeFor` gives what a command run in a
  * directory may write and must never write; `ask` decides a host the
- * settings do not list. Returns why it could not start, or undefined.
+ * settings do not list; `notice` tells the user what a check after a command
+ * could not undo (default: stderr). Returns why it could not start, or
+ * undefined.
  */
-export function startSandbox(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }): Promise<string | undefined> {
+export function startSandbox(opts: SandboxStartOptions): Promise<string | undefined> {
 	const slot = state();
 	const start = startRuntime(opts, slot.starting);
 	slot.starting = start;
 	return start;
 }
 
-async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd: string; tempDir?: string; ask: SandboxHostAsk }, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
+async function startRuntime(opts: SandboxStartOptions, earlier: Promise<unknown> | undefined): Promise<string | undefined> {
 	const slot = state();
 	const settings = sandboxSettings();
 	// One manager per process: an earlier session's sandbox is stopped first.
@@ -204,38 +215,28 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 		// The runtime points TMPDIR at a path every user of the machine shares;
 		// the session's own private directory replaces it.
 		const prefix = opts.tempDir ? `export TMPDIR=${shellQuote(opts.tempDir)}; ` : "";
-		// On Linux a checkout's missing `commondir` cannot be denied (sandbox-settings
-		// `plantableCommondirs`), so one that appears while a command runs is
-		// removed when a command ends: it would redirect the harness's own git.
-		const plantable = new Set<string>();
-		// The same for the names that make a directory a bare repository: a
-		// directory that was not one when a command started and is one when a
-		// command ends has its `HEAD` set aside, which keeps what was written.
-		const notBare = new Set<string>();
+		// On Linux what the sandbox cannot deny without breaking git is checked when a command ends (sandbox-end-checks.ts).
 		const linux = sandboxPlatform() === "linux";
+		const checks = createEndChecks(
+			{
+				cleanup: () => SandboxManager.cleanupAfterCommand(),
+				plantableCommondirs: (cwd) => (linux ? plantableCommondirs(cwd) : []),
+				looksLikeBareRepository: (dir) => !linux || looksLikeBareRepository(dir),
+				exists: pathExists,
+				remove: (path) => rmSync(path, { recursive: true, force: true }),
+				rename: renameSync,
+			},
+			opts.notice ?? ((message) => process.stderr.write(`${message}\n`)),
+		);
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) => {
-				if (linux) {
-					for (const path of plantableCommondirs(call.cwd)) plantable.add(path);
-					if (!looksLikeBareRepository(call.cwd)) notBare.add(call.cwd);
-				}
+				checks.started(call.cwd);
 				// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
 				return SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
 			},
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
-			ended: () => {
-				SandboxManager.cleanupAfterCommand();
-				for (const path of plantable) if (existsSync(path)) rmSync(path, { recursive: true, force: true });
-				for (const dir of notBare) {
-					if (!looksLikeBareRepository(dir)) continue;
-					try {
-						renameSync(join(dir, "HEAD"), join(dir, "HEAD.set-aside-by-sandbox"));
-					} catch {
-						// Gone again, or not ours to move: the next command's end looks again.
-					}
-				}
-			},
+			ended: () => checks.ended(),
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),
 			release: (id) => SandboxManager.unregisterCommandNetworkLists(id),
 		};
@@ -349,11 +350,21 @@ export async function sandboxedCommand(request: SandboxRequest, platform: NodeJS
 		}
 	}
 	let wrapped = false;
+	// Each piece of the run's state is consumed before it is acted on, so a step
+	// that throws is never repeated by a second call, and the wrap is ended
+	// whatever releasing the hosts did.
 	const finish = () => {
-		if (listed) sandbox.release(id);
-		listed = false;
-		if (wrapped) sandbox.ended();
-		wrapped = false;
+		try {
+			if (listed) {
+				listed = false;
+				sandbox.release(id);
+			}
+		} finally {
+			if (wrapped) {
+				wrapped = false;
+				sandbox.ended();
+			}
+		}
 	};
 	try {
 		const command = await sandbox.wrap(request.line?.() ?? request.command, { cwd: request.cwd, shell: request.bash, id, text: request.original });
