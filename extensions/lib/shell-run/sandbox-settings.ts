@@ -438,12 +438,52 @@ function filesystemRules(settings: SandboxSettings, scope: SandboxScope, host: S
 	const home = host.home ?? homedir();
 	const platform = host.platform ?? process.platform;
 	const fromRules = (patterns: readonly string[], kind: "write" | "read") => patterns.flatMap((pattern) => ruleDenyPaths(pattern, kind, scope.cwd, home, platform));
+	const shadowed = new Set(shadowedAllowRead(settings, scope.cwd, host));
 	return {
 		allowWrite: [scope.cwd, ...scope.writableDirs, ...settings.filesystem.allowWrite],
 		denyWrite: [...scope.protectedFiles, ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")],
 		denyRead: [...settings.filesystem.denyRead, ...fromRules(settings.denyRulePaths.read, "read")],
-		allowRead: [...settings.filesystem.allowRead],
+		allowRead: settings.filesystem.allowRead.filter((entry) => !shadowed.has(entry)),
 	};
+}
+
+/**
+ * The settings' `allowRead` entries that a `Read` deny rule's path covers,
+ * for a command run in `cwd`. The runtime lets an allowRead entry win over a
+ * read deny it names or lies inside (a carve-out), so such an entry would
+ * make a file the permission gate denies readable inside the sandbox; the
+ * builder drops it, since a permission deny wins. An entry that only holds a
+ * denied path (`allowRead: ["~/proj"]` with `Read(~/proj/.env)`) stays: the
+ * runtime keeps a deny inside a broader allow. An entry the runtime reads as
+ * a glob is dropped when its folder and a deny's overlap at all, since what
+ * it matches cannot be told apart from the deny's. (A write needs none of
+ * this: the runtime's write denies always win over its write allows.)
+ */
+export function shadowedAllowRead(settings: SandboxSettings, cwd: string, host: SandboxHost = {}): string[] {
+	if (settings.denyRulePaths.read.length === 0 || settings.filesystem.allowRead.length === 0) return [];
+	const home = host.home ?? homedir();
+	const platform = host.platform ?? process.platform;
+	const fold = platform === "darwin" || platform === "win32";
+	const same = (path: string) => (fold ? path.toLowerCase() : path);
+	const atOrUnder = (path: string, dir: string) => same(path) === same(dir) || same(path).startsWith(`${same(dir).replace(/\/+$/, "")}/`);
+	const denies = settings.denyRulePaths.read.flatMap((pattern) => ruleDenyPaths(pattern, "read", cwd, home, platform));
+	return settings.filesystem.allowRead.filter((entry) => {
+		const path = entry === "~" || entry.startsWith("~/") ? resolve(home, `.${entry.slice(1)}`) : resolve(cwd, entry);
+		const allowGlob = RUNTIME_GLOB.test(path);
+		const allowBase = allowGlob ? literalDirectory(path) : path;
+		return denies.some((deny) => {
+			if (deny.kind !== "expand" && !(deny.kind === "path" && hasUnescapedWildcard(deny.path))) return atOrUnder(allowBase, deny.path) || (allowGlob && atOrUnder(deny.path, allowBase));
+			const glob = deny.kind === "expand" ? deny.glob : deny.path;
+			const base = literalDirectory(glob);
+			if (allowGlob) return atOrUnder(allowBase, base) || atOrUnder(base, allowBase);
+			// The allow is a path: covered when it, or a folder above it, matches the deny glob as the gate reads it.
+			const regex = pathGlobRegex(glob, fold);
+			for (let at = path; ; at = dirname(at)) {
+				if (regex.test(at)) return true;
+				if (dirname(at) === at) return false;
+			}
+		});
+	});
 }
 
 const mapLists = <A, B>(lists: SandboxFilesystem<A>, entries: (entry: A) => B[]): SandboxFilesystem<B> => ({

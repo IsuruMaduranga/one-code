@@ -16,7 +16,7 @@ import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matc
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -277,6 +277,20 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 		expect(read("**/what?.txt")).toEqual(["/work"]);
 		expect(write("src/*/[id].tsx", "linux")).toEqual(["expand:/work/src/*/[id].tsx"]);
 		expect(read("**/what?.txt", "linux")).toEqual(["expand:/work/**/what?.txt"]);
+	});
+
+	it("leaves out an allowRead entry a Read deny rule's path covers, since the runtime would let it win, and keeps the others", () => {
+		const allowRead = ["/work/secret.txt", "/work/keys/pub", "/work/a/secrets/x", "~/proj", "~/proj/*", "/work/docs", "/data/*", "/work/*"];
+		const settings: SandboxSettings = { ...ON, filesystem: { ...ON.filesystem, allowRead }, denyRulePaths: { write: [], read: ["secret.txt", "keys/**", "**/secrets", "~/proj/.env"] } };
+		for (const platform of ["darwin", "linux"] as const) {
+			const host = { home, platform };
+			expect(shadowedAllowRead(settings, "/work", host)).toEqual(["/work/secret.txt", "/work/keys/pub", "/work/a/secrets/x", "~/proj/*", "/work/*"]);
+			const kept = ["~/proj", "/work/docs", "/data/*"];
+			expect(sandboxFilesystem(settings, { cwd: "/work", writableDirs: [], protectedFiles: [] }, host).allowRead).toEqual(kept);
+			expect(sandboxCommandFilesystem(settings, { cwd: "/work", writableDirs: [], protectedFiles: [] }, host).allowRead).toEqual(kept);
+		}
+		// Without Read deny rules every entry stays.
+		expect(shadowedAllowRead({ ...settings, denyRulePaths: { write: ["secret.txt"], read: [] } }, "/work", { home })).toEqual([]);
 	});
 
 	it("adds the rules' paths after the settings' own lists, once each, for the command's directory", () => {

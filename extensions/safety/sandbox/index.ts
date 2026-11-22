@@ -37,7 +37,7 @@ import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { applySandboxPanelKey, applySandboxPick, decodeSandboxPanelKey, openSandboxPanel, renderSandboxPanel, sandboxConfigRows, sandboxModeOf, sandboxOverrideOf, sandboxPickOutcome } from "./panel.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
-import { checkoutProtectedFiles, linkedWorktreeGitDirs, type SandboxScope } from "../../lib/shell-run/sandbox-settings.ts";
+import { checkoutProtectedFiles, linkedWorktreeGitDirs, type SandboxScope, shadowedAllowRead } from "../../lib/shell-run/sandbox-settings.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
 import { createHostGate, type HostAnswer } from "./hosts.ts";
 import { hostPromptOptions, hostPromptTitle, sandboxSectionText, sandboxStatusLines } from "./section.ts";
@@ -191,6 +191,8 @@ function sandboxExtension(pi: ExtensionAPI) {
 	tellSandboxSection(pi);
 
 	let warned = false;
+	/** The allowRead entries the user was last told the sandbox leaves out. */
+	let toldShadowed = "";
 	pi.on("session_start", (_event, ctx: ExtensionContext) => {
 		liveCtx = ctx;
 		// A session of another directory than the process started in reads that directory's settings.
@@ -221,6 +223,14 @@ function sandboxExtension(pi: ExtensionAPI) {
 			}
 			return scope;
 		};
+		// An allowRead entry a Read deny rule covers is left out of the rules (a deny wins): say so once per list.
+		const shadowed = shadowedAllowRead(sandboxSettings(), ctx.cwd).join(", ");
+		if (shadowed && shadowed !== toldShadowed) {
+			toldShadowed = shadowed;
+			const message = `The command sandbox leaves out filesystem.allowRead entries that a Read deny rule covers, since a deny wins: ${shadowed}`;
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			else process.stderr.write(`${message}\n`);
+		}
 		// Not awaited: a session must not wait on the proxy. The first command does (lib/shell-run/sandbox.ts).
 		void startSandbox({
 			cwd: ctx.cwd,

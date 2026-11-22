@@ -185,7 +185,7 @@ Claude Code uses.
 | `filesystem.allowWrite` | none | More writable paths. |
 | `filesystem.denyWrite` | none | Paths that are never writable. |
 | `filesystem.denyRead` | none | Paths a sandboxed command can't read. |
-| `filesystem.allowRead` | none | Exceptions inside a `denyRead` path. |
+| `filesystem.allowRead` | none | Exceptions inside a `denyRead` path. An entry that a `Read` deny rule covers is left out, and One Code tells you so when the session starts. |
 | `network.allowedDomains` | none | Hosts a sandboxed command can reach without a question, such as `registry.npmjs.org` or `*.pythonhosted.org`. |
 | `network.deniedDomains` | none | Hosts that are always refused. |
 | `network.allowLocalBinding` | `false` | Lets a sandboxed command listen on a local port, which a development server needs. |
