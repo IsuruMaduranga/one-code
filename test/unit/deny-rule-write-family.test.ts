@@ -4,10 +4,11 @@
  * Allow rules stay exact.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { decide, parseRules, writeTargetMeetsPathPattern } from "../../extensions/lib/rules/matcher.ts";
+import { analyzeShellCommand } from "../../extensions/lib/shell/shell-analysis.ts";
 import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
 
 useShippedProfileWithAllTools();
@@ -134,6 +135,22 @@ describe("a shell line that writes a path such a rule names", () => {
 		expect(run(deny, "bash", command, "auto")).toBe("classify");
 		expect(run(deny, "bash", command, "acceptEdits")).toBe("ask");
 		expect(run(deny, "bash", command, "dontAsk")).toBe("deny");
+	});
+
+	it("counts a move's source as a write, since the move removes it", () => {
+		expect(analyzeShellCommand({ command: "mv config/prod.yaml config/old.yaml", cwd, home: homedir() }).writes.map((write) => write.token)).toEqual(["config/prod.yaml", "config/old.yaml"]);
+		for (const command of ["mv config/prod.yaml config/old.yaml", "mv config/prod.yaml config/dev.yaml .", "mv -f config/prod.yaml config/old/"]) {
+			expect(run(deny, "bash", command, "auto")).toBe("classify");
+			expect(run(deny, "bash", command, "acceptEdits")).toBe("ask");
+			expect(run(deny, "bash", command, "dontAsk")).toBe("deny");
+		}
+		expect(run(deny, "bash", "mv config/dev.yaml config/old.yaml", "auto")).toBe("allow");
+	});
+
+	it("counts every operand of a move with options it does not model, for the sandbox auto-allow", () => {
+		expect(run(deny, "bash", "mv --backup config/prod.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("ask");
+		expect(run(deny, "bash", "mv -t config/old config/prod.yaml", "default", true, { sandboxed: true })).toBe("ask");
+		expect(run(deny, "bash", "mv --backup config/dev.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("allow");
 	});
 
 	it("keeps the fast path for a line that writes elsewhere", () => {

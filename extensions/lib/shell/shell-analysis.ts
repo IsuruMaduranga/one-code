@@ -1438,8 +1438,9 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		const writeTokens: string[] = [];
 		if (fileOperands !== undefined) {
 			// Every operand is a path, bare names included. cp and mv write their
-			// last operand and read the rest, so a source outside the working space
-			// (or a credential) is an outside read and leaves the line uncontained.
+			// last operand and read the rest (mv removes them as well, below), so a
+			// source outside the working space (or a credential) is an outside read
+			// and leaves the line uncontained.
 			const copies = name === "cp" || name === "mv";
 			const reads = copies ? fileOperands.slice(0, -1) : [];
 			// The paths the write checks guard, beneath a directory operand as well
@@ -1462,6 +1463,9 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				}
 				checkRead(token);
 			}
+			// A move removes its sources, so each is a write target too: a deny
+			// rule on `config/prod.yaml` must see `mv config/prod.yaml old.yaml`.
+			if (name === "mv") writeTokens.push(...reads.map((token) => token.value));
 			const destination = copies ? fileOperands.at(-1) : undefined;
 			if (destination === undefined) {
 				writeTokens.push(...fileOperands.map((token) => token.value));
@@ -1496,9 +1500,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 		} else if (isMutation) {
 			const positionals = args.filter((token) => !token.value.startsWith("-") && looksLikePath(token.value));
-			// For cp/mv/rsync/ln the destination is last; for the rest every
-			// positional is a candidate target.
-			if (["cp", "mv", "rsync", "ln", "install"].includes(name)) {
+			// For cp/rsync/ln the destination is last; for the rest every
+			// positional is a candidate target. A move with options this check
+			// does not model writes every operand it names, its sources (which it
+			// removes) and `-t`'s directory included, bare names too.
+			if (name === "mv") {
+				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")).map((token) => token.value));
+			} else if (["cp", "rsync", "ln", "install"].includes(name)) {
 				const last = positionals[positionals.length - 1];
 				if (last) writeTokens.push(last.value);
 			} else {
