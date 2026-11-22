@@ -125,12 +125,18 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
  * by default), itself laid over {@link SANDBOX_OFF} as a file the repository
  * does not control: it is the product's own default. A locked block keeps
  * every widening key out of every file, and each key the lock kept out of a
- * file the repository does not control is listed for the user.
+ * file the repository does not control is listed for the user, after the feature switches that tried to turn a locked sandbox off (`switchesIgnored`).
  */
-export function loadSandboxSettings(cwd: string, home: string, product: ProductSandbox | undefined = activeProfile().sandbox): SandboxSettings {
+export function loadSandboxSettings(
+	cwd: string,
+	home: string,
+	product: ProductSandbox | undefined = activeProfile().sandbox,
+	switchesIgnored: readonly string[] = activeProfile().sandboxOffIgnored ?? [],
+): SandboxSettings {
 	const locked = product?.locked === true;
 	let settings = product ? mergeSandboxBlock(SANDBOX_OFF, product, false) : SANDBOX_OFF;
-	const ignored: string[] = [];
+	// The feature switches the profile kept on for the lock (lib/profile/profile.ts), listed first.
+	const ignored: string[] = locked ? [...switchesIgnored] : [];
 	for (const source of settingsSources(cwd, home)) {
 		const block = readSettingsFile(source.path)?.sandbox;
 		if (block === undefined) continue;

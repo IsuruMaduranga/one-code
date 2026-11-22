@@ -244,7 +244,9 @@ export interface Profile {
 	 * any settings file is read, so `{ enabled: true }` turns it on with no
 	 * settings at all. The files then merge over it as usual (a repository's
 	 * may only tighten, the user's may also loosen). With `locked: true` every
-	 * file counts as a repository's: none can turn the sandbox off or widen it,
+	 * file counts as a repository's: none can turn the sandbox off or widen it
+	 * (workspace directories the user adds stay writable: the lock covers the
+	 * `sandbox` block, not the gate's working directories),
 	 * and the user is told at session start which of their settings the lock
 	 * ignored. Declaring it while the profile turns the sandbox feature off is
 	 * refused at load.

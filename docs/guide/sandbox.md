@@ -245,7 +245,12 @@ product's, as described above. A product can also lock its settings. When it
 does, every settings file, your user settings included, is treated like a
 project's: you can still tighten the sandbox, but nothing you write turns it
 off, adds writable or readable paths, allows hosts or sockets, excludes
-commands, or turns on `autoAllowBashIfSandboxed`. `/sandbox` says when the
+commands, or turns on `autoAllowBashIfSandboxed`. Turning the sandbox
+feature off, in the environment or in a profile of your own, is ignored
+too. The lock covers the
+`sandbox` block only: a workspace directory you add with `/add-dir` or
+`permissions.additionalDirectories` is still writable, as it is without a
+lock. `/sandbox` says when the
 product sets or locks the settings, and when the session starts One Code
 tells you which of your settings the lock ignored.
 

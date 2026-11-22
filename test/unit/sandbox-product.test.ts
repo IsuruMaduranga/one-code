@@ -9,7 +9,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { tildify } from "../../extensions/lib/profile/paths.ts";
+import type { UserProfile } from "../../extensions/lib/profile/user-profile.ts";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { activeProfile, resolveProfile, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import type { ProductSandbox } from "../../extensions/lib/profile/product-sandbox.ts";
@@ -174,6 +176,31 @@ describe("a profile's sandbox block at load", () => {
 
 	it("refuses a block while the profile turns the sandbox feature off", () => {
 		expect(() => resolve({ features: { sandbox: false }, sandbox: { enabled: true } })).toThrow(/declares a sandbox block but turns off "sandbox"/);
+	});
+
+	describe("the user's off-switches for the sandbox feature", () => {
+		const env = { [envName("FEATURES_OFF")]: "sandbox" };
+		const lean: UserProfile = { name: "lean", dir: "/u/lean", toolsOff: [], toolsDeferred: [], toolsEager: [], featuresOff: ["sandbox"], toolWording: new Map(), hash: "h" };
+		const resolveWith = (sandbox: ProductSandbox, over: { env?: NodeJS.ProcessEnv; user?: UserProfile }) =>
+			resolveProfile({ features: {}, tools: {}, childExtensions: [], text: ({ live }) => text(live), sandbox }, over.env ?? {}, "/p", "/p", over.user);
+
+		it("are ignored under a locked block, and named where the lock's ignored settings are", () => {
+			const byEnv = resolveWith(LOCKED_ON, { env });
+			expect(byEnv.features.has("sandbox")).toBe(true);
+			expect(byEnv.sandboxOffIgnored).toEqual([`sandbox in ${envName("FEATURES_OFF")}`]);
+			const byUser = resolveWith(LOCKED_ON, { user: lean });
+			expect(byUser.features.has("sandbox")).toBe(true);
+			expect(byUser.sandboxOffIgnored).toEqual([`sandbox in the featuresOff of the profile "lean"`]);
+			expect(loadSandboxSettings(cwd, home, LOCKED_ON, byUser.sandboxOffIgnored).product?.ignored).toEqual([`sandbox in the featuresOff of the profile "lean"`]);
+		});
+
+		it("still turn an unlocked block's feature off", () => {
+			for (const over of [{ env }, { user: lean }]) {
+				const resolved = resolveWith({ enabled: true }, over);
+				expect(resolved.features.has("sandbox")).toBe(false);
+				expect("sandboxOffIgnored" in resolved).toBe(false);
+			}
+		});
 	});
 });
 

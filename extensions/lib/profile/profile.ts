@@ -240,6 +240,8 @@ export interface ResolvedProfile {
 	openRouterRouting: ReadonlyMap<string, OpenRouterRoutingDefault>;
 	/** The sandbox's starting settings and lock (lib/profile/product-sandbox.ts); absent when the profile declares none. */
 	sandbox?: ProductSandbox;
+	/** The user's switches that tried to turn a locked sandbox's feature off and were ignored, one line each; absent when none did. */
+	sandboxOffIgnored?: readonly string[];
 	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
 	user?: UserProfile;
 }
@@ -341,6 +343,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
 	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
+	// A locked sandbox (decisions/sandbox.md) stays on: the user's off-switches for it are ignored, and listed where the lock's other ignored settings are.
+	const sandboxOffIgnored: string[] = [];
+	if (profile.sandbox?.locked === true && profile.features.sandbox !== false && featureMap.sandbox === false) {
+		featureMap.sandbox = true;
+		if (envOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${envName("FEATURES_OFF")}`);
+		if (user?.featuresOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in the featuresOff of the profile "${user.name}"`);
+	}
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
 	for (const name of [...envTools, ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
@@ -432,6 +441,7 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		defaultThinkingLevels: { ...profile.defaultThinkingLevels },
 		openRouterRouting: new Map(Object.entries(profile.openRouterRouting ?? {})),
 		...(profile.sandbox ? { sandbox: profile.sandbox } : {}),
+		...(sandboxOffIgnored.length > 0 ? { sandboxOffIgnored } : {}),
 		...(user ? { user } : {}),
 	};
 }
