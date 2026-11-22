@@ -50,44 +50,76 @@ const PROGRAM_KEYS: Record<string, (key: string, value: string | undefined) => b
 	includeif: (key) => key === "path",
 };
 
-/** One git config file's entries, section names lowercased without their subsection. */
-function configEntries(text: string): { section: string; key: string; value: string | undefined }[] {
-	const entries: { section: string; key: string; value: string | undefined }[] = [];
+/**
+ * Keys a partial clone's fetch of a missing object reads (a checkout fetches
+ * the blobs it writes), each naming a program the transport runs: the SSH
+ * command, the `git://` proxy, the credential helper and askpass program an
+ * HTTP remote's authentication runs, and what lets an `ext::` remote run its
+ * command (a protocol policy that allows it, or an `ext::` URL, directly or
+ * through `url.<base>.insteadOf`). `remote.<name>.uploadpack` and `.vcs` are
+ * programs on every read ({@link PROGRAM_KEYS}).
+ */
+function fetchRunsProgram(section: string, subsection: string | undefined, key: string, value: string | undefined): boolean {
+	const set = !!value;
+	switch (section) {
+		case "core":
+			return set && (key === "sshcommand" || key === "gitproxy" || key === "askpass");
+		case "credential":
+			return set && key === "helper";
+		case "protocol":
+			// `protocol.allow` sets the default for every protocol, `ext` included.
+			return key === "allow" && (subsection === undefined || subsection.toLowerCase() === "ext") && !/^never$/i.test(value ?? "");
+		case "remote":
+			return (key === "url" || key === "pushurl") && /^\s*ext::/i.test(value ?? "");
+		case "url":
+			return /^\s*ext::/i.test(subsection ?? "");
+		default:
+			return false;
+	}
+}
+
+/** One git config file's entries, section names lowercased with their subsection apart. */
+function configEntries(text: string): { section: string; subsection?: string; key: string; value: string | undefined }[] {
+	const entries: { section: string; subsection?: string; key: string; value: string | undefined }[] = [];
 	let section = "";
+	let subsection: string | undefined;
 	for (const raw of text.split(/\r?\n/)) {
 		let line = raw.trim();
-		const header = /^\[\s*([A-Za-z0-9.-]+)(?:\s+"(?:[^"\\]|\\.)*")?\s*\]/.exec(line);
+		const header = /^\[\s*([A-Za-z0-9.-]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/.exec(line);
 		if (header) {
 			// `[diff "x"]` and the old `[diff.x]` spelling both name section `diff`.
-			section = header[1].split(".")[0].toLowerCase();
+			const [name, ...rest] = header[1].split(".");
+			section = name.toLowerCase();
+			subsection = header[2]?.replace(/\\(.)/g, "$1") ?? (rest.length > 0 ? rest.join(".") : undefined);
 			line = line.slice(header[0].length).trim();
 		}
 		if (!line || line.startsWith("#") || line.startsWith(";")) continue;
 		const entry = /^([A-Za-z][A-Za-z0-9-]*)\s*(?:=\s*(.*))?$/.exec(line);
-		if (entry) entries.push({ section, key: entry[1].toLowerCase(), value: entry[2]?.trim().replace(/^"(.*)"$/, "$1") });
+		if (entry) entries.push({ section, subsection, key: entry[1].toLowerCase(), value: entry[2]?.trim().replace(/^"(.*)"$/, "$1") });
 	}
 	return entries;
 }
 
 /**
  * What one git config file's text names: the first program-valued key, as
- * `section.key`, every `core.hooksPath`, and the key that makes the checkout
- * a partial clone. A hooks path is not a program by itself (husky sets one);
- * the caller looks there for the hook a read runs.
+ * `section.key`, every `core.hooksPath`, the key that makes the checkout a
+ * partial clone, and the first key a partial clone's fetch runs a program by
+ * (`fetchProgram`, {@link fetchRunsProgram}). A hooks path is not a program
+ * by itself (husky sets one); the caller looks there for the hook a read
+ * runs. A fetch key is not one either until some config file of the checkout
+ * makes it a partial clone, which the caller decides across its files.
  */
-export function configRunsProgram(text: string): { program?: string; hooksPaths: string[]; promisor?: string } {
+export function configRunsProgram(text: string): { program?: string; hooksPaths: string[]; promisor?: string; fetchProgram?: string } {
 	const hooksPaths: string[] = [];
 	let promisor: string | undefined;
-	let ssh = false;
-	for (const { section, key, value } of configEntries(text)) {
+	let fetchProgram: string | undefined;
+	for (const { section, subsection, key, value } of configEntries(text)) {
 		if (section === "core" && key === "hookspath" && value) hooksPaths.push(value);
 		else if (PROGRAM_KEYS[section]?.(key, value)) return { program: `${section}.${key}`, hooksPaths };
 		else if ((section === "remote" && (key === "promisor" || key === "partialclonefilter")) || (section === "extensions" && key === "partialclone")) promisor ??= `${section}.${key}`;
-		else if (section === "core" && key === "sshcommand") ssh = true;
+		else if (fetchRunsProgram(section, subsection, key, value)) fetchProgram ??= `${section}.${key}`;
 	}
-	// A partial clone: a read of a missing object fetches it, through
-	// `core.sshCommand` when one is set. Nothing else reads that key on a read.
-	return promisor ? { hooksPaths, promisor: ssh ? "core.sshcommand" : promisor } : { hooksPaths };
+	return { hooksPaths, ...(promisor && { promisor }), ...(fetchProgram && { fetchProgram }) };
 }
 
 /** The checkout holding `dir`: its worktree root, git dir and common dir, or undefined outside one. */
@@ -198,11 +230,13 @@ export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonl
 	// into submodules, each with its own hooks directory.
 	const hooksDirs = [join(commonDir, "hooks"), ...modules.map((module) => join(module, "hooks"))];
 	let promisor: string | undefined;
+	let fetchProgram: CheckoutProgram | undefined;
 	for (const file of new Set([join(commonDir, "config"), join(commonDir, "config.worktree"), join(gitDir, "config.worktree")])) {
 		const found = readConfig(file);
 		if (!found) return { kind: "configUnreadable" };
 		if (found.program) return { kind: "configSetsProgram", key: found.program };
 		promisor ??= found.promisor;
+		if (found.fetchProgram) fetchProgram ??= { kind: "configSetsProgram", key: found.fetchProgram };
 		for (const path of found.hooksPaths) hooksDirs.push(resolve(root, expandTilde(path, home)));
 	}
 	for (const module of modules) {
@@ -212,15 +246,22 @@ export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonl
 			return found ? { kind: "submoduleConfig", key: found.program ?? "core.hookspath" } : { kind: "submoduleConfig" };
 		}
 		promisor ??= found.promisor;
+		if (found.fetchProgram) fetchProgram ??= { kind: "submoduleConfig", key: found.fetchProgram };
 	}
 	const hook = hooks.find((name) => hooksDirs.some((dir) => existsSync(join(dir, name))));
 	if (hook) return { kind: "hook", hook };
-	return promisor ? { kind: "promisorRemote", key: promisor } : undefined;
+	if (!promisor) return undefined;
+	// A partial clone's fetch of a missing object runs what its transport keys
+	// name (`core.sshCommand`, a credential helper): a program the checkout
+	// names, which no harness `-c` flag overrides.
+	return fetchProgram ?? { kind: "promisorRemote", key: promisor };
 }
 
 /**
  * `checkoutGitRunsProgram` for a caller that runs git itself and only needs
- * to know whether the checkout names a program: a partial clone names none.
+ * to know whether the checkout names a program: a partial clone by itself
+ * names none, but one whose fetch runs a program its config names (an SSH
+ * command, a credential helper) comes back as that program.
  */
 export function checkoutRunsOwnProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): CheckoutProgram | undefined {
 	const program = checkoutGitRunsProgram(dir, home, hooks);

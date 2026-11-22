@@ -47,13 +47,49 @@ describe("config keys a read runs", () => {
 	it.each([
 		['[remote "origin"]\n\tpromisor = true\n', "remote.promisor"],
 		["[extensions]\n\tpartialClone = origin\n", "extensions.partialclone"],
-		['[core]\n\tsshCommand = ./tool.sh\n[remote "origin"]\n\tpromisor = true\n', "core.sshcommand"],
 	])("reports a promisor remote apart from a program: %s", (text, key) => {
 		expect(configRunsProgram(text)).toEqual({ hooksPaths: [], promisor: key });
 	});
 
-	it("ignores core.sshCommand without a promisor remote", () => {
-		expect(configRunsProgram("[core]\n\tsshCommand = ssh -i key\n")).toEqual({ hooksPaths: [] });
+	// What a partial clone's fetch runs: no program by itself, since only a fetch reads it.
+	it.each([
+		["[core]\n\tsshCommand = ./tool.sh\n", "core.sshcommand"],
+		["[core]\n\tgitProxy = ./proxy.sh\n", "core.gitproxy"],
+		["[core]\n\taskPass = ./ask.sh\n", "core.askpass"],
+		["[credential]\n\thelper = !./steal.sh\n", "credential.helper"],
+		['[credential "https://example.com"]\n\thelper = store\n', "credential.helper"],
+		['[protocol "ext"]\n\tallow = always\n', "protocol.allow"],
+		["[protocol]\n\tallow = always\n", "protocol.allow"],
+		['[remote "origin"]\n\turl = ext::sh -c ./run.sh\n', "remote.url"],
+		['[url "ext::sh -c ./run.sh % "]\n\tinsteadOf = https://example.com/\n', "url.insteadof"],
+	])("reports a key a fetch runs a program by: %s", (text, key) => {
+		expect(configRunsProgram(text)).toEqual({ hooksPaths: [], fetchProgram: key });
+	});
+
+	it.each([
+		'[protocol "ext"]\n\tallow = never\n',
+		'[protocol "file"]\n\tallow = always\n',
+		'[remote "origin"]\n\turl = git@example.com:x/y.git\n',
+		"[credential]\n\thelper =\n",
+	])("ignores a transport key that runs nothing: %s", (text) => {
+		expect(configRunsProgram(text)).toEqual({ hooksPaths: [] });
+	});
+
+	it("refuses a worktree of a partial clone whose fetch runs the config's SSH command, from any of its config files", () => {
+		execFileSync("git", ["config", "remote.origin.promisor", "true"], { cwd });
+		execFileSync("git", ["config", "core.sshCommand", "./tool.sh"], { cwd });
+		expect(checkoutRunsOwnProgram(cwd, "/home/dana")).toEqual({ kind: "configSetsProgram", key: "core.sshcommand" });
+		expect(analyzeShellCommand({ command: "git status", cwd, home: "/home/dana" }).verdict).not.toBe("safe");
+		// The partial clone and the command in different files of the same checkout.
+		execFileSync("git", ["config", "--unset", "core.sshCommand"], { cwd });
+		writeFileSync(join(cwd, ".git", "config.worktree"), "[credential]\n\thelper = !./steal.sh\n");
+		expect(checkoutRunsOwnProgram(cwd, "/home/dana")).toEqual({ kind: "configSetsProgram", key: "credential.helper" });
+	});
+
+	it("leaves a checkout that sets an SSH command but is no partial clone alone", () => {
+		execFileSync("git", ["config", "core.sshCommand", "ssh -i key"], { cwd });
+		expect(checkoutGitRunsProgram(cwd, "/home/dana")).toBeUndefined();
+		expect(checkoutRunsOwnProgram(cwd, "/home/dana")).toBeUndefined();
 	});
 
 	it("escalates a read in a partial clone and names no program for a worktree", () => {
