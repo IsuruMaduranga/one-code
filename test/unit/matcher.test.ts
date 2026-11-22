@@ -1559,6 +1559,7 @@ describe("a file tool's subject is the path pi opens", () => {
 	});
 
 	it("matches a deny rule through the @ spelling", () => {
-		expect(ruleMatches(parseRules(["Read(//etc/**)"])[0], "read", extractSubject("read", { path: "@/etc/hosts" }), "/work")).toBe(true);
+		const rule = parseRules([`Read(${absPattern("//etc/**")})`])[0];
+		expect(ruleMatches(rule, "read", extractSubject("read", { path: `@${resolve("/etc/hosts")}` }), resolve("/work"))).toBe(true);
 	});
 });
