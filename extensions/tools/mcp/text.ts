@@ -30,6 +30,8 @@ export type McpFailure =
 	| { kind: "closedByServer"; stderr?: string }
 	/** A tool skipped because its namespaced name is over the provider's limit. */
 	| { kind: "nameTooLong"; tool: string; length: number; max: number }
+	/** A registered tool kept out of the current model's requests: its namespaced name is over that provider's limit. */
+	| { kind: "nameOverModelLimit"; tool: string; length: number; max: number }
 	/** A tool skipped because its namespaced name belongs to another tool. */
 	| { kind: "nameTaken"; tool: string; name: string }
 	/** A list's next-page cursor came back a second time. */
@@ -157,6 +159,8 @@ function failure(f: McpFailure): string {
 			return `connection closed by the server${f.stderr ? `\nserver stderr: ${f.stderr}` : ""}`;
 		case "nameTooLong":
 			return `tool "${f.tool}" skipped: its namespaced name is ${f.length} characters, over the ${f.max}-character limit the provider enforces`;
+		case "nameOverModelLimit":
+			return `tool "${f.tool}" unavailable on this model: its namespaced name is ${f.length} characters, over the ${f.max}-character limit its provider enforces`;
 		case "nameTaken":
 			return `tool "${f.tool}" skipped: its registered name "${f.name}" is already taken by another tool`;
 		case "repeatedCursor":

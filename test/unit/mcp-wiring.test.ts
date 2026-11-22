@@ -24,7 +24,7 @@ import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/plugins/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/plugins/mcp-status.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { mcpFacts, type McpSnapshot } from "../../extensions/tools/mcp/announce.ts";
-import type { McpFailure } from "../../extensions/tools/mcp/text.ts";
+import { mcpResultText, type McpFailure } from "../../extensions/tools/mcp/text.ts";
 
 /** Render one request inside an epoch whose message 1 described `told`; the blocks MCP adds to its tail. */
 function renderInEpoch(events: { emit(channel: string, data: unknown): void }, told: McpSnapshot): string[] {
@@ -376,23 +376,38 @@ describe("mcp wiring", () => {
 		expect(renderInEpoch(fake.events, told).join("\n")).not.toContain("slow");
 	});
 
-	it("leaves out a tool whose name is over the limit of the session model's provider, and says so", async () => {
+	it("registers a 65 to 128 character tool name on any model, and names it in /mcp while the model's provider refuses it", async () => {
 		const long = "list_pull_request_review_comments_for_repository_and_branch"; // with "mcp__demo__", 70 characters
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", { tools: [{ name: "foo" }, { name: long }] });
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "openai-completions" } });
+		// Registered all the same: tool-search keeps it out of this model's requests (tool-search-name-limit.test.ts).
 		expect(fake.tools.has("mcp__demo__foo")).toBe(true);
-		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(false);
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(true);
+		let snapshot: McpStatusEvent | undefined;
+		fake.events.on(MCP_STATUS_CHANNEL, (data) => (snapshot = data as McpStatusEvent));
+		const detail = () => {
+			fake.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
+			return snapshot?.servers.find((s) => s.name === "demo")?.detail;
+		};
+		expect(detail()).toBe(mcpResultText.failure({ kind: "nameOverModelLimit", tool: long, length: 70, max: 64 }));
+		await fake.fire("model_select", { model: { api: "anthropic-messages" } });
+		expect(detail()).toBeUndefined();
 	});
 
-	it("keeps a 65 to 128 character tool name where the provider takes it", async () => {
-		const long = "list_pull_request_review_comments_for_repository_and_branch";
+	it("leaves out a tool whose name is over the widest provider limit, and says so", async () => {
+		const long = "x".repeat(120); // with "mcp__demo__", 131 characters
 		writeUserServers({ demo: { command: "demo-server" } });
-		state.fixtures.set("demo", { tools: [{ name: long }] });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }, { name: long }] });
 		mcpExtension(fake.pi as never);
 		await fake.fireOne("session_start", { reason: "startup" }, { ...createFakeCtx({ cwd, hasUI: false }), model: { api: "anthropic-messages" } });
-		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(true);
+		expect(fake.tools.has("mcp__demo__foo")).toBe(true);
+		expect(fake.tools.has(`mcp__demo__${long}`)).toBe(false);
+		let snapshot: McpStatusEvent | undefined;
+		fake.events.on(MCP_STATUS_CHANNEL, (data) => (snapshot = data as McpStatusEvent));
+		fake.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
+		expect(snapshot?.servers.find((s) => s.name === "demo")?.detail).toBe(mcpResultText.failure({ kind: "nameTooLong", tool: long, length: 131, max: 128 }));
 	});
 
 	it("execute() on a registered MCP tool calls through the live connection", async () => {
