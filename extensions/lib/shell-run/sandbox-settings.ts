@@ -391,6 +391,59 @@ export function linkedWorktreeGitDirs(dir: string, read: (path: string) => strin
  * a bare repository are in {@link bareRepositoryFiles}.
  */
 export function checkoutProtectedFiles(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), platform: NodeJS.Platform = process.platform): string[] {
+	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => !absentOnLinux(path, read, platform));
+}
+
+/**
+ * A path nothing exists at, on Linux. bubblewrap denies a missing path by
+ * binding an empty device over it for the length of the command, and the
+ * command sees that stub: git lists each one in the working tree as an
+ * untracked file and `git add -A` fails on it ("can only add regular
+ * files"), and a stub at a git dir's `commondir` fails every git command
+ * ("failed to read .git/commondir: Permission denied"). So on Linux only the
+ * names that exist are denied, as the runtime does for its own built-in
+ * list, and a missing one can be created by a sandboxed command there. The
+ * one that redirects the harness's own git, `commondir`, is removed when the
+ * command ends ({@link plantableCommondirs}). macOS denies by rule, with
+ * nothing put at the path, so it denies the missing names too.
+ */
+function absentOnLinux(path: string, read: (path: string) => string, platform: NodeJS.Platform): boolean {
+	if (platform !== "linux") return false;
+	try {
+		read(path);
+		return false;
+	} catch (error) {
+		// A directory (EISDIR) and an unreadable file exist.
+		return (error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR";
+	}
+}
+
+/**
+ * The `commondir` paths of `dir`'s checkout that the Linux sandbox cannot
+ * deny because nothing exists there. An ordinary checkout has none, so
+ * whatever appears at one while a sandboxed command runs was planted by it;
+ * the runner removes it when the command ends. A linked worktree's
+ * `commondir` exists and stays denied. Empty on macOS.
+ */
+export function plantableCommondirs(dir: string, read: (path: string) => string = (path) => readFileSync(path, "utf8"), platform: NodeJS.Platform = process.platform): string[] {
+	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => basename(path) === "commondir" && absentOnLinux(path, read, platform));
+}
+
+/**
+ * Whether git would take `dir` itself for a repository: a `HEAD` file beside
+ * `objects` and `refs` directories. The Linux sandbox cannot deny those names
+ * while they are missing ({@link checkoutProtectedFiles}), so the runner
+ * checks before and after a command and sets a planted `HEAD` aside.
+ */
+export function looksLikeBareRepository(dir: string): boolean {
+	try {
+		return lstatSync(join(dir, "HEAD")).isFile() && statSync(join(dir, "objects")).isDirectory() && statSync(join(dir, "refs")).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+function allCheckoutProtectedFiles(dir: string, read: (path: string) => string, platform: NodeJS.Platform): string[] {
 	const ROOT_NAMES = [".gitconfig", ".gitmodules", ".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".profile", ".ripgreprc", ".mcp.json", ".vscode", ".idea", ".pi"];
 	const gitDirFiles = (gitDir: string) => ["commondir", "gitdir", "config.worktree"].map((name) => join(gitDir, name));
 	const commonFiles = (common: string) => ["hooks", "config", join("info", "attributes")].map((name) => join(common, name));

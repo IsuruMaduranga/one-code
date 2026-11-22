@@ -16,7 +16,7 @@ import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matc
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -445,13 +445,39 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 			if (file === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 			return typeof file === "string" ? file : file();
 		};
-		const main = checkoutProtectedFiles("/repo/packages/app", read);
+		const main = checkoutProtectedFiles("/repo/packages/app", read, "darwin");
 		expect(main).toEqual(expect.arrayContaining(["/repo/.git/commondir", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/hooks", "/repo/.git/config", "/repo/.mcp.json", "/repo/packages/app/.mcp.json", "/repo/.pi", "/repo/.gitmodules"]));
-		const linked = checkoutProtectedFiles("/wt", read);
+		const linked = checkoutProtectedFiles("/wt", read, "darwin");
 		expect(linked).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/worktrees/wt/gitdir", "/repo/.git/worktrees/wt/config.worktree", "/repo/.git/hooks", "/repo/.git/config", "/repo/.git/commondir"]));
-		expect(checkoutProtectedFiles("/nowhere", read)).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
-		// The names that would make git take the directory for a bare repository come along.
-		expect(checkoutProtectedFiles("/nowhere", read, "linux")).toEqual(expect.arrayContaining(["/nowhere/objects", "/nowhere/refs"]));
+		expect(checkoutProtectedFiles("/nowhere", read, "darwin")).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
+		// Linux denies a missing path with a stub the command sees (git lists it as
+		// untracked, and fails outright on one at commondir), so only what exists is denied there.
+		expect(checkoutProtectedFiles("/nowhere", read, "linux")).toEqual([]);
+		files["/repo/.git/config"] = "[core]\n";
+		files["/repo/.mcp.json"] = "{}";
+		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux");
+		expect([...onLinux].sort()).toEqual(["/repo/.git/config", "/repo/.mcp.json"]);
+		// The one name that redirects the harness's own git is removed after a command if it appears.
+		expect(plantableCommondirs("/repo/packages/app", read, "linux")).toEqual(["/repo/.git/commondir"]);
+		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux");
+		expect(linkedOnLinux).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/config"]));
+		expect(linkedOnLinux).not.toContain("/repo/.git/commondir");
+		expect(plantableCommondirs("/wt", read, "linux")).toEqual(["/repo/.git/commondir"]);
+		expect(plantableCommondirs("/repo/packages/app", read, "darwin")).toEqual([]);
+	});
+
+	it("tells a directory git would take for a repository: HEAD beside objects and refs", () => {
+		const dir = mkdtempSync(join(tmpdir(), "sandbox-bare-"));
+		try {
+			expect(looksLikeBareRepository(dir)).toBe(false);
+			mkdirSync(join(dir, "objects"));
+			mkdirSync(join(dir, "refs"));
+			expect(looksLikeBareRepository(dir)).toBe(false);
+			writeFileSync(join(dir, "HEAD"), "ref: refs/heads/main\n");
+			expect(looksLikeBareRepository(dir)).toBe(true);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	describe.skipIf(process.platform === "win32")("the names that make a directory a bare repository", () => {

@@ -16,13 +16,15 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { existsSync, renameSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import { processState } from "../profile/process-state.ts";
 import { shellQuote } from "../shell/shell-quote.ts";
 import { probeSandbox } from "./sandbox-probe.ts";
 import { bashSpawn } from "./shell-spawn.ts";
 import { isShellToolName } from "./shell-tools.ts";
-import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
+import { commandHosts, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, plantableCommondirs, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
 export interface SandboxCall {
@@ -202,13 +204,38 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 		// The runtime points TMPDIR at a path every user of the machine shares;
 		// the session's own private directory replaces it.
 		const prefix = opts.tempDir ? `export TMPDIR=${shellQuote(opts.tempDir)}; ` : "";
+		// On Linux a checkout's missing `commondir` cannot be denied (sandbox-settings
+		// `plantableCommondirs`), so one that appears while a command runs is
+		// removed when a command ends: it would redirect the harness's own git.
+		const plantable = new Set<string>();
+		// The same for the names that make a directory a bare repository: a
+		// directory that was not one when a command started and is one when a
+		// command ends has its `HEAD` set aside, which keeps what was written.
+		const notBare = new Set<string>();
+		const linux = sandboxPlatform() === "linux";
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
-			wrap: (command, call) =>
+			wrap: (command, call) => {
+				if (linux) {
+					for (const path of plantableCommondirs(call.cwd)) plantable.add(path);
+					if (!looksLikeBareRepository(call.cwd)) notBare.add(call.cwd);
+				}
 				// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
-				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
+				return SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
+			},
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
-			ended: () => SandboxManager.cleanupAfterCommand(),
+			ended: () => {
+				SandboxManager.cleanupAfterCommand();
+				for (const path of plantable) if (existsSync(path)) rmSync(path, { recursive: true, force: true });
+				for (const dir of notBare) {
+					if (!looksLikeBareRepository(dir)) continue;
+					try {
+						renameSync(join(dir, "HEAD"), join(dir, "HEAD.set-aside-by-sandbox"));
+					} catch {
+						// Gone again, or not ours to move: the next command's end looks again.
+					}
+				}
+			},
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),
 			release: (id) => SandboxManager.unregisterCommandNetworkLists(id),
 		};
