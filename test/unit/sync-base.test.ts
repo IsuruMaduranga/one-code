@@ -204,6 +204,18 @@ describe("sync-base", () => {
 			writeFileSync(join(product, "extensions/new.ts"), "edited");
 			expect(checkBase(product, next.dir)).toEqual(["extensions/new.ts: differs from the base"]);
 		});
+
+		it("checks an ignored directory where the base has a file as differing from the base", () => {
+			const { base, product } = synced();
+			git(product, "add", "-A");
+			git(product, "commit", "-q", "-m", "synced");
+			const next = nextBase(base, () => write(base, { "extensions/new.ts": "the base's" }));
+			applyBase(product, next.dir, { commit: next.commit });
+			rmSync(join(product, "extensions/new.ts"));
+			ignore(product);
+			write(product, { "extensions/new.ts/inner.ts": "a directory now" });
+			expect(checkBase(product, next.dir)).toEqual(["extensions/new.ts: differs from the base"]);
+		});
 	});
 
 	// Windows has no executable bit, so the check compares bytes alone there.

@@ -208,11 +208,13 @@ export function checkBase(product, base) {
 		applyBase(copy, base, record);
 		const expected = filesUnder(copy).filter((file) => !file.startsWith(".git/") && !isProductPath(file, own));
 		// A base file the product ignores is on disk but not in `files`, so presence is read from the disk.
+		// Only a regular file (or a link to one) can match: anything else at the path, an ignored folder
+		// for one, differs before its bytes are read.
 		const actual = new Set(files.filter((file) => !isProductPath(file, own)));
 		const executable = (path) => (statSync(path).mode & 0o111) !== 0;
 		const differing = expected.filter(
 			(file) =>
-				!existsSync(join(product, file)) ||
+				!statSync(join(product, file), { throwIfNoEntry: false })?.isFile() ||
 				!readFileSync(join(copy, file)).equals(readFileSync(join(product, file))) ||
 				(process.platform !== "win32" && executable(join(copy, file)) !== executable(join(product, file))),
 		);
