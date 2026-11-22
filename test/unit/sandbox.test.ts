@@ -460,7 +460,7 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 				looksLikeBareRepository: () => false,
 				exists: () => true,
 				remove: (path) => {
-					if (path.startsWith("/repo")) denied();
+					if (path === join("/repo", ".git", "commondir")) denied();
 					removed.push(path);
 				},
 				rename: (from) => void renamed.push(from),
@@ -480,6 +480,34 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		expect(notices[0]).toMatch(/could not clean up/);
 		expect(notices[1]).toContain(join("/repo", ".git", "commondir"));
 		expect(notices[2]).toContain(join("/work", "HEAD"));
+	});
+
+	it("sets a planted HEAD aside without replacing one set aside earlier, and forgets a run whose wrap failed", () => {
+		const present = new Set<string>([join("/work", "HEAD.set-aside-by-sandbox"), join("/work", "HEAD.set-aside-by-sandbox.2")]);
+		const renamed: [string, string][] = [];
+		let bare = false;
+		const checks = createEndChecks(
+			{
+				cleanup: () => {},
+				plantableCommondirs: () => [],
+				looksLikeBareRepository: () => bare,
+				exists: (path) => present.has(path),
+				remove: () => {},
+				rename: (from, to) => void renamed.push([from, to]),
+			},
+			() => {},
+		);
+		checks.started("a", "/work");
+		bare = true;
+		checks.ended("a");
+		expect(renamed).toEqual([[join("/work", "HEAD"), join("/work", "HEAD.set-aside-by-sandbox.3")]]);
+		// A wrap that failed never ends: its observation is dropped and nothing is undone for it later.
+		bare = false;
+		checks.started("b", "/work");
+		checks.discard("b");
+		bare = true;
+		checks.ended("b");
+		expect(renamed).toHaveLength(1);
 	});
 
 	it("undoes after a command only what appeared while that command ran, once, however runs overlap", () => {

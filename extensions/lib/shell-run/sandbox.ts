@@ -230,10 +230,16 @@ async function startRuntime(opts: SandboxStartOptions, earlier: Promise<unknown>
 		);
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
-			wrap: (command, call) => {
+			wrap: async (command, call) => {
 				checks.started(call.id, call.cwd);
-				// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
-				return SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
+				try {
+					// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
+					return await SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
+				} catch (error) {
+					// No command came back, so no `ended` follows: the run's observation goes with it.
+					checks.discard(call.id);
+					throw error;
+				}
 			},
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
 			ended: (id) => checks.ended(id),

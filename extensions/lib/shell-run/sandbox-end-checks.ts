@@ -43,6 +43,8 @@ export interface EndChecks {
 	started(id: string, cwd: string): void;
 	/** The run `id` ended. Never throws. */
 	ended(id: string): void;
+	/** The run `id` never started (its wrap failed): forget what it observed, undo nothing. */
+	discard(id: string): void;
 }
 
 /** What one run found when it started. */
@@ -85,6 +87,9 @@ export function createEndChecks(ops: EndCheckOps, notice: (message: string) => v
 				(reason) => `The command sandbox could not check whether ${cwd} is a git repository (${reason}).`,
 			);
 		},
+		discard(id) {
+			runs.delete(id);
+		},
 		ended(id) {
 			attempt(
 				() => ops.cleanup(),
@@ -106,7 +111,11 @@ export function createEndChecks(ops: EndCheckOps, notice: (message: string) => v
 			if (dir !== undefined) {
 				attempt(
 					() => {
-						if (ops.looksLikeBareRepository(dir)) ops.rename(join(dir, "HEAD"), join(dir, SET_ASIDE_HEAD));
+						if (!ops.looksLikeBareRepository(dir)) return;
+						// Never onto an earlier set-aside file: a rename replaces its target.
+						let target = join(dir, SET_ASIDE_HEAD);
+						for (let n = 2; ops.exists(target); n++) target = join(dir, `${SET_ASIDE_HEAD}.${n}`);
+						ops.rename(join(dir, "HEAD"), target);
 					},
 					(reason) => `The command sandbox could not set aside ${join(dir, "HEAD")}, which a sandboxed command created to make ${dir} a git repository (${reason}). Move it away before running git there.`,
 				);
