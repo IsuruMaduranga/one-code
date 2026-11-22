@@ -177,7 +177,13 @@ export function escapeLiteral(command: string): string {
 	return command.replace(/[\\*]/g, (ch) => `\\${ch}`);
 }
 
-/** Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are literals. */
+/**
+ * Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are
+ * literals. A `**` followed by a separator at the start of a segment
+ * (`a/**` + `/b`, or a leading one) is gitignore's "any number of
+ * directories, none included": it ends at a separator, so the leading form
+ * before `.env` matches `.env` and `x/.env` but never `prod.env`.
+ */
 function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegExp {
 	let out = "";
 	for (let i = 0; i < glob.length; i++) {
@@ -187,9 +193,14 @@ function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegEx
 			i++;
 		} else if (ch === "*") {
 			if (pathMode && glob[i + 1] === "*") {
-				out += ".*";
+				const startsSegment = i === 0 || glob[i - 1] === "/";
 				i++;
-				if (glob[i + 1] === "/") i++; // "**/" also matches zero directories
+				if (startsSegment && glob[i + 1] === "/") {
+					out += "(?:.*/)?";
+					i++;
+				} else {
+					out += ".*";
+				}
 			} else {
 				out += pathMode ? "[^/]*" : ".*";
 			}

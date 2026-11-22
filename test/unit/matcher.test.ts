@@ -1557,6 +1557,34 @@ describe("a path pattern written with a leading ./", () => {
 	});
 });
 
+describe("a ** segment in a path pattern ends at a separator", () => {
+	const cwd = resolve("/work");
+	const at = (...parts: string[]) => join(cwd, ...parts);
+
+	it("reads a leading **/name as name at any depth, never a longer file name", () => {
+		for (const path of [at(".env"), at("sub", ".env"), at("a", "b", ".env")]) expect(matchesPathPattern("**/.env", path, cwd), path).toBe(true);
+		for (const path of [at("prod.env"), at("sub", "x.env"), at(".env.local")]) expect(matchesPathPattern("**/.env", path, cwd), path).toBe(false);
+		// Outside the working directory too, as a deny or ask rule matched it before.
+		expect(matchesPathPattern("**/.env", resolve("/elsewhere/.env"), cwd)).toBe(true);
+		expect(matchesPathPattern("**/.env", resolve("/elsewhere/prod.env"), cwd)).toBe(false);
+	});
+
+	it("reads a/**/b as b directly in a or any folder beneath it", () => {
+		for (const path of [at("a", "b"), at("a", "x", "b"), at("a", "x", "y", "b")]) expect(matchesPathPattern("a/**/b", path, cwd), path).toBe(true);
+		for (const path of [at("a", "xb"), at("a", "x", "yb"), at("ab")]) expect(matchesPathPattern("a/**/b", path, cwd), path).toBe(false);
+	});
+
+	it("reads a trailing /** as everything inside the folder, not a sibling name", () => {
+		expect(matchesPathPattern("a/**", at("a", "x"), cwd)).toBe(true);
+		expect(matchesPathPattern("a/**", at("a", "x", "y"), cwd)).toBe(true);
+		expect(matchesPathPattern("a/**", at("ab", "x"), cwd)).toBe(false);
+	});
+
+	it("leaves a ** inside a segment crossing separators", () => {
+		expect(matchesPathPattern("src/**.ts", at("src", "x", "a.ts"), cwd)).toBe(true);
+	});
+});
+
 describe("a file tool's subject is the path pi opens", () => {
 	it.each([
 		["@/etc/hosts", "/etc/hosts"],
