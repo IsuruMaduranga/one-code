@@ -59,6 +59,30 @@ const emptyGitConfig = join(gitConfigDir, "empty.gitconfig");
 writeFileSync(emptyGitConfig, "");
 process.env.GIT_CONFIG_GLOBAL = emptyGitConfig;
 process.env.GIT_CONFIG_NOSYSTEM = "1";
+// Variables that point git at another repository or identity: a suite run from
+// a git hook or a rebase inherits them, and a fixture's `git init` would then
+// act on the outer repository.
+for (const name of [
+	"GIT_DIR",
+	"GIT_WORK_TREE",
+	"GIT_INDEX_FILE",
+	"GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
+	"GIT_COMMON_DIR",
+	"GIT_NAMESPACE",
+	"GIT_PREFIX",
+	"GIT_CEILING_DIRECTORIES",
+	"GIT_CONFIG",
+	"GIT_CONFIG_COUNT",
+	"GIT_CONFIG_PARAMETERS",
+	"GIT_AUTHOR_NAME",
+	"GIT_AUTHOR_EMAIL",
+	"GIT_AUTHOR_DATE",
+	"GIT_COMMITTER_NAME",
+	"GIT_COMMITTER_EMAIL",
+	"GIT_COMMITTER_DATE",
+])
+	delete process.env[name];
 afterAll(() => rmSync(gitConfigDir, { recursive: true, force: true }));
 
 // The bash grammar loads asynchronously; every shell parse after this is
