@@ -419,15 +419,19 @@ export function keyId(data: string, options?: ParseKeyOptions): string | undefin
 	return parseKey(data, options) ?? EXTRA_KEY_IDS[data];
 }
 
+/** The bracketed-paste markers a terminal puts around pasted text. */
+export const PASTE_START = "\x1b[200~";
+export const PASTE_END = "\x1b[201~";
+
 /** pi-tui's `isKeyRelease`: the kitty protocol's release event (flag 2). Pasted text never counts. */
 export function isKeyRelease(data: string): boolean {
-	if (data.includes("\x1b[200~")) return false;
+	if (data.includes(PASTE_START)) return false;
 	return /:3[u~ABCDHFPQS]/.test(data);
 }
 
 /** pi-tui's `isKeyRepeat`: the kitty protocol's auto-repeat event (flag 2). */
 export function isKeyRepeat(data: string): boolean {
-	if (data.includes("\x1b[200~")) return false;
+	if (data.includes(PASTE_START)) return false;
 	return /:2[u~ABCDHFPQS]/.test(data);
 }
 

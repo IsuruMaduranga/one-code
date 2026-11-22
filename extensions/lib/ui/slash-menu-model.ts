@@ -7,9 +7,10 @@
  * ellipsis. Claude Code lists `/name` rows alphabetically with no tags and
  * ends a cut description with "…" (the ui-parity evidence, cc-02-slash.txt).
  *
- * `arrangeSlashItems` runs in the skill extension's autocomplete wrapper (the
- * one wrapper pi has); `fitSlashDescriptions` and `slashMenuRows` run in the
- * prompt editor, which knows the width and the terminal's height.
+ * `arrangeSlashItems` runs in the branding extension's autocomplete wrapper
+ * (branding owns the editor); `fitSlashDescriptions` and `slashMenuRows` run in
+ * the prompt editor, which knows the width and the terminal's height. `/help`
+ * lays out its command rows with the same name column and order.
  */
 
 import { visibleWidth } from "./text-width.ts";
@@ -23,12 +24,23 @@ export interface MenuItem {
 }
 
 /**
- * pi built-ins the menu leaves out. Typing one still runs it: pi matches its
- * built-ins by the submitted text, never through the menu.
+ * pi built-ins the menu leaves out, by whether their replacement runs. Typing
+ * one still runs it: pi matches its built-ins by the submitted text, never
+ * through the menu.
  * - `thinking`: One Code's `/effort` sets the same level (and more), under
- *   Claude Code's name; two rows for one dial read as two features.
+ *   Claude Code's name; two rows for one dial read as two features. Without
+ *   the effort feature, `/thinking` is the only way to the dial, so it stays.
  */
-export const HIDDEN_MENU_COMMANDS: ReadonlySet<string> = new Set(["thinking"]);
+export function hiddenMenuCommands(effortEnabled: boolean): ReadonlySet<string> {
+	return new Set(effortEnabled ? ["thinking"] : []);
+}
+
+/** The menu's order: by name, ignoring case. */
+export function compareCommandNames(a: string, b: string): number {
+	const x = a.toLowerCase();
+	const y = b.toLowerCase();
+	return x < y ? -1 : x > y ? 1 : 0;
+}
 
 /** pi's source tag: `[t]`, `[u]`, `[p]`, or one of those with `:npm:…` / `:git:…`. */
 const SOURCE_TAG = /^\[[tup](?::[^\]\s]*)?\](?= |$)/;
@@ -60,7 +72,7 @@ export function isCommandMenu(prefix: string): boolean {
  * the slash. A typed filter keeps pi's fuzzy ranking (no Claude Code screen
  * shows a filtered menu). Other menus pass through unchanged.
  */
-export function arrangeSlashItems<T extends MenuItem>(items: T[], prefix: string, hidden: ReadonlySet<string> = HIDDEN_MENU_COMMANDS): T[] {
+export function arrangeSlashItems<T extends MenuItem>(items: T[], prefix: string, hidden: ReadonlySet<string>): T[] {
 	if (!isCommandMenu(prefix)) return items;
 	const rows = items
 		.filter((item) => !hidden.has(item.value))
@@ -70,11 +82,7 @@ export function arrangeSlashItems<T extends MenuItem>(items: T[], prefix: string
 			return { ...item, label, description };
 		});
 	if (prefix !== "/") return rows;
-	return rows.sort((a, b) => {
-		const x = a.value.toLowerCase();
-		const y = b.value.toLowerCase();
-		return x < y ? -1 : x > y ? 1 : 0;
-	});
+	return rows.sort((a, b) => compareCommandNames(a.value, b.value));
 }
 
 // pi-tui's SelectList with the editor's slash-menu layout (select-list.js,
@@ -83,7 +91,14 @@ const PREFIX_WIDTH = 2;
 const COLUMN_GAP = 2;
 const MIN_COLUMN = 12;
 const MAX_COLUMN = 32;
-const MIN_DESCRIPTION = 10;
+/** The fewest columns a description is shown in. */
+export const MIN_DESCRIPTION = 10;
+
+/** The name column for these names: the widest plus a gap, between 12 and 32 columns. */
+export function slashNameColumn(names: readonly string[]): number {
+	const widest = names.reduce((max, name) => Math.max(max, visibleWidth(name) + COLUMN_GAP), 0);
+	return Math.min(Math.max(widest, MIN_COLUMN), MAX_COLUMN);
+}
 
 /**
  * Cut each description to the columns pi-tui's list gives it at
@@ -95,8 +110,7 @@ const MIN_DESCRIPTION = 10;
  */
 export function fitSlashDescriptions<T extends MenuItem>(items: T[], contentWidth: number): T[] {
 	if (contentWidth <= 40 || items.length === 0) return items;
-	const widest = items.reduce((max, item) => Math.max(max, visibleWidth(item.label || item.value) + COLUMN_GAP), 0);
-	const column = Math.min(Math.max(widest, MIN_COLUMN), MAX_COLUMN);
+	const column = slashNameColumn(items.map((item) => item.label || item.value));
 	const effective = Math.max(1, Math.min(column, contentWidth - PREFIX_WIDTH - 4));
 	return items.map((item) => {
 		if (!item.description) return item;

@@ -7,8 +7,32 @@
  * a clock and what it draws; they decide.
  */
 
+import { brandedId } from "../profile/brand.mjs";
+import { stripAnsi } from "./terminal-text.ts";
 import { visibleWidth } from "./text-width.ts";
 import { cutPlainText } from "./tui-render.ts";
+
+/** The stash key (Claude Code's `chat:stash`); pi binds nothing to it in the editor. */
+export const STASH_KEY = "ctrl+s";
+/** The history search key (Claude Code's `historySearch`); pi binds it only in its session picker. */
+export const HISTORY_SEARCH_KEY = "ctrl+r";
+
+/** The prompt editor's own keys that work right now (a key the user bound in pi is left out). */
+export interface EditorKeys {
+	stash?: string;
+	historySearch?: string;
+}
+
+/**
+ * Asks the prompt editor which of its own keys work right now, so `/help`
+ * lists the same keys as the `?` panel. The branding extension answers while
+ * its editor is installed by setting `keys`; nothing answers otherwise, and
+ * then no editor key exists.
+ */
+export const EDITOR_KEYS_CHANNEL = brandedId("editor-keys");
+export interface EditorKeysQuery {
+	keys?: EditorKeys;
+}
 
 /**
  * How long a first Esc waits for the second. Claude Code's double-press
@@ -40,8 +64,6 @@ export interface EscapeContext {
 export class EscapeClear {
 	#armedAt: number | undefined;
 
-	constructor(private readonly windowMs = DOUBLE_ESC_MS) {}
-
 	/** `clear` to empty the input now; `arm` after a first press; `pass` when the Esc means something else. */
 	press(now: number, context: EscapeContext): "clear" | "arm" | "pass" {
 		const free = context.hasText && context.idle && !context.menuOpen && !context.viewOpen && !context.bashMode;
@@ -64,7 +86,7 @@ export class EscapeClear {
 
 	/** Whether a second Esc now would clear (the hint shows while it would). */
 	armed(now: number): boolean {
-		return this.#armedAt !== undefined && now - this.#armedAt < this.windowMs;
+		return this.#armedAt !== undefined && now - this.#armedAt < DOUBLE_ESC_MS;
 	}
 }
 
@@ -108,11 +130,6 @@ export const STASH_NOTICE = "› Stashed (auto-restores after submit)";
 /** The second Esc's hint (no capture shows Claude Code's; plain words). */
 export const ESC_AGAIN_HINT = "esc again to clear";
 
-/** The plain text of a painted line: CSI, OSC and APC escapes removed. */
-function plain(line: string): string {
-	return line.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\x1b[\]_][^\x07\x1b]*(?:\x07|\x1b\\)/g, "");
-}
-
 /**
  * Border glyphs kept between whatever sits at the border's left (the working
  * status, pi's "↑ N more") and the title; also the four columns
@@ -131,7 +148,7 @@ const MIN_TITLE = 4;
 export function fitBorderTitle(top: string, title: string | undefined, reserved = 0): string {
 	const name = title?.replace(/\s+/g, " ").trim();
 	if (!name || top === undefined) return "";
-	const text = plain(top);
+	const text = stripAnsi(top);
 	const glyph = text.at(-1);
 	if (!glyph) return "";
 	let run = 0;
@@ -177,13 +194,12 @@ export class HistorySearch {
 		return this.#original !== undefined;
 	}
 
-	/** Start on the editor's current text; returns the text to show (unchanged). */
-	start(original: string): string {
+	/** Start on the editor's current text, which stays in the editor until a query matches. */
+	start(original: string): void {
 		this.#original = original;
 		this.#query = "";
 		this.#index = -1;
 		this.#failed = false;
-		return original;
 	}
 
 	/** The query grew or shrank: the newest match, or the current text when none matches. */

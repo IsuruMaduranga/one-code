@@ -56,8 +56,11 @@ import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { TitleAnimation } from "./title-animation.ts";
 import { PROMPT_PADDING, PromptEditor, type PromptEditorHooks } from "./prompt-editor.ts";
 import { CTRL_X_CHORD_CHANNEL } from "../../lib/ui/ctrl-x-chord.ts";
-import { shortcutColumns, shortcutLines } from "../../lib/ui/shortcuts-model.ts";
-import { PI_BUILTIN_COMMANDS } from "../../lib/plugins/skill-invoke.ts";
+import { bindingKeyText, shortcutColumns, shortcutLines } from "../../lib/ui/shortcuts-model.ts";
+import { commandExists } from "../../lib/plugins/skill-invoke.ts";
+import { EDITOR_KEYS_CHANNEL, type EditorKeysQuery } from "../../lib/ui/editor-conveniences.ts";
+import { arrangeSlashItems, hiddenMenuCommands } from "../../lib/ui/slash-menu-model.ts";
+import { featureEnabled } from "../../lib/profile/profile.ts";
 import { sanitizeDisplayText, sanitizeTitle } from "../../lib/ui/terminal-text.ts";
 
 export { truncateLine };
@@ -102,7 +105,7 @@ export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - 
  * points at; pi's own /hotkeys table names shift+tab for its thinking dial.
  */
 /** pi's keyText over a binding named as a string. */
-const userKey = (binding: string): string => piKeyText(binding as Parameters<typeof piKeyText>[0]);
+const userKey = bindingKeyText(piKeyText);
 
 /** The startup hints; a third field names the pi binding whose user key replaces the default. */
 const HINTS: [key: string, what: string, binding?: string][] = [
@@ -252,6 +255,7 @@ interface EditorSources {
 function installPromptMarker(
 	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
 	sources: EditorSources,
+	installed: (editor: PromptEditor) => void,
 ): void {
 	if (knobValue("NO_INPUT_MARKER") === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
@@ -271,20 +275,15 @@ function installPromptMarker(
 	};
 	// The editor can outlive this context across a session replacement; a stale
 	// context throws, and keys must still reach the editor then.
-	const queued = () => {
+	const orStale = <T>(read: () => T, stale: T): T => {
 		try {
-			return !ctx.isIdle() && ctx.hasPendingMessages();
+			return read();
 		} catch {
-			return false;
+			return stale;
 		}
 	};
-	const idle = () => {
-		try {
-			return ctx.isIdle();
-		} catch {
-			return true;
-		}
-	};
+	const idle = () => orStale(() => ctx.isIdle(), true);
+	const queued = () => !idle() && orStale(() => ctx.hasPendingMessages(), false);
 	const hooks: PromptEditorHooks = {
 		marker,
 		hint,
@@ -307,7 +306,11 @@ function installPromptMarker(
 			),
 		chordKey: sources.chordKey,
 	};
-	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, hooks));
+	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => {
+		const editor = new PromptEditor(tui as never, theme as never, keybindings as never, hooks);
+		installed(editor);
+		return editor;
+	});
 }
 
 /**
@@ -419,7 +422,17 @@ function brandingExtension(pi: ExtensionAPI) {
 		lastTitle = title;
 		ctx.ui.setTitle(title);
 	};
+	// The session's name for the editor's top border, kept here so a render never walks the session's entries.
+	let sessionName: string | undefined;
+	const readSessionName = () => {
+		try {
+			sessionName = pi.getSessionName?.()?.trim() || undefined;
+		} catch {
+			sessionName = undefined;
+		}
+	};
 	pi.on("session_info_changed", (_event, ctx) => {
+		readSessionName();
 		titleCtx = ctx;
 		retitle(ctx);
 	});
@@ -433,7 +446,13 @@ function brandingExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", () => titleGlyph.settle());
 	pi.on("ui_prompt_start", () => titleGlyph.promptOpened());
 	pi.on("ui_prompt_end", () => titleGlyph.promptClosed());
+	// The prompt editor while it is installed: it answers /help's question about its own keys.
+	let editor: PromptEditor | undefined;
+	pi.events.on(EDITOR_KEYS_CHANNEL, (data) => {
+		if (editor) (data as EditorKeysQuery).keys = editor.editorKeys();
+	});
 	pi.on("session_shutdown", () => {
+		editor = undefined;
 		live = false;
 		titleGlyph.stop();
 		titleCtx = undefined;
@@ -459,14 +478,7 @@ function brandingExtension(pi: ExtensionAPI) {
 			chordKeyOffered = undefined;
 		});
 	});
-	const hasCommand = (name: string): boolean => {
-		if (PI_BUILTIN_COMMANDS.has(name)) return true;
-		try {
-			return pi.getCommands().some((command) => command.name === name);
-		} catch {
-			return false;
-		}
-	};
+	const hasCommand = (name: string): boolean => commandExists(name, () => pi.getCommands());
 	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
 		const { command, ...hint } = data as ArgumentHint;
 		argumentHints.set(command, hint);
@@ -510,20 +522,40 @@ function brandingExtension(pi: ExtensionAPI) {
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
-		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], {
-			argumentHints,
-			agentView,
-			scrollAgentView: (scroll) => pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
-			sessionName: () => {
-				try {
-					return pi.getSessionName?.()?.trim() || undefined;
-				} catch {
-					return undefined;
-				}
+		readSessionName();
+		editor = undefined;
+		installPromptMarker(
+			ctx as unknown as Parameters<typeof installPromptMarker>[0],
+			{
+				argumentHints,
+				agentView,
+				scrollAgentView: (scroll) => pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
+				sessionName: () => sessionName,
+				hasCommand,
+				chordKey: () => chordKeyOffered,
 			},
-			hasCommand,
-			chordKey: () => chordKeyOffered,
-		});
+			(installed) => {
+				editor = installed;
+			},
+		);
+		// The command menu in Claude Code's shape: `/name` rows, no source tags,
+		// alphabetical (lib/ui/slash-menu-model.ts). Branding loads first, so this
+		// wrapper is the innermost one (pi applies wrappers in the order they are
+		// added): the skill extension's wrapper and /help's see the arranged rows.
+		if (ctx.hasUI && ctx.mode === "tui" && typeof ctx.ui.addAutocompleteProvider === "function") {
+			const hidden = hiddenMenuCommands(featureEnabled("effort"));
+			ctx.ui.addAutocompleteProvider((current) => ({
+				...current,
+				getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+					const suggestions = await current.getSuggestions(lines, cursorLine, cursorCol, options);
+					if (!suggestions) return suggestions;
+					const items = arrangeSlashItems(suggestions.items, suggestions.prefix, hidden);
+					return items.length > 0 ? { ...suggestions, items } : null;
+				},
+				applyCompletion: (...args) => current.applyCompletion(...args),
+				...(current.shouldTriggerFileCompletion ? { shouldTriggerFileCompletion: (...args) => current.shouldTriggerFileCompletion!(...args) } : {}),
+			}));
+		}
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {

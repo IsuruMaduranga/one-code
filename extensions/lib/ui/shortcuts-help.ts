@@ -9,10 +9,11 @@
  */
 
 import { type Shortcut, shortcutLines } from "./shortcuts-model.ts";
-import { visibleWidth } from "./text-width.ts";
+import { MIN_DESCRIPTION, slashNameColumn } from "./slash-menu-model.ts";
+import { sanitizeTitle } from "./terminal-text.ts";
 import { cutPlainText, hintLines, padPlainText } from "./tui-render.ts";
 
-export const HELP_TABS = ["General", "Commands", "Custom commands"] as const;
+const HELP_TABS = ["General", "Commands", "Custom commands"] as const;
 
 /** One command row. */
 export interface HelpCommand {
@@ -96,12 +97,12 @@ function tabRow(state: HelpState, paint: HelpPaint): string {
 /** The command rows, Claude Code's slash-menu shape: `/name` in a column, then the description, cut with an ellipsis. */
 export function commandRows(commands: HelpCommand[], width: number): string[] {
 	const names = commands.map((command) => `/${command.name}`);
-	const column = Math.min(32, Math.max(12, ...names.map((name) => visibleWidth(name) + 2)));
+	const column = slashNameColumn(names);
 	const room = width - INDENT.length;
 	return commands.map((command, i) => {
 		const name = names[i] ?? "";
-		if (!command.description || room - column < 10) return `${INDENT}${cutPlainText(name, room)}`;
-		return `${INDENT}${padPlainText(name, column)}${cutPlainText(command.description.replace(/\s+/g, " ").trim(), room - column)}`;
+		if (!command.description || room - column < MIN_DESCRIPTION) return `${INDENT}${cutPlainText(name, room)}`;
+		return `${INDENT}${padPlainText(name, column)}${cutPlainText(sanitizeTitle(command.description), room - column)}`;
 	});
 }
 
@@ -137,6 +138,6 @@ export function helpPanelLines(state: HelpState, data: HelpData, width: number, 
 /** The plain text `/help` prints where no panel can open (RPC, one-shot runs). */
 export function helpText(data: HelpData, width = 100): string {
 	const section = (title: string, commands: HelpCommand[]) =>
-		commands.length === 0 ? [] : ["", `${title}:`, ...commands.map((command) => `  /${command.name}${command.description ? ` - ${command.description.replace(/\s+/g, " ").trim()}` : ""}`)];
+		commands.length === 0 ? [] : ["", `${title}:`, ...commands.map((command) => `  /${command.name}${command.description ? ` - ${sanitizeTitle(command.description)}` : ""}`)];
 	return [data.intro, "", "Shortcuts:", ...shortcutLines(data.shortcuts, width), ...section("Commands", data.commands), ...section("Custom commands", data.custom), "", `For more help: ${data.moreHelp}`].join("\n");
 }

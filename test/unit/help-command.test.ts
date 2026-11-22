@@ -6,6 +6,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import helpExtension from "../../extensions/commands/help/index.ts";
+import { EDITOR_KEYS_CHANNEL, type EditorKeysQuery } from "../../extensions/lib/ui/editor-conveniences.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const commands = [
@@ -35,6 +36,23 @@ describe("/help", () => {
 		expect(text).toContain("Custom commands:\n  /review-file - Review a file");
 		expect(fake.sentMessages).toEqual([]);
 		expect(fake.appendedEntries).toEqual([]);
+	});
+
+	it("lists exactly the editor keys the prompt editor reports, and none without its answer", async () => {
+		const helpText = async (answer?: EditorKeysQuery["keys"]) => {
+			const fake = setup();
+			if (answer) fake.events.on(EDITOR_KEYS_CHANNEL, (data: unknown) => ((data as EditorKeysQuery).keys = answer));
+			const ctx = createFakeCtx({ mode: "rpc", hasUI: true });
+			await fake.commands.get("help")?.handler("", ctx);
+			return (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify.mock.calls[0]?.[0] as string;
+		};
+		// The user bound ctrl+r in pi: the editor reports only its stash key.
+		const stashOnly = await helpText({ stash: "ctrl+s" });
+		expect(stashOnly).toContain("ctrl+s to stash prompt");
+		expect(stashOnly).not.toContain("to search history");
+		const none = await helpText();
+		expect(none).not.toContain("to stash prompt");
+		expect(none).not.toContain("to search history");
 	});
 
 	it("lists the slash menu's own rows in the TUI panel", async () => {

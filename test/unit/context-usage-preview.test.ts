@@ -59,8 +59,11 @@ describe("the system prompt before the first prompt", () => {
 	it("leaves pi's options alone once a prompt has run", async () => {
 		const { fake, ctx } = await setup();
 		const options = { cwd: ctx.cwd, selectedTools: ["read"] };
-		const typed = await fake.fireOne<{ systemPrompt: string }>("before_agent_start", { type: "before_agent_start", systemPromptOptions: options }, ctx);
-		expect(requestSystemPrompt(fake.events, ctx, { cwd: ctx.cwd, customPrompt: "Other" })).toBe(typed?.systemPrompt);
+		await fake.fireOne<{ systemPrompt: string }>("before_agent_start", { type: "before_agent_start", systemPromptOptions: options }, ctx);
+		// The same answer with and without passed options: a custom prompt among them would otherwise answer nothing.
+		const kept = requestSystemPrompt(fake.events, ctx);
+		expect(kept).toEqual(expect.any(String));
+		expect(requestSystemPrompt(fake.events, ctx, { cwd: ctx.cwd, customPrompt: "Other" })).toBe(kept);
 	});
 });
 

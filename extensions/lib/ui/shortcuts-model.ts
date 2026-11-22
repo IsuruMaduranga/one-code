@@ -29,6 +29,11 @@ export interface ShortcutSources {
 	editorKeys?: { stash?: string; historySearch?: string };
 }
 
+/** pi's `keyText` (typed by pi's binding ids) over a binding named as a string, the form the rows ask in. */
+export function bindingKeyText(keyText: (binding: never) => string): (binding: string) => string {
+	return (binding) => keyText(binding as never);
+}
+
 /** One row: the key, then what it does. */
 export interface Shortcut {
 	key: string;

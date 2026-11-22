@@ -69,14 +69,9 @@ function contextExtension(pi: ExtensionAPI) {
 		// A recorded request describes the context until a compaction replaces it; before one, or after a compaction, estimate the next.
 		const recorded = last && !replied.compacted ? last : undefined;
 		const preview = recorded ? undefined : replied.compacted ? "compaction" : "first";
-		let breakdown = recorded ? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath }) : undefined;
-		if (!recorded) {
-			try {
-				breakdown = breakdownRequest(nextRequest(ctx), { displayPath });
-			} catch {
-				// Nothing to estimate from (a torn-down session): the plain "nothing sent" state.
-			}
-		}
+		const breakdown = recorded
+			? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath })
+			: nextBreakdown(ctx, displayPath);
 		return contextUsage({
 			model: { name: ctx.model?.name ?? "No model", id: ctx.model?.id ?? "" },
 			window: piUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0,
@@ -86,6 +81,15 @@ function contextExtension(pi: ExtensionAPI) {
 			...(breakdown && preview ? { preview } : {}),
 			reported: recorded && replied.prompt !== undefined && typeof piUsage?.tokens === "number" ? { prompt: replied.prompt, total: piUsage.tokens } : undefined,
 		});
+	};
+
+	/** The breakdown of the request the next prompt will send; undefined when there is nothing to estimate from (a torn-down session), the plain "nothing sent" state. */
+	const nextBreakdown = (ctx: ExtensionCommandContext, displayPath: (path: string) => string) => {
+		try {
+			return breakdownRequest(nextRequest(ctx), { displayPath });
+		} catch {
+			return undefined;
+		}
 	};
 
 	/**

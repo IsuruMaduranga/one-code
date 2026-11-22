@@ -106,9 +106,9 @@ describe("the file-tracker's classification", () => {
 	});
 
 	it("tells a missing file from another failure of a tool that ran", () => {
-		const base = { toolName: "edit", isError: true, content: [], path: "/w/a.ts", cwd: "/w" };
-		expect(executedErrorKind(base, "Could not edit file: /w/a.ts. Error code: ENOENT.")).toBe("missing");
-		expect(executedErrorKind(base, "Could not find the exact text in /w/a.ts.")).toBe("failed");
+		const result = (text: string) => ({ toolName: "edit", isError: true, content: [{ type: "text", text }], path: "/w/a.ts", cwd: "/w" });
+		expect(executedErrorKind(result("Could not edit file: /w/a.ts. Error code: ENOENT."))).toBe("missing");
+		expect(executedErrorKind(result("Could not find the exact text in /w/a.ts."))).toBe("failed");
 	});
 });
 
@@ -128,7 +128,7 @@ describe("ccWrapBuiltinRenderers: summary, moved body and short error line", () 
 			renderCall: () => component(["", "edit a.ts", "", " -1 old", " +1 new", ""]),
 			renderResult: () => component([]),
 		};
-		const wrapped = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, keepBaseCall: true, bodyUnderSummary: true, summary: () => "Added 1 line, removed 1 line" });
+		const wrapped = ccWrapBuiltinRenderers<{ path?: string }>("Update", base, { title: (a) => a?.path, keepBaseCall: true, summary: () => "Added 1 line, removed 1 line" });
 		// While it waits, the call carries the diff (the prompt is decided on it).
 		const waiting = { args: { path: "a.ts" }, isPartial: true, isError: false, state: {} };
 		expect(wrapped.renderCall({ path: "a.ts" }, plain, waiting).render(80)).toEqual(["● Update(a.ts)", "", " -1 old", " +1 new", ""]);

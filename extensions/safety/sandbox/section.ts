@@ -51,7 +51,8 @@ export function productSandboxLine(product: NonNullable<SandboxSettings["product
 /** What `/sandbox` shows the user, with the product's line second when the profile supplies the settings. */
 export function sandboxStatusLines(facts: SandboxFacts): string[] {
 	const lines = settingsStatusLines(facts);
-	return facts.settings.product ? [lines[0]!, productSandboxLine(facts.settings.product), ...lines.slice(1)] : lines;
+	if (facts.settings.product) lines.splice(1, 0, productSandboxLine(facts.settings.product));
+	return lines;
 }
 
 function settingsStatusLines(facts: SandboxFacts): string[] {

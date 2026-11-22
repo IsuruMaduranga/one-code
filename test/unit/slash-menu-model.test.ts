@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrangeSlashItems, fitSlashDescriptions, slashMenuRows, stripSourceTag } from "../../extensions/lib/ui/slash-menu-model.ts";
+import { arrangeSlashItems, fitSlashDescriptions, hiddenMenuCommands, slashMenuRows, stripSourceTag } from "../../extensions/lib/ui/slash-menu-model.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 
 const item = (value: string, description?: string) => ({ value, label: value, ...(description === undefined ? {} : { description }) });
@@ -29,7 +29,7 @@ describe("arrangeSlashItems", () => {
 	const piOrder = [item("settings", "Open settings menu"), item("thinking", "<level> — Set thinking level"), item("model"), item("auto-mode", "[t] Auto mode"), item("autocompact", "[t] Compact"), item("btw", "[t] Side question")];
 
 	it("sorts the bare menu alphabetically, with /name labels and no tags", () => {
-		const rows = arrangeSlashItems(piOrder, "/");
+		const rows = arrangeSlashItems(piOrder, "/", hiddenMenuCommands(true));
 		expect(rows.map((row) => row.label)).toEqual(["/auto-mode", "/autocompact", "/btw", "/model", "/settings"]);
 		expect(rows.map((row) => row.description)).toEqual(["Auto mode", "Compact", "Side question", undefined, "Open settings menu"]);
 		// The value is what pi completes and runs; it keeps no slash.
@@ -38,13 +38,17 @@ describe("arrangeSlashItems", () => {
 
 	it("drops a hidden built-in but keeps pi's ranking once a filter is typed", () => {
 		const ranked = [item("btw", "[t] x"), item("auto-mode", "[t] y"), item("thinking")];
-		expect(arrangeSlashItems(ranked, "/t").map((row) => row.value)).toEqual(["btw", "auto-mode"]);
+		expect(arrangeSlashItems(ranked, "/t", hiddenMenuCommands(true)).map((row) => row.value)).toEqual(["btw", "auto-mode"]);
+	});
+
+	it("keeps /thinking when the effort feature that replaces it is off", () => {
+		expect(arrangeSlashItems(piOrder, "/", hiddenMenuCommands(false)).map((row) => row.value)).toContain("thinking");
 	});
 
 	it("leaves argument and file completions alone", () => {
 		const args = [item("high", "[t] not a command")];
-		expect(arrangeSlashItems(args, "/effort h")).toBe(args);
-		expect(arrangeSlashItems(args, "@src")).toBe(args);
+		expect(arrangeSlashItems(args, "/effort h", hiddenMenuCommands(true))).toBe(args);
+		expect(arrangeSlashItems(args, "@src", hiddenMenuCommands(true))).toBe(args);
 	});
 });
 

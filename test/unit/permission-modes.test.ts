@@ -71,6 +71,8 @@ describe("MODE_BADGES", () => {
 		expect(MODE_BADGES.acceptEdits).toBe("⏵⏵ accept edits on");
 		expect(MODE_BADGES.plan).toBe(`${P} plan mode on`);
 		expect(MODE_BADGES.auto).toBe("⏵⏵ auto mode on");
+		expect(MODE_BADGES.bypassPermissions).toBe("⏵⏵ bypass permissions on");
+		expect(MODE_BADGES.dontAsk).toBe("⏵⏵ don't ask on");
 	});
 });
 

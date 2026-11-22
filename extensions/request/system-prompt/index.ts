@@ -112,6 +112,8 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		}
 		return cachedEnv;
 	};
+	/** The environment for `cwd` without filling the cache: /context asks before the first turn and must not change what it sends. */
+	const peekEnvironment = (cwd: string): EnvironmentInfo => (cachedEnv && cachedKey === cwd ? cachedEnv : collectEnvironment(cwd));
 
 	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext, env: (cwd: string) => EnvironmentInfo = environment): string => {
 		const tier = requestTier();
@@ -171,8 +173,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const query = data as StackQuery;
 		const ctx = query.ctx as ExtensionContext | undefined;
 		if (!ctx || !query.stack || lastOptions?.customPrompt || query.stack.some((entry) => entry.key === "environment")) return;
-		const env = cachedEnv && cachedKey === ctx.cwd ? cachedEnv : collectEnvironment(ctx.cwd);
-		query.stack.push({ key: "environment", text: environmentText(env), order: CONTEXT_ORDER.environment });
+		query.stack.push({ key: "environment", text: environmentText(peekEnvironment(ctx.cwd)), order: CONTEXT_ORDER.environment });
 		if (ctx.model) query.stack.push({ key: "model-line", text: modelLine(ctx.model), order: CONTEXT_ORDER.modelLine });
 	});
 
@@ -235,11 +236,9 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const request = data as SystemPromptRequest;
 		const ctx = request.ctx as ExtensionContext;
 		const base = !lastOptions ? (request.options as BuildSystemPromptOptions | undefined) : undefined;
-		const prompt = base
-			? base.customPrompt
-				? undefined
-				: buildPrompt(base, ctx, (cwd) => (cachedEnv && cachedKey === cwd ? cachedEnv : collectEnvironment(cwd)))
-			: nextRequestPrompt(ctx);
+		let prompt: string | undefined;
+		if (!base) prompt = nextRequestPrompt(ctx);
+		else if (!base.customPrompt) prompt = buildPrompt(base, ctx, peekEnvironment);
 		if (prompt !== undefined) request.prompt = prompt;
 	});
 }

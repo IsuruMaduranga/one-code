@@ -84,7 +84,7 @@ interface BuiltinSpec {
 	/** A description in place of pi's, by the session's description form; `base` is pi's own. */
 	description?: (form: DescriptionForm, base: string) => string;
 	/** The transcript's result rows: a summary line, and a short line for an error (lib/ui/result-summary-files.ts). */
-	rows?: Pick<CcWrapOptions, "summary" | "bodyUnderSummary" | "errorLine">;
+	rows?: Pick<CcWrapOptions, "summary" | "errorLine">;
 }
 
 type Rows = NonNullable<BuiltinSpec["rows"]>;
@@ -103,15 +103,16 @@ function searchRows(tool: SearchTool): Rows {
 /**
  * A failed file tool's short line: classified by the file-tracker, through
  * the kind it put on an executed call's details, or by asking it about a
- * call it refused. An unclassified failure keeps its words.
+ * call it refused. An unclassified failure keeps its words. Each `op` is
+ * also the name of pi's tool that performs it.
  */
-function fileErrorRows(pi: ExtensionAPI, op: FileErrorOp, toolName: string): Rows["errorLine"] {
+function fileErrorRows(pi: ExtensionAPI, op: FileErrorOp): Rows["errorLine"] {
 	return (result, args, cwd) => {
 		const text = textContent(result);
 		if (text === PI_ABORTED_TEXT) return { text, color: "error" };
 		let kind = fileErrorKindOf(result.details);
 		if (!kind) {
-			const query: FileErrorQuery = { toolName, text, args, cwd: cwd ?? process.cwd() };
+			const query: FileErrorQuery = { toolName: op, text, args, cwd: cwd ?? process.cwd() };
 			pi.events.emit(FILE_ERROR_CHANNEL, query);
 			kind = query.kind;
 		}
@@ -134,7 +135,7 @@ function builtins(text: ToolStyleText, pi: ExtensionAPI): BuiltinSpec[] {
 					if (!read) return undefined;
 					return read.kind === "image" ? "Read image" : `Read ${theme.bold(String(read.count))} ${lineNoun(read.count)}`;
 				},
-				errorLine: fileErrorRows(pi, "read", "read"),
+				errorLine: fileErrorRows(pi, "read"),
 			},
 		},
 		{
@@ -144,7 +145,7 @@ function builtins(text: ToolStyleText, pi: ExtensionAPI): BuiltinSpec[] {
 			rejectedAs: "write",
 			write: true,
 			description: (form) => text.writeDescription(form),
-			rows: { errorLine: fileErrorRows(pi, "write", "write") },
+			rows: { errorLine: fileErrorRows(pi, "write") },
 		},
 		{
 			label: "Update",
@@ -159,8 +160,7 @@ function builtins(text: ToolStyleText, pi: ExtensionAPI): BuiltinSpec[] {
 					const diff = (result.details as { diff?: unknown } | undefined)?.diff;
 					return typeof diff === "string" ? updateSummary(theme, diff) : undefined;
 				},
-				bodyUnderSummary: true,
-				errorLine: fileErrorRows(pi, "edit", "edit"),
+				errorLine: fileErrorRows(pi, "edit"),
 			},
 		},
 		{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined, rows: searchRows("grep") },

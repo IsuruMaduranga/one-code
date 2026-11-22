@@ -63,6 +63,31 @@ describe("the ? panel", () => {
 		expect(twice.below()).toEqual([]);
 	});
 
+	it("opens on a kitty-encoded ? press but not on its release", () => {
+		const { prompt, below } = editor();
+		prompt.handleInput("\x1b[63u");
+		expect(below()).toEqual(["  ! for shell mode"]);
+		// The release that follows the press is neither a second ? nor a new key.
+		const released = editor();
+		released.prompt.handleInput("\x1b[63;1:3u");
+		expect(released.below()).toEqual([]);
+	});
+
+	it("builds the panel once per width while it stays open, and again after it reopens", () => {
+		const { prompt, seen, below } = editor();
+		prompt.handleInput("?");
+		below();
+		below();
+		expect(seen).toHaveLength(1);
+		below(60);
+		expect(seen).toHaveLength(2);
+		prompt.handleInput("a");
+		prompt.setText("");
+		prompt.handleInput("?");
+		below(60);
+		expect(seen).toHaveLength(3);
+	});
+
 	it("treats a ? inside a paste that arrives in pieces as text", () => {
 		const { prompt, below } = editor();
 		prompt.handleInput("\x1b[200~");

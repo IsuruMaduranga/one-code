@@ -9,7 +9,7 @@
 import { brand } from "../../../lib/profile/brand.mjs";
 import { rulesetOwner } from "../auto-mode/classifier-prompt.ts";
 import type { PermissionMode } from "../../../lib/rules/matcher.ts";
-import { MODE_BADGES } from "../../../lib/rules/modes.ts";
+import { MODE_NAMES } from "../../../lib/rules/modes.ts";
 import { cutPlainText, hintLines, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../../lib/ui/tui-render.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -47,13 +47,9 @@ export interface PanelRenderInput {
 	status?: string;
 }
 
-/**
- * A mode's name as the mode line under the editor shows it ("manual mode",
- * "accept edits"): its badge without the glyph and the trailing "on", so the
- * panel and the mode line never name one mode two ways.
- */
+/** A mode's name as the mode line under the editor shows it ("manual mode", "accept edits"). */
 export function modeDisplayName(mode: PermissionMode): string {
-	return (MODE_BADGES[mode] ?? mode).replace(/^\S+\s+/, "").replace(/\s+on$/, "");
+	return MODE_NAMES[mode] ?? mode;
 }
 
 const TAB_TITLES: Record<Tab, string> = {

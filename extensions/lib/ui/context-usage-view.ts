@@ -17,6 +17,7 @@
 
 import { type ContextCategoryKey, type ContextItem, type ContextUsage, contextGrid, formatContextPercent, formatContextTokens } from "../context/context-usage.ts";
 import { visibleWidth } from "./text-width.ts";
+import { wrapProse } from "./tui-render.ts";
 
 /**
  * Theme colours per category, after Claude Code's: grays for the system
@@ -24,7 +25,7 @@ import { visibleWidth } from "./text-width.ts";
  * amber for skills, violet for messages. Claude Code's colour for MCP server
  * instructions is not in the evidence; blue is our choice.
  */
-export const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
+const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
 	systemPrompt: "muted",
 	systemTools: "dim",
 	mcpTools: "mdCode",
@@ -35,7 +36,7 @@ export const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
 };
 
 /** The cell glyphs: a full or partial category cell, free space, and the buffer. */
-export const GLYPHS = { full: "⛁", partial: "⛀", free: "⛶", buffer: "⛝" } as const;
+const GLYPHS = { full: "⛁", partial: "⛀", free: "⛶", buffer: "⛝" } as const;
 
 /** Claude Code shows a cell full from this fullness up. */
 const FULL_FROM = 0.7;
@@ -46,7 +47,7 @@ const INDENT = "     ";
 const GAP = "   ";
 
 /** Under this many terminal columns Claude Code uses its narrow grid. */
-export const NARROW_BELOW = 80;
+const NARROW_BELOW = 80;
 
 export interface ContextViewOptions {
 	width: number;
@@ -62,21 +63,6 @@ export function contextNote(usage: ContextUsage): string | undefined {
 	if (usage.preview === "compaction") return "Estimated from what the next request will send: nothing sent since the compaction.";
 	if (usage.unreconciled !== undefined) return `Rows are estimates: the provider counted ${formatContextTokens(usage.unreconciled)} tokens for the last request.`;
 	return undefined;
-}
-
-/** `text` wrapped at spaces to `columns` terminal columns (a word wider than that keeps its own line). */
-function wrapWords(text: string, columns: number): string[] {
-	const lines: string[] = [];
-	let line = "";
-	for (const word of text.split(" ")) {
-		const next = line ? `${line} ${word}` : word;
-		if (line && visibleWidth(next) > columns) {
-			lines.push(line);
-			line = word;
-		} else line = next;
-	}
-	if (line) lines.push(line);
-	return lines;
 }
 
 /** A tree list: `├` for every item but the last, which takes `└`. */
@@ -134,7 +120,7 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	}
 
 	const note = contextNote(usage);
-	if (note) out.push("", ...wrapWords(note, options.width - INDENT.length).map((line) => `${INDENT}${dim(line)}`));
+	if (note) out.push("", ...wrapProse(note, options.width - INDENT.length).map((line) => `${INDENT}${dim(line)}`));
 	if (usage.buffer > 0) out.push("", `${INDENT}Auto-compact window:  ${window} tokens`);
 
 	const sized = (item: ContextItem, prefix = "") => `${item.name}: ${dim(`${prefix}${formatContextTokens(item.tokens)} tokens`)}`;

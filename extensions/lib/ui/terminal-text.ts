@@ -38,7 +38,7 @@ function stringTerminatorEnd(text: string, from: number): number {
 }
 
 /** `text.replace(ansiRegex, "")` in linear time: the same matches, left to right. */
-function stripAnsi(text: string): string {
+export function stripAnsi(text: string): string {
 	let out = "";
 	let from = 0;
 	// No string terminator exists at or after this index (a failed search holds for every later start).

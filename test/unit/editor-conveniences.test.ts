@@ -86,7 +86,7 @@ describe("history search", () => {
 
 	it("narrows to the newest match and steps to older ones", () => {
 		const search = new HistorySearch();
-		expect(search.start("draft")).toBe("draft");
+		search.start("draft");
 		expect(search.setQuery("fix", history.entries)).toBe("fix the lexer");
 		expect(search.prompt()).toBe("search prompts: fix");
 		expect(search.older(history.entries)).toBe("fix the parser");

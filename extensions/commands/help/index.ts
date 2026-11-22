@@ -5,8 +5,8 @@
  * prints pi's own key table.
  *
  * The command list is the slash menu's own: a pass-through autocomplete
- * wrapper keeps the provider beneath it (the skill extension's wrapper loads
- * first, so the rows are already `/name`, untagged and sorted), and `/help`
+ * wrapper keeps the provider beneath it (branding's and the skill extension's
+ * wrappers load first, so the rows are already `/name`, untagged and sorted), and `/help`
  * asks it for the bare `/` menu. In RPC and one-shot runs no panel can open
  * and pi builds no menu, so `/help` prints the same content as text, the
  * commands taken from `pi.getCommands()`.
@@ -19,16 +19,16 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 // pi's loader maps this import to pi's own module, so keyText reads the keybindings pi loaded.
 import { keyText as piKeyText } from "@earendil-works/pi-coding-agent";
 import { canShowCustomUi, printAnswer } from "../../lib/notify/headless-output.ts";
-import { PI_BUILTIN_COMMANDS } from "../../lib/plugins/skill-invoke.ts";
+import { commandExists } from "../../lib/plugins/skill-invoke.ts";
 import { brand } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
-import { knobValue } from "../../lib/profile/knobs.ts";
-import { featureEnabled } from "../../lib/profile/profile.ts";
+import { EDITOR_KEYS_CHANNEL, type EditorKeysQuery } from "../../lib/ui/editor-conveniences.ts";
 import { keyId } from "../../lib/ui/key-input.ts";
 import { modeCycleKey, taskToggleKey } from "../../lib/ui/keys.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { applyHelpKey, type HelpCommand, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../lib/ui/shortcuts-help.ts";
-import { shortcutColumns } from "../../lib/ui/shortcuts-model.ts";
+import { bindingKeyText, shortcutColumns } from "../../lib/ui/shortcuts-model.ts";
+import { compareCommandNames } from "../../lib/ui/slash-menu-model.ts";
 import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 
 type Provider = Parameters<Parameters<ExtensionContext["ui"]["addAutocompleteProvider"]>[0]>[0];
@@ -36,7 +36,7 @@ type Provider = Parameters<Parameters<ExtensionContext["ui"]["addAutocompletePro
 /** The panel's height cap, as the other docked panels use. */
 const HELP_MAX_HEIGHT = 30;
 
-const userKey = (binding: string): string => piKeyText(binding as Parameters<typeof piKeyText>[0]);
+const userKey = bindingKeyText(piKeyText);
 
 function helpExtension(pi: ExtensionAPI) {
 	let menu: Provider | undefined;
@@ -60,7 +60,7 @@ function helpExtension(pi: ExtensionAPI) {
 	};
 
 	/** The bare `/` menu's rows, or the registered commands where pi builds no menu. */
-	const commandList = async (): Promise<HelpCommand[]> => {
+	const commandList = async (registered: readonly { name: string; description?: string }[]): Promise<HelpCommand[]> => {
 		if (menu) {
 			try {
 				const suggestions = await menu.getSuggestions(["/"], 0, 1, { signal: new AbortController().signal });
@@ -69,25 +69,26 @@ function helpExtension(pi: ExtensionAPI) {
 				// Fall back to the registered commands.
 			}
 		}
-		return registered()
+		return registered
 			.map((command) => ({ name: command.name, ...(command.description ? { description: command.description } : {}) }))
-			.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+			.sort((a, b) => compareCommandNames(a.name, b.name));
 	};
 
-	const helpData = async (ctx: ExtensionContext): Promise<HelpData> => {
-		const commands = await commandList();
-		const custom = new Set(registered().flatMap((command) => (command.source === "prompt" ? [command.name] : [])));
-		const names = new Set(registered().map((command) => command.name));
-		// The prompt editor's own keys exist only where branding installs it (extensions/ui/branding).
-		const editor = ctx.mode === "tui" && featureEnabled("branding") && knobValue("NO_INPUT_MARKER") !== "1";
+	const helpData = async (): Promise<HelpData> => {
+		const commandsNow = registered();
+		const commands = await commandList(commandsNow);
+		const custom = new Set(commandsNow.flatMap((command) => (command.source === "prompt" ? [command.name] : [])));
+		// The prompt editor's own keys, as the `?` panel shows them; none where branding's editor is not installed.
+		const editorKeys: EditorKeysQuery = {};
+		pi.events.emit(EDITOR_KEYS_CHANNEL, editorKeys);
 		return {
 			intro: `${brand.name}, ${brand.subtitle}.`,
 			shortcuts: shortcutColumns({
 				keyText: userKey,
 				modeCycleKey: modeCycleKey(),
 				taskToggleKey: taskToggleKey(),
-				hasCommand: (name) => PI_BUILTIN_COMMANDS.has(name) || names.has(name),
-				...(editor ? { editorKeys: { stash: "ctrl+s", historySearch: "ctrl+r" } } : {}),
+				hasCommand: (name) => commandExists(name, () => commandsNow),
+				...(editorKeys.keys ? { editorKeys: editorKeys.keys } : {}),
 			}),
 			commands: commands.filter((command) => !custom.has(command.name)),
 			custom: commands.filter((command) => custom.has(command.name)),
@@ -98,7 +99,7 @@ function helpExtension(pi: ExtensionAPI) {
 	pi.registerCommand("help", {
 		description: "Show keyboard shortcuts and the command list",
 		handler: async (_args, ctx) => {
-			const data = await helpData(ctx);
+			const data = await helpData();
 			if (!canShowCustomUi(ctx)) {
 				if (ctx.hasUI) ctx.ui.notify(helpText(data), "info");
 				else printAnswer(ctx, helpText(data));

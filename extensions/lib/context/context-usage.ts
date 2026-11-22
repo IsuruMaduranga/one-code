@@ -34,7 +34,7 @@
  */
 
 import { isPlainObject } from "../core/plain-object.ts";
-import { estimateTextTokens } from "../models/pi-ai-estimate.ts";
+import { ESTIMATED_IMAGE_CHARS, estimateCharTokens, estimateTextTokens } from "../models/pi-ai-estimate.ts";
 import { declarationsOf, toolName } from "../request/ledger/wire.ts";
 import { toolSearchResultText } from "../request/tool-search-text.ts";
 
@@ -72,9 +72,6 @@ const SECTION_LINE = /^Contents of (.+) \(([^()]+)\):$/;
 
 const REMINDER_OPEN = "<system-reminder>";
 
-/** Characters pi-ai counts for an image. */
-const IMAGE_CHARS = 4800;
-
 /** Keys whose strings are ids, markers or opaque blobs, not text the model reads. */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set([
 	"signature",
@@ -104,13 +101,13 @@ function charsOf(value: unknown, key?: string): number {
 	if (Array.isArray(value)) return value.reduce<number>((sum, item) => sum + charsOf(item), 0);
 	if (!isPlainObject(value)) return 0;
 	if (key !== undefined && JSON_KEYS.has(key)) return JSON.stringify(value)?.length ?? 0;
-	if ((typeof value.type === "string" && IMAGE_TYPES.has(value.type)) || "inlineData" in value || "image" in value) return IMAGE_CHARS;
+	if ((typeof value.type === "string" && IMAGE_TYPES.has(value.type)) || "inlineData" in value || "image" in value) return ESTIMATED_IMAGE_CHARS;
 	let chars = 0;
 	for (const [field, inner] of Object.entries(value)) chars += charsOf(inner, field);
 	return chars;
 }
 
-const tokensOf = (chars: number): number => (chars > 0 ? Math.ceil(chars / 3.5) : 0);
+const tokensOf = (chars: number): number => (chars > 0 ? estimateCharTokens(chars) : 0);
 const textTokens = (text: string): number => (text ? estimateTextTokens(text) : 0);
 
 /** A list element's text blocks, its role, and the characters of everything else in it. */
@@ -164,11 +161,14 @@ export interface RecordedRequestView {
 
 const isMcp = (name: string): boolean => name.startsWith("mcp__");
 
-/** Tools a list declares itself: Responses `additional_tools` and `tool_search_output` items. */
+/** A Responses list item that declares tools itself: `additional_tools` or `tool_search_output`. */
+function isDeclarationItem(item: unknown): item is Record<string, unknown> {
+	return isPlainObject(item) && (item.type === "additional_tools" || item.type === "tool_search_output");
+}
+
+/** Tools a list declares itself, through its declaration items. */
 function listDeclarations(list: readonly unknown[]): unknown[] {
-	return list.flatMap((item) =>
-		isPlainObject(item) && (item.type === "additional_tools" || item.type === "tool_search_output") && Array.isArray(item.tools) ? item.tools : [],
-	);
+	return list.flatMap((item) => (isDeclarationItem(item) && Array.isArray(item.tools) ? item.tools : []));
 }
 
 /** Every tool a `tool_reference` block in the list loads (Anthropic's deferred loading). */
@@ -320,7 +320,7 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 	// pi's own message list (an estimate of a request not yet sent) also opens with a harness message or a compaction summary.
 	const firstUser = list.findIndex((element) => isPlainObject(element) && (element.role === "user" || element.role === "custom" || element.role === "compactionSummary"));
 	list.forEach((element, index) => {
-		if (isPlainObject(element) && (element.type === "additional_tools" || element.type === "tool_search_output")) return;
+		if (isDeclarationItem(element)) return;
 		const { role, texts, otherChars } = elementParts(element);
 		const instruction = role === "system" || role === "developer";
 		for (const text of texts) {

@@ -13,19 +13,30 @@ import { brandedId } from "../profile/brand.mjs";
 import type { PermissionMode } from "./matcher.ts";
 import { modeCycleKey, pauseGlyph } from "../ui/keys.ts";
 
+/** Each mode's name as the mode line shows it, so the panel and the mode line never name one mode two ways. */
+export const MODE_NAMES: Record<PermissionMode, string> = {
+	default: "manual mode",
+	acceptEdits: "accept edits",
+	plan: "plan mode",
+	bypassPermissions: "bypass permissions",
+	dontAsk: "don't ask",
+	auto: "auto mode",
+};
+
 /**
  * Footer badge per mode — Claude Code's exact strings and icons. The pause
  * icon is swapped for a single-cell glyph on Windows and WSL, where Windows
  * Terminal draws U+23F8 two cells wide and over the mode name (lib/ui/keys.ts).
  */
 const PAUSE = pauseGlyph();
+
 export const MODE_BADGES: Record<PermissionMode, string> = {
-	default: `${PAUSE} manual mode on`,
-	acceptEdits: "⏵⏵ accept edits on",
-	plan: `${PAUSE} plan mode on`,
-	bypassPermissions: "⏵⏵ bypass permissions on",
-	dontAsk: "⏵⏵ don't ask on",
-	auto: "⏵⏵ auto mode on",
+	default: `${PAUSE} ${MODE_NAMES.default} on`,
+	acceptEdits: `⏵⏵ ${MODE_NAMES.acceptEdits} on`,
+	plan: `${PAUSE} ${MODE_NAMES.plan} on`,
+	bypassPermissions: `⏵⏵ ${MODE_NAMES.bypassPermissions} on`,
+	dontAsk: `⏵⏵ ${MODE_NAMES.dontAsk} on`,
+	auto: `⏵⏵ ${MODE_NAMES.auto} on`,
 };
 
 const CYCLE: readonly PermissionMode[] = ["default", "acceptEdits", "plan"];

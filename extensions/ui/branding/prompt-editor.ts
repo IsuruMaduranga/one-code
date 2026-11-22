@@ -19,8 +19,20 @@
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { type AgentViewScroll, applyBorderBadge, fitBadge } from "../../lib/agents/agent-view.ts";
 import { applyArgumentHint } from "../../lib/ui/argument-hints.ts";
-import { DOUBLE_ESC_MS, ESC_AGAIN_HINT, EscapeClear, fitBorderTitle, HistorySearch, PromptHistory, PromptStash, STASH_NOTICE } from "../../lib/ui/editor-conveniences.ts";
-import { decodePrintableKey, keyId, keyText } from "../../lib/ui/key-input.ts";
+import {
+	DOUBLE_ESC_MS,
+	ESC_AGAIN_HINT,
+	type EditorKeys,
+	EscapeClear,
+	fitBorderTitle,
+	HISTORY_SEARCH_KEY,
+	HistorySearch,
+	PromptHistory,
+	PromptStash,
+	STASH_KEY,
+	STASH_NOTICE,
+} from "../../lib/ui/editor-conveniences.ts";
+import { keyId, keyText, PASTE_END, PASTE_START } from "../../lib/ui/key-input.ts";
 import { fitSlashDescriptions, isCommandMenu, slashMenuRows } from "../../lib/ui/slash-menu-model.ts";
 import { visibleWidth } from "../../lib/ui/text-width.ts";
 import { cutPlainText } from "../../lib/ui/tui-render.ts";
@@ -29,11 +41,6 @@ import { upEditsQueue } from "./queued-edit.ts";
 
 /** Width of the left gutter, and therefore the visible width the marker must fill. */
 export const PROMPT_PADDING = 2;
-
-/** The stash key (Claude Code's `chat:stash`); pi binds nothing to it in the editor. */
-export const STASH_KEY = "ctrl+s";
-/** The history search key (Claude Code's `historySearch`); pi binds it only in its session picker. */
-export const HISTORY_SEARCH_KEY = "ctrl+r";
 
 type EditorArgs = ConstructorParameters<typeof CustomEditor>;
 type Provider = Parameters<CustomEditor["setAutocompleteProvider"]>[0];
@@ -65,15 +72,11 @@ export interface PromptEditorHooks {
 	now?: () => number;
 }
 
-/** The editor's own keys that work right now. */
-export interface EditorKeys {
-	stash?: string;
-	historySearch?: string;
-}
+export type { EditorKeys };
 
-/** A `?` keypress: the plain byte, or a kitty / modifyOtherKeys encoding of it. */
+/** A `?` keypress: the plain byte, or a kitty / modifyOtherKeys encoding of it (never its release). */
 function isQuestionKey(data: string): boolean {
-	return data === "?" || (data.startsWith("\x1b[") && decodePrintableKey(data) === "?");
+	return keyText(data) === "?";
 }
 
 export class PromptEditor extends CustomEditor {
@@ -86,6 +89,8 @@ export class PromptEditor extends CustomEditor {
 	/** pi's `autocompleteMaxVisible` setting as pi handed it over. */
 	#configuredRows = 5;
 	#shortcutsOpen = false;
+	/** The open `?` panel's lines at the width they were built for; dropped when it closes. */
+	#shortcutsLines: { width: number; lines: string[] } | undefined;
 	/** Inside a bracketed paste that arrives in pieces: its `?` is text. */
 	#inPaste = false;
 	#escape = new EscapeClear();
@@ -142,8 +147,8 @@ export class PromptEditor extends CustomEditor {
 		);
 	}
 
-	/** The editor's own keys that work right now, for the `?` panel (the raw bytes are ctrl+s and ctrl+r). */
-	#editorKeys(): EditorKeys {
+	/** The editor's own keys that work right now, for the `?` panel and `/help` (the raw bytes are ctrl+s and ctrl+r). */
+	editorKeys(): EditorKeys {
 		return {
 			...(this.#boundInEditor("\x13") ? {} : { stash: STASH_KEY }),
 			...(this.#boundInEditor("\x12") ? {} : { historySearch: HISTORY_SEARCH_KEY }),
@@ -181,56 +186,9 @@ export class PromptEditor extends CustomEditor {
 	handleInput(data: string): void {
 		if (this.#search.active && this.#searchInput(data)) return;
 		const text = this.getText();
-		// The `?` panel closes on the next key, which is then handled as usual;
-		// a second `?` on the empty editor only closes it.
-		if (this.#shortcutsOpen) {
-			this.#shortcutsOpen = false;
-			this.tui.requestRender();
-			if (text === "" && isQuestionKey(data)) return;
-		}
-		if (data.includes("\x1b[200~")) this.#inPaste = !data.includes("\x1b[201~");
-		else if (this.#inPaste && data.includes("\x1b[201~")) this.#inPaste = false;
-		if (!this.#inPaste && text === "" && isQuestionKey(data) && this.#hooks.shortcuts) {
-			this.#shortcutsOpen = true;
-			this.tui.requestRender();
-			return;
-		}
-
-		if (this.#keys.matches(data, "app.interrupt")) {
-			const now = this.#now();
-			const verdict = this.#escape.press(now, {
-				hasText: text.trim() !== "",
-				idle: this.#hooks.idle?.() ?? true,
-				menuOpen: this.isShowingAutocomplete(),
-				viewOpen: this.#hooks.scrollView?.() !== undefined,
-				bashMode: text.trimStart().startsWith("!"),
-			});
-			if (verdict === "clear") {
-				// setText keeps an undo snapshot, so the undo key brings the text back.
-				this.setText("");
-				this.tui.requestRender();
-				return;
-			}
-			if (verdict === "arm") this.#expireEscHint();
-		} else {
-			this.#escape.other();
-		}
-
-		// The editor's own keys, unless a pi binding the user made or a ctrl+x chord has them.
-		const id = keyId(data);
-		if ((id === HISTORY_SEARCH_KEY || id === STASH_KEY) && this.#hooks.chordKey?.() !== id && !this.#boundInEditor(data)) {
-			// An extension's own shortcut on the key keeps it.
-			if (this.onExtensionShortcut?.(data)) return;
-			if (id === HISTORY_SEARCH_KEY) {
-				this.#search.start(text);
-			} else {
-				const next = this.#stash.toggle(this.getExpandedText?.() ?? text);
-				if (next !== undefined) this.setText(next);
-			}
-			this.tui.requestRender();
-			return;
-		}
-
+		if (this.#shortcutsInput(data, text)) return;
+		if (this.#escapeInput(data, text)) return;
+		if (this.#ownKeyInput(data, text)) return;
 		// ↑ on the first line restores queued messages, as in Claude Code (queued-edit.ts).
 		const dequeue = this.actionHandlers.get("app.message.dequeue");
 		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this, this.#hooks.queued?.() ?? false, this.#layoutWidth)) {
@@ -238,6 +196,65 @@ export class PromptEditor extends CustomEditor {
 			return;
 		}
 		super.handleInput(data);
+	}
+
+	/**
+	 * The `?` panel: it closes on the next key, which is then handled as usual
+	 * (a second `?` on the empty editor only closes it), and `?` on the empty
+	 * editor opens it, unless the `?` is pasted text. True when the key is used up.
+	 */
+	#shortcutsInput(data: string, text: string): boolean {
+		if (this.#shortcutsOpen) {
+			this.#shortcutsOpen = false;
+			this.#shortcutsLines = undefined;
+			this.tui.requestRender();
+			if (text === "" && isQuestionKey(data)) return true;
+		}
+		if (data.includes(PASTE_START)) this.#inPaste = true;
+		if (data.includes(PASTE_END)) this.#inPaste = false;
+		if (this.#inPaste || text !== "" || !isQuestionKey(data) || !this.#hooks.shortcuts) return false;
+		this.#shortcutsOpen = true;
+		this.tui.requestRender();
+		return true;
+	}
+
+	/** Esc esc clears the input; any other key disarms it. True when the key is used up. */
+	#escapeInput(data: string, text: string): boolean {
+		if (!this.#keys.matches(data, "app.interrupt")) {
+			this.#escape.other();
+			return false;
+		}
+		const verdict = this.#escape.press(this.#now(), {
+			hasText: text.trim() !== "",
+			idle: this.#hooks.idle?.() ?? true,
+			menuOpen: this.isShowingAutocomplete(),
+			viewOpen: this.#hooks.scrollView?.() !== undefined,
+			bashMode: text.trimStart().startsWith("!"),
+		});
+		if (verdict === "clear") {
+			// setText keeps an undo snapshot, so the undo key brings the text back.
+			this.setText("");
+			this.tui.requestRender();
+			return true;
+		}
+		if (verdict === "arm") this.#expireEscHint();
+		return false;
+	}
+
+	/** The stash and history-search keys, unless a pi binding the user made or a ctrl+x chord has them. True when the key is used up. */
+	#ownKeyInput(data: string, text: string): boolean {
+		const id = keyId(data);
+		if ((id !== HISTORY_SEARCH_KEY && id !== STASH_KEY) || this.#hooks.chordKey?.() === id || this.#boundInEditor(data)) return false;
+		// An extension's own shortcut on the key keeps it.
+		if (this.onExtensionShortcut?.(data)) return true;
+		if (id === HISTORY_SEARCH_KEY) {
+			this.#search.start(text);
+		} else {
+			const next = this.#stash.toggle(this.getExpandedText?.() ?? text);
+			if (next !== undefined) this.setText(next);
+		}
+		this.tui.requestRender();
+		return true;
 	}
 
 	/** Repaint once the second Esc's window has passed, so its hint goes away. */
@@ -318,12 +335,18 @@ export class PromptEditor extends CustomEditor {
 		return applyBorderBadge(lines, tail, tailWidth, glyph);
 	}
 
+	/** The open `?` panel's lines, built once per width while it stays open. */
+	#shortcutLines(build: NonNullable<PromptEditorHooks["shortcuts"]>, width: number): string[] {
+		if (this.#shortcutsLines?.width !== width) this.#shortcutsLines = { width, lines: build(width, this.editorKeys()) };
+		return this.#shortcutsLines.lines;
+	}
+
 	/** The dim lines under the editor: the history search, the `?` panel, the second Esc's hint, the stash notice. */
 	#linesBelow(width: number): string[] {
 		const dim = this.#hooks.dim ?? ((text: string) => text);
 		const plain: string[] = [];
 		if (this.#search.active) plain.push(`  ${this.#search.prompt()}`);
-		else if (this.#shortcutsOpen && this.#hooks.shortcuts) plain.push(...this.#hooks.shortcuts(width, this.#editorKeys()));
+		else if (this.#shortcutsOpen && this.#hooks.shortcuts) plain.push(...this.#shortcutLines(this.#hooks.shortcuts, width));
 		else if (this.#escape.armed(this.#now())) plain.push(`  ${ESC_AGAIN_HINT}`);
 		if (this.#stash.stashed) plain.push(`  ${STASH_NOTICE}`);
 		return plain.map((line) => dim(cutPlainText(line, width)));

@@ -62,7 +62,6 @@ import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { listableSkillNames } from "./announce.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../../lib/ui/argument-hints.ts";
-import { arrangeSlashItems } from "../../lib/ui/slash-menu-model.ts";
 import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../lib/plugins/skill-body.ts";
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
@@ -760,15 +759,14 @@ function skillExtension(pi: ExtensionAPI) {
 		registerSkillCommands(ctx.cwd, skills);
 		// pi lists every skill a second time as `/skill:<name>`; drop that entry
 		// where the bare command exists (withoutDuplicateSkillCommands). The
-		// command menu then takes Claude Code's shape: `/name` rows, no source
-		// tags, alphabetical (lib/ui/slash-menu-model.ts arrangeSlashItems).
+		// menu's Claude Code shape is branding's wrapper, beneath this one.
 		if (ctx.hasUI && ctx.mode === "tui") {
 			ctx.ui.addAutocompleteProvider((current) => ({
 				...current,
 				getSuggestions: async (lines, cursorLine, cursorCol, options) => {
 					const suggestions = await current.getSuggestions(lines, cursorLine, cursorCol, options);
 					if (!suggestions) return suggestions;
-					const items = arrangeSlashItems(withoutDuplicateSkillCommands(suggestions.items, suggestions.prefix, registeredSkillCommands), suggestions.prefix);
+					const items = withoutDuplicateSkillCommands(suggestions.items, suggestions.prefix, registeredSkillCommands);
 					return items.length > 0 ? { ...suggestions, items } : null;
 				},
 				applyCompletion: (...args) => current.applyCompletion(...args),

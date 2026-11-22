@@ -418,14 +418,14 @@ function fileTrackerExtension(pi: ExtensionAPI) {
 		};
 		const content = fileToolResultContent(fileResult, fileTrackerText);
 		// A failure gets its kind on the details, for the transcript's short line (never sent to the model).
-		const first = event.content?.[0];
-		const fileError = event.isError ? executedErrorKind(fileResult, first?.type === "text" && typeof first.text === "string" ? first.text : "") : undefined;
+		const fileError = event.isError ? executedErrorKind(fileResult) : undefined;
 		if (!content && !observation && !fileError) return undefined;
 		const prior = (event.details as Record<string, unknown> | undefined) ?? {};
 		return {
 			...(content ? { content } : {}),
-			...(observation ? { details: { ...prior, productFile: observation } } : {}),
-			...(fileError ? { details: { ...prior, fileError } } : {}),
+			...(observation || fileError
+				? { details: { ...prior, ...(observation ? { productFile: observation } : {}), ...(fileError ? { fileError } : {}) } }
+				: {}),
 		};
 	});
 

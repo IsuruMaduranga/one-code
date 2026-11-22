@@ -136,27 +136,28 @@ export function loadSandboxSettings(cwd: string, home: string, product: ProductS
 		if (block === undefined) continue;
 		const repo = isRepoFile(source);
 		const next = mergeSandboxBlock(settings, block, repo, locked);
-		if (locked && !repo) for (const key of lockedOutKeys(next, mergeSandboxBlock(settings, block, repo))) ignored.push(`sandbox.${key} in ${tildify(source.path, home)}`);
+		if (locked) for (const key of lockedOutKeys(next, mergeSandboxBlock(settings, block, repo))) ignored.push(`sandbox.${key} in ${tildify(source.path, home)}`);
 		settings = next;
 	}
 	return { ...settings, denyRulePaths: denyRulePaths(parseRules(loadPermissionSettings(cwd, home).deny)), ...(product ? { product: { locked, ignored } } : {}) };
 }
 
-/** The widening keys, by their path in a settings file's `sandbox` block. */
-const WIDENING_KEYS: ReadonlyArray<[string, (settings: SandboxSettings) => unknown]> = [
-	["enabled", (s) => s.enabled],
-	["autoAllowBashIfSandboxed", (s) => s.autoAllowBashIfSandboxed],
-	["excludedCommands", (s) => s.excludedCommands],
-	["filesystem.allowWrite", (s) => s.filesystem.allowWrite],
-	["filesystem.allowRead", (s) => s.filesystem.allowRead],
-	["network.allowedDomains", (s) => s.network.allowedDomains],
-	["network.allowLocalBinding", (s) => s.network.allowLocalBinding],
-	["network.allowUnixSockets", (s) => s.network.allowUnixSockets],
-];
-
-/** The widening keys whose value differs between a file's locked merge and its unlocked one: what the lock kept out. */
+/**
+ * What the lock kept out of a file: the settings whose value differs between
+ * the file's locked merge and its unlocked one, by their path in a settings
+ * file's `sandbox` block (`filesystem.allowWrite`). The two merges differ only
+ * in mergeSandboxBlock's widening section, so that section is the one list of
+ * widening keys; a file the repository controls never reaches it, and differs
+ * in nothing.
+ */
 function lockedOutKeys(locked: SandboxSettings, unlocked: SandboxSettings): string[] {
-	return WIDENING_KEYS.filter(([, read]) => JSON.stringify(read(locked)) !== JSON.stringify(read(unlocked))).map(([key]) => key);
+	const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+	const kept = locked as unknown as Record<string, unknown>;
+	return Object.entries(unlocked).flatMap(([key, value]) =>
+		isPlainObject(value)
+			? Object.entries(value).flatMap(([inner, innerValue]) => (differs(innerValue, record(kept[key])[inner]) ? [`${key}.${inner}`] : []))
+			: differs(value, kept[key]) ? [key] : [],
+	);
 }
 
 /**
