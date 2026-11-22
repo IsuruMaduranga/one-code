@@ -158,7 +158,7 @@ function workflowExtension(pi: ExtensionAPI) {
 	const deliverResult = (handle: RunHandle, toolUseId: string) => {
 		// CC's kind=workflow task notification; the run report (result or the
 		// failure and how to resume) is its `<result>`. Summary literal: see
-		// workflowSummary — unverified against CC.
+		// workflowSummary.
 		const status = taskStatusOf(handle.status);
 		notifyTask(
 			WORKFLOW_RESULT_TYPE,

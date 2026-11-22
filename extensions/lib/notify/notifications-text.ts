@@ -3,7 +3,7 @@
  * Claude Code's agent-message envelope, task-notification summaries, note
  * and delivery preambles, byte for byte (notification-fidelity.test.ts), and
  * our own additions (a shell failure's detail, a monitor's reason, the
- * workflow summary, the one-shot and interactive session notes). The tags
+ * one-shot and interactive session notes). The tags
  * (`<task-notification>`, `<agent-message>`, `<system-reminder>`) and their
  * order are in notifications.ts, which also parses the frames back for
  * display, from the same words. The profile supplies the sentences that name
@@ -82,12 +82,11 @@ function summary(s: TaskSummary): string {
 			if (s.status === "failed") return `Monitor "${s.description}" script failed${suffix}`;
 			return `Monitor "${s.description}" stopped${suffix}`;
 		}
-		case "workflow": {
-			const suffix = s.reason ? `: ${s.reason}` : "";
-			if (s.status === "completed") return `Workflow "${s.name}" finished`;
-			if (s.status === "failed") return `Workflow "${s.name}" failed${suffix}`;
-			return `Workflow "${s.name}" was stopped${suffix}`;
-		}
+		case "workflow":
+			// Claude Code 2.1.330: a failure always names a reason, a stop never does.
+			if (s.status === "completed") return `Dynamic workflow "${s.name}" completed`;
+			if (s.status === "failed") return `Dynamic workflow "${s.name}" failed: ${s.reason || "Unknown error"}`;
+			return `Dynamic workflow "${s.name}" was stopped`;
 	}
 }
 

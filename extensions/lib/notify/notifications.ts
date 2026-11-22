@@ -240,10 +240,10 @@ export function monitorEndedSummary(description: string, status: TaskStatus, pro
 }
 
 /**
- * `Workflow "NAME" finished` — UNVERIFIED: the 2.1.278 binary holds no local
- * workflow completion summary (only remote/error variants) and no transcript
- * on this machine carries one, so this mirrors the agent shape
- * (working-docs/features/notifications/plan.md, Deviations).
+ * Claude Code 2.1.330's workflow summary: `Dynamic workflow "NAME" completed`,
+ * `Dynamic workflow "NAME" failed: REASON` (`Unknown error` when there is no
+ * reason) and `Dynamic workflow "NAME" was stopped` (never a reason). Its
+ * `<recovery>` and `<diagnostics>` tags are not mirrored.
  */
 export function workflowSummary(name: string, status: TaskStatus, reason?: string): string {
 	return notificationWords().summary({ kind: "workflow", name, status, ...(reason ? { reason } : {}) });
