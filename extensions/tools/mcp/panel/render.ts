@@ -125,8 +125,12 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		out.push(paint.fg("dim", cutPlainText(` ${count}`, width - 1)));
 
 		footer = wrapFooter("↑/↓ to navigate · Enter to confirm · Esc to cancel");
-		const notes = (input.configNotes ?? []).flatMap((note) => wrapProse(note, width - 3)).map((line) => paint.fg("warning", `  ${line}`));
 		const noticeLines = input.notices.reduce((sum, notice) => sum + notice.split("\n").length, 0);
+		// The notes take what the header, one list row, the config line, the notices and the footer leave; the startup notice has them in full.
+		const noteLines = (input.configNotes ?? []).flatMap((note) => wrapProse(note, width - 3));
+		const noteRoom = Math.max(1, height - out.length - (entries.length === 0 ? 2 : 1) - 2 - footer.length - noticeLines - 1);
+		const shownNotes = noteLines.length <= noteRoom ? noteLines : [...noteLines.slice(0, noteRoom - 1), `… ${noteLines.length - noteRoom + 1} more lines, shown in full when the session starts`];
+		const notes = shownNotes.map((line) => paint.fg("warning", cutPlainText(`  ${line}`, width - 1)));
 		const footerReserve = 2 + notes.length + footer.length + noticeLines + 1;
 		const budget = Math.max(1, height - out.length - footerReserve);
 		if (entries.length === 0) {
