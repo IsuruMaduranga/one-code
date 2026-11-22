@@ -270,6 +270,12 @@ describe("a shell line that writes a path such a rule names", () => {
 		expect(run({ ...deny, allow: ["Bash(printf:*)"] }, "bash", "printf x > config/dev.yaml", "default")).toBe("allow");
 	});
 
+	it("keeps an operand that starts with a dash after -- in a move the check does not model", () => {
+		const writes = analyzeShellCommand({ command: "mv --backup=numbered -- -notes.md config/", cwd, home: homedir() }).writes.map((write) => write.token);
+		expect(writes).toEqual(expect.arrayContaining(["-notes.md", "config/-notes.md"]));
+		expect(run({ deny: ["Edit(config/-notes.md)"] }, "bash", "mv --backup=numbered -- -notes.md config/", "auto")).toBe("deny");
+	});
+
 	it("sees a bare-name destination behind options the copy check does not model", () => {
 		const rule = { deny: ["Edit(notes.md)"] };
 		for (const command of ["cp --sparse=always config/dev.yaml notes.md", "ln --backup=numbered config/dev.yaml notes.md", "install --mode=644 config/dev.yaml notes.md"]) {

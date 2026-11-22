@@ -1704,7 +1704,9 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// install write each operand's name beneath it, as they do when the last
 			// operand is an existing directory or ends with a slash.
 			const into = name in TARGET_DIRECTORY_COMMANDS ? targetDirectoryOperands(name, args) : undefined;
-			const operands = args.filter((token) => !token.value.startsWith("-"));
+			// After `--` every word is an operand, a name that starts with a dash included.
+			const delimiter = args.findIndex((token) => token.value === "--");
+			const operands = delimiter < 0 ? args.filter((token) => !token.value.startsWith("-")) : [...args.slice(0, delimiter).filter((token) => !token.value.startsWith("-")), ...args.slice(delimiter + 1)];
 			if (name === "mv") {
 				writeTokens.push(...operands);
 			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
