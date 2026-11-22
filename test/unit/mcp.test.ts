@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/tools/mcp/config.ts";
@@ -104,6 +104,21 @@ describe("loadServers", () => {
 				`MCP server "sock" in ${user} has type "ws", which is not supported; it is tried as Streamable HTTP.`,
 				`MCP server "empty" in ${user} has neither a url nor a command, so it is ignored.`,
 			]);
+		});
+
+		it("reads a file with no mcpServers object as a server map only when it is a plugin's", () => {
+			// A settings file whose only key is `permissions` is not a server named "permissions".
+			const settings = join(project, ".claude", "settings.local.json");
+			mkdirSync(join(project, ".claude"), { recursive: true });
+			writeFileSync(settings, JSON.stringify({ permissions: { allow: ["Bash(ls:*)"] } }));
+			const plugin = join(root, "plugin.mcp.json");
+			writeFileSync(plugin, JSON.stringify({ tools: { command: "tools" } }));
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [plugin], { pluginNames: new Map([[plugin, "kit"]]), onNote: (m) => notes.push(m) });
+			expect(servers.map((server) => server.name)).toEqual(["plugin:kit:tools"]);
+			expect(notes).toEqual([]);
+			expect(loadServers(project, home, {}, [], { piConfigs: { user: settings, project: settings }, onNote: (m) => notes.push(m) })).toEqual([]);
+			expect(notes).toEqual([]);
 		});
 
 		it("reads servers other extensions registered, below every file, with the extension as the source", () => {
