@@ -263,6 +263,26 @@ describe("a shell line that writes a path such a rule names", () => {
 		expect(run(deny, "bash", "mv --backup config/dev.yaml config/old.yaml", "default", true, { sandboxed: true })).toBe("allow");
 	});
 
+	it("counts the file a -t or --target-directory option puts in its directory, in every spelling", () => {
+		const ask = { ask: ["Write(config/prod.yaml)"], allow: ["Bash(mv:*)", "Bash(cp:*)", "Bash(install:*)", "Bash(ln:*)"] };
+		const writes = (command: string) => analyzeShellCommand({ command, cwd, home: homedir() }).writes.map((write) => write.token);
+		for (const command of ["mv -tconfig prod.yaml", "mv -t config prod.yaml", "mv -ft config prod.yaml", "mv -vtconfig/ prod.yaml", "mv --target-directory=config prod.yaml", "mv --target-directory config prod.yaml", "mv --target=config build/prod.yaml", "mv -t config -- prod.yaml"]) {
+			expect(writes(command), command).toContain("config/prod.yaml");
+			expect(run(ask, "bash", command, "default"), command).toBe("ask");
+			expect(run(ask, "bash", command, "default", true, { sandboxed: true }), command).toBe("ask");
+		}
+		// A move still removes each source.
+		expect(writes("mv -tconfig prod.yaml other.yaml")).toEqual(expect.arrayContaining(["prod.yaml", "other.yaml", "config/prod.yaml", "config/other.yaml"]));
+		for (const command of ["cp -tconfig prod.yaml", "cp --target-directory=config build/prod.yaml", "install -m 644 -t config prod.yaml", "install -tconfig prod.yaml", "ln -s -t config ../prod.yaml"]) {
+			expect(writes(command), command).toContain("config/prod.yaml");
+			expect(run(ask, "bash", command, "default"), command).toBe("ask");
+		}
+		// The value of another option is not the directory: `-S t` is a backup suffix.
+		expect(writes("mv -St config/dev.yaml build/")).not.toContain("config/dev.yaml/build");
+		expect(run(ask, "bash", "mv -tconfig dev.yaml", "default")).toBe("allow");
+		expect(run(ask, "bash", "cp -t config dev.yaml", "default")).toBe("allow");
+	});
+
 	it("keeps the fast path for a line that writes elsewhere", () => {
 		expect(run(deny, "bash", "rm config/dev.yaml", "auto")).toBe("allow");
 		expect(run(deny, "bash", "printf '' > config/dev.yaml", "acceptEdits")).toBe("allow");

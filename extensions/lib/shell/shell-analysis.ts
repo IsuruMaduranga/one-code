@@ -849,6 +849,48 @@ function bashBasename(word: string): string {
 	return trimmed.slice(trimmed.lastIndexOf("/") + 1);
 }
 
+/** The short options that take a value, for the commands with a `-t DIR` option: in a cluster, the letters after one are its value (`-St` is suffix `t`). */
+const TARGET_DIRECTORY_COMMANDS: Record<string, string> = { mv: "St", cp: "St", ln: "St", install: "Stmog" };
+
+/**
+ * The directory `mv`, `cp`, `ln` or `install` puts its operands in, and those
+ * operands: `-t DIR`, `-tDIR` (also ending a cluster, `-ft DIR`),
+ * `--target-directory=DIR` or `--target-directory DIR`, with GNU's
+ * abbreviations of the long form (`--target=DIR`). `dir` is undefined when no
+ * such option is given. After `--` every word is an operand. A long option's
+ * separate value this does not model (`--suffix X`) counts as an operand,
+ * which only adds a write target.
+ */
+function targetDirectoryOperands(name: string, args: readonly Token[]): { dir?: string; operands: string[] } {
+	const valued = TARGET_DIRECTORY_COMMANDS[name] ?? "";
+	let dir: string | undefined;
+	const operands: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const value = args[i].value;
+		if (value === "--") {
+			operands.push(...args.slice(i + 1).map((token) => token.value));
+			break;
+		}
+		if (value.startsWith("--")) {
+			const equals = value.indexOf("=");
+			const option = equals < 0 ? value : value.slice(0, equals);
+			if (option.length > 2 && "--target-directory".startsWith(option)) dir = equals < 0 ? args[++i]?.value : value.slice(equals + 1);
+			continue;
+		}
+		if (value.startsWith("-") && value.length > 1) {
+			for (let j = 1; j < value.length; j++) {
+				if (!valued.includes(value[j])) continue;
+				const optionValue = value.slice(j + 1) || args[++i]?.value;
+				if (value[j] === "t") dir = optionValue;
+				break;
+			}
+			continue;
+		}
+		operands.push(value);
+	}
+	return { dir: dir || undefined, operands };
+}
+
 /** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
 function entryExists(absolute: string): boolean {
 	try {
@@ -1624,14 +1666,22 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// For cp/rsync/ln the destination is last; for the rest every
 			// positional is a candidate target. A move with options this check
 			// does not model writes every operand it names, its sources (which it
-			// removes) and `-t`'s directory included, bare names too.
+			// removes) and `-t`'s directory included, bare names too. With a
+			// target directory (`-t DIR`, `--target-directory=DIR`), mv, cp, ln and
+			// install write each operand's name beneath it.
+			const into = name in TARGET_DIRECTORY_COMMANDS ? targetDirectoryOperands(name, args) : undefined;
 			if (name === "mv") {
 				writeTokens.push(...args.filter((token) => !token.value.startsWith("-")).map((token) => token.value));
-			} else if (["cp", "rsync", "ln", "install"].includes(name)) {
+			} else if (into?.dir === undefined && ["cp", "rsync", "ln", "install"].includes(name)) {
 				const last = positionals[positionals.length - 1];
 				if (last) writeTokens.push(last.value);
-			} else {
+			} else if (into?.dir === undefined) {
 				writeTokens.push(...positionals.map((token) => token.value));
+			}
+			if (into?.dir !== undefined) {
+				const dir = into.dir;
+				if (!writeTokens.includes(dir)) writeTokens.push(dir);
+				for (const operand of into.operands) writeTokens.push(`${dir.replace(/\/+$/, "")}/${bashBasename(operand)}`);
 			}
 			for (const { value } of args) {
 				if (value.startsWith("of=")) writeTokens.push(value.slice(3)); // dd
