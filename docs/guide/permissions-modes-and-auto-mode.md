@@ -76,7 +76,11 @@ The same rule covers shell commands that write the file. With
 every mode, and no `Bash` allow rule lets them through. An `ask` rule asks
 instead. A command that removes or replaces a folder that might contain the
 file, such as `rm -r config`, is not refused, but it is never approved
-automatically: you are asked, or in auto mode the classifier decides.
+automatically: you are asked, or in auto mode the classifier decides. A
+wildcard in a command that removes or moves files, such as
+`rm config/*.yaml`, is checked against the files it matches, so it is
+refused or asked about like `rm config/prod.yaml`. When One Code cannot list
+those files (`rm */prod.yaml`), the command is never approved automatically.
 
 This check sees the writes One Code can read from the command line:
 redirects and the operands of commands such as `rm`, `mv`, and `cp`. It

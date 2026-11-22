@@ -70,6 +70,17 @@ export interface ShellEvidence {
 	 * keeps the model's spelling from), the realpath'd form, and the verdict.
 	 */
 	writes: { token: string; absolute: string; resolved?: string; outsideCwd: boolean }[];
+	/**
+	 * The glob operands of a removing or moving command (`rm`, `rmdir`,
+	 * `shred`, `truncate`, `mv`), expanded against the filesystem as bash would
+	 * (`expandGlob`): each with the paths it matches, absolute and realpath'd,
+	 * or with `matches` undefined when this check cannot enumerate them. Each
+	 * also escalates, and appears in `writes` as written where the command's
+	 * branch records it. Read only by the edit-family rule check
+	 * (lib/rules/matcher.ts `decide`), so a rule on `config/prod.yaml` sees
+	 * `rm config/*.yaml`; containment never relies on the expansion.
+	 */
+	globWrites: { token: string; matches?: { absolute: string; resolved?: string }[] }[];
 	/** Credential/secret paths named anywhere in the command (original tokens, never expanded). */
 	sensitivePaths: string[];
 	/** In-project paths whose contents execute later (`.git/hooks/*`, `.vscode/*.json`). */
@@ -1128,6 +1139,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		notes: [],
 		commands: [],
 		writes: [],
+		globWrites: [],
 		sensitivePaths: [],
 		executionPrimitives: [],
 		protectedPaths: [],
@@ -1190,17 +1202,32 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	/** The directory per subshell scope: a `cd` inside `$(…)` or `( … )` does not reach the parent. */
 	const cwdByScope = scopedTracker(cwd);
 
+	/** Record a removing or moving command's glob operand with what it expands to here (`ShellEvidence.globWrites`). */
+	const recordGlobWrite = (token: string) => {
+		const words = isUnknownTilde(token) ? undefined : expandGlob(effectiveCwd, token, home);
+		evidence.globWrites.push({
+			token,
+			matches: words?.map((word) => {
+				const absolute = toAbsoluteBash(effectiveCwd, word, home);
+				return { absolute, resolved: resolveForContainment(absolute) };
+			}),
+		});
+	};
+
 	/**
 	 * Resolve a write-target token, record it as evidence, and escalate on any
 	 * target that cannot be resolved, escapes the working directory, or names a
 	 * credential / execution-primitive path. Shared by redirections, mutating
 	 * command positionals, and output-flag targets so all writes get one check.
+	 * `removes` marks an operand of a removing or moving command, whose glob is
+	 * also expanded for the edit-family rule check (`recordGlobWrite`).
 	 */
-	const checkWriteTarget = (token: string) => {
+	const checkWriteTarget = (token: string, removes = false) => {
 		if (token === "/dev/null") return;
 		// A `~name`/`~-` target or a glob lands wherever bash expands it, which
 		// this check cannot know (SECURITY-REVIEW-2026-09-23 M2).
 		if (isUnknownTilde(token) || /[*?[]/.test(token)) {
+			if (removes && /[*?[]/.test(token)) recordGlobWrite(token);
 			evidence.writes.push({ token, absolute: token, outsideCwd: true });
 			escalate(`writes to ${token}, which bash expands to a path this check cannot resolve`);
 			return;
@@ -1587,6 +1614,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				if (token.value.startsWith("-")) continue;
 				if (hasGlob(token.value)) {
 					escalate(`targets ${token.value}, a glob whose expansion cannot be checked`);
+					recordGlobWrite(token.value);
 					continue;
 				}
 				writeTokens.push(token.value);
@@ -1621,7 +1649,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 		}
 
-		for (const token of writeTokens) checkWriteTarget(token);
+		const removes = isDelete || name === "mv";
+		for (const token of writeTokens) checkWriteTarget(token, removes);
 	}
 
 	// A moved or copied relative symlink points somewhere else afterwards, and

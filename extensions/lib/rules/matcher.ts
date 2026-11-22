@@ -1591,11 +1591,30 @@ export function decide(params: DecideInput): Decision {
 		);
 	const runsBashLine = !!subject && (tool === "bash" || tool === "monitor");
 	let lineEvidence: ShellEvidence | undefined;
-	/** The first of `rules` that one of the bash line's recorded write targets meets. */
+	/**
+	 * A line's write targets for the edit-family rule check: the recorded ones,
+	 * and what each glob operand of a removing or moving command matches on
+	 * disk (`ShellEvidence.globWrites`), so `rm config/*.yaml` meets a rule on
+	 * `config/prod.yaml` as `rm config/prod.yaml` does.
+	 */
+	const familyTargets = (evidence: ShellEvidence) => [...evidence.writes, ...evidence.globWrites.flatMap((glob) => glob.matches ?? [])];
+	/** The first of `rules` that one of the bash line's write targets meets. */
 	const writtenPathRule = (rules: readonly PermissionRule[]): PermissionRule | undefined => {
 		if (!runsBashLine || rules.length === 0) return undefined;
 		lineEvidence ??= shellEvidence(subject);
-		return pathRuleMet(rules, lineEvidence.writes);
+		return pathRuleMet(rules, familyTargets(lineEvidence));
+	};
+	/**
+	 * Whether the bash line removes or moves through a glob whose matches this
+	 * check cannot enumerate while an edit-family rule names a path. Nothing
+	 * shows the line keeps clear of that path, so no allow rule, fast path or
+	 * sandbox auto-allow clears it: the classifier or a prompt reads it. It
+	 * refuses nothing, since nothing shows it reaches the path either.
+	 */
+	const removesThroughUnknownGlob = (): boolean => {
+		if (!runsBashLine || denyPathRules.length + askPathRules.length === 0) return false;
+		lineEvidence ??= shellEvidence(subject);
+		return lineEvidence.globWrites.some((glob) => glob.matches === undefined);
 	};
 	/**
 	 * Whether a line's write targets meet an edit-family deny or ask rule: a
@@ -1804,6 +1823,7 @@ export function decide(params: DecideInput): Decision {
 	// before any allow rule, as its deny counterpart is refused above.
 	const askRule = blockingRule(ask) ?? writtenPathRule(askPathRules);
 	if (askRule) return askOrDeny(askRule);
+	if (removesThroughUnknownGlob()) return mode === "auto" ? { decision: "classify", cause: "mode" } : askOrDeny();
 
 	/**
 	 * The session's own auto-memory and scratchpad directories are
@@ -1902,7 +1922,7 @@ export function decide(params: DecideInput): Decision {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
-		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderFamilyRule(evidence.writes)) {
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderFamilyRule(familyTargets(evidence))) {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
@@ -1924,7 +1944,7 @@ export function decide(params: DecideInput): Decision {
 	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
 	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
 		const evidence = shellEvidence(subject);
-		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderFamilyRule(evidence.writes)) return { decision: "allow", cause: "sandboxed" };
+		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderFamilyRule(familyTargets(evidence))) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

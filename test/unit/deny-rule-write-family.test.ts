@@ -148,6 +148,47 @@ describe("a shell line that writes a directory holding a path such a rule names"
 	});
 });
 
+describe("a glob operand of a removing or moving command", () => {
+	const ask = { ask: ["Write(config/prod.yaml)"], allow: ["Bash(rm:*)", "Bash(mv:*)", "Bash(shred:*)"] };
+	const deny = { deny: ["Write(config/prod.yaml)"], allow: ["Bash(rm:*)", "Bash(mv:*)"] };
+
+	it("is expanded against the disk, so a match an ask rule names is asked, a Bash allow rule and the sandbox notwithstanding", () => {
+		for (const command of ["rm config/*.yaml", "rm -f config/prod.*", "rm --one-file-system config/*.yaml", "shred config/*.yaml", "mv config/*.yaml build/", "mv -b config/p* build/"]) {
+			for (const mode of ["auto", "acceptEdits", "default"] as Mode[]) expect(run(ask, "bash", command, mode), `${command} ${mode}`).toBe("ask");
+			expect(run(ask, "bash", command, "default", true, { sandboxed: true }), command).toBe("ask");
+			expect(run(ask, "bash", command, "dontAsk"), command).toBe("deny");
+		}
+	});
+
+	it("is refused when a match is a path a deny rule names, as the exact spelling is", () => {
+		for (const command of ["rm config/*.yaml", "rm --one-file-system config/prod.*", "mv config/*.yaml build/"]) {
+			for (const mode of MODES) expect(run(deny, "bash", command, mode), `${command} ${mode}`).toBe("deny");
+			expect(run(deny, "bash", command, "default", true, { sandboxed: true }), command).toBe("deny");
+		}
+	});
+
+	it("keeps today's result when every match is unrelated", () => {
+		expect(run(ask, "bash", "rm config/d*.yaml", "default")).toBe("allow");
+		expect(run(deny, "bash", "rm config/d*.yaml", "default", true, { sandboxed: true })).toBe("allow");
+		expect(run(deny, "bash", "rm build/out/*.js", "default")).toBe("allow");
+		// A glob that matches nothing names only itself.
+		expect(run(deny, "bash", "rm config/*.toml", "default")).toBe("allow");
+	});
+
+	it("withholds the allow, the fast path and the sandbox auto-allow when the matches cannot be enumerated, and refuses nothing", () => {
+		for (const command of ["rm */prod.yaml", "rm config/.*", "mv c*/prod.yaml build/"]) {
+			expect(run(ask, "bash", command, "default"), command).toBe("ask");
+			expect(run(deny, "bash", command, "default"), command).toBe("ask");
+			expect(run(deny, "bash", command, "acceptEdits"), command).toBe("ask");
+			expect(run(deny, "bash", command, "auto"), command).toBe("classify");
+			expect(run(deny, "bash", command, "default", true, { sandboxed: true }), command).toBe("ask");
+			expect(run(deny, "bash", command, "dontAsk"), command).toBe("deny");
+		}
+		// With no edit-family rule nothing changes.
+		expect(run({ allow: ["Bash(rm:*)"] }, "bash", "rm */prod.yaml", "default")).toBe("allow");
+	});
+});
+
 // Claude Code reads `/x` against the project root (`//x` is its absolute form).
 describe("a deny or ask rule written with a single leading slash", () => {
 	it("names the path under the working directory for the file tools and the read tools", () => {
