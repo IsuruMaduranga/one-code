@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach } from "vitest";
@@ -46,6 +46,20 @@ afterAll(() => rmSync(stateDir, { recursive: true, force: true }));
 // run from a One Code shell, the suite inherited *_PERMISSION_MODE=auto and
 // 16 permission-gate and workflow tests failed. A test that wants it stubs it.
 delete process.env[envName("PERMISSION_MODE")];
+
+// Git reads no configuration from the machine: the global file is an empty one
+// and the system file is off, for this process and every child it spawns. A
+// developer's own `user.email`, signing, hooks path or default branch changed
+// what the tests saw (the instructions test expects the GIT_AUTHOR_EMAIL value,
+// which a configured email overrides) and made commits fail on a signing
+// program. A test that wants a setting writes it to its own repository
+// (`initTestRepo`) or stubs the variable itself.
+const gitConfigDir = mkdtempSync(join(tmpdir(), "git-config-"));
+const emptyGitConfig = join(gitConfigDir, "empty.gitconfig");
+writeFileSync(emptyGitConfig, "");
+process.env.GIT_CONFIG_GLOBAL = emptyGitConfig;
+process.env.GIT_CONFIG_NOSYSTEM = "1";
+afterAll(() => rmSync(gitConfigDir, { recursive: true, force: true }));
 
 // The bash grammar loads asynchronously; every shell parse after this is
 // synchronous, as it is once a session's hooks have awaited it.
