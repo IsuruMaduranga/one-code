@@ -82,14 +82,17 @@ the sandbox, so the sandbox needs a Bash on your `PATH`.
   the sandbox.
 - The paths you list in `filesystem.allowWrite`.
 
-Inside those locations, some paths are never writable: the settings files
+Inside those locations, some paths are never writable: the paths your
+`Edit`, `Write`, and `NotebookEdit` deny rules name, the settings files
 that hold permission rules, the project's `skills`, `hooks`, `commands`,
 `agents`, `rules`, and `workflows` folders, shell startup files, Git hooks,
-and Git configuration.
+and Git configuration. So a deny rule such as `Edit(config/prod.yaml)` also
+stops `sed -i` or a script from writing that file.
 
 **Reads.** A sandboxed command can read any file your account can read,
-except the paths you list in `filesystem.denyRead`. The sandbox doesn't hide
-your credentials by default. To hide them, list them.
+except the paths you list in `filesystem.denyRead` and the paths your
+`Read` deny rules name. The sandbox doesn't hide your credentials by
+default. To hide them, list them.
 
 **Network.** Connections go through a filtering proxy. A host you list in
 `network.allowedDomains` is allowed, and a host in `network.deniedDomains`
@@ -212,7 +215,15 @@ holds whatever another file sets.
 - The sandbox doesn't cover the file tools, hooks, or MCP servers. The
   permission gate is what guards those.
 - A sandboxed command can read your files unless you list them in
-  `filesystem.denyRead`.
+  `filesystem.denyRead` or deny them with a `Read` rule.
+- The sandbox takes your deny rules when it starts. A deny rule you add
+  during a session binds the permission gate at once and the sandbox from
+  the next start.
+- On Linux, bubblewrap protects only real paths, so a write-deny rule with
+  a wildcard protects the whole folder the pattern starts in:
+  `Edit(config/*.yaml)` makes all of `config` read-only to sandboxed
+  commands, and `Edit(**/.env)` the whole working directory. On macOS the
+  pattern applies as written.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.

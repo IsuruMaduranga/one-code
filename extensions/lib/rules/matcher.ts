@@ -1003,7 +1003,8 @@ export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
 export type ToolTier = "safe" | "edit" | "execute" | "custom";
 
 const SAFE_TOOLS = new Set(["read", "grep", "find", "ls"]);
-const EDIT_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+/** The edit family: a rule on one of these binds all three (`decide`), and the sandbox denies a write to a deny rule's path. */
+export const EDIT_TOOLS: ReadonlySet<string> = new Set(["edit", "write", "notebook_edit"]);
 
 export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);

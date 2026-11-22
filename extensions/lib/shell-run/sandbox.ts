@@ -143,7 +143,9 @@ export function sandboxSettled(): Promise<void> {
  * take effect at once, since neither changes a tool's schema nor the running
  * sandbox's rules: whether a sandboxed command skips the prompt, and whether
  * the model may ask to leave the sandbox. Everything else (on or off, the
- * paths, the hosts) holds until the next start. Returns what the files now
+ * paths, the deny rules' paths, the hosts) holds until the next start, so a
+ * deny rule added in `/permissions` binds the gate at once and the sandbox
+ * from the next start. Returns what the files now
  * say, so the caller can tell the user what waits for a restart.
  */
 export function reloadSandboxSettings(): SandboxSettings {

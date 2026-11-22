@@ -9,12 +9,20 @@
  * and read allowances, network hosts, excluded commands, local binding, Unix
  * sockets) counts from the user's, the product's and managed files only, as
  * a repository's permission mode does (lib/rules/settings.ts).
+ *
+ * The paths of the permission deny rules join the sandbox's own deny lists,
+ * as in Claude Code: an edit-family rule's path is never writable and a
+ * `Read` rule's never readable from inside the sandbox, so a write the gate
+ * cannot see in a command line (`sed -i`, a script) still cannot reach it.
  */
 
 import { readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settings-files.ts";
+import { EDIT_TOOLS, hasUnescapedWildcard, type PermissionRule, parseRules, unescapeLiteral } from "../rules/matcher.ts";
+import { loadPermissionSettings } from "../rules/settings.ts";
 
 export interface SandboxSettings {
 	enabled: boolean;
@@ -32,6 +40,12 @@ export interface SandboxSettings {
 	excludedCommands: string[];
 	filesystem: { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] };
 	network: { allowedDomains: string[]; deniedDomains: string[]; allowLocalBinding: boolean; allowUnixSockets: string[] };
+	/**
+	 * The path patterns of the permission deny rules, as written: `write` from
+	 * the edit family's (`Edit`, `Write`, `NotebookEdit`), `read` from `Read`'s.
+	 * Turned into sandbox paths per command directory by {@link ruleDenyPaths}.
+	 */
+	denyRulePaths: { write: string[]; read: string[] };
 }
 
 export const SANDBOX_OFF: SandboxSettings = {
@@ -42,6 +56,7 @@ export const SANDBOX_OFF: SandboxSettings = {
 	excludedCommands: [],
 	filesystem: { allowWrite: [], denyWrite: [], denyRead: [], allowRead: [] },
 	network: { allowedDomains: [], deniedDomains: [], allowLocalBinding: false, allowUnixSockets: [] },
+	denyRulePaths: { write: [], read: [] },
 };
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry !== "") : []);
@@ -85,7 +100,9 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
 /**
  * The session's sandbox settings. A user-scope `allowUnsandboxedCommands:
  * false` holds whatever a later file says, because the merge only ever
- * turns it off.
+ * turns it off. The deny rules are the permission gate's own
+ * (`loadPermissionSettings`), from every file: a deny only restricts, so a
+ * repository's counts too.
  */
 export function loadSandboxSettings(cwd: string, home: string): SandboxSettings {
 	let settings = SANDBOX_OFF;
@@ -93,7 +110,82 @@ export function loadSandboxSettings(cwd: string, home: string): SandboxSettings 
 		const block = readSettingsFile(source.path)?.sandbox;
 		if (block !== undefined) settings = mergeSandboxBlock(settings, block, isRepoFile(source));
 	}
-	return settings;
+	return { ...settings, denyRulePaths: denyRulePaths(parseRules(loadPermissionSettings(cwd, home).deny)) };
+}
+
+/**
+ * The path patterns of `deny` that bind the sandbox: an edit-family rule's
+ * for writes, a `Read` rule's for reads, as Claude Code's sandbox takes its
+ * `Edit` and `Read` deny rules. A rule with no path (a bare `Edit`) names no
+ * path, and Claude Code skips it too. Only deny rules are passed in: allow
+ * and ask rules never reach the sandbox.
+ */
+export function denyRulePaths(deny: readonly PermissionRule[]): { write: string[]; read: string[] } {
+	const paths = { write: [] as string[], read: [] as string[] };
+	for (const rule of deny) {
+		if (!rule.pattern) continue;
+		if (EDIT_TOOLS.has(rule.tool)) add(paths.write, [rule.pattern]);
+		else if (rule.tool === "read") add(paths.read, [rule.pattern]);
+	}
+	return paths;
+}
+
+/** What the runtime reads as glob syntax in a path: `*`, `?` and a bracket set. It has no escape character. */
+const RUNTIME_GLOB = /[*?[\]]/;
+
+/**
+ * The directory `path` names before its first character that is glob syntax
+ * to the gate or the runtime (a wildcard, an escape, `?`, a bracket): what a
+ * deny falls back to where the runtime cannot hold the pattern itself. It
+ * covers everything the pattern matches, and more.
+ */
+function literalDirectory(path: string): string {
+	const cut = path.search(/[*?[\]\\]/);
+	if (cut < 0) return path;
+	const head = path.slice(0, cut);
+	return head.slice(0, head.lastIndexOf("/")) || "/";
+}
+
+/**
+ * The sandbox paths a deny rule's path pattern names, for a command run in
+ * `cwd`, in the gate's rule syntax:
+ *
+ * - `//abs` is the absolute path `/abs`;
+ * - `~/x` is under the home directory;
+ * - `/x` is read both ways it is meant: the gate matches it as the absolute
+ *   path, and Claude Code reads it against the project directory, so both are
+ *   denied (a deny only ever narrows);
+ * - anything else (`x`, `./x`, `../x`) is relative to `cwd`.
+ *
+ * Every path is absolute, since the runtime would read a relative one
+ * against the process's directory, not the command's. A glob passes as
+ * written where the runtime reads it as the gate does: `*` within a name and
+ * `**` across directories, on macOS for both lists and on Linux for reads,
+ * which the runtime expands against the disk. Where it cannot, the deny is
+ * widened to {@link literalDirectory}, never dropped: a write-deny glob on
+ * Linux (bubblewrap binds only real paths, and the runtime skips a glob
+ * there), and a pattern holding a gate escape (`\*`), a `?` or a bracket,
+ * which the gate takes literally and the runtime as syntax. An exact path
+ * stays exact.
+ */
+export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: string, home: string, platform: NodeJS.Platform): string[] {
+	const trimmed = pattern.trim();
+	const paths = trimmed.startsWith("//")
+		? [resolve(trimmed.slice(1))]
+		: trimmed === "~" || trimmed.startsWith("~/")
+			? [resolve(home, `.${trimmed.slice(1)}`)]
+			: trimmed.startsWith("/")
+				? [resolve(trimmed), resolve(cwd, `.${trimmed}`)]
+				: [resolve(cwd, trimmed)];
+	return paths.map((path) => {
+		if (!hasUnescapedWildcard(path)) {
+			const exact = unescapeLiteral(path);
+			return RUNTIME_GLOB.test(exact) ? literalDirectory(path) : exact;
+		}
+		// The runtime ends a `/**` itself (the directory and all beneath it), which bubblewrap can bind.
+		const linuxWrite = platform === "linux" && kind === "write" && RUNTIME_GLOB.test(path.replace(/\/\*\*$/, ""));
+		return linuxWrite || /[?[\]\\]/.test(path) ? literalDirectory(path) : path;
+	});
 }
 
 const SHELL_OPERATORS = /[;&|<>`\n]|\$\(/;
@@ -247,18 +339,31 @@ export function checkoutProtectedFiles(dir: string, read: (path: string) => stri
 	return [...found];
 }
 
-/** The filesystem rules of one command, in the runtime's shape. Writes are allow-only; reads are deny-only. */
-export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope): { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] } {
+/** Where a command's rules are built: the home directory `~/` names, and the platform that decides what a glob can be. */
+export interface SandboxHost {
+	home?: string;
+	platform?: NodeJS.Platform;
+}
+
+/**
+ * The filesystem rules of one command, in the runtime's shape. Writes are
+ * allow-only; reads are deny-only. The deny rules' paths come after the
+ * settings' own lists, as in Claude Code.
+ */
+export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] } {
+	const home = host.home ?? homedir();
+	const platform = host.platform ?? process.platform;
+	const fromRules = (patterns: readonly string[], kind: "write" | "read") => patterns.flatMap((pattern) => ruleDenyPaths(pattern, kind, scope.cwd, home, platform));
 	return {
 		allowWrite: [...new Set([scope.cwd, ...scope.writableDirs, ...settings.filesystem.allowWrite])],
-		denyWrite: [...new Set([...scope.protectedFiles, ...settings.filesystem.denyWrite])],
-		denyRead: [...settings.filesystem.denyRead],
+		denyWrite: [...new Set([...scope.protectedFiles, ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")])],
+		denyRead: [...new Set([...settings.filesystem.denyRead, ...fromRules(settings.denyRulePaths.read, "read")])],
 		allowRead: [...settings.filesystem.allowRead],
 	};
 }
 
 /** The session's configuration for the runtime's `initialize`. */
-export function sandboxRuntimeConfig(settings: SandboxSettings, scope: SandboxScope) {
+export function sandboxRuntimeConfig(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}) {
 	return {
 		network: {
 			allowedDomains: [...settings.network.allowedDomains],
@@ -266,6 +371,6 @@ export function sandboxRuntimeConfig(settings: SandboxSettings, scope: SandboxSc
 			...(settings.network.allowLocalBinding ? { allowLocalBinding: true } : {}),
 			...(settings.network.allowUnixSockets.length > 0 ? { allowUnixSockets: [...settings.network.allowUnixSockets] } : {}),
 		},
-		filesystem: sandboxFilesystem(settings, scope),
+		filesystem: sandboxFilesystem(settings, scope, host),
 	};
 }

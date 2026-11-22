@@ -5,16 +5,18 @@
  * The runtime itself is not started here; the live checks are in
  * working-docs/features/sandbox/.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
+import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import { Type } from "typebox";
-import { decide } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, isExcludedCommand, mergeSandboxBlock, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -99,6 +101,7 @@ describe("sandbox settings", () => {
 			excludedCommands: ["docker *"],
 			filesystem: block.filesystem,
 			network: block.network,
+			denyRulePaths: SANDBOX_OFF.denyRulePaths,
 		});
 	});
 
@@ -140,6 +143,94 @@ describe("sandbox settings", () => {
 			network: { allowedDomains: ["registry.npmjs.org"], deniedDomains: [] },
 			filesystem: { allowWrite: ["/work", "/tmp/session", "~/out"], denyWrite: ["/work/.claude/settings.json", "*.pem"], denyRead: ["~/.aws"], allowRead: [] },
 		});
+	});
+});
+
+// The sandbox runs on macOS and Linux only, whose paths these are.
+describe.skipIf(process.platform === "win32")("the permission deny rules in the sandbox", () => {
+	const home = "/home/u";
+	const write = (pattern: string, platform: NodeJS.Platform = "darwin") => ruleDenyPaths(pattern, "write", "/work", home, platform);
+	const read = (pattern: string, platform: NodeJS.Platform = "darwin") => ruleDenyPaths(pattern, "read", "/work", home, platform);
+
+	it("takes the path patterns of the edit family's deny rules for writes and of Read's for reads", () => {
+		const rules = parseRules(["Edit(a.txt)", "Write(b.txt)", "NotebookEdit(c.ipynb)", "Read(.env)", "Edit", "Bash(rm:*)", "Grep(secrets/**)", "Edit(a.txt)"]);
+		expect(denyRulePaths(rules)).toEqual({ write: ["a.txt", "b.txt", "c.ipynb"], read: [".env"] });
+	});
+
+	it("makes every spelling of the rule syntax an absolute path", () => {
+		expect(write("//etc/hosts")).toEqual(["/etc/hosts"]);
+		expect(write("~/.zshrc")).toEqual([`${home}/.zshrc`]);
+		expect(read("~")).toEqual([home]);
+		expect(write("config/prod.yaml")).toEqual(["/work/config/prod.yaml"]);
+		expect(write("./config/prod.yaml")).toEqual(["/work/config/prod.yaml"]);
+		expect(write("../shared/env")).toEqual(["/shared/env"]);
+		expect(write("config/")).toEqual(["/work/config"]);
+		// The gate reads `/x` as the absolute path, Claude Code against the project: both are denied.
+		expect(write("/config/prod.yaml")).toEqual(["/config/prod.yaml", "/work/config/prod.yaml"]);
+	});
+
+	it("passes a glob where the runtime reads it as the gate does, and widens it to its directory where it cannot", () => {
+		expect(write("config/*.yaml")).toEqual(["/work/config/*.yaml"]);
+		expect(read("~/.aws/**")).toEqual([`${home}/.aws/**`]);
+		// Linux reads: the runtime expands the glob against the disk.
+		expect(read("**/.env", "linux")).toEqual(["/work/**/.env"]);
+		// Linux writes: bubblewrap binds real paths only, so the deny covers the directory the glob starts in.
+		expect(write("config/*.yaml", "linux")).toEqual(["/work/config"]);
+		expect(write("**/.env", "linux")).toEqual(["/work"]);
+		// A trailing `/**` is the directory itself, which the runtime binds.
+		expect(write("secrets/**", "linux")).toEqual(["/work/secrets/**"]);
+	});
+
+	it("widens a pattern whose characters the gate takes literally and the runtime as glob syntax, and keeps an exact path exact", () => {
+		expect(write("notes/a\\*b.txt")).toEqual(["/work/notes"]);
+		expect(write("app/[id]/page.tsx")).toEqual(["/work/app"]);
+		expect(read("logs/what?.txt")).toEqual(["/work/logs"]);
+		expect(write("src/*/[id].tsx")).toEqual(["/work/src"]);
+		expect(write("src/page.tsx")).toEqual(["/work/src/page.tsx"]);
+	});
+
+	it("adds the rules' paths after the settings' own lists, once each, for the command's directory", () => {
+		const settings: SandboxSettings = { ...ON, filesystem: { ...ON.filesystem, denyWrite: ["/work/config/prod.yaml"], denyRead: ["~/.aws"] }, denyRulePaths: { write: ["config/prod.yaml", "~/.zshrc"], read: ["~/.ssh/**"] } };
+		const scope = { cwd: "/work", writableDirs: [], protectedFiles: ["/work/.claude/settings.json"] };
+		expect(sandboxFilesystem(settings, scope, { home, platform: "darwin" })).toEqual({
+			allowWrite: ["/work"],
+			denyWrite: ["/work/.claude/settings.json", "/work/config/prod.yaml", `${home}/.zshrc`],
+			denyRead: ["~/.aws", `${home}/.ssh/**`],
+			allowRead: [],
+		});
+		// A command in a worktree has the relative rules under the worktree.
+		expect(sandboxFilesystem(settings, { ...scope, cwd: "/wt" }, { home, platform: "darwin" }).denyWrite).toContain("/wt/config/prod.yaml");
+	});
+
+	it("reads the deny rules from every settings file, a repository's too, and never an allow or ask rule", () => {
+		const root = mkdtempSync(join(tmpdir(), "sandbox-deny-"));
+		const cwd = join(root, "project");
+		const userHome = join(root, "home");
+		const put = (path: string, settings: object) => {
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, JSON.stringify(settings));
+		};
+		try {
+			mkdirSync(cwd, { recursive: true });
+			// The profile names the files: the product's user file always, and a repository's file where the profile reads one.
+			const sources = settingsSources(cwd, userHome);
+			put(productSettingsPath(userHome), { sandbox: { enabled: true }, permissions: { deny: ["Edit(~/.zshrc)"], allow: ["Edit(src/**)"], ask: ["Read(notes.md)"] } });
+			const repo = sources.find(isRepoFile);
+			if (repo) put(repo.path, { permissions: { deny: ["Write(config/prod.yaml)", "Read(.env)"], allow: ["Read(~/.ssh/**)"], ask: ["NotebookEdit(nb.ipynb)"] } });
+			const settings = loadSandboxSettings(cwd, userHome);
+			expect(settings.denyRulePaths).toEqual(repo ? { write: ["~/.zshrc", "config/prod.yaml"], read: [".env"] } : { write: ["~/.zshrc"], read: [] });
+			const fs = sandboxFilesystem(settings, { cwd, writableDirs: [], protectedFiles: [] }, { home: userHome, platform: "darwin" });
+			expect(fs.denyWrite).toEqual([join(userHome, ".zshrc"), ...(repo ? [join(cwd, "config", "prod.yaml")] : [])]);
+			expect(fs.denyRead).toEqual(repo ? [join(cwd, ".env")] : []);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("shows the model the denied paths in the sandbox section", () => {
+		const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["//etc/hosts"], read: ["//etc/shadow"] } };
+		const section = sandboxSectionText(text, { settings, platform: "darwin", unavailable: undefined, cwd: "/work", active: fakeSandbox(settings) });
+		expect(section).toContain(JSON.stringify({ read: { denyOnly: ["/etc/shadow"], allowWithinDeny: [] }, write: { allowOnly: ["/work", "/tmp/session"], denyWithinAllow: ["/work/.claude/settings.json", "/etc/hosts"] } }).replace(/"/g, '\\"'));
 	});
 });
 
