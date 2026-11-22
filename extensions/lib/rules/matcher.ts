@@ -1534,46 +1534,45 @@ export function decide(params: DecideInput): Decision {
 	 * asks for it, whatever allow rule matches it. A bare rule names no path,
 	 * and Claude Code's path check reads none, so it only withholds the fast
 	 * path and the sandbox auto-allow from a line that writes anything
-	 * (`writesUnderBareFamilyRule`). The pre-gate itself gains no deny path.
+	 * (`writesUnderFamilyRule`). The pre-gate itself gains no deny path.
 	 */
 	const familyPathRules = (rules: readonly PermissionRule[]) => rules.filter((r) => !!r.pattern && EDIT_TOOLS.has(r.tool));
 	const denyPathRules = familyPathRules(deny);
 	const askPathRules = familyPathRules(ask);
 	const bareFamilyRule = [...deny, ...ask].some((r) => !r.pattern && EDIT_TOOLS.has(r.tool));
+	/** The first of `rules` (each with a path) that one of `targets` meets, as written or where it resolves. */
+	const pathRuleMet = (
+		rules: readonly PermissionRule[],
+		targets: readonly { absolute: string; resolved?: string }[],
+		meets: (pattern: string, path: string, cwd: string) => boolean = matchesPathPattern,
+	): PermissionRule | undefined =>
+		rules.find((r) =>
+			targets.some((target) =>
+				[target.absolute, ...(target.resolved !== undefined && target.resolved !== target.absolute ? [target.resolved] : [])].some((path) => meets(r.pattern as string, path, cwd)),
+			),
+		);
 	const runsBashLine = !!subject && (tool === "bash" || tool === "monitor");
 	let lineEvidence: ShellEvidence | undefined;
-	/** The first of `rules` whose path one of the line's recorded write targets meets. */
+	/** The first of `rules` that one of the bash line's recorded write targets meets. */
 	const writtenPathRule = (rules: readonly PermissionRule[]): PermissionRule | undefined => {
 		if (!runsBashLine || rules.length === 0) return undefined;
 		lineEvidence ??= shellEvidence(subject);
-		return rules.find((r) =>
-			(lineEvidence as ShellEvidence).writes.some((write) =>
-				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) => matchesPathPattern(r.pattern as string, path, cwd)),
-			),
-		);
+		return pathRuleMet(rules, lineEvidence.writes);
 	};
 	/**
-	 * A line that writes anything under a bare rule, or writes a directory that
-	 * may hold a path rule's file (`rm -r config` under `Edit(config/prod.yaml)`).
-	 * The second is a may, not a does, so it withholds the fast path and never
-	 * refuses: the classifier or a prompt reads the line.
+	 * Whether a line's write targets meet an edit-family deny or ask rule: a
+	 * bare one meets any target, and one with a path meets a target it names or
+	 * a directory that may hold its file (`rm -r config` under
+	 * `Edit(config/prod.yaml)`; `writeTargetMeetsPathPattern`). A fast path or
+	 * the sandbox auto-allow is withheld from such a line. For bash, a rule
+	 * whose path a target names already decided above, so what is left here is
+	 * the "may hold" case, which never refuses: the classifier or a prompt
+	 * reads the line. The PowerShell contained-edits branch learns its targets
+	 * only there.
 	 */
-	const coveringWrites = new WeakMap<ShellEvidence, boolean>();
-	const writesUnderBareFamilyRule = (evidence: ShellEvidence): boolean => {
-		if (evidence.writes.length === 0) return false;
-		if (bareFamilyRule) return true;
-		if (denyPathRules.length === 0 && askPathRules.length === 0) return false;
-		let covering = coveringWrites.get(evidence);
-		if (covering === undefined) {
-			covering = evidence.writes.some((write) =>
-				[write.absolute, ...(write.resolved !== undefined && write.resolved !== write.absolute ? [write.resolved] : [])].some((path) =>
-					[...denyPathRules, ...askPathRules].some((r) => writeTargetMeetsPathPattern(r.pattern as string, path, cwd)),
-				),
-			);
-			coveringWrites.set(evidence, covering);
-		}
-		return covering;
-	};
+	const writesUnderFamilyRule = (targets: readonly { absolute: string; resolved?: string }[]): boolean =>
+		targets.length > 0 &&
+		(bareFamilyRule || pathRuleMet(denyPathRules, targets, writeTargetMeetsPathPattern) !== undefined || pathRuleMet(askPathRules, targets, writeTargetMeetsPathPattern) !== undefined);
 
 	const denyRule = blockingRule(deny) ?? writtenPathRule(denyPathRules);
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
@@ -1865,7 +1864,7 @@ export function decide(params: DecideInput): Decision {
 		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
-		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderBareFamilyRule(evidence)) {
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork) && !writesUnderFamilyRule(evidence.writes)) {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
@@ -1874,13 +1873,11 @@ export function decide(params: DecideInput): Decision {
 			return { decision: "allow", cause: "read-only" };
 		}
 		// Claude Code's acceptEdits PowerShell cmdlets on the working space, the
-		// PowerShell half of the bash file-command fast path above.
-		if (
-			fastPaths &&
-			(mode === "acceptEdits" || mode === "auto") &&
-			powershellTreeContainedEdits(params.powershellParse, { cwd, home: homedir(), writableRoots: params.workspaceDirs, protectedDirs: params.protectedDirs }).ok
-		) {
-			return { decision: "allow", cause: "mode" };
+		// PowerShell half of the bash file-command fast path above, withheld when
+		// what they write meets an edit-family deny or ask rule.
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto")) {
+			const edits = powershellTreeContainedEdits(params.powershellParse, { cwd, home: homedir(), writableRoots: params.workspaceDirs, protectedDirs: params.protectedDirs });
+			if (edits.ok && !writesUnderFamilyRule(edits.writes ?? [])) return { decision: "allow", cause: "mode" };
 		}
 	}
 
@@ -1889,7 +1886,7 @@ export function decide(params: DecideInput): Decision {
 	// its classifier, as Claude Code's does, and dontAsk and plan keep theirs.
 	if (params.sandboxed && subject && tool === "bash" && (mode === "default" || mode === "acceptEdits")) {
 		const evidence = shellEvidence(subject);
-		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderBareFamilyRule(evidence)) return { decision: "allow", cause: "sandboxed" };
+		if (!evidence.writes.some((write) => isProtected(write.absolute, write.resolved)) && !writesUnderFamilyRule(evidence.writes)) return { decision: "allow", cause: "sandboxed" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

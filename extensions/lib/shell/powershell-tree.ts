@@ -60,6 +60,12 @@ export interface PowerShellTreeVerdict {
 	ok: boolean;
 	/** Why not, for the decision log. */
 	reason?: string;
+	/**
+	 * A cleared contained-edits line's write targets: every path its cmdlets
+	 * write or remove, as the shell reaches it and realpath'd, for the
+	 * permission rules that name a path (lib/rules/matcher.ts `decide`).
+	 */
+	writes?: { absolute: string; resolved: string }[];
 }
 
 /** The tree with each node's children, and the set of nodes a check has approved. */
@@ -399,7 +405,7 @@ function requireAllApproved(tree: Tree): void {
  */
 const judged = new WeakMap<PowerShellParse, Map<string, PowerShellTreeVerdict>>();
 
-function verdict(parse: PowerShellParse, kind: "read" | "edit", opts: PowerShellTreeOptions, judge: () => void): PowerShellTreeVerdict {
+function verdict(parse: PowerShellParse, kind: "read" | "edit", opts: PowerShellTreeOptions, judge: () => Omit<PowerShellTreeVerdict, "ok"> | void): PowerShellTreeVerdict {
 	const key = JSON.stringify([kind, opts.cwd, opts.home, opts.readableRoots, opts.writableRoots, opts.protectedDirs]);
 	let answers = judged.get(parse);
 	if (!answers) judged.set(parse, (answers = new Map()));
@@ -407,8 +413,7 @@ function verdict(parse: PowerShellParse, kind: "read" | "edit", opts: PowerShell
 	if (known) return known;
 	let answer: PowerShellTreeVerdict;
 	try {
-		judge();
-		answer = { ok: true };
+		answer = { ok: true, ...judge() };
 	} catch (error) {
 		if (!(error instanceof Refusal)) throw error;
 		answer = { ok: false, reason: error.message };
@@ -520,16 +525,18 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
 		const tree = buildTree(parse);
 		const root = resolveForContainment(opts.cwd) ?? opts.cwd;
 		const writable = [root, ...(opts.writableRoots ?? [])];
+		const writes: { absolute: string; resolved: string }[] = [];
 		for (const pipeline of pipelines(tree)) {
 			pipeline.forEach((command, position) => {
 				const current = checkCommand(tree, command, (name) => (position === 0 ? WRITE_CMDLETS[name] : WRITE_TAILS.has(name) ? READ_CMDLETS[name] : undefined), false);
 				if (position > 0) return;
 				if (current.paths.length === 0) refuse(`${tree.nodes[command].resolvedName} without a path`);
 				const removes = current.name === "remove-item";
-				for (const path of current.paths) checkWriteTarget(path, removes, removes && current.bound.has("recurse"), opts, writable);
+				for (const path of current.paths) writes.push(checkWriteTarget(path, removes, removes && current.bound.has("recurse"), opts, writable));
 			});
 		}
 		requireAllApproved(tree);
+		return { writes };
 	});
 }
 
@@ -638,7 +645,7 @@ export function powershellTreeUnlistedOnly(parse: PowerShellParse, opts: PowerSh
  * a working root, a `.git`, or a directory holding one or a guarded path,
  * and a recursive removal must not reach a link.
  */
-function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, writable: string[]): void {
+function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, writable: string[]): { absolute: string; resolved: string } {
 	if (hasPowerShellWildcard(value)) refuse(`writes to ${value}, a wildcard whose matches this check does not judge`);
 	// `-Path` drops a backtick escape (`a``b` writes `a`b`) and `-LiteralPath` keeps it.
 	if (value.includes("`")) refuse(`writes to ${value}, whose backtick escapes this check does not judge`);
@@ -647,9 +654,10 @@ function checkWriteTarget(value: string, removes: boolean, recurses: boolean, op
 	const resolved = resolveForContainment(absolute);
 	if (resolved === undefined || !writable.some((dir) => isWithin(dir, resolved))) refuse(`writes to ${value}, which is outside the working directory`);
 	if ([absolute, resolved].some((path) => isGuardedWritePath(path, opts.cwd, opts.protectedDirs))) refuse(`writes to ${value}, a credential, execution-primitive or protected path`);
-	if (!removes) return;
+	if (!removes) return { absolute, resolved };
 	if (removalLoses(absolute, resolved, writable, opts.cwd, opts.protectedDirs)) {
 		refuse(`removes ${value}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path`);
 	}
 	if (recurses && linkInTree(resolved)) refuse(`removes ${value} recursively, and a link inside it would be followed by Windows PowerShell 5.1`);
+	return { absolute, resolved };
 }
