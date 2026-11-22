@@ -72,6 +72,34 @@ function fullRequest() {
 }
 
 describe("breakdownRequest", () => {
+	it("counts a reply or a tool result that only looks like a harness block as Messages", () => {
+		const lookalike = ["Contents of /proj/notes.md (my notes):", "", BLOCK_HEADS.instructions, "", BLOCK_HEADS.skills, "- simplify: x"].join("\n");
+		const base = fullRequest();
+		const withLookalikes = {
+			...base,
+			list: [
+				...base.list,
+				{ role: "assistant", content: [{ type: "text", text: lookalike }] },
+				// pi's own message list (an estimate of a request not yet sent) keeps a tool result's text at the top level.
+				{ role: "toolResult", toolCallId: "t2", toolName: "read", content: [{ type: "text", text: lookalike }] },
+			],
+		};
+		const before = breakdownRequest(base).tokens;
+		const after = breakdownRequest(withLookalikes).tokens;
+		expect(after.memory).toBe(before.memory);
+		expect(after.skills).toBe(before.skills);
+		expect(after.messages).toBeGreaterThanOrEqual(before.messages + 2 * estimateTextTokens(lookalike));
+	});
+
+	it("does not count pi's thinking and text signatures", () => {
+		const base = fullRequest();
+		const signed = (signature: string) => ({
+			...base,
+			list: [...base.list, { role: "assistant", content: [{ type: "thinking", thinking: "Hm.", thinkingSignature: signature }, { type: "text", text: "Done.", textSignature: signature }] }],
+		});
+		expect(breakdownRequest(signed("x".repeat(20_000))).tokens.messages).toBe(breakdownRequest(signed("x")).tokens.messages);
+	});
+
 	it("puts every part of the request in its category", () => {
 		const request = fullRequest();
 		const out = breakdownRequest(request, { displayPath: (path) => path.replace("/proj/", "") });
@@ -297,6 +325,14 @@ function ccUsage(): ContextUsage {
 }
 
 describe("renderContextUsage", () => {
+	it("names a failed estimate instead of saying nothing was sent", () => {
+		const usage = contextUsage({ model: { name: "M", id: "m" }, window: 1000, estimateError: "boom\x1b[31m" });
+		expect(usage).toMatchObject({ state: "empty", estimateError: "boom\x1b[31m" });
+		const lines = renderContextUsage(usage, { width: 100 });
+		expect(lines).toContain("     The estimate failed: boom");
+		expect(lines.join("\n")).not.toContain("Nothing sent yet");
+	});
+
 	it("lays out Claude Code's screen at full width", () => {
 		const lines = renderContextUsage(ccUsage(), { width: 160 });
 		expect(lines[0]).toBe("  ⎿  Context usage");

@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { applyHelpKey, commandRows, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../extensions/lib/ui/shortcuts-help.ts";
+import { applyHelpKey, commandRows, guideUrl, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../extensions/lib/ui/shortcuts-help.ts";
 import { shortcutColumns, shortcutLines, type ShortcutSources } from "../../extensions/lib/ui/shortcuts-model.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 
@@ -20,7 +22,7 @@ const sources = (keys: Record<string, string> = PI_KEYS, extra: Partial<Shortcut
 	keyText: (binding) => keys[binding] ?? "",
 	modeCycleKey: "ctrl+q",
 	taskToggleKey: "ctrl+\\",
-	editorKeys: { stash: "ctrl+s", historySearch: "ctrl+r" },
+	editorKeys: { stash: "ctrl+s", historySearch: "ctrl+r", clearInput: true },
 	...extra,
 });
 
@@ -68,11 +70,11 @@ describe("shortcutColumns", () => {
 		expect(all.some((row) => row.includes("suspend"))).toBe(false);
 		expect(all.some((row) => row.startsWith("/btw"))).toBe(false);
 		expect(all.some((row) => row.startsWith("/hotkeys"))).toBe(false);
-		expect(all.some((row) => row.includes("stash") || row.includes("search history"))).toBe(false);
+		expect(all.some((row) => row.includes("stash") || row.includes("search history") || row.includes("clear input"))).toBe(false);
 	});
 
 	it("names every pi key with its default when pi's keyText is unavailable", () => {
-		const all = rows(shortcutColumns({ modeCycleKey: "alt+m", taskToggleKey: "alt+t" })).flat();
+		const all = rows(shortcutColumns({ modeCycleKey: "alt+m", taskToggleKey: "alt+t", editorKeys: { clearInput: true } })).flat();
 		expect(all).toContain("esc esc to clear input");
 		expect(all).toContain("ctrl+g to edit in $EDITOR");
 		expect(all).toContain("alt+m to cycle modes");
@@ -116,6 +118,17 @@ describe("the /help panel", () => {
 		expect(lines).toContain("  Shortcuts");
 		expect(lines).toContain("  For more help: https://example.test/docs");
 		expect(lines.at(-1)).toBe("  ←/→ to switch · Esc to close");
+	});
+
+	it("leaves out the guide line for a brand that names no guide folder (the fixture product's)", () => {
+		const fixture = JSON.parse(readFileSync(join(import.meta.dirname, "..", "fixtures", "profile", "brand.json"), "utf8")) as { homepage: string; guideDir?: string };
+		expect(guideUrl(fixture)).toBeUndefined();
+		expect(guideUrl({ homepage: "https://github.com/o/r", guideDir: "docs/guide" })).toBe("https://github.com/o/r/tree/master/docs/guide");
+		const { moreHelp: _omit, ...noGuide } = data;
+		const lines = helpPanelLines(initialHelpState(), noGuide, 140, 30, plain);
+		expect(lines.some((line) => line.includes("For more help"))).toBe(false);
+		expect(lines.at(-1)).toBe("  ←/→ to switch · Esc to close");
+		expect(helpText(noGuide)).not.toContain("For more help");
 	});
 
 	it("switches tabs with ←/→, wrapping, and closes on Esc", () => {

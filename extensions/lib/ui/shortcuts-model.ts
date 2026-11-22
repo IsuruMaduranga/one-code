@@ -25,8 +25,8 @@ export interface ShortcutSources {
 	taskToggleKey: string;
 	/** Whether a slash command exists, for rows that name one (`/btw`). */
 	hasCommand?: (name: string) => boolean;
-	/** The prompt editor's own keys, present only while that editor is installed. */
-	editorKeys?: { stash?: string; historySearch?: string };
+	/** The prompt editor's own keys, present only while that editor is installed (lib/ui/editor-conveniences.ts EditorKeys). */
+	editorKeys?: { stash?: string; historySearch?: string; clearInput?: boolean };
 }
 
 /** pi's `keyText` (typed by pi's binding ids) over a binding named as a string, the form the rows ask in. */
@@ -80,7 +80,7 @@ export function shortcutColumns(sources: ShortcutSources): Shortcut[][] {
 			has("btw") && { key: "/btw", text: "for side question" },
 		],
 		[
-			{ binding: "app.interrupt", key: "escape", twice: true, text: "to clear input" },
+			editor.clearInput === true && { binding: "app.interrupt", key: "escape", twice: true, text: "to clear input" },
 			{ binding: "app.thinking.cycle", key: "shift+tab", text: "to change effort" },
 			{ key: sources.modeCycleKey, text: "to cycle modes" },
 			{ binding: "app.tools.expand", key: "ctrl+o", text: "to expand output" },

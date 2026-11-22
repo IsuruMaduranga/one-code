@@ -161,7 +161,7 @@ describe("branding session_start", () => {
 		expect(ask()).toBeUndefined();
 		const keybindings = { matches: () => false, getResolvedBindings: () => ({}) };
 		factory?.({ requestRender: () => {}, terminal: { rows: 40, columns: 100 } }, { borderColor: (t: string) => t, selectList: {} }, keybindings);
-		expect(ask()).toEqual({ stash: "ctrl+s", historySearch: "ctrl+r" });
+		expect(ask()).toEqual({ clearInput: true, stash: "ctrl+s", historySearch: "ctrl+r" });
 		fire("session_shutdown", ctx);
 		expect(ask()).toBeUndefined();
 	});

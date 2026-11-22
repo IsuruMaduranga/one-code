@@ -25,6 +25,15 @@ export class ThinkingClock {
 		this.startedAt = undefined;
 	}
 
+	/**
+	 * The message ended: a run still open never got its end (a stream error,
+	 * an abort before a retry) and is dropped, so the next run times from its
+	 * own start. The last finished run still shows.
+	 */
+	messageEnded(): void {
+		this.startedAt = undefined;
+	}
+
 	/** The turn is over: nothing to show. */
 	reset(): void {
 		this.startedAt = undefined;

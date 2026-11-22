@@ -21,6 +21,8 @@ export const HISTORY_SEARCH_KEY = "ctrl+r";
 export interface EditorKeys {
 	stash?: string;
 	historySearch?: string;
+	/** Esc twice clears the input (the key is pi's `app.interrupt`, read where the row is drawn). */
+	clearInput?: boolean;
 }
 
 /**
@@ -54,6 +56,8 @@ export interface EscapeContext {
 	viewOpen: boolean;
 	/** The input starts with `!`: pi clears a shell command on one Esc. */
 	bashMode: boolean;
+	/** A `!` command the user ran is still running: pi's Esc stops it. */
+	bashRunning: boolean;
 }
 
 /**
@@ -66,7 +70,7 @@ export class EscapeClear {
 
 	/** `clear` to empty the input now; `arm` after a first press; `pass` when the Esc means something else. */
 	press(now: number, context: EscapeContext): "clear" | "arm" | "pass" {
-		const free = context.hasText && context.idle && !context.menuOpen && !context.viewOpen && !context.bashMode;
+		const free = context.hasText && context.idle && !context.menuOpen && !context.viewOpen && !context.bashMode && !context.bashRunning;
 		if (!free) {
 			this.#armedAt = undefined;
 			return "pass";

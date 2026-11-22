@@ -26,7 +26,7 @@ import { EDITOR_KEYS_CHANNEL, type EditorKeysQuery } from "../../lib/ui/editor-c
 import { keyId } from "../../lib/ui/key-input.ts";
 import { modeCycleKey, taskToggleKey } from "../../lib/ui/keys.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
-import { applyHelpKey, type HelpCommand, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../lib/ui/shortcuts-help.ts";
+import { applyHelpKey, guideUrl, type HelpCommand, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../lib/ui/shortcuts-help.ts";
 import { bindingKeyText, shortcutColumns } from "../../lib/ui/shortcuts-model.ts";
 import { compareCommandNames } from "../../lib/ui/slash-menu-model.ts";
 import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
@@ -92,7 +92,7 @@ function helpExtension(pi: ExtensionAPI) {
 			}),
 			commands: commands.filter((command) => !custom.has(command.name)),
 			custom: commands.filter((command) => custom.has(command.name)),
-			moreHelp: `${brand.homepage}/tree/master/${brand.guideDir}`,
+			...(guideUrl(brand) !== undefined ? { moreHelp: guideUrl(brand) } : {}),
 		};
 	};
 

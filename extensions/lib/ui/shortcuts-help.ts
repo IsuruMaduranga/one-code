@@ -22,6 +22,16 @@ export interface HelpCommand {
 	description?: string;
 }
 
+/**
+ * The user guide's address for "For more help:", built the way the base's
+ * other guide links are (the homepage as a GitHub repository): only for a
+ * brand that names its guide folder (`guideDir`). Without one the brand gives
+ * no address, so the line is left out.
+ */
+export function guideUrl(brand: { homepage: string; guideDir?: string }): string | undefined {
+	return brand.guideDir === undefined ? undefined : `${brand.homepage}/tree/master/${brand.guideDir}`;
+}
+
 /** What the panel shows. */
 export interface HelpData {
 	/** The General tab's introduction. */
@@ -31,8 +41,8 @@ export interface HelpData {
 	commands: HelpCommand[];
 	/** The user's command files (Claude Code's custom commands). */
 	custom: HelpCommand[];
-	/** The address after "For more help:". */
-	moreHelp: string;
+	/** The address after "For more help:"; the line is left out without one. */
+	moreHelp?: string;
 }
 
 export interface HelpState {
@@ -116,8 +126,8 @@ export function helpPanelLines(state: HelpState, data: HelpData, width: number, 
 		const intro = `${INDENT}${cutPlainText(data.intro, Math.max(1, width - INDENT.length))}`;
 		// Plain here, dim under the prompt: Claude Code's General tab passes no dimColor.
 		const shortcuts = shortcutLines(data.shortcuts, width);
-		const more = `${INDENT}For more help: ${data.moreHelp}`;
-		return [...head, intro, "", `${INDENT}${paint.bold("Shortcuts")}`, ...shortcuts, "", cutPlainText(more, width), "", ...hint];
+		const more = data.moreHelp === undefined ? [] : [cutPlainText(`${INDENT}For more help: ${data.moreHelp}`, width), ""];
+		return [...head, intro, "", `${INDENT}${paint.bold("Shortcuts")}`, ...shortcuts, "", ...more, ...hint];
 	}
 	if (list.length === 0) {
 		const empty = state.tab === 2 ? "No custom commands. A Markdown file in .claude/commands/ becomes one." : "No commands.";
@@ -139,5 +149,5 @@ export function helpPanelLines(state: HelpState, data: HelpData, width: number, 
 export function helpText(data: HelpData, width = 100): string {
 	const section = (title: string, commands: HelpCommand[]) =>
 		commands.length === 0 ? [] : ["", `${title}:`, ...commands.map((command) => `  /${command.name}${command.description ? ` - ${sanitizeTitle(command.description)}` : ""}`)];
-	return [data.intro, "", "Shortcuts:", ...shortcutLines(data.shortcuts, width), ...section("Commands", data.commands), ...section("Custom commands", data.custom), "", `For more help: ${data.moreHelp}`].join("\n");
+	return [data.intro, "", "Shortcuts:", ...shortcutLines(data.shortcuts, width), ...section("Commands", data.commands), ...section("Custom commands", data.custom), ...(data.moreHelp === undefined ? [] : ["", `For more help: ${data.moreHelp}`])].join("\n");
 }

@@ -17,6 +17,7 @@
 
 import { type ContextCategoryKey, type ContextItem, type ContextUsage, contextGrid, formatContextPercent, formatContextTokens } from "../context/context-usage.ts";
 import { visibleWidth } from "./text-width.ts";
+import { sanitizeTitle } from "./terminal-text.ts";
 import { wrapProse } from "./tui-render.ts";
 
 /**
@@ -57,6 +58,8 @@ export interface ContextViewOptions {
 
 /** The note under the legend when the rows are not a measurement of the current context. */
 export function contextNote(usage: ContextUsage): string | undefined {
+	// No diagnostics log exists for a swallowed error, so the one place it shows is here.
+	if (usage.estimateError !== undefined) return `The estimate failed: ${sanitizeTitle(usage.estimateError)}`;
 	if (usage.state === "empty") return "Nothing sent yet in this session; the breakdown appears after the next reply.";
 	if (usage.state === "compacted") return "Compacted since the last request; the breakdown appears after the next reply.";
 	if (usage.preview === "first") return "Estimated from what the next request will send: nothing sent yet.";

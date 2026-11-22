@@ -36,6 +36,31 @@ describe("permission dialog keys", () => {
 		expect(decodePermissionKey("\x0f", (data) => data === "\x0f")).toEqual({ kind: "expand" });
 	});
 
+	it("takes k and j and a bare newline, as pi's select does", () => {
+		expect(decodePermissionKey("k")).toEqual({ kind: "up" });
+		expect(decodePermissionKey("j")).toEqual({ kind: "down" });
+		expect(decodePermissionKey("\n")).toEqual({ kind: "enter" });
+	});
+
+	it("follows the user's tui.select bindings through the dialog, and names them in the hint row", async () => {
+		// The user moved up/down to ctrl+p/ctrl+n and confirm to tab; cancel keeps pi's default.
+		const bound: Record<string, string[]> = { "tui.select.up": ["ctrl+p"], "tui.select.down": ["ctrl+n"], "tui.select.confirm": ["tab"] };
+		const bytes: Record<string, string> = { "ctrl+p": "\x10", "ctrl+n": "\x0e", tab: "\t" };
+		const keybindings = { getKeys: (id: string) => bound[id] ?? [], matches: (data: string, id: string) => (bound[id] ?? []).some((key) => bytes[key] === data) };
+		let lines: string[] = [];
+		const custom = (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) =>
+			new Promise((resolve) => {
+				const component = factory({ requestRender: () => {} }, {}, keybindings, resolve);
+				// The old arrow no longer moves; the user's keys do.
+				for (const key of ["\x1b[B", "\x0e", "\x0e", "\x10"]) component.handleInput(key);
+				lines = component.render(120);
+				component.handleInput("\t");
+			});
+		const ctx = { hasUI: true, mode: "interactive", ui: { select: vi.fn(), custom } };
+		expect(await askPermission({ emit: () => {} }, ctx, view(), "t")).toBe(OPTIONS[1]);
+		expect(lines.join("\n")).toContain("ctrl+p/ctrl+n to navigate · tab or 1-3 to select · Esc to cancel");
+	});
+
 	it("a number key answers in one keystroke; one past the options does nothing", () => {
 		const state = { cursor: 0 };
 		expect(applyPermissionKey(state, OPTIONS, { kind: "number", value: 4 })).toBeUndefined();
@@ -174,6 +199,16 @@ describe("askPermission", () => {
 		const answer = askPermission(events, t.ctx, view(), "t", { signal: abort.signal });
 		abort.abort();
 		expect(await answer).toBeUndefined();
+	});
+
+	it("keeps pi's select while the prompt editor holds a draft, which custom() would rewrite on close", async () => {
+		const drafted = tuiCtx(["1"]);
+		Object.assign(drafted.ctx.ui, { getEditorText: () => "fix the parser [paste #1 +200 lines]" });
+		expect(await askPermission(events, drafted.ctx, view(), "t")).toBe("from select");
+		expect(drafted.custom).not.toHaveBeenCalled();
+		const empty = tuiCtx(["1"]);
+		Object.assign(empty.ctx.ui, { getEditorText: () => "" });
+		expect(await askPermission(events, empty.ctx, view(), "t")).toBe("Yes");
 	});
 
 	it("asks through the gate's exact select call in RPC, for a timed prompt, and where custom() builds nothing", async () => {

@@ -108,6 +108,27 @@ describe("esc esc", () => {
 		expect(prompt.getText()).toBe("");
 	});
 
+	it("keeps the draft when the first Esc stops a running ! command", async () => {
+		const { prompt } = editor();
+		let finish: () => void = () => {};
+		// pi runs a `!` command inside its submit handler and settles it when the command ends.
+		prompt.onSubmit = async () => {
+			await new Promise<void>((resolve) => (finish = resolve));
+		};
+		prompt.setText("!sleep 30");
+		prompt.handleInput("\r");
+		prompt.setText("draft");
+		prompt.handleInput("\x1b");
+		prompt.handleInput("\x1b");
+		expect(prompt.getText()).toBe("draft");
+		// Once it has ended, esc esc clears again.
+		finish();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		prompt.handleInput("\x1b");
+		prompt.handleInput("\x1b");
+		expect(prompt.getText()).toBe("");
+	});
+
 	it("keeps the draft when the second Esc is late, or while a turn runs", () => {
 		const late = editor();
 		late.prompt.setText("draft");
@@ -142,6 +163,37 @@ describe("ctrl+s stash", () => {
 		expect(below()).toEqual([]);
 	});
 
+	it("comes back after a command whose handler clears the editor after an await (pi's /copy), unless the user typed meanwhile", async () => {
+		const { prompt, below } = editor();
+		let release: () => void = () => {};
+		// pi's /copy: await the command, then setText("").
+		prompt.onSubmit = async () => {
+			await new Promise<void>((resolve) => (release = resolve));
+			prompt.setText("");
+		};
+		prompt.setText("keep this");
+		prompt.handleInput("\x13");
+		prompt.setText("/copy");
+		prompt.handleInput("\r");
+		expect(prompt.getText()).toBe("");
+		release();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(prompt.getText()).toBe("keep this");
+		expect(below()).toEqual([]);
+		// Typed while a command ran (one whose handler leaves the editor alone): the draft stays, and so do the stash and its notice.
+		prompt.onSubmit = async () => {
+			await new Promise<void>((resolve) => (release = resolve));
+		};
+		prompt.handleInput("\x13");
+		prompt.setText("/help");
+		prompt.handleInput("\r");
+		prompt.setText("new draft");
+		release();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(prompt.getText()).toBe("new draft");
+		expect(below()).toEqual(["  › Stashed (auto-restores after submit)"]);
+	});
+
 	it("leaves a ctrl+s the ctrl+x chord offers, and a ctrl+s the user bound in pi", () => {
 		const chord = editor({ chordKey: () => "ctrl+s" });
 		chord.prompt.setText("text");
@@ -155,7 +207,7 @@ describe("ctrl+s stash", () => {
 		rebound.prompt.setText("");
 		rebound.prompt.handleInput("?");
 		rebound.below();
-		expect(rebound.seen.at(-1)).toEqual({ historySearch: "ctrl+r" });
+		expect(rebound.seen.at(-1)).toEqual({ clearInput: true, historySearch: "ctrl+r" });
 	});
 });
 

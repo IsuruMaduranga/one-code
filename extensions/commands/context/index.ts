@@ -69,9 +69,8 @@ function contextExtension(pi: ExtensionAPI) {
 		// A recorded request describes the context until a compaction replaces it; before one, or after a compaction, estimate the next.
 		const recorded = last && !replied.compacted ? last : undefined;
 		const preview = recorded ? undefined : replied.compacted ? "compaction" : "first";
-		const breakdown = recorded
-			? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath })
-			: nextBreakdown(ctx, displayPath);
+		const next = recorded ? undefined : nextBreakdown(ctx, displayPath);
+		const breakdown = recorded ? breakdownRequest({ api: recorded.identity.api, head: recorded.head, list: recorded.list }, { displayPath }) : next?.breakdown;
 		return contextUsage({
 			model: { name: ctx.model?.name ?? "No model", id: ctx.model?.id ?? "" },
 			window: piUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0,
@@ -79,16 +78,17 @@ function contextExtension(pi: ExtensionAPI) {
 			compacted: replied.compacted,
 			breakdown,
 			...(breakdown && preview ? { preview } : {}),
+			...(next?.error !== undefined ? { estimateError: next.error } : {}),
 			reported: recorded && replied.prompt !== undefined && typeof piUsage?.tokens === "number" ? { prompt: replied.prompt, total: piUsage.tokens } : undefined,
 		});
 	};
 
-	/** The breakdown of the request the next prompt will send; undefined when there is nothing to estimate from (a torn-down session), the plain "nothing sent" state. */
-	const nextBreakdown = (ctx: ExtensionCommandContext, displayPath: (path: string) => string) => {
+	/** The breakdown of the request the next prompt will send, or why estimating it failed: a broken estimate must not break /context, and the screen names the failure. */
+	const nextBreakdown = (ctx: ExtensionCommandContext, displayPath: (path: string) => string): { breakdown?: ReturnType<typeof breakdownRequest>; error?: string } => {
 		try {
-			return breakdownRequest(nextRequest(ctx), { displayPath });
-		} catch {
-			return undefined;
+			return { breakdown: breakdownRequest(nextRequest(ctx), { displayPath }) };
+		} catch (error) {
+			return { error: error instanceof Error ? error.message : String(error) };
 		}
 	};
 

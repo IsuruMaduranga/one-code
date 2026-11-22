@@ -98,6 +98,12 @@ export class PromptEditor extends CustomEditor {
 	#stash = new PromptStash();
 	#history = new PromptHistory();
 	#search = new HistorySearch();
+	/**
+	 * How many `!` submits are still in pi's handler: pi runs the command inside
+	 * its submit handler and settles the handler's promise when it ends (pi's
+	 * `isBashRunning` is not on the extension API), and its Esc stops it then.
+	 */
+	#bashRuns = 0;
 
 	constructor(tui: EditorArgs[0], theme: EditorArgs[1], keybindings: EditorArgs[2], hooks: PromptEditorHooks) {
 		super(tui, theme, keybindings, { paddingX: PROMPT_PADDING, embedWorkingStatus: true });
@@ -105,7 +111,16 @@ export class PromptEditor extends CustomEditor {
 		this.#keys = keybindings;
 		// pi assigns its submit handler after construction; wrap whatever it
 		// assigns so a stash returns once the submitted text has left the editor.
-		let submit: ((text: string) => void) | undefined;
+		// pi's handler is async and clears the editor again after awaiting some
+		// built-ins (/copy, /export, /import, /share), so the stash returns once
+		// the handler settles, and only into an editor that is still empty.
+		let submit: ((text: string) => unknown) | undefined;
+		const restore = () => {
+			const restored = this.#stash.afterSubmit(this.getText());
+			if (restored === undefined) return;
+			this.setText(restored);
+			this.tui.requestRender();
+		};
 		Object.defineProperty(this, "onSubmit", {
 			configurable: true,
 			enumerable: true,
@@ -113,11 +128,18 @@ export class PromptEditor extends CustomEditor {
 				submit &&
 				((text: string) => {
 					const result = submit?.(text);
-					const restored = this.#stash.afterSubmit(this.getText());
-					if (restored !== undefined) this.setText(restored);
+					if (result instanceof Promise) {
+						const bash = /^!!?\s*\S/.test(text.trim());
+						if (bash) this.#bashRuns++;
+						const settled = () => {
+							if (bash) this.#bashRuns--;
+							restore();
+						};
+						void result.then(settled, settled);
+					} else restore();
 					return result;
 				}),
-			set: (handler: ((text: string) => void) | undefined) => {
+			set: (handler: ((text: string) => unknown) | undefined) => {
 				submit = handler;
 			},
 		});
@@ -150,6 +172,7 @@ export class PromptEditor extends CustomEditor {
 	/** The editor's own keys that work right now, for the `?` panel and `/help` (the raw bytes are ctrl+s and ctrl+r). */
 	editorKeys(): EditorKeys {
 		return {
+			clearInput: true,
 			...(this.#boundInEditor("\x13") ? {} : { stash: STASH_KEY }),
 			...(this.#boundInEditor("\x12") ? {} : { historySearch: HISTORY_SEARCH_KEY }),
 		};
@@ -230,6 +253,7 @@ export class PromptEditor extends CustomEditor {
 			menuOpen: this.isShowingAutocomplete(),
 			viewOpen: this.#hooks.scrollView?.() !== undefined,
 			bashMode: text.trimStart().startsWith("!"),
+			bashRunning: this.#bashRuns > 0,
 		});
 		if (verdict === "clear") {
 			// setText keeps an undo snapshot, so the undo key brings the text back.

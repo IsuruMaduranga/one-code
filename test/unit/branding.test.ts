@@ -42,6 +42,13 @@ describe("bannerLines", () => {
 		}
 	});
 
+	it("points at /hotkeys instead of ? when the prompt editor that opens the panel is not installed", () => {
+		const hint = (editor: boolean) => bannerLines({ version: "0.1.0", cwd: "/p", mode: "default", editor }, plain).find((l) => l.includes("shift+tab")) ?? "";
+		expect(hint(false).trimStart().startsWith("/hotkeys all keys")).toBe(true);
+		expect(hint(false)).not.toContain("? shortcuts");
+		expect(hint(true).trimStart().startsWith("? shortcuts")).toBe(true);
+	});
+
 	it("shows the model when known and always the mode", () => {
 		const lines = bannerLines({ version: "0.1.0", model: "gpt-5.5", cwd: "/p", mode: "acceptEdits" }, plain);
 		const context = contextLine(lines);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DOUBLE_ESC_MS, EscapeClear, type EscapeContext, fitBorderTitle, HistorySearch, PromptHistory, PromptStash } from "../../extensions/lib/ui/editor-conveniences.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 
-const free: EscapeContext = { hasText: true, idle: true, menuOpen: false, viewOpen: false, bashMode: false };
+const free: EscapeContext = { hasText: true, idle: true, menuOpen: false, viewOpen: false, bashMode: false, bashRunning: false };
 
 describe("EscapeClear", () => {
 	it("clears on a second Esc inside the window", () => {

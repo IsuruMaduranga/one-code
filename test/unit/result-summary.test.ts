@@ -336,6 +336,18 @@ describe("thought for Ns", () => {
 		expect(clock.segment(4_400 + THOUGHT_SHOWN_MS)).toBeUndefined();
 	});
 
+	it("drops a run its message ended without closing (a stream error before a retry)", () => {
+		const clock = new ThinkingClock();
+		clock.start(0);
+		clock.messageEnded(); // the stream failed: no thinking_end
+		clock.start(30_000); // the retry's run
+		clock.end(32_000);
+		expect(clock.segment(32_000)).toBe("thought for 2s");
+		// A finished run still shows after its message ends.
+		clock.messageEnded();
+		expect(clock.segment(32_500)).toBe("thought for 2s");
+	});
+
 	it("never says 0s, and forgets the run at the turn's end", () => {
 		const clock = new ThinkingClock();
 		clock.end(5); // no start: nothing

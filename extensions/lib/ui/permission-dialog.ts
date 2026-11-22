@@ -49,29 +49,49 @@ export interface PermissionDialogState {
 
 export type PermissionDialogKey = { kind: "up" | "down" | "enter" | "cancel" | "expand" } | { kind: "number"; value: number };
 
+/** pi's bindings for the select it replaces, with pi-tui's defaults (pi-tui keybindings.js). */
+const SELECT_BINDINGS = {
+	up: { binding: "tui.select.up", defaults: ["up"] },
+	down: { binding: "tui.select.down", defaults: ["down"] },
+	enter: { binding: "tui.select.confirm", defaults: ["enter"] },
+	cancel: { binding: "tui.select.cancel", defaults: ["escape", "ctrl+c"] },
+} as const;
+
 /**
- * Decode one input chunk. `isExpand` matches pi's `app.tools.expand` binding
- * (ctrl+o by default), which pi's select honoured so a write's preview can be
- * expanded while its prompt waits.
+ * Whether `data` is the key for one of the select's actions: the user's
+ * binding when `matches` can tell (a binding with keys), else pi-tui's default.
  */
-export function decodePermissionKey(data: string, isExpand: (data: string) => boolean = () => false): PermissionDialogKey | undefined {
+export type SelectKeyMatcher = (data: string, action: keyof typeof SELECT_BINDINGS) => boolean;
+const defaultSelectKeys: SelectKeyMatcher = (data, action) => (SELECT_BINDINGS[action].defaults as readonly string[]).includes(keyId(data) ?? "");
+
+/**
+ * Decode one input chunk the way pi's select (extension-selector.js) does:
+ * its `tui.select.*` bindings, `k`/`j` and a bare `\n`, and the expand key,
+ * whose `isExpand` matches pi's `app.tools.expand` binding (ctrl+o by
+ * default) so a write's preview can be expanded while its prompt waits.
+ * Digits pick an option.
+ */
+export function decodePermissionKey(data: string, isExpand: (data: string) => boolean = () => false, isKey: SelectKeyMatcher = defaultSelectKeys): PermissionDialogKey | undefined {
 	if (isExpand(data)) return { kind: "expand" };
-	switch (keyId(data)) {
-		case "up":
-			return { kind: "up" };
-		case "down":
-			return { kind: "down" };
-		case "enter":
-			return { kind: "enter" };
-		case "escape":
-		case "ctrl+c": // pi's select cancelled on both
-			return { kind: "cancel" };
-		default: {
-			const text = keyText(data);
-			return text && /^[1-9]$/.test(text) ? { kind: "number", value: Number(text) } : undefined;
-		}
-	}
+	if (isKey(data, "up") || data === "k") return { kind: "up" };
+	if (isKey(data, "down") || data === "j") return { kind: "down" };
+	if (isKey(data, "enter") || data === "\n") return { kind: "enter" };
+	if (isKey(data, "cancel")) return { kind: "cancel" };
+	const text = keyText(data);
+	return text && /^[1-9]$/.test(text) ? { kind: "number", value: Number(text) } : undefined;
 }
+
+/** The user's keys for each select action, pi-tui's defaults where the bindings say nothing. */
+function selectKeys(keybindings: Keybindings | undefined): { keys: Record<keyof typeof SELECT_BINDINGS, string[]>; isKey: SelectKeyMatcher } {
+	const bound = (action: keyof typeof SELECT_BINDINGS) => safeKeys(keybindings, SELECT_BINDINGS[action].binding);
+	const user = { up: bound("up"), down: bound("down"), enter: bound("enter"), cancel: bound("cancel") };
+	const isKey: SelectKeyMatcher = (data, action) => (user[action].length > 0 ? safeMatches(keybindings, data, SELECT_BINDINGS[action].binding) : defaultSelectKeys(data, action));
+	const or = (action: keyof typeof SELECT_BINDINGS) => (user[action].length > 0 ? user[action] : [...SELECT_BINDINGS[action].defaults]);
+	return { keys: { up: or("up"), down: or("down"), enter: or("enter"), cancel: or("cancel") }, isKey };
+}
+
+/** A key as the hint row names it: the arrows as arrows, Enter and Esc capitalised. */
+const hintKey = (key: string | undefined): string => ({ up: "↑", down: "↓", enter: "Enter", escape: "Esc" })[key ?? ""] ?? key ?? "";
 
 /** The dialog's outcome for one key: `{ answer }` when it closes (undefined answer = dismissed). */
 export type PermissionDialogStep = { answer: string | undefined } | "expand" | undefined;
@@ -104,10 +124,15 @@ export interface PermissionDialogStyle {
 	bold: (text: string) => string;
 }
 
-/** The hint row: every key the dialog takes. `expandKey` is the user's key for expanding tool output, if bound. */
-export function permissionHints(optionCount: number, expandKey?: string): string {
+/**
+ * The hint row: every key the dialog takes, each action by the user's first
+ * key for it (pi-tui's defaults without `keys`). `expandKey` is the user's key
+ * for expanding tool output, if bound.
+ */
+export function permissionHints(optionCount: number, expandKey?: string, keys?: Partial<Record<keyof typeof SELECT_BINDINGS, readonly string[]>>): string {
+	const first = (action: keyof typeof SELECT_BINDINGS) => hintKey((keys?.[action] ?? SELECT_BINDINGS[action].defaults)[0]);
 	const numbers = optionCount > 1 ? `1-${optionCount}` : "1";
-	return ["↑/↓ to navigate", `Enter or ${numbers} to select`, ...(expandKey ? [`${expandKey} to expand`] : []), "Esc to cancel"].join(" · ");
+	return [`${first("up")}/${first("down")} to navigate`, `${first("enter")} or ${numbers} to select`, ...(expandKey ? [`${expandKey} to expand`] : []), `${first("cancel")} to cancel`].join(" · ");
 }
 
 /** One line of display text with tabs as spaces, so the width math holds. */
@@ -118,7 +143,7 @@ const detab = (text: string) => text.replace(/\t/g, "  ");
  * descriptions and option labels wrap, and a final ANSI-aware cut guards the
  * painted lines (pi-tui stops the app on an overwide line).
  */
-export function renderPermissionDialog(view: PermissionDialogView, state: PermissionDialogState, style: PermissionDialogStyle, width: number, expandKey?: string): string[] {
+export function renderPermissionDialog(view: PermissionDialogView, state: PermissionDialogState, style: PermissionDialogStyle, width: number, expandKey?: string, keys?: Parameters<typeof permissionHints>[2]): string[] {
 	const { paint, bold } = style;
 	const room = (indent: number) => Math.max(1, width - indent - 1);
 	const out: string[] = [panelTopRule(paint, width)];
@@ -152,7 +177,7 @@ export function renderPermissionDialog(view: PermissionDialogView, state: Permis
 	}
 
 	out.push("");
-	for (const line of hintLines(permissionHints(view.options.length, expandKey), room(1))) out.push(` ${paint("dim", line)}`);
+	for (const line of hintLines(permissionHints(view.options.length, expandKey, keys), room(1))) out.push(` ${paint("dim", line)}`);
 	return out.map((line) => truncateLine(line, width));
 }
 
@@ -176,7 +201,23 @@ export interface PermissionDialogHost {
 		custom?: (...args: any[]) => Promise<unknown>;
 		getToolsExpanded?(): boolean;
 		setToolsExpanded?(expanded: boolean): void;
+		getEditorText?(): string;
 	};
+}
+
+/**
+ * Whether the prompt editor holds a draft. pi's `ctx.ui.custom` saves the
+ * editor's expanded text when a component opens and sets it back when it
+ * closes, which expands a collapsed paste and moves the cursor to the end;
+ * `ctx.ui.select` leaves the editor alone. A stale context counts as a draft,
+ * so the select is the fallback.
+ */
+function editorHoldsDraft(ui: PermissionDialogHost["ui"]): boolean {
+	try {
+		return (ui.getEditorText?.() ?? "") !== "";
+	} catch {
+		return true;
+	}
 }
 
 export interface AskPermissionOptions {
@@ -196,7 +237,8 @@ export async function askPermission(events: Emitter, ctx: PermissionDialogHost, 
 	const { signal, timeout } = options;
 	const select = () => ctx.ui.select(selectTitle, view.options, { signal, ...(timeout !== undefined ? { timeout } : {}) });
 	const ui = ctx.ui;
-	if (timeout !== undefined || !canShowCustomUi(ctx as Parameters<typeof canShowCustomUi>[0]) || typeof ui.custom !== "function") return select();
+	// A draft in the editor keeps pi's select, which does not rewrite the draft (editorHoldsDraft).
+	if (timeout !== undefined || !canShowCustomUi(ctx as Parameters<typeof canShowCustomUi>[0]) || typeof ui.custom !== "function" || editorHoldsDraft(ui)) return select();
 	let built = false;
 	const answer = await panelUi(events, ui as { custom: (...args: any[]) => Promise<unknown> }).custom(
 		(tui: { requestRender?(): void }, theme: unknown, keybindings: Keybindings | undefined, done: (answer: string | undefined) => void) => {
@@ -205,6 +247,7 @@ export async function askPermission(events: Emitter, ctx: PermissionDialogHost, 
 			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const expandKeys = safeKeys(keybindings, "app.tools.expand");
 			const isExpand = (data: string) => expandKeys.length > 0 && safeMatches(keybindings, data, "app.tools.expand");
+			const select = selectKeys(keybindings);
 			let settled = false;
 			const finish = (value: string | undefined) => {
 				if (settled) return;
@@ -215,12 +258,12 @@ export async function askPermission(events: Emitter, ctx: PermissionDialogHost, 
 			const onAbort = () => finish(undefined);
 			if (signal?.aborted) queueMicrotask(onAbort);
 			else signal?.addEventListener("abort", onAbort, { once: true });
-			const lines = linesComponent((width) => renderPermissionDialog(view, state, style, width, expandKeys.join("/") || undefined));
+			const lines = linesComponent((width) => renderPermissionDialog(view, state, style, width, expandKeys.join("/") || undefined, select.keys));
 			return {
 				render: (width: number) => lines.render(width),
 				invalidate: () => lines.invalidate?.(),
 				handleInput: (data: string) => {
-					const key = decodePermissionKey(data, isExpand);
+					const key = decodePermissionKey(data, isExpand, select.isKey);
 					if (!key) return;
 					const step = applyPermissionKey(state, view.options, key);
 					if (step === "expand") {

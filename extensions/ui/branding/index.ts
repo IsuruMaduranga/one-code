@@ -82,6 +82,8 @@ export interface BannerInput {
 	sections?: StartupSection[];
 	/** pi's `keyText`: the user's key for a pi binding, "" when unbound; the defaults without it. */
 	keyText?: (binding: string) => string;
+	/** False when branding's prompt editor is not installed: `?` then types a character, so the first hint points at /hotkeys. */
+	editor?: boolean;
 }
 
 /**
@@ -202,7 +204,8 @@ export function bannerLines(
 	// Narrow terminals drop whole trailing hints (the ? pointer is
 	// first, so it always survives) instead of cutting one mid-word.
 	// A rebound pi key shows as bound; an unbound one drops its hint.
-	const bound = HINTS.flatMap(([key, what, binding]): [string, string][] => {
+	const hintList: typeof HINTS = input.editor === false ? [["/hotkeys", "all keys"], ...HINTS.slice(1)] : HINTS;
+	const bound = hintList.flatMap(([key, what, binding]): [string, string][] => {
 		const shown = binding ? boundKey(input.keyText, binding, key) : key;
 		return shown ? [[shown, what]] : [];
 	});
@@ -644,6 +647,7 @@ function brandingExtension(pi: ExtensionAPI) {
 							version,
 							...(profileSelection.userProfile !== undefined ? { profile: profileSelection.userProfile } : {}),
 							keyText: userKey,
+							editor: editor !== undefined,
 							model: modelLabel ?? "none",
 							cwd: ctx.cwd,
 							mode: bannerModeLabel(permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false })),

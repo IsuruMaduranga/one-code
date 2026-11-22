@@ -75,6 +75,9 @@ const REMINDER_OPEN = "<system-reminder>";
 /** Keys whose strings are ids, markers or opaque blobs, not text the model reads. */
 const OPAQUE_KEYS: ReadonlySet<string> = new Set([
 	"signature",
+	// pi's own message list keeps a thinking block's and a text block's signatures here.
+	"thinkingSignature",
+	"textSignature",
 	"encrypted_content",
 	"thoughtSignature",
 	"thought_signature",
@@ -327,7 +330,9 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 			const { body, framed } = unwrap(text);
 			// Harness text the words do not name is session context in the first user message or a system message, else conversation.
 			const other: ContextCategoryKey = instruction || (framed && index === firstUser) ? "systemPrompt" : "messages";
-			const segments = harnessSegments(body);
+			// Harness blocks sit only in a system or developer message or inside a system-reminder frame;
+			// anything else (a reply, a tool result, the user's words) is conversation, whatever its lines look like.
+			const segments = instruction || framed ? harnessSegments(body) : [];
 			if (segments.length === 0) tokens[other] += textTokens(text);
 			for (const segment of segments) {
 				if (segment.kind) sizeBlock(segment.kind, segment.text);
@@ -432,6 +437,8 @@ export interface ContextUsage {
 	unreconciled?: number;
 	/** The rows estimate the request the next prompt will send: none sent yet ("first") or none since a compaction. */
 	preview?: "first" | "compaction";
+	/** Why estimating the next request failed, when it did: the screen then says so instead of "nothing sent". */
+	estimateError?: string;
 	memoryFiles: ContextItem[];
 	skills: ContextItem[];
 	mcp: { loaded: ContextItem[]; available: string[] };
@@ -450,6 +457,8 @@ export interface ContextUsageInput {
 	compacted?: boolean;
 	/** `breakdown` is of the request the next prompt will send (`previewRequest`), not of one sent. */
 	preview?: "first" | "compaction";
+	/** Estimating the next request threw: its message. */
+	estimateError?: string;
 }
 
 /** The band within which the provider's count rescales the estimate; outside it one of the two is off and the rows stay estimates. */
@@ -478,7 +487,7 @@ export function contextUsage(input: ContextUsageInput): ContextUsage {
 	const base = { model: input.model, window, buffer };
 	const empty = { memoryFiles: [], skills: [], mcp: { loaded: [], available: [] } };
 	const breakdown = input.breakdown;
-	if (!breakdown) return { ...base, ...empty, state: input.compacted ? "compacted" : "empty", categories: [] };
+	if (!breakdown) return { ...base, ...empty, state: input.compacted ? "compacted" : "empty", categories: [], ...(input.estimateError !== undefined ? { estimateError: input.estimateError } : {}) };
 
 	const keys = CONTEXT_CATEGORIES.map(([key]) => key);
 	let values = keys.map((key) => breakdown.tokens[key]);

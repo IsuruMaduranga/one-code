@@ -53,6 +53,7 @@ describe("/help", () => {
 		const none = await helpText();
 		expect(none).not.toContain("to stash prompt");
 		expect(none).not.toContain("to search history");
+		expect(none).not.toContain("to clear input");
 	});
 
 	it("lists the slash menu's own rows in the TUI panel", async () => {

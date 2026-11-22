@@ -128,6 +128,8 @@ function spinnerExtension(pi: ExtensionAPI) {
 		if (event.message.role === "assistant") {
 			settledChars += messageChars(event.message);
 			streamingMessage = undefined;
+			// pi ends every assistant message here, an errored one too: a thinking run it left open is over.
+			thinking.messageEnded();
 		}
 	});
 
