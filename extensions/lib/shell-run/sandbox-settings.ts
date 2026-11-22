@@ -408,9 +408,13 @@ export function linkedWorktreeGitDirs(dir: string, read: (path: string) => strin
  * `config.worktree` is config. pi loads `.pi` (extensions, settings) into the
  * harness at the next start. The names that make git take `dir` itself for
  * a bare repository are in {@link bareRepositoryFiles}.
+ *
+ * Every name is listed whether it exists or not. On Linux a missing one is
+ * denied per command in the form bubblewrap can hold without breaking git
+ * ({@link linuxProtectedEntries}).
  */
-export function checkoutProtectedFiles(dir: string, read: (path: string) => string = readGitPointer, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = pathExists): string[] {
-	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => !absentOnLinux(path, exists, platform));
+export function checkoutProtectedFiles(dir: string, read: (path: string) => string = readGitPointer, platform: NodeJS.Platform = process.platform): string[] {
+	return allCheckoutProtectedFiles(dir, read, platform);
 }
 
 /**
@@ -431,37 +435,57 @@ export function pathExists(path: string): boolean {
 }
 
 /**
- * A path nothing exists at, on Linux. bubblewrap denies a missing path by
- * binding an empty device over it for the length of the command, and the
- * command sees that stub: git lists each one in the working tree as an
- * untracked file and `git add -A` fails on it ("can only add regular
- * files"), and a stub at a git dir's `commondir` fails every git command
- * ("failed to read .git/commondir: Permission denied"). So on Linux only the
- * names that exist are denied, as the runtime does for its own built-in
- * list, and a missing one can be created by a sandboxed command there. The
- * one that redirects the harness's own git, `commondir`, is removed when the
- * command ends ({@link plantableCommondirs}). macOS denies by rule, with
- * nothing put at the path, so it denies the missing names too.
+ * A name below a missing protected path, denied in its place on Linux. The
+ * runtime holds a missing deny path with a stub at its first missing
+ * component for the length of the command, and makes that stub an empty
+ * read-only directory when another deny path lies beneath it (a file, bound
+ * from `/dev/null`, otherwise). Nothing is ever made under this name: the stub
+ * is the protected path itself.
  */
-function absentOnLinux(path: string, exists: (path: string) => boolean, platform: NodeJS.Platform): boolean {
-	return platform === "linux" && !exists(path);
+export const DIRECTORY_STUB_CHILD = ".sandbox-stub";
+
+/**
+ * The protected names a stub directory cannot stand in for while they are
+ * missing on Linux. git fails on a directory at `commondir` ("failed to read
+ * .git/commondir: Is a directory"); empty `objects` and `refs` directories
+ * would be two of the three marks of a bare repository, for the harness's own
+ * git outside the sandbox; a `HEAD` of any kind makes `git log HEAD`
+ * ambiguous with a path. They stay creatable, and the runner undoes them when
+ * the command ends (sandbox-end-checks.ts).
+ */
+const NO_STUB_NAMES: ReadonlySet<string> = new Set(["commondir", "objects", "refs", "HEAD"]);
+
+/**
+ * What the Linux runtime is handed to deny the protected path `path` for one
+ * command about to start. A path that exists is denied as it is. A missing
+ * one is denied through {@link DIRECTORY_STUB_CHILD}, so the stub at the path
+ * is an empty read-only directory, which git leaves out of `git status` and
+ * `git add -A` (a stub file is listed as untracked, and `git add -A` fails on
+ * it: "can only add regular files"). The command sees a directory there and
+ * can create nothing at the path or under it. A name in
+ * {@link NO_STUB_NAMES} is left out while it is missing.
+ */
+export function linuxProtectedEntries(path: string, exists: (path: string) => boolean = pathExists): string[] {
+	if (exists(path)) return [path];
+	return NO_STUB_NAMES.has(basename(path)) ? [] : [join(path, DIRECTORY_STUB_CHILD)];
 }
 
 /**
  * The `commondir` paths of `dir`'s checkout that the Linux sandbox cannot
- * deny because nothing exists there. An ordinary checkout has none, so
- * whatever appears at one while a sandboxed command runs was planted by it;
- * the runner removes it when the command ends. A linked worktree's
- * `commondir` exists and stays denied. Empty on macOS.
+ * deny because nothing exists there ({@link NO_STUB_NAMES}). An ordinary
+ * checkout has none, so whatever appears at one while a sandboxed command
+ * runs was planted by it; the runner removes it when the command ends. A
+ * linked worktree's `commondir` exists and stays denied. Empty on macOS.
  */
 export function plantableCommondirs(dir: string, read: (path: string) => string = readGitPointer, platform: NodeJS.Platform = process.platform, exists: (path: string) => boolean = pathExists): string[] {
-	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => basename(path) === "commondir" && absentOnLinux(path, exists, platform));
+	if (platform !== "linux") return [];
+	return allCheckoutProtectedFiles(dir, read, platform).filter((path) => basename(path) === "commondir" && !exists(path));
 }
 
 /**
  * Whether git would take `dir` itself for a repository: a `HEAD` file beside
  * `objects` and `refs` directories. The Linux sandbox cannot deny those names
- * while they are missing ({@link checkoutProtectedFiles}), so the runner
+ * while they are missing ({@link linuxProtectedEntries}), so the runner
  * checks before and after a command and sets a planted `HEAD` aside.
  */
 export function looksLikeBareRepository(dir: string): boolean {
@@ -521,10 +545,11 @@ function allCheckoutProtectedFiles(dir: string, read: (path: string) => string, 
  * what it does with each (2.1.330):
  *
  * - `objects` and `refs` are never writable. Where they are missing, Claude
- *   Code denies them on macOS and deletes them after each command on Linux;
- *   One Code denies them on both (on Linux the runtime holds an empty mount
- *   point there while the command runs), so the three names are never all
- *   there and git never takes `dir` for a repository.
+ *   Code denies them on macOS and deletes them after each command on Linux.
+ *   One Code denies them on macOS; on Linux a stub directory there would be
+ *   two of the three marks ({@link linuxProtectedEntries}), so they stay
+ *   creatable and a directory that became a bare repository while a command
+ *   ran has its `HEAD` set aside when the command ends.
  * - `HEAD` is never writable when it exists. A missing one is denied on
  *   macOS only: on Linux the runtime's mount point would be a file named
  *   `HEAD` in the directory, and git inside the command would then read
@@ -566,7 +591,12 @@ export function bareRepositoryFiles(dir: string, platform: NodeJS.Platform = pro
 export interface SandboxHost {
 	home?: string;
 	platform?: NodeJS.Platform;
+	/** Whether something is at a path, asked as a command's rules are built (default {@link pathExists}). */
+	exists?: (path: string) => boolean;
 }
+
+/** One of the scope's protected files, which a Linux command gets as {@link linuxProtectedEntries} reads it. */
+type ProtectedPath = { kind: "protected"; path: string };
 
 /** A command's filesystem rules: writes are allow-only, reads deny-only. */
 export interface SandboxFilesystem<Entry = string> {
@@ -577,14 +607,14 @@ export interface SandboxFilesystem<Entry = string> {
 }
 
 /** The settings' lists and the deny rules' paths for a command run in `scope.cwd`, with each rule path as {@link ruleDenyPaths} reads it. */
-function filesystemRules(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost): SandboxFilesystem<string | RuleDenyPath> {
+function filesystemRules(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost): SandboxFilesystem<string | RuleDenyPath | ProtectedPath> {
 	const home = host.home ?? homedir();
 	const platform = host.platform ?? process.platform;
 	const fromRules = (patterns: readonly string[], kind: "write" | "read") => patterns.flatMap((pattern) => ruleDenyPaths(pattern, kind, scope.cwd, home, platform));
 	const shadowed = new Set(shadowedAllowRead(settings, scope.cwd, host));
 	return {
 		allowWrite: [scope.cwd, ...scope.writableDirs, ...settings.filesystem.allowWrite],
-		denyWrite: [...scope.protectedFiles, ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")],
+		denyWrite: [...scope.protectedFiles.map((path): ProtectedPath => ({ kind: "protected", path })), ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")],
 		denyRead: [...settings.filesystem.denyRead, ...fromRules(settings.denyRulePaths.read, "read")],
 		allowRead: settings.filesystem.allowRead.filter((entry) => !shadowed.has(entry)),
 	};
@@ -700,16 +730,20 @@ export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope
 /**
  * The filesystem rules handed to the runtime for one command about to start
  * in `scope.cwd`: {@link sandboxFilesystem}'s rules with each per-command glob
- * expanded to the files it matches now ({@link expandDenyGlobs}). Built for
- * every wrap, so a file that appeared since the last command is denied from
- * this one on; one created while the command runs is not.
+ * expanded to the files it matches now ({@link expandDenyGlobs}), and on
+ * Linux each protected file as {@link linuxProtectedEntries} reads it as
+ * the command starts. Built for every wrap, so a file that appeared since the
+ * last command is denied from this one on; one created while the command
+ * runs is not.
  */
 export function sandboxCommandFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): SandboxFilesystem<SandboxPathEntry> {
 	const rules = filesystemRules(settings, scope, host);
+	const linux = (host.platform ?? process.platform) === "linux";
 	const globs = [...rules.denyWrite, ...rules.denyRead].flatMap((entry) => (typeof entry !== "string" && entry.kind === "expand" ? [entry.glob] : []));
 	const expanded = globs.length > 0 ? expandDenyGlobs(globs) : new Map<string, SandboxPathEntry[]>();
-	const entries = (entry: string | RuleDenyPath): SandboxPathEntry[] => {
+	const entries = (entry: string | RuleDenyPath | ProtectedPath): SandboxPathEntry[] => {
 		if (typeof entry === "string") return [entry];
+		if (entry.kind === "protected") return linux ? linuxProtectedEntries(entry.path, host.exists) : [entry.path];
 		if (entry.kind === "path") return [entry.path];
 		if (entry.kind === "literal") return [{ path: entry.path, literal: true }];
 		return expanded.get(entry.glob) ?? [literalDirectory(entry.glob)];

@@ -15,7 +15,7 @@ import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settin
 import { Type } from "typebox";
 import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
-import { bareRepositoryFiles, checkoutProtectedFiles, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { bareRepositoryFiles, checkoutProtectedFiles, DIRECTORY_STUB_CHILD, linkedWorktreeGitDirs, pathExists, readGitPointer } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
 import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, looksLikeBareRepository, mergeSandboxBlock, plantableCommondirs, resolvedSpelling, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, shadowedAllowRead } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { createEndChecks } from "../../extensions/lib/shell-run/sandbox-end-checks.ts";
@@ -587,23 +587,40 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 		const linked = checkoutProtectedFiles("/wt", read, "darwin");
 		expect(linked).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/worktrees/wt/gitdir", "/repo/.git/worktrees/wt/config.worktree", "/repo/.git/hooks", "/repo/.git/config", "/repo/.git/commondir"]));
 		expect(checkoutProtectedFiles("/nowhere", read, "darwin")).toEqual(expect.arrayContaining(["/nowhere/.mcp.json"]));
-		// Linux denies a missing path with a stub the command sees (git lists it as
-		// untracked, and fails outright on one at commondir), so only what exists is denied there.
-		expect(checkoutProtectedFiles("/nowhere", read, "linux", exists)).toEqual([]);
 		files["/repo/.git/config"] = "[core]\n";
 		files["/repo/.mcp.json"] = "{}";
 		reads.length = 0;
-		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux", exists);
-		expect([...onLinux].sort()).toEqual(["/repo/.git/config", "/repo/.mcp.json"]);
-		// Whether a name is there is asked of its metadata: only the `.git` entries
-		// whose contents name another directory are read, never a protected file
-		// (a FIFO there would block, a large file be read whole).
+		// Every name is listed on Linux too; what is there is asked per command, below.
+		const onLinux = checkoutProtectedFiles("/repo/packages/app", read, "linux");
+		// (A missing HEAD is the one exception, bareRepositoryFiles.)
+		expect(onLinux).toEqual(expect.arrayContaining(main.filter((path) => basename(path) !== "HEAD")));
+		// Only the `.git` entries whose contents name another directory are read,
+		// never a protected file (a FIFO there would block, a large file be read whole).
 		expect(reads.every((path) => basename(path) === ".git" || basename(path) === "commondir")).toBe(true);
+		// A command's rules: what exists as it is, what is missing through a name
+		// beneath it, so bubblewrap's stub there is an empty read-only directory that
+		// git ignores (a stub file is listed as untracked and breaks `git add -A`).
+		const scope = { cwd: "/repo/packages/app", writableDirs: [], protectedFiles: onLinux };
+		const denied = sandboxCommandFilesystem(ON, scope, { platform: "linux", exists }).denyWrite;
+		const stub = (path: string) => join(path, DIRECTORY_STUB_CHILD);
+		expect(denied).toEqual(expect.arrayContaining(["/repo/.git/config", "/repo/.mcp.json", ...["/repo/.pi", "/repo/packages/app/.pi", "/repo/.gitmodules", "/repo/.vscode", "/repo/.bashrc", "/repo/.git/config.worktree", "/repo/.git/info/attributes", "/repo/.git/gitdir", "/repo/.git/hooks"].map(stub)]));
+		expect(denied).not.toContain("/repo/.pi");
+		// Where a directory would break git or help plant a repository, nothing: the end-of-command checks undo those.
+		for (const kept of ["/repo/.git/commondir", "/repo/packages/app/objects", "/repo/packages/app/refs"]) {
+			expect(denied).not.toContain(kept);
+			expect(denied).not.toContain(stub(kept));
+		}
+		// macOS denies by rule, with nothing put at the path, and the prompt shows the names either way.
+		expect(sandboxCommandFilesystem(ON, scope, { platform: "darwin", exists }).denyWrite).toEqual(expect.arrayContaining(["/repo/.pi", "/repo/.git/commondir"]));
+		expect(sandboxFilesystem(ON, scope, { platform: "linux" }).denyWrite).toEqual(expect.arrayContaining(["/repo/.pi", "/repo/.git/commondir"]));
+		// A name that appears later is denied as it is from the next command on.
+		files["/repo/.pi"] = eisdir;
+		expect(sandboxCommandFilesystem(ON, scope, { platform: "linux", exists }).denyWrite).toContain("/repo/.pi");
 		// The one name that redirects the harness's own git is removed after a command if it appears.
 		expect(plantableCommondirs("/repo/packages/app", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
-		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux", exists);
+		const linkedOnLinux = checkoutProtectedFiles("/wt", read, "linux");
 		expect(linkedOnLinux).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", "/repo/.git/config"]));
-		expect(linkedOnLinux).not.toContain("/repo/.git/commondir");
+		expect(sandboxCommandFilesystem(ON, { ...scope, cwd: "/wt", protectedFiles: linkedOnLinux }, { platform: "linux", exists }).denyWrite).toEqual(expect.arrayContaining(["/wt/.git", "/repo/.git/worktrees/wt/commondir", stub("/repo/.git/worktrees/wt/gitdir")]));
 		expect(plantableCommondirs("/wt", read, "linux", exists)).toEqual(["/repo/.git/commondir"]);
 		expect(plantableCommondirs("/repo/packages/app", read, "darwin", exists)).toEqual([]);
 	});

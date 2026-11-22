@@ -96,12 +96,25 @@ the top of the working directory are never writable. A `config` or `hooks`
 entry there is protected when a `HEAD` file sits beside it, or when `config`
 is a file. Your project's own `config/` and `hooks/` folders stay writable.
 
-On Linux, bubblewrap can protect only a file or folder that already exists,
-so the protected names that exist are read-only and the missing ones can be
-created. One Code checks after each command instead: if the command turned
-the working directory into a bare repository, its `HEAD` is renamed to
-`HEAD.set-aside-by-sandbox`, and a `commondir` file planted in the
-project's `.git` is removed.
+On Linux, bubblewrap protects a path that doesn't exist yet by putting a
+placeholder there while the command runs. For a missing protected name,
+such as `.mcp.json`, `.pi`, a `.vscode` folder or `.git/info/attributes`,
+One Code makes that placeholder an empty, read-only folder, which Git
+ignores. The command can't create anything at that name or inside it. While
+it runs, the command sees an empty folder there: `test -e .mcp.json` is
+true, `test -f .mcp.json` is false, and `cat .mcp.json` reports `Is a
+directory`. The placeholders are removed when the command ends. Which names
+exist is checked before every command, so a protected file you create
+during a session is read-only from the next command on.
+
+A few names can't hold a folder without breaking Git, so on Linux they stay
+creatable while they are missing: `.git/commondir`, and `objects`, `refs`,
+and `HEAD` at the top of the working directory. One Code checks them after
+each command instead. A `commondir` file that appeared in the project's
+`.git` while the command ran is removed, and if the command turned the
+working directory into a bare repository, its `HEAD` is renamed to
+`HEAD.set-aside-by-sandbox`. If either step fails, One Code tells you, so
+you can remove the file yourself before you run Git there.
 
 **Reads.** A sandboxed command can read any file your account can read,
 except the paths you list in `filesystem.denyRead` and the paths your
@@ -243,10 +256,15 @@ holds whatever another file sets.
   quickly (more than 20,000 entries), the whole folder the pattern starts in
   becomes read-only instead. On macOS the pattern applies as written, to
   files created later too.
-- On Linux, a sandboxed command can create a protected file that doesn't
-  exist yet, such as `.mcp.json` or a `.vscode` folder. A file that exists
-  when the session starts is read-only. On macOS, the missing names are
-  protected too.
+- On Linux, the placeholder folders for missing protected names show up
+  inside a sandboxed command: `ls -A` and `find` list them, and `git clean
+  -d` and `git stash -u` warn that they can't remove them and exit with
+  status 1, although the rest of their work is done. `git status`, `git
+  add`, and `git commit` don't see them.
+- On Linux, a sandboxed command can create `.git/commondir`, or `objects`,
+  `refs`, and `HEAD` in the working directory, while they are missing. One
+  Code undoes them when the command ends, so a long background command
+  leaves a window in which they exist.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.
