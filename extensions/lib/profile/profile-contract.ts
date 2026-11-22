@@ -19,6 +19,7 @@ import type { ProductProvider } from "./product-providers.ts";
 import type { ProductSetting } from "./settings-keys.ts";
 import type { ThinkingDefaults } from "./thinking-defaults.ts";
 import type { OpenRouterRoutingDefault } from "./openrouter-routing.ts";
+import type { ProductSandbox } from "./product-sandbox.ts";
 import type { ArtifactsText } from "../../tools/artifacts/text.ts";
 import type { AskUserText } from "../../tools/ask-user/text.ts";
 import type { AutoModeSetupText, ClassifierText } from "../../safety/permissions/auto-mode/text.ts";
@@ -237,6 +238,20 @@ export interface Profile {
 	 * catalog models keeps a host at the floor.
 	 */
 	openRouterRouting?: Readonly<Record<string, OpenRouterRoutingDefault>>;
+	/**
+	 * The shell sandbox's starting settings (`lib/profile/product-sandbox.ts`):
+	 * a settings file's `sandbox` block, laid over a sandbox that is off before
+	 * any settings file is read, so `{ enabled: true }` turns it on with no
+	 * settings at all. The files then merge over it as usual (a repository's
+	 * may only tighten, the user's may also loosen). With `locked: true` every
+	 * file counts as a repository's: none can turn the sandbox off or widen it
+	 * (workspace directories the user adds stay writable: the lock covers the
+	 * `sandbox` block, not the gate's working directories),
+	 * and the user is told at session start which of their settings the lock
+	 * ignored. Declaring it while the profile turns the sandbox feature off is
+	 * refused at load.
+	 */
+	sandbox?: ProductSandbox;
 	/**
 	 * The model-facing text, by owning feature, built once when the profile
 	 * resolves. `live` answers which tools the session can have (the features

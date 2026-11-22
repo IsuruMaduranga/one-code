@@ -44,9 +44,33 @@ export function fileToolOutcome(result: FileToolResult, text: string): FileToolO
 
 /** The result's content with our text in place of pi's, or undefined when nothing changes. */
 export function fileToolResultContent<B extends Block>(result: FileToolResult & { content: B[] }, words: FileTrackerText): B[] | undefined {
-	if (!Array.isArray(result.content)) return undefined;
+	const text = firstText(result.content);
+	if (text === undefined) return undefined;
 	const [first, ...rest] = result.content;
-	if (first?.type !== "text" || typeof first.text !== "string") return undefined;
-	const outcome = fileToolOutcome(result, first.text);
+	const outcome = fileToolOutcome(result, text);
 	return outcome === undefined ? undefined : [{ ...first, text: words.toolResult(outcome) }, ...rest];
+}
+
+/** The text of a result's first block when that block is text, the only block pi's wording lives in. */
+function firstText(content: Block[] | undefined): string | undefined {
+	const first = Array.isArray(content) ? content[0] : undefined;
+	return first?.type === "text" && typeof first.text === "string" ? first.text : undefined;
+}
+
+/**
+ * Which of the file-tracker's refusals `text` is, found by generating each
+ * one for this call: `unread`, `failed` for the others, undefined for any
+ * other text. For the transcript's short line only (lib/ui/result-summary-files.ts):
+ * a refusal is a blocked call, whose result pi gives no details to carry it.
+ */
+export function refusalKind(text: string, call: { path: string; tool: string }, words: FileTrackerText): "unread" | "failed" | undefined {
+	const same = (generated: string) => text === generated.trim();
+	if (same(words.unread(call))) return "unread";
+	if (same(words.unreadable(call)) || same(words.notRegularFile(call)) || same(words.stale({ path: call.path }))) return "failed";
+	return undefined;
+}
+
+/** What a failed read, write or edit that ran records on its details for the transcript: a missing file, or another failure. */
+export function executedErrorKind(result: FileToolResult): "missing" | "failed" {
+	return fileToolOutcome(result, firstText(result.content) ?? "")?.kind === "missing" ? "missing" : "failed";
 }

@@ -367,6 +367,8 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 			expect(fs.denyWrite).toEqual([join(userHome, ".zshrc"), ...(repo ? [join(cwd, "config", "prod.yaml")] : [])]);
 			expect(fs.denyRead).toEqual(repo ? [join(cwd, ".env")] : []);
 		} finally {
+			// The product's user file sits in the test run's shared state folder, not under `root`.
+			rmSync(productSettingsPath(userHome), { force: true });
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

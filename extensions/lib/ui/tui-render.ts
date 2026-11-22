@@ -579,9 +579,14 @@ export function callLine(
  * aligned under it; a `… +N lines` trailer advertises ctrl+o when collapsed.
  * The text is a tool's output (a shell, an MCP server, a web page), so its
  * escape sequences and control characters are removed before it is painted.
+ * Given the row's `width`, an expanded result wraps its long lines under the
+ * elbow instead of being cut at the edge: ctrl+o shows the whole text.
  */
-export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, opts: { maxCollapsed?: number; hint?: string | null } = {}): string[] {
-	const { lines, hidden } = collapseLines(sanitizeDisplayText(text), expanded, opts.maxCollapsed ?? 5);
+export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, opts: { maxCollapsed?: number; hint?: string | null; width?: number } = {}): string[] {
+	const safe = sanitizeDisplayText(text);
+	// Hard-wrapped, never word-wrapped: a tool's output is often code, whose indentation must survive any width.
+	const shown = expanded && opts.width !== undefined ? wrapPlainText(safe.replace(/\s+$/, ""), Math.max(1, opts.width - 5)).join("\n") : safe;
+	const { lines, hidden } = collapseLines(shown, expanded, opts.maxCollapsed ?? 5);
 	const color = isError ? "error" : "muted";
 	const out = lines.map((line, i) => (i === 0 ? `  ⎿  ${theme.fg(color, line)}` : `     ${theme.fg(color, line)}`));
 	if (hidden > 0) out.push(`     ${theme.fg("dim", `… +${hidden} lines${hintSuffix(hintOrDefault(opts.hint), "paren")}`)}`);
@@ -683,7 +688,7 @@ export function withResultDisplay<R extends { renderResult: (result: any, option
 				text = undefined;
 			}
 			if (text === undefined) return renderers.renderResult(result, options, theme, context);
-			return linesComponent(() => resultLines(theme, text, options.expanded, false, { hint: expandHintFor(context) }));
+			return linesComponent((width) => resultLines(theme, text, options.expanded, false, { hint: expandHintFor(context), width }));
 		},
 	};
 }
@@ -743,7 +748,7 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 				link = undefined;
 			}
 			return linesComponent((width) => {
-				const lines = resultLines(theme, text, options.expanded, context.isError, { maxCollapsed: spec.maxCollapsedLines, hint: expandHintFor(context) });
+				const lines = resultLines(theme, text, options.expanded, context.isError, { maxCollapsed: spec.maxCollapsedLines, hint: expandHintFor(context), width });
 				if (link && lines.length > 0) {
 					// Truncation drops a cut link's closing escape and leaves the
 					// hyperlink open, so a link that does not fit goes in as plain text.
@@ -780,9 +785,7 @@ export function isBlankLine(line: string): boolean {
 
 /** Indent a component's lines under a `⎿` elbow, CC-style. */
 export function elbowIndent(lines: string[]): string[] {
-	const trimmed = [...lines];
-	while (trimmed.length > 0 && isBlankLine(trimmed[0])) trimmed.shift();
-	return trimmed.map((line, i) => (i === 0 ? `  ⎿  ${line}` : `     ${line}`));
+	return trimLeadingBlankLines(lines).map((line, i) => (i === 0 ? `  ⎿  ${line}` : `     ${line}`));
 }
 
 export interface CcWrapOptions<TArgs = any> {
@@ -796,6 +799,57 @@ export interface CcWrapOptions<TArgs = any> {
 	keepBaseCall?: boolean;
 	/** A file tool: a rejection without a reason reads "User rejected <op> to <path>" (the path from `title`). */
 	rejectedAs?: RejectedFileOp;
+	/**
+	 * A successful result's one-line summary, painted (`Read 2 lines`): shown
+	 * alone under the elbow while collapsed, above the base result when
+	 * expanded. `hint` is the expand hint while collapsed, null when expanded.
+	 * Undefined leaves the base result as it is. With `keepBaseCall`, once the
+	 * call succeeds its body (edit's diff) moves from the call to under the
+	 * summary, Claude Code's order.
+	 */
+	summary?: (result: ResultView, args: TArgs | undefined, theme: ThemeLike, hint: string | null) => string | undefined;
+	/**
+	 * A short line in place of an error result while collapsed (ctrl+o shows
+	 * the whole text; the model always reads it); undefined keeps the result.
+	 * With `keepBaseCall` the call's body (an edit's failed preview) hides with it.
+	 */
+	errorLine?: (result: ResultView, args: TArgs | undefined, cwd: string | undefined) => ShortLine | undefined;
+}
+
+/** A short transcript line and its colour token (an error's, or a dim note). */
+export interface ShortLine {
+	text: string;
+	color: "error" | "dim";
+}
+
+/** The result fields the summary and short-line hooks read. */
+type ResultView = { content?: Array<{ type: string; text?: string }>; details?: unknown };
+
+/**
+ * What the call row shows of its base body, decided by the result renderer
+ * (pi runs it after the call renderer and before either renders): `keep` it,
+ * `hide` it behind a short error line, or `move` it under the summary.
+ */
+type CallBody = "keep" | "hide" | "move";
+
+/** The base call component's body: its lines without the padding and the header line ours replaces. */
+function baseCallBody(inner: TuiComponent | undefined, width: number): string[] {
+	return trimLeadingBlankLines(inner?.render(width) ?? []).slice(1);
+}
+
+/** `lines` without the blank (possibly painted) rows at the start. */
+function trimLeadingBlankLines(lines: string[]): string[] {
+	let start = 0;
+	while (start < lines.length && isBlankLine(lines[start])) start++;
+	return lines.slice(start);
+}
+
+/** `lines` without the blank (possibly painted) rows at either end. */
+function trimBlankLines(lines: string[]): string[] {
+	const head = trimLeadingBlankLines(lines);
+	let end = head.length;
+	while (end > 0 && isBlankLine(head[end - 1])) end--;
+	return head.slice(0, end);
 }
 
 /**
@@ -881,13 +935,15 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 	renderCall: (args: TArgs, theme: any, context: any) => TuiComponent;
 	renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => TuiComponent;
 } {
-	const rawTitle = (args: TArgs | undefined): string | undefined => {
+	// The option hooks run inside a render: one that throws falls back to the base row instead of breaking the transcript.
+	const orUndefined = <T>(hook: () => T | undefined): T | undefined => {
 		try {
-			return opts.title?.(args);
+			return hook();
 		} catch {
 			return undefined;
 		}
 	};
+	const rawTitle = (args: TArgs | undefined): string | undefined => orUndefined(() => opts.title?.(args));
 	const titleOf = (args: TArgs | undefined): string => {
 		const custom = rawTitle(args);
 		return summarizeArgs(custom !== undefined ? custom : args);
@@ -917,10 +973,9 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 					if (hit) return hit;
 					// The base component is a padded Box: skip its blank padding
 					// (painted lines — ANSI-aware test), then its header line —
-					// ours replaces it.
-					const lines: string[] = [...(inner.render(width) ?? [])];
-					while (lines.length > 0 && isBlankLine(lines[0])) lines.shift();
-					lines.shift();
+					// ours replaces it. A settled result may have taken the body.
+					const body: CallBody = context.isPartial ? "keep" : (context.state.ccCallBody ?? "keep");
+					const lines = body === "keep" ? baseCallBody(inner, width) : [];
 					const out = [head(), ...lines].map((line) => truncateLine(line, width));
 					if (cache.size >= 4) cache.clear();
 					cache.set(width, out);
@@ -934,12 +989,33 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 		},
 		renderResult(rawResult: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: any) {
 			const result = stripReminderBlocks(rawResult);
+			const state = context.state as { ccCallBody?: CallBody; ccInnerCall?: TuiComponent };
+			state.ccCallBody = "keep";
 			const path = rawTitle(context.args);
 			const rejected = rejectionLine(theme, result, context.isError, opts.rejectedAs && {
 				op: opts.rejectedAs,
 				path: path ? displayToolPath(path, context.cwd) : undefined,
 			});
 			if (rejected) return linesComponent(() => [rejected]);
+			if (context.isError && !options.isPartial) {
+				const short = orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
+				if (short) {
+					// The whole text, expanded, goes under the elbow too: an edit's base view
+					// would show it as the call's body and print no result.
+					state.ccCallBody = "hide";
+					if (options.expanded) {
+						const full = textContent(result);
+						return linesComponent((width) => resultLines(theme, full, true, true, { width }));
+					}
+					const line = elbowIndent([theme.fg(short.color, sanitizeDisplayText(short.text))])[0];
+					return linesComponent(() => [line]);
+				}
+			}
+			const summary = !context.isError && !options.isPartial
+				? orUndefined(() => opts.summary?.(result, context.args, theme, options.expanded ? null : expandHintFor(context)))
+				: undefined;
+			const moveBody = summary !== undefined && opts.keepBaseCall === true;
+			if (moveBody) state.ccCallBody = "move";
 			let inner: any;
 			try {
 				inner = base.renderResult?.(result, options, theme, baseContext(context, context.state.ccInnerResult));
@@ -947,10 +1023,23 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			} catch {
 				inner = undefined;
 			}
+			if (summary !== undefined) {
+				const head = elbowIndent([summary]);
+				// The moved body keeps pi's one-column pad, so four more columns put it under the summary's text.
+				if (moveBody) return linesComponent((width) => [...head, ...trimBlankLines(baseCallBody(state.ccInnerCall, Math.max(10, width - 4))).map((line) => `    ${line}`)]);
+				if (!options.expanded) return linesComponent(() => head);
+				if (!inner) {
+					// No base view to expand: the result's own text goes under the summary, as the plain fallback shows it.
+					const text = sanitizeDisplayText(textContent(result)).replace(/\s+$/, "");
+					if (!text) return linesComponent(() => head);
+					return linesComponent((width) => elbowIndent([summary, ...wrapPlainText(text, Math.max(1, width - 5)).map((line) => theme.fg("muted", line))]));
+				}
+				return linesComponent((width) => elbowIndent([summary, ...trimBlankLines(inner.render(Math.max(10, width - 5)) ?? [])]));
+			}
 			if (!inner) {
 				const text = textContent(result);
 				if (!text) return linesComponent(() => []);
-				return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, { hint: expandHintFor(context) }));
+				return linesComponent((width) => resultLines(theme, text, options.expanded, context.isError, { hint: expandHintFor(context), width }));
 			}
 			// Same memoization as the call wrapper: settled results are static.
 			const cache = new Map<number, string[]>();

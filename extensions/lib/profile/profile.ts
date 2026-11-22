@@ -40,6 +40,7 @@ import type { OptionSpec } from "../shell/read-only-options.ts";
 import { readOnlyCommandProblems, readOnlyCommandSpecs } from "../shell/product-read-only.ts";
 import type { SourceProvider } from "./sources.ts";
 import { type OpenRouterRoutingDefault, openRouterRoutingProblems } from "./openrouter-routing.ts";
+import { type ProductSandbox, productSandboxProblems } from "./product-sandbox.ts";
 import { parseToolFlags, type PiToolFilter, piRegisters, piToolFilter, piToolFilterKey } from "./pi-tool-flags.ts";
 import { launchSetsThinking, parseThinkingFlags } from "./pi-thinking-flags.ts";
 import { type ThinkingDefaults, thinkingDefaultProblems } from "./thinking-defaults.ts";
@@ -178,6 +179,7 @@ const PROFILE_FIELDS: Readonly<Record<keyof Profile, true>> = {
 	settings: true,
 	defaultThinkingLevels: true,
 	openRouterRouting: true,
+	sandbox: true,
 	sources: true,
 	globalAgentsFiles: true,
 };
@@ -236,6 +238,10 @@ export interface ResolvedProfile {
 	defaultThinkingLevels: ThinkingDefaults;
 	/** The OpenRouter routing defaults by model-id vendor (lib/request/openrouter-routing-defaults.ts). */
 	openRouterRouting: ReadonlyMap<string, OpenRouterRoutingDefault>;
+	/** The sandbox's starting settings and lock (lib/profile/product-sandbox.ts); absent when the profile declares none. */
+	sandbox?: ProductSandbox;
+	/** The user's switches that tried to turn a locked sandbox's feature off and were ignored, one line each; absent when none did. */
+	sandboxOffIgnored?: readonly string[];
 	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
 	user?: UserProfile;
 }
@@ -337,6 +343,13 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
 	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
+	// A locked sandbox (decisions/sandbox.md) stays on: the user's off-switches for it are ignored, and listed where the lock's other ignored settings are.
+	const sandboxOffIgnored: string[] = [];
+	if (profile.sandbox?.locked === true && profile.features.sandbox !== false && featureMap.sandbox === false) {
+		featureMap.sandbox = true;
+		if (envOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${envName("FEATURES_OFF")}`);
+		if (user?.featuresOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in the featuresOff of the profile "${user.name}"`);
+	}
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
 	for (const name of [...envTools, ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
@@ -371,6 +384,9 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 	// The effort feature applies the levels: declared with it off, they would never take effect.
 	if (profile.features.effort === false && Object.keys(profile.defaultThinkingLevels ?? {}).length > 0) problems.push(`it declares defaultThinkingLevels but turns off "effort", the feature that applies them`);
 	problems.push(...openRouterRoutingProblems(profile.openRouterRouting ?? {}));
+	problems.push(...productSandboxProblems(profile.sandbox));
+	// The sandbox feature starts the sandbox: declared with it off, the block would never take effect.
+	if (profile.features.sandbox === false && profile.sandbox !== undefined) problems.push(`it declares a sandbox block but turns off "sandbox", the feature that runs it`);
 	if (problems.length > 0) throw new Error(`Invalid profile: ${problems.join("; ")}.`);
 	const features = enabledFeatures(featureMap);
 	const disabledTools = new Set([...tools].filter(([, sw]) => sw.enabled === false).map(([name]) => name));
@@ -424,6 +440,8 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		settings: new Map(Object.entries(profile.settings ?? {})),
 		defaultThinkingLevels: { ...profile.defaultThinkingLevels },
 		openRouterRouting: new Map(Object.entries(profile.openRouterRouting ?? {})),
+		...(profile.sandbox ? { sandbox: profile.sandbox } : {}),
+		...(sandboxOffIgnored.length > 0 ? { sandboxOffIgnored } : {}),
 		...(user ? { user } : {}),
 	};
 }

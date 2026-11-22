@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import brandingExtension from "../../extensions/ui/branding/index.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/ui/argument-hints.ts";
+import { EDITOR_KEYS_CHANNEL, type EditorKeysQuery } from "../../extensions/lib/ui/editor-conveniences.ts";
 import { KEEP_DECLINED_KEY } from "../../extensions/ui/branding/compaction-keep.ts";
 import { KEEP_NO, KEEP_YES } from "../../extensions/lib/app/compaction-keep.mjs";
 import { TURN_OFF_YES } from "../../extensions/lib/app/replaced-builtins.mjs";
@@ -123,6 +124,46 @@ describe("branding session_start", () => {
 		expect(typeof factory).toBe("function");
 		// The hint listener exists even though the banner code never ran.
 		expect(() => pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" })).not.toThrow();
+	});
+
+	it("shapes the command menu and answers /help with the installed editor's own keys", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "branding-"));
+		dirs.push(agentDir);
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		vi.stubEnv(envName("NO_BANNER"), "1");
+		const { pi, fire } = fakePi();
+		brandingExtension(pi as never);
+		let factory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
+		let wrap: ((provider: unknown) => { getSuggestions: (...args: unknown[]) => Promise<{ items: { value: string; label: string; description?: string }[] } | null> }) | undefined;
+		const ctx = {
+			hasUI: true,
+			mode: "tui",
+			cwd: agentDir,
+			ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: (f: typeof factory) => (factory = f), addAutocompleteProvider: (w: typeof wrap) => (wrap = w), notify: () => {}, setTitle: () => {} },
+		};
+		fire("session_start", ctx);
+		// pi's own menu order and source tags; branding's wrapper is the innermost.
+		const base = {
+			getSuggestions: async () => ({ prefix: "/", items: [{ value: "settings", label: "settings", description: "Open settings menu" }, { value: "btw", label: "btw", description: "[t] Side question" }] }),
+			applyCompletion: () => ({ lines: [""], cursorLine: 0, cursorCol: 0 }),
+		};
+		const menu = await wrap?.(base).getSuggestions(["/"], 0, 1, {});
+		expect(menu?.items).toEqual([
+			{ value: "btw", label: "/btw", description: "Side question" },
+			{ value: "settings", label: "/settings", description: "Open settings menu" },
+		]);
+		const ask = () => {
+			const query: EditorKeysQuery = {};
+			pi.events.emit(EDITOR_KEYS_CHANNEL, query);
+			return query.keys;
+		};
+		// Nothing answers until pi builds the editor.
+		expect(ask()).toBeUndefined();
+		const keybindings = { matches: () => false, getResolvedBindings: () => ({}) };
+		factory?.({ requestRender: () => {}, terminal: { rows: 40, columns: 100 } }, { borderColor: (t: string) => t, selectList: {} }, keybindings);
+		expect(ask()).toEqual({ clearInput: true, stash: "ctrl+s", historySearch: "ctrl+r" });
+		fire("session_shutdown", ctx);
+		expect(ask()).toBeUndefined();
 	});
 });
 

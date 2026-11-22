@@ -11,7 +11,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { toolsInUse } from "../../extensions/lib/request/deferred.ts";
 import type { ToldFact } from "../../extensions/lib/request/ledger/records.ts";
 import { pluginRoot } from "../../extensions/lib/plugins/plugin-root.ts";
-import { REMINDER_CHANNEL, type RenderRequest, toldBlockFact as toldFact } from "../../extensions/lib/request/reminders.ts";
+import { REMINDER_CHANNEL, type RenderRequest, STACK_QUERY_CHANNEL, type StackQuery, toldBlockFact as toldFact } from "../../extensions/lib/request/reminders.ts";
+import { recordUsage } from "../../extensions/lib/plugins/usage-tracker.ts";
 import { projectConfigDir } from "../../extensions/lib/profile/sources.ts";
 import { setSkillState } from "../../extensions/lib/plugins/skill-overrides.ts";
 import { listableSkillNames } from "../../extensions/tools/skill/announce.ts";
@@ -110,6 +111,34 @@ describe("skills listing", () => {
 			expect(result.content[0].text).toBe(skillResultText.userOnly("beta"));
 		} finally {
 			setSkillState(pluginRoot(join(root, "agent")), "project:beta", "on");
+		}
+	});
+
+	it("lets /context's preview keep no usage snapshot: the first prompt ranks by the usage it finds", async () => {
+		// A budget one description short of the first prompt's whole listing: alpha or beta keeps its description, the more-used one.
+		const usageRoot = pluginRoot(join(root, "agent"));
+		const listingOf = (reminders: Array<Reminder & { facts?: ToldFact[] }>) => reminders.filter((r) => r.key === "skills" && r.placement === "first-prepend").at(-1)?.text;
+		const reference = await mount();
+		await reference.turn([alpha, beta]);
+		const full = listingOf(reference.reminders)?.split("\n\n").slice(1).join("\n\n") ?? "";
+		vi.stubEnv("SLASH_COMMAND_TOOL_CHAR_BUDGET", String(full.length - ": The beta skill".length));
+		try {
+			const queried = await mount();
+			const query: StackQuery = { ctx: queried.ctx, stack: [] };
+			queried.fake.events.emit(STACK_QUERY_CHANNEL, query);
+			expect(query.stack?.some((entry) => entry.key === "skills")).toBe(true);
+			// Used between /context and the first prompt.
+			recordUsage(usageRoot, "skill", "beta");
+			await queried.turn([alpha, beta]);
+			const plain = await mount();
+			await plain.turn([alpha, beta]);
+			expect(listingOf(queried.reminders)).toContain("- beta: The beta skill");
+			expect(listingOf(queried.reminders)).not.toContain("- alpha: The alpha skill");
+			expect(listingOf(queried.reminders)).toBe(listingOf(plain.reminders));
+		} finally {
+			rmSync(join(usageRoot, "usage.json"), { force: true });
+			vi.unstubAllEnvs();
+			vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
 		}
 	});
 

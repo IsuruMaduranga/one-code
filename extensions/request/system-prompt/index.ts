@@ -30,7 +30,7 @@ import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../lib/context/git-status.ts";
 import { interactiveSessionNote, oneShotSessionNote, sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
 import { sessionModelTier } from "../../lib/models/session-model-tier.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, toldBlockFact } from "../../lib/request/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, STACK_QUERY_CHANNEL, type StackQuery, toldBlockFact } from "../../lib/request/reminders.ts";
 import { privateSessionScratchpadDir } from "../../lib/core/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { totalTokensBlock, turnTokenBudget } from "../../lib/context/budget.ts";
@@ -112,8 +112,10 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		}
 		return cachedEnv;
 	};
+	/** The environment for `cwd` without filling the cache: /context asks before the first turn and must not change what it sends. */
+	const peekEnvironment = (cwd: string): EnvironmentInfo => (cachedEnv && cachedKey === cwd ? cachedEnv : collectEnvironment(cwd));
 
-	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
+	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext, env: (cwd: string) => EnvironmentInfo = environment): string => {
 		const tier = requestTier();
 		// The same constant the context-budget extension puts on every user
 		// message, and only while that extension runs.
@@ -123,7 +125,7 @@ function systemPromptExtension(pi: ExtensionAPI) {
 		const appended = [options.appendSystemPrompt, user?.appendSystemPrompt].filter(Boolean).join("\n\n");
 		if (user?.systemPrompt !== undefined) return [user.systemPrompt, appended].filter(Boolean).join("\n\n");
 		if (user?.appendSystemPrompt !== undefined) options = { ...options, appendSystemPrompt: appended };
-		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled() && toolLive("task_create"), [...extraSections.values()], view);
+		return buildClaudeCodeSystemPrompt(options, env(ctx.cwd), tier, totalTokensLine, taskToolsEnabled() && toolLive("task_create"), [...extraSections.values()], view);
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the
@@ -131,13 +133,14 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	// neither, as before). Re-queued per turn under
 	// fixed keys, so the text changes only when the facts do: a model switch
 	// changes the model line, and the new model reads its own cache anyway.
+	const environmentText = (env: EnvironmentInfo) => environmentBlock({ ...env, scratchpadDir: scratchpad, workspaceDirs });
 	pi.on("turn_start", (_event, ctx) => {
 		// A first turn opened from idle has no options yet and still gets them, so
 		// message 1 never gains them later.
 		if (lastOptions?.customPrompt) return;
 		const env = environment(ctx.cwd);
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: environmentBlock({ ...env, scratchpadDir: scratchpad, workspaceDirs }),
+			text: environmentText(env),
 			key: "environment",
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.environment,
@@ -163,6 +166,18 @@ function systemPromptExtension(pi: ExtensionAPI) {
 				order: CONTEXT_ORDER.modelLine,
 			});
 		}
+	});
+
+	// /context before the first turn: the two blocks turn_start will queue, built without queueing them or caching the environment.
+	pi.events.on(STACK_QUERY_CHANNEL, (data) => {
+		const query = data as StackQuery;
+		const ctx = query.ctx as (ExtensionContext & { getSystemPromptOptions?: () => BuildSystemPromptOptions }) | undefined;
+		if (!ctx || !query.stack || query.stack.some((entry) => entry.key === "environment")) return;
+		// Before the first prompt no options are kept: a launch's custom prompt shows in pi's base options (a command's ctx has them).
+		const customPrompt = lastOptions ? lastOptions.customPrompt : ctx.getSystemPromptOptions?.().customPrompt;
+		if (customPrompt) return;
+		query.stack.push({ key: "environment", text: environmentText(peekEnvironment(ctx.cwd)), order: CONTEXT_ORDER.environment });
+		if (ctx.model) query.stack.push({ key: "model-line", text: modelLine(ctx.model), order: CONTEXT_ORDER.modelLine });
 	});
 
 	// Inside an epoch, what changed since message 1 was rendered goes on the tail.
@@ -218,9 +233,15 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	});
 
 	// A fork inherits this prompt, not pi's (lib/ui/prompt-options.ts).
+	// Before the first prompt, /context passes pi's base options: the prompt that
+	// prompt will carry, built without keeping the options or caching the environment.
 	pi.events.on(SYSTEM_PROMPT_REQUEST_CHANNEL, (data) => {
 		const request = data as SystemPromptRequest;
-		const prompt = nextRequestPrompt(request.ctx as ExtensionContext);
+		const ctx = request.ctx as ExtensionContext;
+		const base = !lastOptions ? (request.options as BuildSystemPromptOptions | undefined) : undefined;
+		let prompt: string | undefined;
+		if (!base) prompt = nextRequestPrompt(ctx);
+		else if (!base.customPrompt) prompt = buildPrompt(base, ctx, peekEnvironment);
 		if (prompt !== undefined) request.prompt = prompt;
 	});
 }

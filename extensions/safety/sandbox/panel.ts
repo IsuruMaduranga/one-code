@@ -208,20 +208,21 @@ export function applySandboxPick(file: Record<string, unknown>, pick: SandboxPic
  * on or off waits for the next start.
  */
 export function sandboxPickOutcome(pick: SandboxPick, running: boolean, loaded: SandboxSettings): string {
+	const lock = "the product locks the sandbox's settings";
+	const locked = loaded.product?.locked === true;
 	if (pick.tab === "overrides") {
 		if (pick.value === "strict") return "Strict sandbox mode: no command the model runs leaves the sandbox, except your excluded commands.";
-		return loaded.allowUnsandboxedCommands
-			? "Unsandboxed fallback allowed: the model may ask to run a command outside the sandbox, through the permission gate."
-			: "Saved, but another settings file sets sandbox.allowUnsandboxedCommands to false, so strict sandbox mode stays.";
+		if (loaded.allowUnsandboxedCommands) return "Unsandboxed fallback allowed: the model may ask to run a command outside the sandbox, through the permission gate.";
+		return locked ? `Saved, but ${lock}, so strict sandbox mode stays.` : "Saved, but another settings file sets sandbox.allowUnsandboxedCommands to false, so strict sandbox mode stays.";
 	}
 	const wanted = pick.value !== "off";
-	if (loaded.enabled !== wanted) return wanted ? "Saved, but the sandbox stays off." : "Saved, but another settings file turns the sandbox on, so it stays on.";
+	if (loaded.enabled !== wanted) return wanted ? "Saved, but the sandbox stays off." : locked ? `Saved, but ${lock}, so it stays on.` : "Saved, but another settings file turns the sandbox on, so it stays on.";
 	const restart = loaded.enabled !== running ? ` The sandbox turns ${wanted ? "on" : "off"} at the next start.` : "";
 	if (!wanted) return `No sandbox.${restart}`;
 	if (pick.value === "auto-allow") {
 		return loaded.autoAllowBashIfSandboxed
 			? `Sandbox with auto-allow: a sandboxed Bash command runs without a prompt in default and acceptEdits modes.${restart}`
-			: `Saved, but another settings file turns auto-allow off, so sandboxed commands keep their prompts.${restart}`;
+			: `Saved, but ${locked ? lock : "another settings file turns auto-allow off"}, so sandboxed commands keep their prompts.${restart}`;
 	}
 	return loaded.autoAllowBashIfSandboxed
 		? `Saved, but another settings file turns auto-allow on, so sandboxed Bash commands still run without a prompt.${restart}`

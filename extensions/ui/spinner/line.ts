@@ -27,13 +27,16 @@ export function estimateTokens(responseChars: number): number {
 }
 
 /**
- * `Verb… (elapsed · ↓ N tokens)` — the token part appears once anything has
- * streamed, formatted compactly the way CC's formatNumber does (448, 1.3k).
+ * `Verb… (elapsed · ↓ N tokens · thought for Ns)`. The token part appears
+ * once anything has streamed, formatted compactly the way CC's formatNumber
+ * does (448, 1.3k); `thought` (lib/ui/thinking-clock.ts) closes it, in the
+ * order a Claude Code capture shows.
  */
-export function composeWorkingMessage(input: { verb: string; elapsedMs: number; responseChars: number }): string {
+export function composeWorkingMessage(input: { verb: string; elapsedMs: number; responseChars: number; thought?: string }): string {
 	const parts = [formatDuration(0, input.elapsedMs)];
 	const tokens = estimateTokens(input.responseChars);
 	if (tokens > 0) parts.push(`↓ ${formatTokenCount(tokens)} tokens`);
+	if (input.thought) parts.push(input.thought);
 	return `${input.verb}… (${parts.join(" · ")})`;
 }
 

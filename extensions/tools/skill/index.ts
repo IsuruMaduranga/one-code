@@ -28,7 +28,7 @@ import { pluginRoot } from "../../lib/plugins/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../../lib/plugins/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../../lib/ui/prompt-options.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, STACK_QUERY_CHANNEL, type StackQuery } from "../../lib/request/reminders.ts";
 import {
 	nextSkillState,
 	readSkillStates,
@@ -199,13 +199,13 @@ function skillExtension(pi: ExtensionAPI) {
 	 * the file, since pi's own section is dropped from every prompt below.
 	 * `skills` is the whole index or, for a later notice, only the new ones.
 	 */
-	const listingText = (skills: IndexedSkill[]): string | undefined => {
+	const listingText = (skills: IndexedSkill[], retain = true): string | undefined => {
 		const tools = pi.getActiveTools();
 		if (!tools.includes("skill")) {
 			const lines = readableSkillLines(skills);
 			return lines && skillResultText.readableListing({ lines, reader: tools.includes("read") ? "read" : "shell" });
 		}
-		const listing = describe(skills);
+		const listing = describe(skills, retain);
 		return listing === undefined ? undefined : `${skillResultText.listingHeader}\n\n${listing}`;
 	};
 	const listableNow = (skills: IndexedSkill[]) => listableSkillNames(skills, !pi.getActiveTools().includes("skill"));
@@ -236,6 +236,14 @@ function skillExtension(pi: ExtensionAPI) {
 		if (typeof event.systemPrompt !== "string") return;
 		const stripped = withoutPiSkillsBlock(event.systemPrompt);
 		return stripped === event.systemPrompt ? undefined : { systemPrompt: stripped };
+	});
+	// /context before the first prompt: the listing that prompt will carry, built without announcing it.
+	pi.events.on(STACK_QUERY_CHANNEL, (data) => {
+		const query = data as StackQuery;
+		if (prompted || !query.stack || query.stack.some((entry) => entry.key === "skills")) return;
+		// Not retained: the usage the preview reads must not become the snapshot the first prompt's listing ranks by.
+		const text = listingText(index((query.ctx as { cwd?: string } | undefined)?.cwd ?? sessionCwd), false);
+		if (text) query.stack.push({ key: "skills", text, order: CONTEXT_ORDER.skills });
 	});
 	// The first turn a background completion opens (lib/ui/prompt-options.ts)
 	// carries the same listing a typed first prompt would.
@@ -390,10 +398,15 @@ function skillExtension(pi: ExtensionAPI) {
 	 */
 	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
 
-	/** The listing, within Claude Code's budget for the session model's context window. */
-	const describe = (source: IndexedSkill[] = index()) => {
-		sessionUsage ??= { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
-		const { usage, now } = sessionUsage;
+	/**
+	 * The listing, within Claude Code's budget for the session model's context
+	 * window. `retain: false` (a preview) reads usage without keeping it as the
+	 * session's snapshot.
+	 */
+	const describe = (source: IndexedSkill[] = index(), retain = true) => {
+		const snapshot = sessionUsage ?? { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
+		if (retain) sessionUsage = snapshot;
+		const { usage, now } = snapshot;
 		const skills = source.map((skill) => ({
 			...skill,
 			bundled: isBundled(skill.path),
@@ -751,7 +764,8 @@ function skillExtension(pi: ExtensionAPI) {
 		const skills = skillsOnly(ctx.cwd);
 		registerSkillCommands(ctx.cwd, skills);
 		// pi lists every skill a second time as `/skill:<name>`; drop that entry
-		// where the bare command exists (withoutDuplicateSkillCommands).
+		// where the bare command exists (withoutDuplicateSkillCommands). The
+		// menu's Claude Code shape is branding's wrapper, beneath this one.
 		if (ctx.hasUI && ctx.mode === "tui") {
 			ctx.ui.addAutocompleteProvider((current) => ({
 				...current,

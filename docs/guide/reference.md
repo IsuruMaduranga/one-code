@@ -53,9 +53,11 @@ that explains it.
 | `/loop <task>` | Repeat a task, letting the model choose the pace. | |
 | `/loop`, `/loop <interval>` | Run the autonomous check, or the tasks in `.claude/loop.md`, on a loop. | |
 | `/tools-deferred` | List deferred tools and whether each is loaded. | [Tools](tools.md#eager-and-deferred-tools) |
+| `/context` | Show what fills the context window: a grid and an estimate by category, then the tools, instruction files, and skills that take the space. It runs no model call; its text goes to the model with your next prompt, like other command output. | [The context window](sessions-and-context.md#the-context-window) |
 | `/init` | Have the model write a `CLAUDE.md` for the project. | [CLAUDE.md](bring-your-claude-code-setup.md#project-instructions-claudemd) |
 | `/clear` | Start a new session (pi's `/new`); the model is told. | [Sessions](sessions-and-context.md#start-over) |
 | `/exit` | Quit (pi's `/quit`). | |
+| `/help` | Open the help panel: the shortcuts, then the command list in tabs. | [Keyboard shortcuts](terminal-interface.md#keyboard-shortcuts) |
 
 ### pi commands
 
@@ -94,8 +96,14 @@ These come from pi and are available in every One Code session.
 | **↓** (empty editor) | Focus the panel below the editor: background shells, then subagents, then workflows. |
 | **ctrl+x** then **ctrl+k**, twice | Stop every running background agent. Works from the prompt; the first press asks, a second within three seconds stops them. |
 | **x** | Stop the selected agent, shell, or workflow (in a panel). |
+| **?** (empty prompt) | Show the shortcuts under the prompt. The next key closes it. A pasted **?** is text. |
+| **Esc** twice | Clear what you typed in the prompt. It doesn't apply while the model works or a `!` command runs, with a menu open, or on a line that starts with **!**. |
+| **ctrl+s** | Stash the prompt and empty the editor. The stash comes back after your next submit, or when you press **ctrl+s** again on an empty prompt. |
+| **ctrl+r** | Search earlier prompts: type to narrow, **ctrl+r** again for an older match, **Esc** or **Tab** to keep the match, **ctrl+c** to put back what you had. |
 | **Esc** | Leave a panel, or cancel a dialog. |
 | **ctrl+c** | Close any panel. |
+
+**ctrl+s** and **ctrl+r** stay with pi when you bind them to a pi action.
 
 Panel-specific keys are listed in
 [The terminal interface](terminal-interface.md#panels-opened-by-commands).

@@ -21,7 +21,12 @@
  * (write-render.ts): a preview of the content or the diff while it waits, then
  * "Wrote N lines" or "Added N lines, removed M lines"; to show an overwrite's
  * diff afterwards, its execution reads the old file first and records the diff
- * on the result's details, which never reach the model.
+ * on the result's details, which never reach the model. A finished edit reads
+ * the same way: its summary, then the diff moved from the call under it. Read
+ * and the search tools show Claude Code's one-line summary ("Read 2 lines",
+ * "Found 3 files"), and a failed file tool the harness can classify shows its
+ * short line ("File must be read first"); ctrl+o shows the whole result
+ * (lib/ui/result-summary-files.ts).
  *
  * grep/find/ls stay gated: registering them does not bypass the
  * search-tools extension, which reconciles the active-tool list on
@@ -45,9 +50,22 @@ import {
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { type DescriptionForm, registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
-import { ccWrapBuiltinRenderers, type RejectedFileOp } from "../../lib/ui/tui-render.ts";
+import { type CcWrapOptions, ccWrapBuiltinRenderers, type RejectedFileOp, textContent } from "../../lib/ui/tui-render.ts";
+import {
+	FILE_ERROR_CHANNEL,
+	type FileErrorOp,
+	type FileErrorQuery,
+	fileErrorKindOf,
+	fileErrorLine,
+	lineNoun,
+	PI_ABORTED_TEXT,
+	readSummary,
+	type SearchTool,
+	searchCount,
+	searchSummaryWords,
+} from "../../lib/ui/result-summary-files.ts";
 import type { ToolStyleText } from "./text.ts";
-import { createWriteRenderers, WRITE_DIFF_MAX_BYTES, type WriteRenderDeps, writeDetails } from "./write-render.ts";
+import { createWriteRenderers, updateSummary, WRITE_DIFF_MAX_BYTES, type WriteRenderDeps, writeDetails } from "./write-render.ts";
 
 // The concrete definitions are each strongly typed to their own schema; this
 // extension treats them uniformly, so the spec is deliberately loose. Every
@@ -65,14 +83,61 @@ interface BuiltinSpec {
 	write?: boolean;
 	/** A description in place of pi's, by the session's description form; `base` is pi's own. */
 	description?: (form: DescriptionForm, base: string) => string;
+	/** The transcript's result rows: a summary line, and a short line for an error (lib/ui/result-summary-files.ts). */
+	rows?: Pick<CcWrapOptions, "summary" | "errorLine">;
+}
+
+type Rows = NonNullable<BuiltinSpec["rows"]>;
+
+/** `Found 3 files (ctrl+o to expand)`: a search's count, with the hint while there is something to expand. */
+function searchRows(tool: SearchTool): Rows {
+	return {
+		summary: (result, _args, theme, hint) => {
+			const count = searchCount(tool, result);
+			const { verb, noun } = searchSummaryWords(tool, count);
+			return `${verb} ${theme.bold(String(count))} ${noun}${count > 0 && hint ? theme.fg("dim", ` (${hint})`) : ""}`;
+		},
+	};
+}
+
+/**
+ * A failed file tool's short line: classified by the file-tracker, through
+ * the kind it put on an executed call's details, or by asking it about a
+ * call it refused. An unclassified failure keeps its words. Each `op` is
+ * also the name of pi's tool that performs it.
+ */
+function fileErrorRows(pi: ExtensionAPI, op: FileErrorOp): Rows["errorLine"] {
+	return (result, args, cwd) => {
+		const text = textContent(result);
+		if (text === PI_ABORTED_TEXT) return { text, color: "error" };
+		let kind = fileErrorKindOf(result.details);
+		if (!kind) {
+			const query: FileErrorQuery = { toolName: op, text, args, cwd: cwd ?? process.cwd() };
+			pi.events.emit(FILE_ERROR_CHANNEL, query);
+			kind = query.kind;
+		}
+		return fileErrorLine(op, kind);
+	};
 }
 
 const asSpecCreate = (create: (cwd: string) => unknown): BuiltinSpec["create"] =>
 	create as BuiltinSpec["create"];
 
-function builtins(text: ToolStyleText): BuiltinSpec[] {
+function builtins(text: ToolStyleText, pi: ExtensionAPI): BuiltinSpec[] {
 	return [
-		{ label: "Read", create: asSpecCreate(createReadToolDefinition), title: (a) => a?.path as string | undefined },
+		{
+			label: "Read",
+			create: asSpecCreate(createReadToolDefinition),
+			title: (a) => a?.path as string | undefined,
+			rows: {
+				summary: (result, args, theme) => {
+					const read = readSummary(result, args as { limit?: unknown } | undefined);
+					if (!read) return undefined;
+					return read.kind === "image" ? "Read image" : `Read ${theme.bold(String(read.count))} ${lineNoun(read.count)}`;
+				},
+				errorLine: fileErrorRows(pi, "read"),
+			},
+		},
 		{
 			label: "Write",
 			create: asSpecCreate(createWriteToolDefinition),
@@ -80,6 +145,7 @@ function builtins(text: ToolStyleText): BuiltinSpec[] {
 			rejectedAs: "write",
 			write: true,
 			description: (form) => text.writeDescription(form),
+			rows: { errorLine: fileErrorRows(pi, "write") },
 		},
 		{
 			label: "Update",
@@ -88,10 +154,18 @@ function builtins(text: ToolStyleText): BuiltinSpec[] {
 			keepBaseCall: true,
 			rejectedAs: "update",
 			description: (_form, base) => text.editDescription({ base }),
+			rows: {
+				// pi's edit result carries the display diff it showed; the summary counts its lines.
+				summary: (result, _args, theme) => {
+					const diff = (result.details as { diff?: unknown } | undefined)?.diff;
+					return typeof diff === "string" ? updateSummary(theme, diff) : undefined;
+				},
+				errorLine: fileErrorRows(pi, "edit"),
+			},
 		},
-		{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined },
-		{ label: "Find", create: asSpecCreate(createFindToolDefinition), title: (a) => a?.pattern as string | undefined },
-		{ label: "LS", create: asSpecCreate(createLsToolDefinition), title: (a) => (a?.path as string | undefined) ?? "." },
+		{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined, rows: searchRows("grep") },
+		{ label: "Find", create: asSpecCreate(createFindToolDefinition), title: (a) => a?.pattern as string | undefined, rows: searchRows("find") },
+		{ label: "LS", create: asSpecCreate(createLsToolDefinition), title: (a) => (a?.path as string | undefined) ?? ".", rows: searchRows("ls") },
 	];
 }
 
@@ -113,10 +187,10 @@ const readBefore: WriteRenderDeps["readBefore"] = async (raw, cwd) => {
 const writeDeps: WriteRenderDeps = { readBefore, diff: (before, after) => generateDiffString(before, after).diff };
 
 function toolStyleExtension(pi: ExtensionAPI) {
-	for (const spec of builtins(requireText("toolStyle"))) {
+	for (const spec of builtins(requireText("toolStyle"), pi)) {
 		const base = spec.create(process.cwd());
 		const forCwd = perCwd(spec.create);
-		const renderers = ccWrapBuiltinRenderers(spec.label, base, { title: spec.title, keepBaseCall: spec.keepBaseCall, rejectedAs: spec.rejectedAs });
+		const renderers = ccWrapBuiltinRenderers(spec.label, base, { title: spec.title, keepBaseCall: spec.keepBaseCall, rejectedAs: spec.rejectedAs, ...spec.rows });
 
 		const definition = {
 			name: base.name,

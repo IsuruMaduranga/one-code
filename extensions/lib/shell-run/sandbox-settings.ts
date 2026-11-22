@@ -24,6 +24,9 @@ import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settin
 import { EDIT_TOOLS, hasUnescapedWildcard, type PermissionRule, parseRules, pathGlobRegex, unescapeLiteral } from "../rules/matcher.ts";
 import { loadPermissionSettings } from "../rules/settings.ts";
 import { walkTree } from "../shell/paths.ts";
+import { tildify } from "../profile/paths.ts";
+import { activeProfile } from "../profile/profile.ts";
+import type { ProductSandbox } from "../profile/product-sandbox.ts";
 
 export interface SandboxSettings {
 	enabled: boolean;
@@ -47,6 +50,13 @@ export interface SandboxSettings {
 	 * Turned into sandbox paths per command directory by {@link ruleDenyPaths}.
 	 */
 	denyRulePaths: { write: string[]; read: string[] };
+	/**
+	 * Present when the profile supplies the starting settings
+	 * (`Profile.sandbox`): `locked` when no settings file may loosen them, and
+	 * what the lock ignored, one `sandbox.<key> in <file>` each. Absent for a
+	 * profile with no sandbox block.
+	 */
+	product?: { locked: boolean; ignored: string[] };
 }
 
 export const SANDBOX_OFF: SandboxSettings = {
@@ -66,8 +76,13 @@ const add = (into: string[], more: string[]): void => {
 	for (const entry of more) if (!into.includes(entry)) into.push(entry);
 };
 
-/** One file's `sandbox` block laid over `settings`; `repo` says the repository controls the file. */
-export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, repo: boolean): SandboxSettings {
+/**
+ * One file's `sandbox` block laid over `settings`; `repo` says the repository
+ * controls the file. `locked` (the profile's lock) keeps every widening key
+ * out of any file; `failIfUnavailable`, which only refuses commands, still
+ * counts from a file the repository does not control.
+ */
+export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, repo: boolean, locked = false): SandboxSettings {
 	const sandbox = record(block);
 	const filesystem = record(sandbox.filesystem);
 	const network = record(sandbox.network);
@@ -85,9 +100,10 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
 	add(next.filesystem.denyRead, strings(filesystem.denyRead));
 	add(next.network.deniedDomains, strings(network.deniedDomains));
 	if (repo) return next;
-	// Widening, and the choices that are the user's alone.
-	if (sandbox.enabled === false) next.enabled = false;
+	// The choices that are the user's alone, then widening.
 	if (sandbox.failIfUnavailable === true) next.failIfUnavailable = true;
+	if (locked) return next;
+	if (sandbox.enabled === false) next.enabled = false;
 	if (sandbox.autoAllowBashIfSandboxed === true) next.autoAllowBashIfSandboxed = true;
 	add(next.excludedCommands, strings(sandbox.excludedCommands));
 	add(next.filesystem.allowWrite, strings(filesystem.allowWrite));
@@ -104,14 +120,50 @@ export function mergeSandboxBlock(settings: SandboxSettings, block: unknown, rep
  * turns it off. The deny rules are the permission gate's own
  * (`loadPermissionSettings`), from every file: a deny only restricts, so a
  * repository's counts too.
+ *
+ * The files merge over the profile's block (`product`, the active profile's
+ * by default), itself laid over {@link SANDBOX_OFF} as a file the repository
+ * does not control: it is the product's own default. A locked block keeps
+ * every widening key out of every file, and each key the lock kept out of a
+ * file the repository does not control is listed for the user, after the feature switches that tried to turn a locked sandbox off (`switchesIgnored`).
  */
-export function loadSandboxSettings(cwd: string, home: string): SandboxSettings {
-	let settings = SANDBOX_OFF;
+export function loadSandboxSettings(
+	cwd: string,
+	home: string,
+	product: ProductSandbox | undefined = activeProfile().sandbox,
+	switchesIgnored: readonly string[] = activeProfile().sandboxOffIgnored ?? [],
+): SandboxSettings {
+	const locked = product?.locked === true;
+	let settings = product ? mergeSandboxBlock(SANDBOX_OFF, product, false) : SANDBOX_OFF;
+	// The feature switches the profile kept on for the lock (lib/profile/profile.ts), listed first.
+	const ignored: string[] = locked ? [...switchesIgnored] : [];
 	for (const source of settingsSources(cwd, home)) {
 		const block = readSettingsFile(source.path)?.sandbox;
-		if (block !== undefined) settings = mergeSandboxBlock(settings, block, isRepoFile(source));
+		if (block === undefined) continue;
+		const repo = isRepoFile(source);
+		const next = mergeSandboxBlock(settings, block, repo, locked);
+		if (locked) for (const key of lockedOutKeys(next, mergeSandboxBlock(settings, block, repo))) ignored.push(`sandbox.${key} in ${tildify(source.path, home)}`);
+		settings = next;
 	}
-	return { ...settings, denyRulePaths: denyRulePaths(parseRules(loadPermissionSettings(cwd, home).deny)) };
+	return { ...settings, denyRulePaths: denyRulePaths(parseRules(loadPermissionSettings(cwd, home).deny)), ...(product ? { product: { locked, ignored } } : {}) };
+}
+
+/**
+ * What the lock kept out of a file: the settings whose value differs between
+ * the file's locked merge and its unlocked one, by their path in a settings
+ * file's `sandbox` block (`filesystem.allowWrite`). The two merges differ only
+ * in mergeSandboxBlock's widening section, so that section is the one list of
+ * widening keys; a file the repository controls never reaches it, and differs
+ * in nothing.
+ */
+function lockedOutKeys(locked: SandboxSettings, unlocked: SandboxSettings): string[] {
+	const differs = (a: unknown, b: unknown) => JSON.stringify(a) !== JSON.stringify(b);
+	const kept = locked as unknown as Record<string, unknown>;
+	return Object.entries(unlocked).flatMap(([key, value]) =>
+		isPlainObject(value)
+			? Object.entries(value).flatMap(([inner, innerValue]) => (differs(innerValue, record(kept[key])[inner]) ? [`${key}.${inner}`] : []))
+			: differs(value, kept[key]) ? [key] : [],
+	);
 }
 
 /**

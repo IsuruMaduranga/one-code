@@ -208,4 +208,12 @@ describe("the app launcher (lib/app/create-app.mjs) applies the launcher environ
 		expect(LAUNCHER_VARS.includes(SESSION_DIR_VAR)).toBe(OWN_SESSIONS);
 		expect(profileSessionDir({}, "/home/alice")).toBe(join("/home/alice", brand.stateDir, "sessions"));
 	});
+
+	it("seeds a first run with the look later sessions have: thinking collapsed, prose flush with the tool rows", async () => {
+		const { firstRunSettings } = await import("../../extensions/lib/app/app-launch.mjs");
+		expect(firstRunSettings("onecode", {})).toEqual({ theme: "onecode", quietStartup: true, tuiMode: "fullscreen", hideThinkingBlock: true, outputPad: 0 });
+		// The pad belongs to the assistant marker: with the marker off, pi's own pad stays.
+		expect(firstRunSettings("onecode", { [envName("NO_ASSISTANT_MARKER")]: "1" })).not.toHaveProperty("outputPad");
+		expect(source).toContain("settings = firstRunSettings(brand.theme);");
+	});
 });

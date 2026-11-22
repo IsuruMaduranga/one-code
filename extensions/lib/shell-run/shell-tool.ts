@@ -28,6 +28,7 @@ import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, withResultDisplay } from "../ui/tui-render.ts";
+import { shellBlockedLine } from "../ui/result-summary-shell.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
 import { shellResultText } from "./shell-text.ts";
 
@@ -174,7 +175,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// "Took Ns" that counted permission-prompt wait disappears.
 	// A background start returns a model-facing instruction paragraph; the
 	// transcript needs one line (Claude Code: "Running in the background").
-	const wrapped = withResultDisplay(ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command }), (result, expanded) => {
+	// A guard's refusal is a paragraph to the model; the user sees what tripped it (details.blocked).
+	const errorLine = (result: { details?: unknown }) => {
+		const text = shellBlockedLine(result.details);
+		return text === undefined ? undefined : { text, color: "error" as const };
+	};
+	const wrapped = withResultDisplay(ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command, errorLine }), (result, expanded) => {
 		const details = result.details as { taskId?: string; logPath?: string } | undefined;
 		if (!details?.taskId) return undefined;
 		return expanded ? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})` : "Running in the background (↓ to manage)";
@@ -204,7 +210,8 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// input.command to `cd '<wt>' && (…)`, which would hide the real lead.
 			const originalCommand = commandToEvaluate(originalCommands, toolCallId, params.command);
 			const block = spec.guard(originalCommand, { background: params.run_in_background === true });
-			if (block) return { content: [{ type: "text" as const, text: words().blocked(block) }], isError: true, details: {} };
+			// `blocked` names the guard for the transcript's short line; details never reach the model.
+			if (block) return { content: [{ type: "text" as const, text: words().blocked(block) }], isError: true, details: { blocked: block.kind } };
 			// pi's executor takes seconds; the model-facing unit is milliseconds
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
 			// 33 hours (review T11). A command that names none gets Claude Code's

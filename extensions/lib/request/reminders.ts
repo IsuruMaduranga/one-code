@@ -243,6 +243,23 @@ export interface RenderedBlock {
 	facts?: ToldFact[];
 }
 
+/**
+ * Ask the system-reminder extension for its live `first-prepend` stack and
+ * sticky states (`StackQuery`, answered synchronously). Read only: answering
+ * renders, records and tells nothing, so a request not yet sent can be
+ * estimated (`/context`) without changing it. An owner that queues its block
+ * only when the first prompt starts (the environment block, the skills
+ * listing) adds what it would queue, without queueing it.
+ */
+export const STACK_QUERY_CHANNEL = brandedId("stack-query");
+
+export interface StackQuery {
+	/** The asking command's context (cwd, model). */
+	ctx?: unknown;
+	stack?: StackEntry[];
+	sticky?: StickyEntry[];
+}
+
 /** The RENDER_CHANNEL payload. */
 export interface RenderRequest {
 	/** True when the request opens an epoch: the live stack is rendered, so owners add nothing. */

@@ -14,7 +14,7 @@ hint line lists the keys worth knowing:
 
 | Hint | Meaning |
 |---|---|
-| `/hotkeys` | pi's full key list. |
+| `?` | On an empty prompt, show the shortcuts. `/help` has the same list with the commands. |
 | `shift+tab` | Cycle reasoning effort. |
 | `ctrl+q` (`alt+m` on Windows and WSL) | Cycle the permission mode. |
 | `ctrl+t` | Show or hide thinking blocks. |

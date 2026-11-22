@@ -96,6 +96,12 @@ describe("callLine / resultLines", () => {
 		expect(lines[2]).toContain("ctrl+o");
 	});
 
+	it("keeps a code line's indentation when an expanded result wraps on a narrow row", () => {
+		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+		const lines = resultLines(plain, "def f():\n        run()", true, false, { width: 20 });
+		expect(lines).toEqual(["  ⎿  def f():", "             run()"]);
+	});
+
 	it("uses the error color for failed results", () => {
 		expect(resultLines(theme, "boom", false, true)[0]).toBe("  ⎿  <error>boom</>");
 	});

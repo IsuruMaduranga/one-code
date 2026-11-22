@@ -35,7 +35,7 @@ import { contentHash } from "../../lib/request/ledger/wire.ts";
 import { acceptsAnthropicWire } from "../../lib/models/model-policy.ts";
 import { claudeFamily } from "../../lib/models/model-tier.ts";
 import { extensionVersion } from "../../lib/app/package-version.ts";
-import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, stickyFact, withoutSilentMessages } from "../../lib/request/reminders.ts";
+import { LiveReminders, type OneShot, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest, renderReminders, type ReminderPayload, STACK_QUERY_CHANNEL, type StackQuery, stickyFact, withoutSilentMessages } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../../lib/request/system-role.ts";
 import { contextBreakpoint } from "../../lib/request/openai-cache-breakpoints.ts";
@@ -136,6 +136,12 @@ function systemReminderExtension(pi: ExtensionAPI) {
 	});
 	pi.events.on(LEDGER_PLAN_CHANNEL, (data) => {
 		plan = data as RequestPlan;
+	});
+	// A read of the live state for /context's estimate: copies, nothing rendered or recorded.
+	pi.events.on(STACK_QUERY_CHANNEL, (data) => {
+		const query = data as StackQuery;
+		query.stack = live.stackEntries().map((entry) => ({ ...entry }));
+		query.sticky = live.stickyEntries().map((entry) => ({ ...entry }));
 	});
 
 	// A tool's empty result is normalized before anything else reads it. Read's

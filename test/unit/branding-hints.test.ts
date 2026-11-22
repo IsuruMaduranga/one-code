@@ -11,8 +11,8 @@ let renderHint: ((text: string) => string | undefined) | undefined;
 vi.mock("../../extensions/ui/branding/prompt-editor.ts", () => ({
 	PROMPT_PADDING: 2,
 	PromptEditor: class {
-		constructor(_tui: unknown, _theme: unknown, _keybindings: unknown, _marker: unknown, hint: (text: string) => string | undefined) {
-			renderHint = hint;
+		constructor(_tui: unknown, _theme: unknown, _keybindings: unknown, hooks: { hint: (text: string) => string | undefined }) {
+			renderHint = hooks.hint;
 		}
 	},
 }));

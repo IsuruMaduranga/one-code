@@ -15,8 +15,8 @@ describe("markAssistantMarkdown", () => {
 		expect(markAssistantMarkdown("")).toBe("");
 	});
 
-	// A raw prefix would demote these blocks to plain paragraphs, so they are left
-	// alone rather than corrupted.
+	// A raw prefix would demote these blocks to plain paragraphs, so the marker
+	// sits alone above them, a blank line apart, and the block is untouched.
 	it.each([
 		["heading", "## Plan"],
 		["unordered list", "- first item"],
@@ -29,8 +29,18 @@ describe("markAssistantMarkdown", () => {
 		["table row", "| a | b |"],
 		["horizontal rule", "---"],
 		["raw html", "<div>hi</div>"],
-	])("leaves a %s first line untouched", (_label, markdown) => {
-		expect(markAssistantMarkdown(markdown)).toBe(markdown);
+	])("puts the marker above a %s first line", (_label, markdown) => {
+		expect(markAssistantMarkdown(markdown)).toBe(`${ASSISTANT_MARKER}\n\n${markdown}`);
+	});
+
+	it("puts the marker above an indented code block and a link definition", () => {
+		expect(markAssistantMarkdown("    code")).toBe(`${ASSISTANT_MARKER}\n\n    code`);
+		expect(markAssistantMarkdown("[a]: https://x.test")).toBe(`${ASSISTANT_MARKER}\n\n[a]: https://x.test`);
+	});
+
+	it("keeps a block's body intact after the marker line (a fence keeps its opening line)", () => {
+		const fence = "```ts\nconst x = 1;\n```\nAfter.";
+		expect(markAssistantMarkdown(fence).split("\n").slice(2).join("\n")).toBe(fence);
 	});
 
 	it("still marks prose that merely contains markdown later", () => {

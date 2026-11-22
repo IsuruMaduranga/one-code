@@ -4,7 +4,9 @@
  * - The working line: pi's spinner becomes CC's animated asterisk (✳ frame
  *   cycle) with a random gerund verb per turn and live stats — "Hyperspacing…
  *   (10s · ↓ 448 tokens)" — updated on a 1s ticker while the model streams.
- *   Tokens are CC's estimate (streamed characters / 4).
+ *   Tokens are CC's estimate (streamed characters / 4). For 2 s after a
+ *   thinking run ends, `· thought for Ns` closes the stats
+ *   (lib/ui/thinking-clock.ts).
  *
  * - While the model waits in `yield`, the verb gives way to what it waits
  *   for: "Waiting for 1 background agent to finish… (1m 49s · ↓ 68 tokens)",
@@ -23,6 +25,7 @@
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { pendingWork, waitingForText } from "../../lib/notify/session-work.ts";
+import { ThinkingClock } from "../../lib/ui/thinking-clock.ts";
 import { safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { composeWorkingMessage, messageChars, spinnerFrames } from "./line.ts";
 import { pickVerb } from "./verbs.ts";
@@ -47,16 +50,20 @@ function spinnerExtension(pi: ExtensionAPI) {
 	let ticker: ReturnType<typeof setInterval> | undefined;
 	/** The yield calls running now, by tool call id. */
 	const waits = new Set<string>();
+	/** The last thinking run's length, for `thought for Ns`. */
+	const thinking = new ThinkingClock();
 
 	const updateWorkingMessage = () => {
 		const ctx = lastCtx;
 		if (!ctx?.hasUI || !turnStartedAt) return;
 		const waiting = waits.size > 0 ? waitingForText(pendingWork(pi.events)) : undefined;
+		const now = Date.now();
 		ctx.ui.setWorkingMessage(
 			composeWorkingMessage({
 				verb: waiting ?? verb,
-				elapsedMs: Date.now() - turnStartedAt,
+				elapsedMs: now - turnStartedAt,
 				responseChars: settledChars + messageChars(streamingMessage),
+				thought: thinking.segment(now),
 			}),
 		);
 	};
@@ -108,12 +115,21 @@ function spinnerExtension(pi: ExtensionAPI) {
 	pi.on("message_update", (event) => {
 		if (event.message.role !== "assistant") return;
 		streamingMessage = event.message;
+		// The stream's own thinking events time the run (Claude Code times its thinking mode the same way).
+		const type = event.assistantMessageEvent?.type;
+		if (type === "thinking_start") thinking.start(Date.now());
+		else if (type === "thinking_end") {
+			thinking.end(Date.now());
+			updateWorkingMessage();
+		}
 	});
 
 	pi.on("message_end", (event) => {
 		if (event.message.role === "assistant") {
 			settledChars += messageChars(event.message);
 			streamingMessage = undefined;
+			// pi ends every assistant message here, an errored one too: a thinking run it left open is over.
+			thinking.messageEnded();
 		}
 	});
 
@@ -124,6 +140,7 @@ function spinnerExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", (_event, ctx) => {
 		stopTicker();
 		waits.clear();
+		thinking.reset();
 		turnStartedAt = 0;
 		if (ctx.hasUI) ctx.ui.setWorkingMessage(); // restore pi's default for non-turn work
 	});

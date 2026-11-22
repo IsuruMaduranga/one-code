@@ -179,6 +179,16 @@ export const PI_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
 	"trust",
 ]);
 
+/** Whether a slash command exists now: one of pi's built-ins, or one of `commands` (pi's `getCommands`; a torn-down session has none). */
+export function commandExists(name: string, commands: () => readonly { name: string }[]): boolean {
+	if (PI_BUILTIN_COMMANDS.has(name)) return true;
+	try {
+		return commands().some((command) => command.name === name);
+	} catch {
+		return false;
+	}
+}
+
 /** A skill name that can be a bare slash command: one token, no `:` (plugin skills stay `<plugin>:<skill>`, as in Claude Code). */
 export function isBareCommandName(name: string): boolean {
 	return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name);

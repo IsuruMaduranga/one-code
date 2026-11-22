@@ -65,7 +65,8 @@ export function charsPerToken(piVersion: string | undefined): number {
 }
 
 const CHARS_PER_TOKEN = charsPerToken(PI_VERSION);
-const ESTIMATED_IMAGE_CHARS = 4800;
+/** The characters pi-ai counts for one image. */
+export const ESTIMATED_IMAGE_CHARS = 4800;
 const CONTEXT_SAFETY_TOKENS = 4096;
 const MIN_MAX_TOKENS = 1;
 
@@ -88,9 +89,14 @@ function estimateTextAndImageContentChars(content: string | Array<TextContent | 
 	return chars;
 }
 
+/** pi-ai's chars-per-token estimate for a count of characters. */
+export function estimateCharTokens(chars: number): number {
+	return Math.ceil(chars / CHARS_PER_TOKEN);
+}
+
 /** pi-ai's chars-per-token estimate for plain text. */
 export function estimateTextTokens(text: string): number {
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
+	return estimateCharTokens(text.length);
 }
 
 function estimateTextAndImageContentTokens(content: string | Array<TextContent | ImageContent>): number {
