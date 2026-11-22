@@ -284,10 +284,10 @@ describe("PAIRING_TABLE against its scores", () => {
 		expect(derivedPick("anthropic/claude-fable-5-2", "classifier", isTiny)).toBe("session");
 	});
 
-	it("screens Gemini 4 Argon with Gemini 4 Neon, the user's call over the rule's Hydrogen", () => {
+	it("screens Gemini 4 Argon with Gemini 4 Hydrogen, the rule's pick, with no override left", () => {
 		const isTiny = tinyInBundledCatalog();
 		expect(derivedPick("google/gemini-4-argon", "classifier", isTiny)).toBe("google/gemini-4-hydrogen");
-		expect(SCORES.overrides).toEqual([expect.objectContaining({ session: "google/gemini-4-argon", role: "classifier", pick: "google/gemini-4-neon" })]);
-		expect(PAIRING_TABLE.find((row) => row.sessions.includes("google/gemini-4-argon"))?.classifier).toBe("google/gemini-4-neon");
+		expect(SCORES.overrides).toEqual([]);
+		expect(PAIRING_TABLE.find((row) => row.sessions.includes("google/gemini-4-argon"))?.classifier).toBe("google/gemini-4-hydrogen");
 	});
 });

@@ -87,9 +87,8 @@ export const PAIRING_TABLE: readonly PairingRow[] = [
 	{ sessions: ["openai/gpt-6.1-terra", "openai/gpt-6-luna"], subagent: SESSION, classifier: SESSION },
 	// Google. Gemini 4 Hydrogen is 7.5 below Neon and 6.1 below Carbon, and above Argon, at the lowest price of the four.
 	// At low effort nothing cheaper is within 10 points of Neon, Carbon or Hydrogen (Gemini 3.8 Flash is deprecated).
-	// Argon's classifier is the user's call (2026-11-22): Neon, 44.1 at low effort and cheaper than Argon, over the rule's Hydrogen (26.9 there).
 	{ sessions: ["google/gemini-4-neon", "google/gemini-4-carbon"], subagent: "google/gemini-4-hydrogen", classifier: SESSION },
-	{ sessions: ["google/gemini-4-argon"], subagent: "google/gemini-4-hydrogen", classifier: "google/gemini-4-neon" },
+	{ sessions: ["google/gemini-4-argon"], subagent: "google/gemini-4-hydrogen", classifier: "google/gemini-4-hydrogen" },
 	{ sessions: ["google/gemini-4-hydrogen", "google/gemini-3.8-flash"], subagent: SESSION, classifier: SESSION },
 	// DeepSeek. V4.1 Flash 1017 outscores V4 Pro by 9.5 points at under a quarter of its price.
 	{ sessions: ["deepseek/deepseek-v4-pro-0813"], subagent: "deepseek/deepseek-v4.1-flash-1017", classifier: "deepseek/deepseek-v4.1-flash-1017" },

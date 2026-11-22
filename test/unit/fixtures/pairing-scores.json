@@ -1,9 +1,7 @@
 {
 	"about": "The scores behind PAIRING_TABLE (extensions/lib/models/model-pairings.ts): Artificial Analysis Intelligence Index v5 (v5.0.1 on 2026-11-15) at one decimal, as its API publishes it. max is the Max effort, else the highest effort scored; low is the Low effort; null means not measured. price is Artificial Analysis's list price, USD per million input and output tokens. deprecated marks a model Artificial Analysis lists as deprecated. Read 2026-11-22 (the Anthropic, OpenAI, Google and Alibaba rows; the other vendors' scores and marks were rechecked that day and did not change).",
 	"asOf": "2026-11-22",
-	"overrides": [
-		{"session": "google/gemini-4-argon", "role": "classifier", "pick": "google/gemini-4-neon", "why": "The user's call (2026-11-22): Argon has no low-effort score, and Hydrogen, which the maximum-effort bar picks, drops 27 points at low effort (26.9). Neon scores 44.1 at low effort and costs less than Argon. Gemini 3.8 Flash, the 2026-11-15 pick, is deprecated."}
-	],
+	"overrides": [],
 	"models": [
 		{"id": "anthropic/claude-fable-5-2", "max": 64.6, "low": 53.9, "price": [8, 40], "deprecated": false},
 		{"id": "anthropic/claude-opus-5-5", "max": 59.1, "low": 34.8, "price": [4, 20], "deprecated": false},
