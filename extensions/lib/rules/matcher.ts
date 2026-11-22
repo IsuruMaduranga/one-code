@@ -721,7 +721,10 @@ function pathPatternReading(pattern: string, subject: string, cwd: string): { gl
 	// whose backslashes would read as escapes on Windows); it matches the
 	// `C:/Users/x/…` candidate below.
 	const expandHome = (p: string) => (p === "~" ? forwardSlashes(home) : p.startsWith("~/") ? `${forwardSlashes(home)}/${p.slice(2)}` : p);
-	const glob = expandHome(spelled.startsWith("//") ? spelled.slice(1) : spelled);
+	// `./x` is `x`: the candidates are spelled without the prefix, so a pattern
+	// that kept it (`Read(./.env)`, the form Claude Code's docs write) matched nothing.
+	const plain = spelled.replace(/^(?:\.\/+)+/, "");
+	const glob = expandHome(plain.startsWith("//") ? plain.slice(1) : plain);
 	const expandedSubject = expandTilde(subject, home);
 	return { glob, absolute: isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject) };
 }

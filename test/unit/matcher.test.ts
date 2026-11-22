@@ -1547,6 +1547,16 @@ describe("an allow rule never covers a redirect outside the working space (PR #1
 // pi's file tools strip one leading `@`, convert a `file://` URL and expand `~`
 // before they open the path; the subject every rule and containment check
 // judges must be that same file.
+describe("a path pattern written with a leading ./", () => {
+	it("names the same path as the pattern without it", () => {
+		const cwd = resolve("/work");
+		for (const pattern of ["./.env", "././.env", ".env"]) expect(matchesPathPattern(pattern, join(cwd, ".env"), cwd), pattern).toBe(true);
+		expect(matchesPathPattern("./config/**", join(cwd, "config", "prod.yaml"), cwd)).toBe(true);
+		expect(matchesPathPattern("./.env", join(cwd, "sub", ".env"), cwd)).toBe(false);
+		expect(ruleMatches(parseRules(["Read(./.env)"])[0], "read", join(cwd, ".env"), cwd)).toBe(true);
+	});
+});
+
 describe("a file tool's subject is the path pi opens", () => {
 	it.each([
 		["@/etc/hosts", "/etc/hosts"],
