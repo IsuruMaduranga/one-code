@@ -40,7 +40,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { applyLauncherEnv, installMethodFor } from "./app-launch.mjs";
+import { applyLauncherEnv, firstRunSettings, installMethodFor } from "./app-launch.mjs";
 import { brand, envName, productBrand, withoutProfileFlags } from "../profile/brand.mjs";
 import { withCompactionKeepBackfilled } from "./compaction-keep.mjs";
 import { withReplacedBuiltinsOff } from "./replaced-builtins.mjs";
@@ -139,7 +139,7 @@ export async function createApp({ appVersion, corePath, argv: processArgv, resol
 			// Fullscreen (alt-screen) is the One Code look — the TUI owns the
 			// screen and exits clean. Seeded only here, so users who switch back
 			// to regular mode keep their choice.
-			settings = { theme: brand.theme, quietStartup: true, tuiMode: "fullscreen" };
+			settings = firstRunSettings(brand.theme);
 		}
 		// pi 0.85.0 made the clean fullscreen exit reachable from settings
 		// (stopInteractiveTui skips the transcript repaint and stops with

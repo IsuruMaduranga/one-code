@@ -91,6 +91,18 @@ export function applyLauncherEnv(env, { home = homedir(), appVersion, installMet
 }
 
 /**
+ * pi's settings for an agent directory that has none yet. Thinking collapsed
+ * and prose flush with the tool rows are One Code's look, and pi reads its
+ * settings before any extension loads, so the branding extension's own
+ * defaults reach only the second session: seeding them makes the first one
+ * match. The pad travels with the assistant marker, as it does there.
+ */
+export function firstRunSettings(theme, env = process.env) {
+	const flushProse = env[envName("NO_ASSISTANT_MARKER")] === "1" ? {} : { outputPad: 0 };
+	return { theme, quietStartup: true, tuiMode: "fullscreen", hideThinkingBlock: true, ...flushProse };
+}
+
+/**
  * The environment for a spawned command: `env` with the launcher variables put
  * back to the user's own values and the record removed. Outside the app (no
  * record) it is `env` itself, untouched. A record that does not parse drops the
