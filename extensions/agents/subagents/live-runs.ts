@@ -244,11 +244,20 @@ export class LiveRunRegistry {
 		return true;
 	}
 
-	/** An idle resident got new work — back to running, the turn clock restarts. */
-	private wake(run: LiveRun): void {
-		if (run.status !== "idle") return;
+	/**
+	 * An idle resident started a turn: back to running, the turn clock restarts.
+	 * Running and idle follow the turn's start (`wake`) and end (`settle`) only.
+	 * The child's own events never flip the status: an aborted reply's
+	 * `message_end` lands after a capped turn has settled, and it must not turn
+	 * an idle row back to running.
+	 */
+	wake(taskId: string): void {
+		const run = this.byId.get(taskId);
+		if (!run || run.status !== "idle") return;
 		run.status = "running";
 		run.finishedAt = undefined;
+		run.activity = "Working…";
+		this.changed(taskId);
 	}
 
 	/** A progress tick from the tracker: refresh tokens/toolCalls (on top of any pre-resume baseline). */
@@ -257,7 +266,6 @@ export class LiveRunRegistry {
 		if (!run) return;
 		run.toolCalls = run.baseToolCalls + toolCalls;
 		run.tokens = sumUsage(run.baseTokens, tokens);
-		this.wake(run);
 		this.changed(taskId);
 	}
 
@@ -266,7 +274,6 @@ export class LiveRunRegistry {
 		const run = this.byId.get(taskId);
 		if (!run) return;
 		run.activity = sanitizeDisplayText(activity);
-		this.wake(run);
 		this.changed(taskId);
 	}
 
@@ -295,7 +302,6 @@ export class LiveRunRegistry {
 		if (!message) run.streamStartedAt = undefined;
 		else if (!run.streaming) run.streamStartedAt = Date.now();
 		run.streaming = message;
-		this.wake(run);
 		this.changed(taskId);
 	}
 

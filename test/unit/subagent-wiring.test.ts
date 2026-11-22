@@ -1334,8 +1334,8 @@ describe("ctrl+x ctrl+k at the prompt", () => {
 		runtime.finish();
 		await vi.advanceTimersByTimeAsync(2000);
 		await h.call("SendMessage", { to: "general-purpose-1", message: "Now the tests" });
-		// The resident's first activity on the new turn wakes its row to running, as the runner's sink does.
-		(runtime.options() as { sink: { onActivity(tool: string, args: unknown, text?: string): void } }).sink.onActivity("bash", { command: "npm test" });
+		// The runner starts the new turn, which wakes the row to running.
+		(runtime.options() as { onTurnStart(): void }).onTurnStart();
 		await vi.advanceTimersByTimeAsync(100);
 		const before = sent().length;
 		input(CTRL_X);

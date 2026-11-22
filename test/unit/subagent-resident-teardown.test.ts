@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as defaults from "../../extensions/lib/models/subagent-default.ts";
 import subagentsExtension from "../../extensions/agents/subagents/index.ts";
+import { LiveRunRegistry } from "../../extensions/agents/subagents/live-runs.ts";
 import type { ChildOutcome } from "../../extensions/agents/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/agents/subagents/runner.ts";
 import { emptyUsage } from "../../extensions/lib/agents/usage.ts";
@@ -207,7 +208,12 @@ describe("a kill as the turn ends on its own", () => {
 			reply(text);
 			if (ended) session.isIdle = true;
 		};
-		return { session, run, finishPrompt: () => finishPrompt() };
+		/** pi's message_end for the reply an abort cut short. */
+		const abortedReply = () =>
+			listener({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Halfway" }], stopReason: "aborted", usage: emptyUsage() } });
+		/** pi's settle event for the run that ended. */
+		const settle = () => listener({ type: "agent_settled" });
+		return { session, run, abortedReply, settle, finishPrompt: () => finishPrompt() };
 	}
 
 	async function resident() {
@@ -239,6 +245,56 @@ describe("a kill as the turn ends on its own", () => {
 		expect(outcomes).toHaveLength(1);
 		expect(outcomes[0].failed).toBe(true);
 		expect(outcomes[0].aborted).toBe("stopped");
+	});
+
+	it("drives the strip row from the turn: running at its start, idle at its end, not woken by the abort's late message_end", async () => {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const scripted = scriptedSession();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session: scripted.session, note: undefined } as never);
+		vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockResolvedValue((() => {}) as never);
+		const live = new LiveRunRegistry();
+		live.register({ taskId: "r1", name: "worker", agentType: "general-purpose", task: "Build it", startedAt: 0 });
+		const turnStarts = vi.fn(() => live.wake("r1"));
+		const handle = await runtime.runResident({
+			name: "worker",
+			cwd: agentDir,
+			onProgress: () => {},
+			onTurnStart: turnStarts,
+			onTurnEnd: () => live.settle("r1"),
+			sink: { onStreaming: (message: { content?: unknown } | undefined) => live.setStreaming("r1", message) },
+		} as never);
+		await handle.send("Build it");
+		expect(turnStarts).toHaveBeenCalledOnce();
+		await vi.waitFor(() => expect(scripted.session.prompt).toHaveBeenCalled());
+		scripted.run("Halfway there.", false);
+		// A turn reported early (the wall-clock cap, a stop) settles the row before pi's abort lands.
+		void handle.kill();
+		expect(live.get("r1")!.status).toBe("idle");
+		scripted.abortedReply();
+		expect(live.get("r1")!.status).toBe("idle");
+	});
+
+	it("wakes an idle resident's row when a SendMessage starts its next turn, before the child's first event", async () => {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const scripted = scriptedSession();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session: scripted.session, note: undefined } as never);
+		vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockResolvedValue((() => {}) as never);
+		const live = new LiveRunRegistry();
+		live.register({ taskId: "r1", name: "worker", agentType: "general-purpose", task: "Build it", startedAt: 0 });
+		const handle = await runtime.runResident({
+			name: "worker",
+			cwd: agentDir,
+			onProgress: () => {},
+			onTurnStart: () => live.wake("r1"),
+			onTurnEnd: () => live.settle("r1"),
+		} as never);
+		await handle.send("Build it");
+		await vi.waitFor(() => expect(scripted.session.prompt).toHaveBeenCalled());
+		scripted.run("Built.", true);
+		scripted.settle();
+		expect(live.get("r1")!.status).toBe("idle");
+		await handle.send("Now the tests");
+		expect(live.get("r1")!.status).toBe("running");
 	});
 
 	it("reports a blocking run pi already ended as it ended", async () => {
