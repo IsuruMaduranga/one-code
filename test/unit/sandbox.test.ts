@@ -466,19 +466,72 @@ describe.skipIf(!supported)("which calls run in the sandbox", () => {
 			},
 			(message) => void notices.push(message),
 		);
-		checks.started("/work");
+		checks.started("run-1", "/work");
 		let bareNow = false;
 		const bare = createEndChecks({ cleanup: () => {}, plantableCommondirs: () => [], looksLikeBareRepository: () => bareNow, exists: () => false, remove: () => {}, rename: denied }, (message) => void notices.push(message));
-		bare.started("/work");
+		bare.started("run-1", "/work");
 		// The directory became a bare repository while the command ran, and its HEAD cannot be moved.
 		bareNow = true;
-		expect(() => checks.ended()).not.toThrow();
-		expect(() => bare.ended()).not.toThrow();
+		expect(() => checks.ended("run-1")).not.toThrow();
+		expect(() => bare.ended("run-1")).not.toThrow();
 		expect(removed).toEqual([join("/other", ".git", "commondir")]);
 		expect(notices).toHaveLength(3);
 		expect(notices[0]).toMatch(/could not clean up/);
 		expect(notices[1]).toContain(join("/repo", ".git", "commondir"));
 		expect(notices[2]).toContain(join("/work", "HEAD"));
+	});
+
+	it("undoes after a command only what appeared while that command ran, once, however runs overlap", () => {
+		const commondir = join("/work", ".git", "commondir");
+		const disk = { commondir: false, bare: false };
+		const removed: string[] = [];
+		const renamed: string[] = [];
+		let cleanups = 0;
+		const checks = createEndChecks(
+			{
+				cleanup: () => void cleanups++,
+				plantableCommondirs: () => (disk.commondir ? [] : [commondir]),
+				looksLikeBareRepository: () => disk.bare,
+				exists: () => disk.commondir,
+				remove: (path) => {
+					removed.push(path);
+					disk.commondir = false;
+				},
+				rename: (from) => {
+					renamed.push(from);
+					disk.bare = false;
+				},
+			},
+			() => {},
+		);
+		// A run that found an ordinary directory ends; the user then makes a real bare repository there.
+		checks.started("a", "/work");
+		checks.ended("a");
+		disk.bare = true;
+		checks.started("b", "/work");
+		checks.ended("b");
+		expect(renamed).toEqual([]);
+		// Two runs overlap and one of them plants both: the first to end undoes them, the other finds nothing left.
+		disk.bare = false;
+		checks.started("c", "/work");
+		checks.started("d", "/work");
+		disk.commondir = true;
+		disk.bare = true;
+		checks.ended("c");
+		checks.ended("d");
+		expect(removed).toEqual([commondir]);
+		expect(renamed).toEqual([join("/work", "HEAD")]);
+		// A name that was there when a run started is not that run's to undo; the earlier run's end does it.
+		checks.started("e", "/work");
+		disk.commondir = true;
+		checks.started("f", "/work");
+		checks.ended("f");
+		expect(removed).toHaveLength(1);
+		checks.ended("e");
+		expect(removed).toHaveLength(2);
+		// The runtime cleans up once per ended wrap, an unknown id included.
+		checks.ended("never-started");
+		expect(cleanups).toBe(7);
 	});
 
 	it("reads another directory's settings for a session that starts there", () => {

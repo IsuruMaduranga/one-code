@@ -58,12 +58,12 @@ export interface ActiveSandbox {
 	/** The run `id` is over: its host list no longer applies. */
 	release(id: string): void;
 	/**
-	 * One wrapped command is over. The runtime counts its wraps and removes
-	 * what a command left on disk (bubblewrap's mount points for paths that
-	 * did not exist) only once every wrap was ended, so this is called exactly
-	 * once per successful `wrap`.
+	 * The wrapped command of run `id` is over. The runtime counts its wraps
+	 * and removes what a command left on disk (bubblewrap's mount points for
+	 * paths that did not exist) only once every wrap was ended, so this is
+	 * called exactly once per successful `wrap`, with the id that wrap got.
 	 */
-	ended(): void;
+	ended(id: string): void;
 	/** The filesystem rules of a command run in `cwd`, for the prompt: a per-command glob as its pattern, never its expansion. */
 	filesystem(cwd: string): ReturnType<typeof sandboxFilesystem>;
 }
@@ -231,12 +231,12 @@ async function startRuntime(opts: SandboxStartOptions, earlier: Promise<unknown>
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) => {
-				checks.started(call.cwd);
+				checks.started(call.id, call.cwd);
 				// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
 				return SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text });
 			},
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
-			ended: () => checks.ended(),
+			ended: (id) => checks.ended(id),
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),
 			release: (id) => SandboxManager.unregisterCommandNetworkLists(id),
 		};
@@ -362,7 +362,7 @@ export async function sandboxedCommand(request: SandboxRequest, platform: NodeJS
 		} finally {
 			if (wrapped) {
 				wrapped = false;
-				sandbox.ended();
+				sandbox.ended(id);
 			}
 		}
 	};

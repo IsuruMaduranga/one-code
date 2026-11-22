@@ -3,8 +3,8 @@
  * runtime's own cleanup. bubblewrap cannot deny a missing `commondir` or the
  * names that make a directory a bare repository without a stub that breaks
  * git (sandbox-settings `plantableCommondirs`, `bareRepositoryFiles`), so a
- * `commondir` that appeared while a command ran is removed when a command
- * ends, and a directory that became a bare repository has its `HEAD` set
+ * `commondir` that appeared while a command ran is removed when it ends, and
+ * a directory that became a bare repository while it ran has its `HEAD` set
  * aside, which keeps what was written.
  *
  * Every step stands alone: one that fails is reported through `notice` and
@@ -30,16 +30,31 @@ export interface EndCheckOps {
 /** Where a planted `HEAD` is moved to. */
 export const SET_ASIDE_HEAD = "HEAD.set-aside-by-sandbox";
 
+/**
+ * The checks of each run, by the run's id. What a run observes when it starts
+ * is its own and is used once, when it ends, so an end only undoes what
+ * appeared between that run's start and its end: a bare repository the user
+ * made between two commands is left alone. Runs that overlap each act on
+ * what is there when they end, so whichever ends first after the planted
+ * name appeared undoes it, and the other finds nothing left to undo.
+ */
 export interface EndChecks {
-	/** A command is about to start in `cwd`. */
-	started(cwd: string): void;
-	/** A wrapped command ended. Never throws. */
-	ended(): void;
+	/** The run `id` is about to start in `cwd`. */
+	started(id: string, cwd: string): void;
+	/** The run `id` ended. Never throws. */
+	ended(id: string): void;
+}
+
+/** What one run found when it started. */
+interface RunObservation {
+	/** The `commondir` paths nothing was at. */
+	commondirs: string[];
+	/** The run's directory, when it was not a bare repository. */
+	notBare?: string;
 }
 
 export function createEndChecks(ops: EndCheckOps, notice: (message: string) => void): EndChecks {
-	const plantable = new Set<string>();
-	const notBare = new Set<string>();
+	const runs = new Map<string, RunObservation>();
 	const attempt = (step: () => void, failed: (reason: string) => string) => {
 		try {
 			step();
@@ -54,26 +69,32 @@ export function createEndChecks(ops: EndCheckOps, notice: (message: string) => v
 		}
 	};
 	return {
-		started(cwd) {
+		started(id, cwd) {
+			const run: RunObservation = { commondirs: [] };
+			runs.set(id, run);
 			attempt(
 				() => {
-					for (const path of ops.plantableCommondirs(cwd)) plantable.add(path);
+					run.commondirs = ops.plantableCommondirs(cwd);
 				},
 				(reason) => `The command sandbox could not list the git files to check in ${cwd} after the command (${reason}).`,
 			);
 			attempt(
 				() => {
-					if (!ops.looksLikeBareRepository(cwd)) notBare.add(cwd);
+					if (!ops.looksLikeBareRepository(cwd)) run.notBare = cwd;
 				},
 				(reason) => `The command sandbox could not check whether ${cwd} is a git repository (${reason}).`,
 			);
 		},
-		ended() {
+		ended(id) {
 			attempt(
 				() => ops.cleanup(),
 				(reason) => `The command sandbox could not clean up after a command (${reason}).`,
 			);
-			for (const path of plantable) {
+			// Consumed before anything is undone: a run's observations are used once.
+			const run = runs.get(id);
+			runs.delete(id);
+			if (!run) return;
+			for (const path of run.commondirs) {
 				attempt(
 					() => {
 						if (ops.exists(path)) ops.remove(path);
@@ -81,7 +102,8 @@ export function createEndChecks(ops: EndCheckOps, notice: (message: string) => v
 					(reason) => `The command sandbox could not remove ${path}, which a sandboxed command created to redirect git (${reason}). Remove it before running git there.`,
 				);
 			}
-			for (const dir of notBare) {
+			const dir = run.notBare;
+			if (dir !== undefined) {
 				attempt(
 					() => {
 						if (ops.looksLikeBareRepository(dir)) ops.rename(join(dir, "HEAD"), join(dir, SET_ASIDE_HEAD));
