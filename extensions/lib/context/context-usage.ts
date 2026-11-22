@@ -59,6 +59,8 @@ export type ContextCategoryKey = (typeof CONTEXT_CATEGORIES)[number][0];
  */
 export const BLOCK_HEADS = {
 	skills: "The following skills are available for use with the Skill tool:",
+	/** The skills listing of a session without the skill tool, framed for reading each skill's file. */
+	readableSkills: "The following skills provide specialized instructions for specific tasks.",
 	mcpInstructions: "# MCP Server Instructions",
 	agents: "Available agent types for the Agent tool:",
 	instructions: "Codebase and user instructions are shown below.",
@@ -198,6 +200,7 @@ const HEADS: ReadonlyArray<readonly [string, BlockKind]> = [
 	[BLOCK_HEADS.agents, "agents"],
 	[BLOCK_HEADS.mcpInstructions, "mcpInstructions"],
 	[BLOCK_HEADS.skills, "skills"],
+	[BLOCK_HEADS.readableSkills, "skills"],
 	[BLOCK_HEADS.instructions, "memory"],
 ];
 

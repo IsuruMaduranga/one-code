@@ -69,16 +69,32 @@ function listOf(data: HelpData, tab: number): HelpCommand[] | undefined {
 	return tab === 1 ? data.commands : tab === 2 ? data.custom : undefined;
 }
 
-/** The keys a tab answers, as its hint line says them. */
-function hints(tab: number): string {
-	return tab === 0 ? "←/→ to switch · Esc to close" : "←/→ to switch · ↑/↓ to scroll · Esc to close";
+/** The keys a tab answers, as its hint line says them; the General tab scrolls only when it overflows. */
+function hints(tab: number, scrolls = tab !== 0): string {
+	return scrolls ? "←/→ to switch · ↑/↓ to scroll · Esc to close" : "←/→ to switch · Esc to close";
+}
+
+/** The General tab's rows between the tab row and the hint: the introduction, the shortcuts and the guide line. */
+function generalBody(data: HelpData, width: number, bold: (text: string) => string = (text) => text): string[] {
+	const intro = `${INDENT}${cutPlainText(data.intro, Math.max(1, width - INDENT.length))}`;
+	// Plain here, dim under the prompt: Claude Code's General tab passes no dimColor.
+	const shortcuts = shortcutLines(data.shortcuts, width);
+	const more = data.moreHelp === undefined ? [] : ["", cutPlainText(`${INDENT}For more help: ${data.moreHelp}`, width)];
+	return [intro, "", `${INDENT}${bold("Shortcuts")}`, ...shortcuts, ...more];
+}
+
+/** The General tab's window at `width` x `height`: its rows, and how many show when they overflow (undefined when all fit). */
+function generalWindow(data: HelpData, width: number, height: number): { body: string[]; rows?: number } {
+	const body = generalBody(data, width);
+	if (LIST_CHROME + body.length + hintLines(hints(0, false), width, INDENT).length <= height) return { body };
+	return { body, rows: helpListRows(height, width, 0, true) };
 }
 
 /**
  * Apply a key (pi-tui key ids: `left`, `right`, `up`, `down`, `escape`).
  * Returns `close` for Esc; every other key the panel does not show is ignored.
  */
-export function applyHelpKey(state: HelpState, key: string | undefined, data: HelpData, listRows: number): "close" | undefined {
+export function applyHelpKey(state: HelpState, key: string | undefined, data: HelpData, listRows: number, general?: { width: number; height: number }): "close" | undefined {
 	if (key === "escape") return "close";
 	if (key === "left" || key === "right") {
 		const step = key === "left" ? -1 : 1;
@@ -86,16 +102,21 @@ export function applyHelpKey(state: HelpState, key: string | undefined, data: He
 		state.scroll = 0;
 		return undefined;
 	}
+	if (key !== "up" && key !== "down") return undefined;
 	const list = listOf(data, state.tab);
-	if (!list || (key !== "up" && key !== "down")) return undefined;
-	const max = Math.max(0, list.length - Math.max(1, listRows));
+	// The General tab scrolls by its own window, which only the panel's size gives.
+	const window = !list && general ? generalWindow(data, general.width, general.height) : undefined;
+	const length = list ? list.length : window?.rows !== undefined ? window.body.length : 0;
+	const rows = list ? listRows : (window?.rows ?? 0);
+	if (length === 0) return undefined;
+	const max = Math.max(0, length - Math.max(1, rows));
 	state.scroll = Math.min(max, Math.max(0, state.scroll + (key === "up" ? -1 : 1)));
 	return undefined;
 }
 
 /** How many list rows a command tab has at `height` (after its chrome and its wrapped hint). */
-export function helpListRows(height: number, width: number, tab: number): number {
-	return Math.max(1, height - LIST_CHROME - hintLines(hints(tab), width, INDENT).length);
+export function helpListRows(height: number, width: number, tab: number, scrolls = tab !== 0): number {
+	return Math.max(1, height - LIST_CHROME - hintLines(hints(tab, scrolls), width, INDENT).length);
 }
 
 function tabRow(state: HelpState, paint: HelpPaint): string {
@@ -123,11 +144,12 @@ export function helpPanelLines(state: HelpState, data: HelpData, width: number, 
 	const head = [paint.fg("border", "─".repeat(Math.max(0, width))), tabRow(state, paint), ""];
 	const list = listOf(data, state.tab);
 	if (!list) {
-		const intro = `${INDENT}${cutPlainText(data.intro, Math.max(1, width - INDENT.length))}`;
-		// Plain here, dim under the prompt: Claude Code's General tab passes no dimColor.
-		const shortcuts = shortcutLines(data.shortcuts, width);
-		const more = data.moreHelp === undefined ? [] : [cutPlainText(`${INDENT}For more help: ${data.moreHelp}`, width), ""];
-		return [...head, intro, "", `${INDENT}${paint.bold("Shortcuts")}`, ...shortcuts, "", ...more, ...hint];
+		const body = generalBody(data, width, paint.bold);
+		const { rows } = generalWindow(data, width, height);
+		if (rows === undefined) return [...head, ...body, "", ...hint];
+		// Too tall for the panel: a window over the rows, scrolled with ↑/↓, the hint always shown.
+		const scroll = Math.min(state.scroll, Math.max(0, body.length - rows));
+		return [...head, ...body.slice(scroll, scroll + rows), "", ...hintLines(hints(0, true), width, INDENT).map(dim)];
 	}
 	if (list.length === 0) {
 		const empty = state.tab === 2 ? "No custom commands. A Markdown file in .claude/commands/ becomes one." : "No commands.";

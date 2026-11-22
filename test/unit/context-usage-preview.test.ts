@@ -56,6 +56,19 @@ describe("the system prompt before the first prompt", () => {
 		expect(after.stack).toHaveLength(1);
 	});
 
+	it("adds no environment block or model line before a custom prompt's first turn, as that turn adds none", async () => {
+		const { fake, ctx } = await setup();
+		const options = { cwd: ctx.cwd, customPrompt: "You are a reviewer." };
+		const query: StackQuery = { ctx: { ...ctx, getSystemPromptOptions: () => options }, stack: [] };
+		fake.events.emit(STACK_QUERY_CHANNEL, query);
+		expect(query.stack).toEqual([]);
+		const queued: Array<{ key?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => queued.push(data as { key?: string }));
+		await fake.fire("before_agent_start", { type: "before_agent_start", systemPromptOptions: options }, ctx);
+		await fake.fire("turn_start", { type: "turn_start" }, ctx);
+		expect(queued.some((payload) => payload.key === "environment" || payload.key === "model-line")).toBe(false);
+	});
+
 	it("leaves pi's options alone once a prompt has run", async () => {
 		const { fake, ctx } = await setup();
 		const options = { cwd: ctx.cwd, selectedTools: ["read"] };

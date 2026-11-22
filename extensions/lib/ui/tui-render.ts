@@ -584,7 +584,8 @@ export function callLine(
  */
 export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, opts: { maxCollapsed?: number; hint?: string | null; width?: number } = {}): string[] {
 	const safe = sanitizeDisplayText(text);
-	const shown = expanded && opts.width !== undefined ? wrapProse(safe.replace(/\s+$/, ""), Math.max(1, opts.width - 5)).join("\n") : safe;
+	// Hard-wrapped, never word-wrapped: a tool's output is often code, whose indentation must survive any width.
+	const shown = expanded && opts.width !== undefined ? wrapPlainText(safe.replace(/\s+$/, ""), Math.max(1, opts.width - 5)).join("\n") : safe;
 	const { lines, hidden } = collapseLines(shown, expanded, opts.maxCollapsed ?? 5);
 	const color = isError ? "error" : "muted";
 	const out = lines.map((line, i) => (i === 0 ? `  ⎿  ${theme.fg(color, line)}` : `     ${theme.fg(color, line)}`));
@@ -1026,7 +1027,13 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 				const head = elbowIndent([summary]);
 				// The moved body keeps pi's one-column pad, so four more columns put it under the summary's text.
 				if (moveBody) return linesComponent((width) => [...head, ...trimBlankLines(baseCallBody(state.ccInnerCall, Math.max(10, width - 4))).map((line) => `    ${line}`)]);
-				if (!options.expanded || !inner) return linesComponent(() => head);
+				if (!options.expanded) return linesComponent(() => head);
+				if (!inner) {
+					// No base view to expand: the result's own text goes under the summary, as the plain fallback shows it.
+					const text = sanitizeDisplayText(textContent(result)).replace(/\s+$/, "");
+					if (!text) return linesComponent(() => head);
+					return linesComponent((width) => elbowIndent([summary, ...wrapPlainText(text, Math.max(1, width - 5)).map((line) => theme.fg("muted", line))]));
+				}
 				return linesComponent((width) => elbowIndent([summary, ...trimBlankLines(inner.render(Math.max(10, width - 5)) ?? [])]));
 			}
 			if (!inner) {

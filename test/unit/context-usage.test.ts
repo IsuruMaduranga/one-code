@@ -72,6 +72,13 @@ function fullRequest() {
 }
 
 describe("breakdownRequest", () => {
+	it("counts the listing a session without the skill tool gets as Skills", () => {
+		const listing = skillResultText.readableListing({ lines: ["- simplify: Review the changed code. (/s/simplify/SKILL.md)"], reader: "read" });
+		const out = breakdownRequest({ api: "anthropic-messages", head: { model: "m" }, list: [{ role: "user", content: [{ type: "text", text: reminder(listing) }, { type: "text", text: "hi" }] }] });
+		expect(out.tokens.skills).toBe(estimateTextTokens(listing));
+		expect(out.skills.map((item) => item.name)).toEqual(["simplify"]);
+	});
+
 	it("counts a reply or a tool result that only looks like a harness block as Messages", () => {
 		const lookalike = ["Contents of /proj/notes.md (my notes):", "", BLOCK_HEADS.instructions, "", BLOCK_HEADS.skills, "- simplify: x"].join("\n");
 		const base = fullRequest();
@@ -188,6 +195,7 @@ describe("the block heads match the words the base sends", () => {
 	it("skills, MCP instructions, agents, instruction files and the deferred listing", () => {
 		expect(contextText({} as never, {} as never).instructionsPreamble.startsWith(BLOCK_HEADS.instructions)).toBe(true);
 		expect(skillResultText.listingHeader).toBe(BLOCK_HEADS.skills);
+		for (const reader of ["read", "shell"] as const) expect(skillResultText.readableListing({ lines: ["- a: b (/s/a/SKILL.md)"], reader }).startsWith(BLOCK_HEADS.readableSkills)).toBe(true);
 		expect(mcpResultText.instructions([]).startsWith(BLOCK_HEADS.mcpInstructions)).toBe(true);
 		const words = subagentResultWords({} as never, {} as never);
 		expect(words.catalogBlock({ rows: [] }).startsWith(BLOCK_HEADS.agents)).toBe(true);

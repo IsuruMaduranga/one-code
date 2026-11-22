@@ -121,8 +121,9 @@ function helpExtension(pi: ExtensionAPI) {
 						return lines;
 					},
 					handleInput: (input: string) => {
-						const listRows = helpListRows(boundedDockHeight(rows(), HELP_MAX_HEIGHT), lastWidth, state.tab);
-						if (applyHelpKey(state, keyId(input), data, listRows) === "close") {
+						const height = boundedDockHeight(rows(), HELP_MAX_HEIGHT);
+						const listRows = helpListRows(height, lastWidth, state.tab);
+						if (applyHelpKey(state, keyId(input), data, listRows, { width: lastWidth, height }) === "close") {
 							done(null);
 							return;
 						}

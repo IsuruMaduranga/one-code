@@ -23,7 +23,7 @@ import { keyId, keyText } from "./key-input.ts";
 import { panelUi } from "./panel-focus.ts";
 import { escapeControlText, sanitizeDisplayText } from "./terminal-text.ts";
 import { visibleWidth } from "./text-width.ts";
-import { hintLines, linesComponent, panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText, wrapProse } from "./tui-render.ts";
+import { boundedDockHeight, hintLines, linesComponent, panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText, wrapProse } from "./tui-render.ts";
 
 /** Claude Code's question above the options. */
 export const PROCEED_QUESTION = "Do you want to proceed?";
@@ -59,35 +59,40 @@ const SELECT_BINDINGS = {
 
 /**
  * Whether `data` is the key for one of the select's actions: the user's
- * binding when `matches` can tell (a binding with keys), else pi-tui's default.
+ * binding as pi resolved it, or pi-tui's default when there are no bindings.
  */
 export type SelectKeyMatcher = (data: string, action: keyof typeof SELECT_BINDINGS) => boolean;
 const defaultSelectKeys: SelectKeyMatcher = (data, action) => (SELECT_BINDINGS[action].defaults as readonly string[]).includes(keyId(data) ?? "");
 
 /**
- * Decode one input chunk the way pi's select (extension-selector.js) does:
+ * Decode one input chunk with the keys of pi's select (extension-selector.js):
  * its `tui.select.*` bindings, `k`/`j` and a bare `\n`, and the expand key,
  * whose `isExpand` matches pi's `app.tools.expand` binding (ctrl+o by
  * default) so a write's preview can be expanded while its prompt waits.
- * Digits pick an option.
+ * Digits pick an option. Unlike pi's select, cancel is decided before the
+ * other actions: a key the user bound to cancel never approves a call.
  */
 export function decodePermissionKey(data: string, isExpand: (data: string) => boolean = () => false, isKey: SelectKeyMatcher = defaultSelectKeys): PermissionDialogKey | undefined {
 	if (isExpand(data)) return { kind: "expand" };
+	if (isKey(data, "cancel")) return { kind: "cancel" };
 	if (isKey(data, "up") || data === "k") return { kind: "up" };
 	if (isKey(data, "down") || data === "j") return { kind: "down" };
 	if (isKey(data, "enter") || data === "\n") return { kind: "enter" };
-	if (isKey(data, "cancel")) return { kind: "cancel" };
 	const text = keyText(data);
 	return text && /^[1-9]$/.test(text) ? { kind: "number", value: Number(text) } : undefined;
 }
 
-/** The user's keys for each select action, pi-tui's defaults where the bindings say nothing. */
+/**
+ * The user's keys for each select action. pi's bindings already hold the
+ * defaults for an action the user left alone, and an empty list for one the
+ * user turned off, so their answer is taken as it is; pi-tui's defaults apply
+ * only when there are no bindings to ask.
+ */
 function selectKeys(keybindings: Keybindings | undefined): { keys: Record<keyof typeof SELECT_BINDINGS, string[]>; isKey: SelectKeyMatcher } {
-	const bound = (action: keyof typeof SELECT_BINDINGS) => safeKeys(keybindings, SELECT_BINDINGS[action].binding);
-	const user = { up: bound("up"), down: bound("down"), enter: bound("enter"), cancel: bound("cancel") };
-	const isKey: SelectKeyMatcher = (data, action) => (user[action].length > 0 ? safeMatches(keybindings, data, SELECT_BINDINGS[action].binding) : defaultSelectKeys(data, action));
-	const or = (action: keyof typeof SELECT_BINDINGS) => (user[action].length > 0 ? user[action] : [...SELECT_BINDINGS[action].defaults]);
-	return { keys: { up: or("up"), down: or("down"), enter: or("enter"), cancel: or("cancel") }, isKey };
+	const readable = typeof keybindings?.getKeys === "function" && typeof keybindings.matches === "function";
+	const keysOf = (action: keyof typeof SELECT_BINDINGS) => (readable ? safeKeys(keybindings, SELECT_BINDINGS[action].binding) : [...SELECT_BINDINGS[action].defaults]);
+	const isKey: SelectKeyMatcher = readable ? (data, action) => safeMatches(keybindings, data, SELECT_BINDINGS[action].binding) : defaultSelectKeys;
+	return { keys: { up: keysOf("up"), down: keysOf("down"), enter: keysOf("enter"), cancel: keysOf("cancel") }, isKey };
 }
 
 /** A key as the hint row names it: the arrows as arrows, Enter and Esc capitalised. */
@@ -126,13 +131,19 @@ export interface PermissionDialogStyle {
 
 /**
  * The hint row: every key the dialog takes, each action by the user's first
- * key for it (pi-tui's defaults without `keys`). `expandKey` is the user's key
- * for expanding tool output, if bound.
+ * key for it (pi-tui's defaults without `keys`); an action with no key is not
+ * named. `expandKey` is the user's key for expanding tool output, if bound.
  */
 export function permissionHints(optionCount: number, expandKey?: string, keys?: Partial<Record<keyof typeof SELECT_BINDINGS, readonly string[]>>): string {
-	const first = (action: keyof typeof SELECT_BINDINGS) => hintKey((keys?.[action] ?? SELECT_BINDINGS[action].defaults)[0]);
+	const first = (action: keyof typeof SELECT_BINDINGS) => {
+		const key = (keys?.[action] ?? SELECT_BINDINGS[action].defaults)[0];
+		return key === undefined ? undefined : hintKey(key);
+	};
 	const numbers = optionCount > 1 ? `1-${optionCount}` : "1";
-	return [`${first("up")}/${first("down")} to navigate`, `${first("enter")} or ${numbers} to select`, ...(expandKey ? [`${expandKey} to expand`] : []), `${first("cancel")} to cancel`].join(" · ");
+	const move = [first("up"), first("down")].filter((key) => key !== undefined).join("/");
+	const confirm = first("enter");
+	const cancel = first("cancel");
+	return [...(move ? [`${move} to navigate`] : []), `${confirm ? `${confirm} or ` : ""}${numbers} to select`, ...(expandKey ? [`${expandKey} to expand`] : []), ...(cancel ? [`${cancel} to cancel`] : [])].join(" · ");
 }
 
 /** One line of display text with tabs as spaces, so the width math holds. */
@@ -143,28 +154,32 @@ const detab = (text: string) => text.replace(/\t/g, "  ");
  * descriptions and option labels wrap, and a final ANSI-aware cut guards the
  * painted lines (pi-tui stops the app on an overwide line).
  */
-export function renderPermissionDialog(view: PermissionDialogView, state: PermissionDialogState, style: PermissionDialogStyle, width: number, expandKey?: string, keys?: Parameters<typeof permissionHints>[2]): string[] {
+export function renderPermissionDialog(
+	view: PermissionDialogView,
+	state: PermissionDialogState,
+	style: PermissionDialogStyle,
+	width: number,
+	expandKey?: string,
+	keys?: Parameters<typeof permissionHints>[2],
+	height?: number,
+): string[] {
 	const { paint, bold } = style;
 	const room = (indent: number) => Math.max(1, width - indent - 1);
-	const out: string[] = [panelTopRule(paint, width)];
-	out.push(` ${paint("accent", bold(sanitizeDisplayText(view.title)))}`);
+	const head = [panelTopRule(paint, width), ` ${paint("accent", bold(sanitizeDisplayText(view.title)))}`];
 
 	const subject = view.subject === undefined ? undefined : detab(escapeControlText(view.subject));
 	const description = view.description ? detab(sanitizeDisplayText(view.description)).trim() : "";
-	if (subject !== undefined || description) {
-		out.push("");
-		if (subject !== undefined) for (const line of wrapPlainText(subject, room(3))) out.push(`   ${line}`);
-		if (description) for (const line of wrapProse(description, room(3))) out.push(`   ${paint("dim", line)}`);
-	}
+	let subjectLines = subject === undefined ? [] : wrapPlainText(subject, room(3));
+	let descriptionLines = description ? wrapProse(description, room(3)) : [];
 
+	const tail: string[] = [];
 	const notes = (view.notes ?? []).map((note) => detab(sanitizeDisplayText(note)).trim()).filter(Boolean);
 	if (notes.length > 0) {
-		out.push("");
-		for (const note of notes) for (const line of wrapProse(note, room(1))) out.push(` ${line}`);
+		tail.push("");
+		for (const note of notes) for (const line of wrapProse(note, room(1))) tail.push(` ${line}`);
 	}
-
-	out.push("");
-	out.push(` ${bold(view.question ?? PROCEED_QUESTION)}`);
+	tail.push("");
+	tail.push(` ${bold(view.question ?? PROCEED_QUESTION)}`);
 	for (const [index, option] of view.options.entries()) {
 		const focused = index === state.cursor;
 		const prefix = `${focused ? "❯" : " "} ${index + 1}. `;
@@ -172,13 +187,33 @@ export function renderPermissionDialog(view: PermissionDialogView, state: Permis
 		const label = wrapProse(detab(sanitizeDisplayText(option)), room(indent));
 		for (const [at, part] of label.entries()) {
 			const line = at === 0 ? ` ${prefix}${part}` : `${" ".repeat(indent)}${part}`;
-			out.push(focused ? paint("accent", line) : line);
+			tail.push(focused ? paint("accent", line) : line);
 		}
 	}
+	tail.push("");
+	for (const line of hintLines(permissionHints(view.options.length, expandKey, keys), room(1))) tail.push(` ${paint("dim", line)}`);
 
-	out.push("");
-	for (const line of hintLines(permissionHints(view.options.length, expandKey, keys), room(1))) out.push(` ${paint("dim", line)}`);
-	return out.map((line) => truncateLine(line, width));
+	// On a short terminal the subject and description give way, so the question, the choices and the hint stay on screen.
+	const separator = subjectLines.length + descriptionLines.length > 0 ? 1 : 0;
+	const left = height === undefined ? Number.POSITIVE_INFINITY : Math.max(2, height - head.length - separator - tail.length);
+	let subjectMore = "";
+	if (subjectLines.length + descriptionLines.length > left) {
+		const subjectRoom = descriptionLines.length === 0 ? left : Math.min(subjectLines.length, Math.max(1, Math.ceil(left / 2)));
+		[subjectLines, subjectMore] = clipLines(subjectLines, subjectRoom);
+		const [kept, more] = clipLines(descriptionLines, left - subjectLines.length - (subjectMore ? 1 : 0));
+		descriptionLines = more ? [...kept, more] : kept;
+	}
+	const body = separator
+		? ["", ...subjectLines.map((line) => `   ${line}`), ...(subjectMore ? [`   ${paint("dim", subjectMore)}`] : []), ...descriptionLines.map((line) => `   ${paint("dim", line)}`)]
+		: [];
+	return [...head, ...body, ...tail].map((line) => truncateLine(line, width));
+}
+
+/** `lines` within `count` rows: the rows kept, and an "… N more lines" row (counted in `count`) when some are cut. */
+function clipLines(lines: string[], count: number): [string[], string] {
+	if (lines.length <= count) return [lines, ""];
+	const kept = lines.slice(0, Math.max(0, count - 1));
+	return [kept, `… ${lines.length - kept.length} more lines`];
 }
 
 // ── opener ───────────────────────────────────────────────────────────────
@@ -258,7 +293,12 @@ export async function askPermission(events: Emitter, ctx: PermissionDialogHost, 
 			const onAbort = () => finish(undefined);
 			if (signal?.aborted) queueMicrotask(onAbort);
 			else signal?.addEventListener("abort", onAbort, { once: true });
-			const lines = linesComponent((width) => renderPermissionDialog(view, state, style, width, expandKeys.join("/") || undefined, select.keys));
+			// The dialog sits in the editor's slot, above pi's two footer lines.
+			const height = () => {
+				const rows = (tui as { terminal?: { rows?: number } }).terminal?.rows;
+				return typeof rows === "number" && rows > 0 ? boundedDockHeight(rows, rows) : undefined;
+			};
+			const lines = linesComponent((width) => renderPermissionDialog(view, state, style, width, expandKeys.join("/") || undefined, select.keys, height()));
 			return {
 				render: (width: number) => lines.render(width),
 				invalidate: () => lines.invalidate?.(),

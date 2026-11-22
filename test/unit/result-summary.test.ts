@@ -50,6 +50,9 @@ describe("readSummary", () => {
 		const image = { type: "image" };
 		expect(readSummary({ content: [text("Read image file [image/png]"), image] }, {})).toEqual({ kind: "image" });
 		expect(readSummary({ content: [text("Read image file [image/png]"), image], details: { imageUnsupportedByModel: "m" } }, {})).toBeUndefined();
+		// pi could not shrink or convert the image: a text notice alone, no isError, no details.
+		expect(readSummary({ content: [text("Read image file [image/png]\n[Image omitted: could not be resized below the inline image size limit.]")] }, {})).toBeUndefined();
+		expect(readSummary({ content: [text("Read image file [image/bmp]\n[Image omitted: could not be converted to a supported inline image format.]")] }, {})).toBeUndefined();
 	});
 
 	it("counts an empty result (the empty-file reminder stripped) as zero", () => {
@@ -123,6 +126,17 @@ describe("ccWrapBuiltinRenderers: summary, moved body and short error line", () 
 		expect(wrapped.renderResult({ content: [text("x")] }, expanded, plain, context).render(80)).toEqual(["  ⎿  Read 2 lines", "     line one", "     line two"]);
 	});
 
+	it("shows the result text under the summary when expanded and the base renderer gives nothing", () => {
+		const summary = { summary: () => "Read 2 lines" };
+		const context = { args: {}, isError: false, state: {} };
+		const result = { content: [text("line one\nline two")] };
+		for (const base of [{}, { renderResult: () => { throw new Error("no view"); } }]) {
+			const wrapped = ccWrapBuiltinRenderers("Read", base, summary);
+			expect(wrapped.renderResult(result, collapsed, plain, context).render(80)).toEqual(["  ⎿  Read 2 lines"]);
+			expect(wrapped.renderResult(result, expanded, plain, context).render(80)).toEqual(["  ⎿  Read 2 lines", "     line one", "     line two"]);
+		}
+	});
+
 	it("moves a settled edit's diff from the call to under the summary", () => {
 		const base = {
 			renderCall: () => component(["", "edit a.ts", "", " -1 old", " +1 new", ""]),
@@ -165,10 +179,10 @@ describe("ccWrapBuiltinRenderers: summary, moved body and short error line", () 
 });
 
 describe("resultLines: ctrl+o shows the whole text", () => {
-	it("wraps an expanded result's long lines under the elbow when it knows the width, and leaves a collapsed one as it was", async () => {
+	it("hard-wraps an expanded result's long lines under the elbow when it knows the width (output keeps every space), and leaves a collapsed one as it was", async () => {
 		const { resultLines } = await import("../../extensions/lib/ui/tui-render.ts");
 		const long = "alpha beta gamma delta epsilon zeta eta theta";
-		expect(resultLines(plain, long, true, true, { width: 25 })).toEqual(["  ⎿  alpha beta gamma", "     delta epsilon zeta", "     eta theta"]);
+		expect(resultLines(plain, long, true, true, { width: 25 })).toEqual(["  ⎿  alpha beta gamma del", "     ta epsilon zeta eta ", "     theta"]);
 		expect(resultLines(plain, long, false, true, { width: 25 })).toEqual([`  ⎿  ${long}`]);
 		expect(resultLines(plain, long, true, true)).toEqual([`  ⎿  ${long}`]);
 	});

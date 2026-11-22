@@ -171,8 +171,11 @@ function systemPromptExtension(pi: ExtensionAPI) {
 	// /context before the first turn: the two blocks turn_start will queue, built without queueing them or caching the environment.
 	pi.events.on(STACK_QUERY_CHANNEL, (data) => {
 		const query = data as StackQuery;
-		const ctx = query.ctx as ExtensionContext | undefined;
-		if (!ctx || !query.stack || lastOptions?.customPrompt || query.stack.some((entry) => entry.key === "environment")) return;
+		const ctx = query.ctx as (ExtensionContext & { getSystemPromptOptions?: () => BuildSystemPromptOptions }) | undefined;
+		if (!ctx || !query.stack || query.stack.some((entry) => entry.key === "environment")) return;
+		// Before the first prompt no options are kept: a launch's custom prompt shows in pi's base options (a command's ctx has them).
+		const customPrompt = lastOptions ? lastOptions.customPrompt : ctx.getSystemPromptOptions?.().customPrompt;
+		if (customPrompt) return;
 		query.stack.push({ key: "environment", text: environmentText(peekEnvironment(ctx.cwd)), order: CONTEXT_ORDER.environment });
 		if (ctx.model) query.stack.push({ key: "model-line", text: modelLine(ctx.model), order: CONTEXT_ORDER.modelLine });
 	});

@@ -5,6 +5,7 @@
  * gate's exact `ctx.ui.select` call wherever the dialog cannot show.
  */
 import { describe, expect, it, vi } from "vitest";
+import { keyId } from "../../extensions/lib/ui/key-input.ts";
 import { PANEL_FOCUS_CHANNEL } from "../../extensions/lib/ui/panel-focus.ts";
 import {
 	applyPermissionKey,
@@ -19,6 +20,12 @@ import { askDialogTitle, askView } from "../../extensions/safety/permissions/ask
 import { modeDisplayName } from "../../extensions/safety/permissions/panel/render.ts";
 
 const plain = { paint: (_color: string, text: string) => text, bold: (text: string) => text };
+/** pi's resolved bindings: pi-tui's defaults for what the user left alone, the user's list (empty when turned off) for the rest. */
+function piKeybindings(user: Record<string, string[]> = {}) {
+	const keys: Record<string, string[]> = { "tui.select.up": ["up"], "tui.select.down": ["down"], "tui.select.confirm": ["enter"], "tui.select.cancel": ["escape", "ctrl+c"], "app.tools.expand": ["ctrl+o"], ...user };
+	return { getKeys: (id: string) => [...(keys[id] ?? [])], matches: (data: string, id: string) => (keys[id] ?? []).includes(keyId(data) ?? "") };
+}
+
 const OPTIONS = ["Yes", "Yes, and allow write anywhere in the working directory this session", "No, tell the agent what to do differently"];
 const view = (over: Partial<PermissionDialogView> = {}): PermissionDialogView => ({ title: "Bash command", subject: "ls -la", options: OPTIONS, ...over });
 const render = (v: PermissionDialogView, width = 100, cursor = 0, expandKey?: string) => renderPermissionDialog(v, { cursor }, plain, width, expandKey);
@@ -44,9 +51,7 @@ describe("permission dialog keys", () => {
 
 	it("follows the user's tui.select bindings through the dialog, and names them in the hint row", async () => {
 		// The user moved up/down to ctrl+p/ctrl+n and confirm to tab; cancel keeps pi's default.
-		const bound: Record<string, string[]> = { "tui.select.up": ["ctrl+p"], "tui.select.down": ["ctrl+n"], "tui.select.confirm": ["tab"] };
-		const bytes: Record<string, string> = { "ctrl+p": "\x10", "ctrl+n": "\x0e", tab: "\t" };
-		const keybindings = { getKeys: (id: string) => bound[id] ?? [], matches: (data: string, id: string) => (bound[id] ?? []).some((key) => bytes[key] === data) };
+		const keybindings = piKeybindings({ "tui.select.up": ["ctrl+p"], "tui.select.down": ["ctrl+n"], "tui.select.confirm": ["tab"] });
 		let lines: string[] = [];
 		const custom = (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) =>
 			new Promise((resolve) => {
@@ -58,7 +63,26 @@ describe("permission dialog keys", () => {
 			});
 		const ctx = { hasUI: true, mode: "interactive", ui: { select: vi.fn(), custom } };
 		expect(await askPermission({ emit: () => {} }, ctx, view(), "t")).toBe(OPTIONS[1]);
-		expect(lines.join("\n")).toContain("ctrl+p/ctrl+n to navigate · tab or 1-3 to select · Esc to cancel");
+		expect(lines.join("\n")).toContain("ctrl+p/ctrl+n to navigate · tab or 1-3 to select · ctrl+o to expand · Esc to cancel");
+	});
+
+	it("never approves with a key the user moved from confirm to cancel", async () => {
+		// The user turned confirm off and made Enter cancel: pi's resolved bindings say [] and ["enter"].
+		const keybindings = piKeybindings({ "tui.select.confirm": [], "tui.select.cancel": ["enter"] });
+		let hint = "";
+		const custom = (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) =>
+			new Promise((resolve) => {
+				const component = factory({ requestRender: () => {} }, {}, keybindings, resolve);
+				hint = component.render(120).at(-1) ?? "";
+				component.handleInput("\r");
+			});
+		const ctx = { hasUI: true, mode: "interactive", ui: { select: vi.fn(), custom } };
+		expect(await askPermission({ emit: () => {} }, ctx, view(), "t")).toBeUndefined();
+		// The hint names no confirm key, and Enter as the cancel key.
+		expect(hint).toContain("↑/↓ to navigate · 1-3 to select");
+		expect(hint).toContain("Enter to cancel");
+		// A key bound to both confirm and cancel cancels.
+		expect(decodePermissionKey("\r", () => false, (data, action) => keyId(data) === "enter" && (action === "enter" || action === "cancel"))).toEqual({ kind: "cancel" });
 	});
 
 	it("a number key answers in one keystroke; one past the options does nothing", () => {
@@ -157,7 +181,7 @@ describe("askPermission", () => {
 		const custom = vi.fn((factory: (...args: unknown[]) => unknown, opts?: Record<string, unknown>) => {
 			options = opts;
 			return new Promise((resolve) => {
-				const keybindings = { getKeys: (id: string) => (id === "app.tools.expand" ? ["ctrl+o"] : []), matches: (data: string, id: string) => id === "app.tools.expand" && data === "\x0f" };
+				const keybindings = piKeybindings();
 				const component = factory({ requestRender: () => {} }, {}, keybindings, resolve) as { render(width: number): string[]; handleInput(data: string): void };
 				rendered = component.render(80);
 				for (const key of keys) component.handleInput(key);
@@ -199,6 +223,41 @@ describe("askPermission", () => {
 		const answer = askPermission(events, t.ctx, view(), "t", { signal: abort.signal });
 		abort.abort();
 		expect(await answer).toBeUndefined();
+	});
+
+	describe("on an 80x24 terminal", () => {
+		const shown = async (over: Partial<PermissionDialogView>) => {
+			let lines: string[] = [];
+			const custom = (factory: (...args: unknown[]) => { render(width: number): string[]; handleInput(data: string): void }) =>
+				new Promise((resolve) => {
+					const component = factory({ requestRender: () => {}, terminal: { rows: 24, columns: 80 } }, {}, piKeybindings(), resolve);
+					lines = component.render(80);
+					component.handleInput("\x1b");
+				});
+			await askPermission({ emit: () => {} }, { hasUI: true, mode: "interactive", ui: { select: vi.fn(), custom } }, view(over), "t");
+			return lines;
+		};
+		const visible = (lines: string[]) => {
+			// pi's two footer lines sit under the dialog.
+			expect(lines.length).toBeLessThanOrEqual(22);
+			expect(lines).toContain(" Do you want to proceed?");
+			for (const [index, option] of OPTIONS.entries()) expect(lines.some((line) => line.includes(`${index + 1}. ${option.slice(0, 20)}`))).toBe(true);
+			expect(lines.at(-1)).toContain("Esc to cancel");
+		};
+
+		it("cuts a 30-line description with a more-lines row", async () => {
+			const lines = await shown({ subject: "ls", description: Array.from({ length: 30 }, (_, i) => `Description line ${i}`).join("\n") });
+			visible(lines);
+			expect(lines).toContain("   ls");
+			expect(lines.some((line) => /… \d+ more lines/.test(line))).toBe(true);
+		});
+
+		it("cuts a 40-line command, keeping its first lines", async () => {
+			const lines = await shown({ subject: Array.from({ length: 40 }, (_, i) => `echo ${i}`).join("\n") });
+			visible(lines);
+			expect(lines).toContain("   echo 0");
+			expect(lines.some((line) => /… \d+ more lines/.test(line))).toBe(true);
+		});
 	});
 
 	it("keeps pi's select while the prompt editor holds a draft, which custom() would rewrite on close", async () => {

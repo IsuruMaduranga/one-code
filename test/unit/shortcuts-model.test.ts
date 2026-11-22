@@ -131,6 +131,27 @@ describe("the /help panel", () => {
 		expect(helpText(noGuide)).not.toContain("For more help");
 	});
 
+	it("fits the General tab to a short panel and scrolls it, the hint always shown", () => {
+		const state = initialHelpState();
+		const first = helpPanelLines(state, data, 40, 20, plain);
+		expect(first).toHaveLength(20);
+		expect(first.at(-1)).toContain("Esc to close");
+		expect(first.join("\n")).toContain("↑/↓ to scroll");
+		// Down reaches the last row, the guide line; it stops there.
+		for (let i = 0; i < 40; i++) applyHelpKey(state, "down", data, 0, { width: 40, height: 20 });
+		const last = helpPanelLines(state, data, 40, 20, plain);
+		expect(last).toHaveLength(20);
+		expect(last.some((line) => line.includes("For more help"))).toBe(true);
+		expect(last.at(-1)).toContain("Esc to close");
+		applyHelpKey(state, "up", data, 0, { width: 40, height: 20 });
+		expect(helpPanelLines(state, data, 40, 20, plain)).not.toEqual(last);
+		// A panel tall enough shows everything with the plain hint and ignores ↑/↓.
+		const tall = initialHelpState();
+		applyHelpKey(tall, "down", data, 0, { width: 140, height: 30 });
+		expect(tall.scroll).toBe(0);
+		expect(helpPanelLines(tall, data, 140, 30, plain).at(-1)).toBe("  ←/→ to switch · Esc to close");
+	});
+
 	it("switches tabs with ←/→, wrapping, and closes on Esc", () => {
 		const state = initialHelpState();
 		expect(applyHelpKey(state, "left", data, 10)).toBeUndefined();

@@ -20,6 +20,9 @@ interface ResultLike {
 	details?: unknown;
 }
 
+/** pi's text note for an image read; on its own (no image block) the image was omitted. */
+const PI_IMAGE_NOTE = /^Read image file \[[^\]\n]+\]\n\[Image omitted: /;
+
 /** `Read 1 line`, `Read 2 lines`: Claude Code's noun, singular for exactly one. */
 export const lineNoun = (count: number): string => (count === 1 ? "line" : "lines");
 
@@ -34,11 +37,14 @@ function firstText(result: ResultLike): string {
  * number of lines it read. Counted from typed fields where pi sets them (the
  * truncation's `outputLines`) and from the arguments (`limit`) where pi
  * appends its "more lines" notice without one, never from the notice's words.
- * Undefined when pi's own view says more (an image the model cannot see).
+ * Undefined when pi's own view says more: an image the model cannot see, or
+ * an image pi could not send, which it answers with a text notice alone and no
+ * typed field (read.ts: `Read image file [<type>]` and an "[Image omitted: …]" line).
  */
 export function readSummary(result: ResultLike, args: { limit?: unknown } | undefined): { kind: "image" } | { kind: "lines"; count: number } | undefined {
 	const details = result.details as { truncation?: { truncated?: boolean; outputLines?: number }; imageUnsupportedByModel?: string } | undefined;
 	if (result.content?.some((block) => block.type === "image")) return details?.imageUnsupportedByModel ? undefined : { kind: "image" };
+	if (PI_IMAGE_NOTE.test(firstText(result))) return undefined;
 	const truncation = details?.truncation;
 	if (truncation?.truncated && typeof truncation.outputLines === "number") return { kind: "lines", count: truncation.outputLines };
 	const text = firstText(result);
