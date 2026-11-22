@@ -388,8 +388,12 @@ function mcpExtension(pi: ExtensionAPI) {
 		notices.forEach((text, i) => request.blocks.push({ text, ...(i === 0 ? { facts: delta.facts } : {}) }));
 	});
 
-	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
-	let configErrors: string[] = [];
+	/**
+	 * What the last config load warned about: files that failed to parse, and
+	 * entries it skipped or reads another way. Shown once at startup, and kept
+	 * for /mcp (its panel and its text forms), long after that notice is gone.
+	 */
+	let configNotes: string[] = [];
 
 	/** How the consent check asks, tells and records a "No", for startup and for Reconnect alike. */
 	const consentDeps = (ctx: ExtensionContext): McpTrustDeps => ({
@@ -409,20 +413,20 @@ function mcpExtension(pi: ExtensionAPI) {
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
 		pluginConfigPaths = new Set(plugins.mcpConfigs);
 		mcpFiles = new Map(mcpConfigFiles(ctx.cwd, home).map((file) => [file.path, { scope: file.scope, shown: relativeDisplayPath(ctx.cwd, file.path) }]));
-		configErrors = [];
-		const configNotes: string[] = [];
+		const configErrors: string[] = [];
+		const notes: string[] = [];
 		servers = loadServers(ctx.cwd, home, process.env, [...pluginConfigPaths], {
 			pluginNames: plugins.mcpConfigPlugins,
 			onError: (path, message) => configErrors.push(`${path}: ${message}`),
 			piConfigs: piMcpConfigs(ctx.cwd),
-			onNote: (message) => configNotes.push(message),
+			onNote: (message) => notes.push(message),
 			registered: registeredMcpServers(pi),
 		});
-		const configWarnings = [
+		configNotes = [
 			...(configErrors.length > 0 ? [`MCP config could not be parsed (ignored): ${configErrors.join("; ")}`] : []),
-			...configNotes,
+			...notes,
 		];
-		for (const text of configWarnings) {
+		for (const text of configNotes) {
 			if (ctx.hasUI) ctx.ui.notify(text, "warning");
 			else process.stderr.write(`${text}\n`);
 		}
@@ -946,7 +950,7 @@ function mcpExtension(pi: ExtensionAPI) {
 					const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
 					const height = boundedDockHeight(termRows, MCP_PANEL_MAX_HEIGHT);
 					const lines = renderMcpPanel(
-						{ state, entries, width, height, notices, settled: connectSettled, where: mcpConfigWhere(openSources(os.homedir()).mcpWhere) },
+						{ state, entries, width, height, notices, configNotes, settled: connectSettled, where: mcpConfigWhere(openSources(os.homedir()).mcpWhere) },
 						paint,
 					).map((line) => truncateLine(line, width));
 					cache = { width, lines };
@@ -976,7 +980,7 @@ function mcpExtension(pi: ExtensionAPI) {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
 		handler: async (args, ctx) => {
 			if (servers.length === 0) {
-				const stdout = noMcpServersMessage(openSources(home).mcpWhere);
+				const stdout = [noMcpServersMessage(openSources(home).mcpWhere), ...configNotes].join("\n");
 				ctx.ui.notify(stdout, "info");
 				return stdout;
 			}
@@ -999,6 +1003,7 @@ function mcpExtension(pi: ExtensionAPI) {
 				}
 				return `${status.padEnd(12)} ${server.name}${suffix} (${server.source})`;
 			});
+			lines.push(...configNotes);
 			ctx.ui.notify(lines.join("\n"), "info");
 			return [readOnly, ...lines].filter(Boolean).join("\n");
 		},

@@ -8,7 +8,7 @@
  * Only width-1 glyphs are used so cutPlainText's code-point count stays exact.
  */
 
-import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks } from "../../../lib/ui/tui-render.ts";
+import { cutPlainText, hintLines, padPlainText, panelTopRule, type RenderBlock as Block, windowBlocks, wrapProse } from "../../../lib/ui/tui-render.ts";
 import { actionsFor, type McpEntry, statusText } from "./model.ts";
 import { clampMcpCursor, detailEntry, type McpPanelState } from "./state.ts";
 
@@ -24,6 +24,8 @@ export interface McpRenderInput {
 	height: number;
 	/** Transient messages (auth in progress / URL / errors). */
 	notices: string[];
+	/** What the config load warned about (a file that failed to parse, a skipped entry), shown under the list. */
+	configNotes?: string[];
 	settled: boolean;
 	/** The files servers are configured in, as the panel names them (config.ts `mcpConfigWhere`). */
 	where: string;
@@ -123,8 +125,9 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		out.push(paint.fg("dim", cutPlainText(` ${count}`, width - 1)));
 
 		footer = wrapFooter("↑/↓ to navigate · Enter to confirm · Esc to cancel");
+		const notes = (input.configNotes ?? []).flatMap((note) => wrapProse(note, width - 3)).map((line) => paint.fg("warning", `  ${line}`));
 		const noticeLines = input.notices.reduce((sum, notice) => sum + notice.split("\n").length, 0);
-		const footerReserve = 2 + footer.length + noticeLines + 1;
+		const footerReserve = 2 + notes.length + footer.length + noticeLines + 1;
 		const budget = Math.max(1, height - out.length - footerReserve);
 		if (entries.length === 0) {
 			out.push("", paint.fg("dim", `  No MCP servers configured. Add them to ${input.where}.`));
@@ -135,6 +138,7 @@ export function renderMcpPanel(input: McpRenderInput, paint: McpPaint): string[]
 		}
 		out.push("");
 		out.push(paint.fg("dim", cutPlainText(`  Servers are configured in ${input.where}.`, width - 1)));
+		out.push(...notes);
 	}
 
 	for (const notice of input.notices) {
