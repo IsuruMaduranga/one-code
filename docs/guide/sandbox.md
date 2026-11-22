@@ -220,10 +220,13 @@ holds whatever another file sets.
   during a session binds the permission gate at once and the sandbox from
   the next start.
 - On Linux, bubblewrap protects only real paths, so a write-deny rule with
-  a wildcard protects the whole folder the pattern starts in:
-  `Edit(config/*.yaml)` makes all of `config` read-only to sandboxed
-  commands, and `Edit(**/.env)` the whole working directory. On macOS the
-  pattern applies as written.
+  a wildcard protects the files that match it when each command starts. For
+  `Edit(**/.env)`, One Code looks for `.env` files before every sandboxed
+  command and makes each one it finds read-only. A file the command creates
+  itself isn't covered. In a folder too large to search quickly (more than
+  20,000 entries), the whole folder the pattern starts in becomes read-only
+  instead. On macOS the pattern applies as written, to files created later
+  too.
 - An allowed host is allowed for any use. A command that can reach a host
   can send data to it.
 - Subagents run their commands in the same sandbox as the main session.

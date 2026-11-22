@@ -22,7 +22,7 @@ import { shellQuote } from "../shell/shell-quote.ts";
 import { probeSandbox } from "./sandbox-probe.ts";
 import { bashSpawn } from "./shell-spawn.ts";
 import { isShellToolName } from "./shell-tools.ts";
-import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
+import { commandHosts, isExcludedCommand, loadSandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig, type SandboxScope, type SandboxSettings } from "./sandbox-settings.ts";
 
 /** One command to wrap. */
 export interface SandboxCall {
@@ -62,7 +62,7 @@ export interface ActiveSandbox {
 	 * once per successful `wrap`.
 	 */
 	ended(): void;
-	/** The filesystem rules of a command run in `cwd`, for the prompt. */
+	/** The filesystem rules of a command run in `cwd`, for the prompt: a per-command glob as its pattern, never its expansion. */
 	filesystem(cwd: string): ReturnType<typeof sandboxFilesystem>;
 }
 
@@ -205,7 +205,8 @@ async function startRuntime(opts: { scopeFor: (cwd: string) => SandboxScope; cwd
 		slot.active = {
 			filesystem: (cwd) => sandboxFilesystem(settings, opts.scopeFor(cwd)),
 			wrap: (command, call) =>
-				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
+				// Built for every wrap: a Linux write-deny glob becomes the files it matches as this command starts.
+				SandboxManager.wrapWithSandbox(`${prefix}${command}`, call.shell, { filesystem: sandboxCommandFilesystem(settings, opts.scopeFor(call.cwd)) }, undefined, { commandId: call.id, commandText: call.text }),
 			annotate: (id, output) => SandboxManager.annotateStderrWithSandboxFailures(id, output),
 			ended: () => SandboxManager.cleanupAfterCommand(),
 			allowHosts: (id, hosts) => SandboxManager.registerCommandNetworkLists(id, { allowedDomains: [...hosts] }),

@@ -16,7 +16,7 @@ import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
-import { commandHosts, denyRulePaths, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
+import { commandHosts, denyRulePaths, expandDenyGlobs, isExcludedCommand, loadSandboxSettings, mergeSandboxBlock, type RuleDenyPath, ruleDenyPaths, SANDBOX_OFF, type SandboxSettings, sandboxCommandFilesystem, sandboxFilesystem, sandboxRuntimeConfig } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { registerShellTool } from "../../extensions/lib/shell-run/shell-tool.ts";
 import { powerShellBashLine } from "../../extensions/lib/shell-run/shell-spawn.ts";
 import { sandboxProbeFailure, usernsRestricted } from "../../extensions/lib/shell-run/sandbox-probe.ts";
@@ -149,8 +149,10 @@ describe("sandbox settings", () => {
 // The sandbox runs on macOS and Linux only, whose paths these are.
 describe.skipIf(process.platform === "win32")("the permission deny rules in the sandbox", () => {
 	const home = "/home/u";
-	const write = (pattern: string, platform: NodeJS.Platform = "darwin") => ruleDenyPaths(pattern, "write", "/work", home, platform);
-	const read = (pattern: string, platform: NodeJS.Platform = "darwin") => ruleDenyPaths(pattern, "read", "/work", home, platform);
+	/** The paths as the runtime gets them; a glob expanded per command as `expand:<glob>`. */
+	const shown = (paths: RuleDenyPath[]) => paths.map((path) => (path.kind === "path" ? path.path : `expand:${path.glob}`));
+	const write = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "write", "/work", home, platform));
+	const read = (pattern: string, platform: NodeJS.Platform = "darwin") => shown(ruleDenyPaths(pattern, "read", "/work", home, platform));
 
 	it("takes the path patterns of the edit family's deny rules for writes and of Read's for reads", () => {
 		const rules = parseRules(["Edit(a.txt)", "Write(b.txt)", "NotebookEdit(c.ipynb)", "Read(.env)", "Edit", "Bash(rm:*)", "Grep(secrets/**)", "Edit(a.txt)"]);
@@ -169,16 +171,69 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 		expect(write("/config/prod.yaml")).toEqual(["/config/prod.yaml", "/work/config/prod.yaml"]);
 	});
 
-	it("passes a glob where the runtime reads it as the gate does, and widens it to its directory where it cannot", () => {
+	it("passes a glob where the runtime reads it as the gate does, and expands a Linux write glob per command", () => {
 		expect(write("config/*.yaml")).toEqual(["/work/config/*.yaml"]);
 		expect(read("~/.aws/**")).toEqual([`${home}/.aws/**`]);
 		// Linux reads: the runtime expands the glob against the disk.
 		expect(read("**/.env", "linux")).toEqual(["/work/**/.env"]);
-		// Linux writes: bubblewrap binds real paths only, so the deny covers the directory the glob starts in.
-		expect(write("config/*.yaml", "linux")).toEqual(["/work/config"]);
-		expect(write("**/.env", "linux")).toEqual(["/work"]);
+		// Linux writes: bubblewrap binds real paths only and the runtime skips a write glob, so each command gets the matching files.
+		expect(write("config/*.yaml", "linux")).toEqual(["expand:/work/config/*.yaml"]);
+		expect(write("**/.env", "linux")).toEqual(["expand:/work/**/.env"]);
 		// A trailing `/**` is the directory itself, which the runtime binds.
 		expect(write("secrets/**", "linux")).toEqual(["/work/secrets/**"]);
+	});
+
+	describe("a Linux write-deny glob", () => {
+		let root: string;
+		const put = (...parts: string[]) => {
+			mkdirSync(dirname(join(root, ...parts)), { recursive: true });
+			writeFileSync(join(root, ...parts), "x");
+		};
+		afterEach(() => rmSync(root, { recursive: true, force: true }));
+		const literal = (...parts: string[]) => ({ path: join(root, ...parts), literal: true });
+
+		it("denies the files it matches when the command's rules are built, as the gate matches them, never the whole directory", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put(".env");
+			put("app", "nested", ".env");
+			put("app", "main.ts");
+			put("[id]", "x.yaml");
+			put("config", "a.yaml");
+			put("config", "deep", "b.yaml");
+			const found = expandDenyGlobs([join(root, "**", ".env"), join(root, "config", "*.yaml"), join(root, "*", "x.yaml")]);
+			expect(found.get(join(root, "**", ".env"))).toEqual(expect.arrayContaining([literal(".env"), literal("app", "nested", ".env")]));
+			expect(found.get(join(root, "**", ".env"))).toHaveLength(2);
+			// `*` stays within one name: the walk does not go below the depth the glob reaches.
+			expect(found.get(join(root, "config", "*.yaml"))).toEqual([literal("config", "a.yaml")]);
+			// A matched name that holds glob syntax goes to the runtime as a literal path.
+			expect(found.get(join(root, "*", "x.yaml"))).toEqual([literal("[id]", "x.yaml")]);
+		});
+
+		it("denies a directory that matches whole, and falls back to the directory the glob starts in when the walk runs out of budget", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("a", "secrets", "key");
+			put("b", "c", "d.txt");
+			expect(expandDenyGlobs([join(root, "**", "secrets", "**")]).get(join(root, "**", "secrets", "**"))).toEqual([literal("a", "secrets")]);
+			expect(expandDenyGlobs([join(root, "**", ".env")], 2).get(join(root, "**", ".env"))).toEqual([root]);
+			expect(expandDenyGlobs([join(root, "missing", "**", ".env")]).get(join(root, "missing", "**", ".env"))).toEqual([]);
+		});
+
+		it("keeps the section's text the pattern while each command gets the files that exist as it starts", () => {
+			root = mkdtempSync(join(tmpdir(), "sandbox-glob-"));
+			put("app", ".env");
+			const settings: SandboxSettings = { ...ON, denyRulePaths: { write: ["**/.env"], read: [] } };
+			const scope = { cwd: root, writableDirs: [], protectedFiles: [] };
+			const host = { home, platform: "linux" as const };
+			const shownBefore = JSON.stringify(sandboxFilesystem(settings, scope, host));
+			expect(sandboxFilesystem(settings, scope, host).denyWrite).toEqual([join(root, "**", ".env")]);
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).toEqual([literal("app", ".env")]);
+			expect(sandboxRuntimeConfig(settings, scope, host).filesystem.denyWrite).toEqual([literal("app", ".env")]);
+			put("lib", ".env");
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).toEqual(expect.arrayContaining([literal("app", ".env"), literal("lib", ".env")]));
+			expect(JSON.stringify(sandboxFilesystem(settings, scope, host))).toBe(shownBefore);
+			// The working directory itself stays writable.
+			expect(sandboxCommandFilesystem(settings, scope, host).denyWrite).not.toContain(root);
+		});
 	});
 
 	it("widens a pattern whose characters the gate takes literally and the runtime as glob syntax, and keeps an exact path exact", () => {

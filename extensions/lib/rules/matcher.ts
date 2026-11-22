@@ -214,6 +214,15 @@ function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegEx
 }
 
 /**
+ * A path rule's glob (made absolute) as the RegExp {@link matchesPathPattern}
+ * tests a path with: `**` crosses separators, `*` does not, `\*` and `\\` are
+ * literals, and `?` and brackets are plain characters.
+ */
+export function pathGlobRegex(glob: string, ignoreCase: boolean): RegExp {
+	return globToRegex(glob, true, ignoreCase);
+}
+
+/**
  * Bash pattern match against ONE command (no `&&`/`|`/`;`), Claude Code
  * semantics (`utils/permissions/shellRuleMatching.ts` + `bashPermissions.ts`):
  * - exact rule: the whole command, character for character;

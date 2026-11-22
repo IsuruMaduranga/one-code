@@ -18,11 +18,12 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { isRepoFile, readSettingsFile, settingsSources } from "../profile/settings-files.ts";
-import { EDIT_TOOLS, hasUnescapedWildcard, type PermissionRule, parseRules, unescapeLiteral } from "../rules/matcher.ts";
+import { EDIT_TOOLS, hasUnescapedWildcard, type PermissionRule, parseRules, pathGlobRegex, unescapeLiteral } from "../rules/matcher.ts";
 import { loadPermissionSettings } from "../rules/settings.ts";
+import { walkTree } from "../shell/paths.ts";
 
 export interface SandboxSettings {
 	enabled: boolean;
@@ -146,6 +147,17 @@ function literalDirectory(path: string): string {
 	return head.slice(0, head.lastIndexOf("/")) || "/";
 }
 
+/** An entry of the runtime's path lists: a spelling, which it reads as a pattern when it holds `*`, `?` or a bracket, or a path marked literal, which it never reads as one. */
+export type SandboxPathEntry = string | { path: string; literal: true };
+
+/**
+ * One path a deny rule names for a command, as {@link ruleDenyPaths} reads
+ * it: `path` goes to the runtime as written; `expand` is a glob the runtime
+ * cannot hold on this platform, so each command gets the files it matches
+ * when its rules are built ({@link expandDenyGlobs}).
+ */
+export type RuleDenyPath = { kind: "path"; path: string } | { kind: "expand"; glob: string };
+
 /**
  * The sandbox paths a deny rule's path pattern names, for a command run in
  * `cwd`, in the gate's rule syntax:
@@ -161,14 +173,14 @@ function literalDirectory(path: string): string {
  * against the process's directory, not the command's. A glob passes as
  * written where the runtime reads it as the gate does: `*` within a name and
  * `**` across directories, on macOS for both lists and on Linux for reads,
- * which the runtime expands against the disk. Where it cannot, the deny is
- * widened to {@link literalDirectory}, never dropped: a write-deny glob on
- * Linux (bubblewrap binds only real paths, and the runtime skips a glob
- * there), and a pattern holding a gate escape (`\*`), a `?` or a bracket,
- * which the gate takes literally and the runtime as syntax. An exact path
- * stays exact.
+ * which the runtime expands against the disk. A write-deny glob on Linux is
+ * expanded per command (bubblewrap binds only real paths, and the runtime
+ * skips a write glob there). A pattern holding a gate escape (`\*`), a `?` or
+ * a bracket, which the gate takes literally and the runtime as syntax, is
+ * widened to {@link literalDirectory}, never dropped. An exact path stays
+ * exact.
  */
-export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: string, home: string, platform: NodeJS.Platform): string[] {
+export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: string, home: string, platform: NodeJS.Platform): RuleDenyPath[] {
 	const trimmed = pattern.trim();
 	const paths = trimmed.startsWith("//")
 		? [resolve(trimmed.slice(1))]
@@ -177,15 +189,73 @@ export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: stri
 			: trimmed.startsWith("/")
 				? [resolve(trimmed), resolve(cwd, `.${trimmed}`)]
 				: [resolve(cwd, trimmed)];
-	return paths.map((path) => {
+	return paths.map((path): RuleDenyPath => {
 		if (!hasUnescapedWildcard(path)) {
 			const exact = unescapeLiteral(path);
-			return RUNTIME_GLOB.test(exact) ? literalDirectory(path) : exact;
+			return { kind: "path", path: RUNTIME_GLOB.test(exact) ? literalDirectory(path) : exact };
 		}
 		// The runtime ends a `/**` itself (the directory and all beneath it), which bubblewrap can bind.
-		const linuxWrite = platform === "linux" && kind === "write" && RUNTIME_GLOB.test(path.replace(/\/\*\*$/, ""));
-		return linuxWrite || /[?[\]\\]/.test(path) ? literalDirectory(path) : path;
+		if (platform === "linux" && kind === "write" && RUNTIME_GLOB.test(path.replace(/\/\*\*$/, ""))) return { kind: "expand", glob: path };
+		return { kind: "path", path: /[?[\]\\]/.test(path) ? literalDirectory(path) : path };
 	});
+}
+
+/** The most directory entries one walk of {@link expandDenyGlobs} visits (about 60 ms on a laptop's warm disk). */
+export const DENY_GLOB_WALK_BUDGET = 20_000;
+
+/**
+ * The files each glob matches now, as literal entries for the runtime: what
+ * a Linux write-deny glob becomes for one command, the way the runtime
+ * expands a read-deny glob for each command. Globs that start in the same
+ * directory share one walk of it ({@link walkTree}: no symbolic link
+ * followed, nothing skipped, at most `budget` entries). A path is matched as
+ * the permission gate matches it (`pathGlobRegex`), so the sandbox denies
+ * what the gate denies. A directory that matches is denied whole and not
+ * walked further, as is one that cannot be listed; a glob that ends in `/**`
+ * also matches the directory it names. A glob with no `**` is walked only as
+ * deep as it reaches.
+ *
+ * A walk that runs out of budget gives each of its globs the directory it
+ * starts in ({@link literalDirectory}), the widening that covers everything
+ * the glob matches and more. A file created after the rules are built is not
+ * covered; the expansion runs again for the next command.
+ */
+export function expandDenyGlobs(globs: readonly string[], budget = DENY_GLOB_WALK_BUDGET): Map<string, SandboxPathEntry[]> {
+	const byBase = new Map<string, string[]>();
+	for (const glob of new Set(globs)) {
+		const base = literalDirectory(glob);
+		byBase.set(base, [...(byBase.get(base) ?? []), glob]);
+	}
+	const expanded = new Map<string, SandboxPathEntry[]>();
+	for (const [base, group] of byBase) {
+		const readings = group.map((glob) => ({
+			glob,
+			whole: pathGlobRegex(glob, false),
+			directory: glob.endsWith("/**") ? pathGlobRegex(glob.slice(0, -3), false) : undefined,
+			depth: glob.includes("**") ? Number.POSITIVE_INFINITY : glob.slice(base.length).split("/").filter(Boolean).length,
+			found: [] as string[],
+		}));
+		const depth = Math.max(...readings.map((reading) => reading.depth));
+		const outcome = walkTree(
+			base,
+			(relative, entry) => {
+				const path = join(base, relative);
+				let whole = false;
+				for (const reading of readings) {
+					if (!reading.whole.test(path) && !(entry.isDirectory() && reading.directory?.test(path))) continue;
+					reading.found.push(path);
+					whole ||= entry.isDirectory();
+				}
+				return whole || relative.split(sep).length >= depth ? "skip" : undefined;
+			},
+			budget,
+			(relative) => {
+				for (const reading of readings) reading.found.push(join(base, relative));
+			},
+		);
+		for (const reading of readings) expanded.set(reading.glob, outcome === "over budget" ? [literalDirectory(reading.glob)] : reading.found.map((path) => ({ path, literal: true as const })));
+	}
+	return expanded;
 }
 
 const SHELL_OPERATORS = /[;&|<>`\n]|\$\(/;
@@ -345,24 +415,75 @@ export interface SandboxHost {
 	platform?: NodeJS.Platform;
 }
 
-/**
- * The filesystem rules of one command, in the runtime's shape. Writes are
- * allow-only; reads are deny-only. The deny rules' paths come after the
- * settings' own lists, as in Claude Code.
- */
-export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): { allowWrite: string[]; denyWrite: string[]; denyRead: string[]; allowRead: string[] } {
+/** A command's filesystem rules: writes are allow-only, reads deny-only. */
+export interface SandboxFilesystem<Entry = string> {
+	allowWrite: Entry[];
+	denyWrite: Entry[];
+	denyRead: Entry[];
+	allowRead: Entry[];
+}
+
+/** The settings' lists and the deny rules' paths for a command run in `scope.cwd`, with each rule path as {@link ruleDenyPaths} reads it. */
+function filesystemRules(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost): SandboxFilesystem<string | RuleDenyPath> {
 	const home = host.home ?? homedir();
 	const platform = host.platform ?? process.platform;
 	const fromRules = (patterns: readonly string[], kind: "write" | "read") => patterns.flatMap((pattern) => ruleDenyPaths(pattern, kind, scope.cwd, home, platform));
 	return {
-		allowWrite: [...new Set([scope.cwd, ...scope.writableDirs, ...settings.filesystem.allowWrite])],
-		denyWrite: [...new Set([...scope.protectedFiles, ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")])],
-		denyRead: [...new Set([...settings.filesystem.denyRead, ...fromRules(settings.denyRulePaths.read, "read")])],
+		allowWrite: [scope.cwd, ...scope.writableDirs, ...settings.filesystem.allowWrite],
+		denyWrite: [...scope.protectedFiles, ...settings.filesystem.denyWrite, ...fromRules(settings.denyRulePaths.write, "write")],
+		denyRead: [...settings.filesystem.denyRead, ...fromRules(settings.denyRulePaths.read, "read")],
 		allowRead: [...settings.filesystem.allowRead],
 	};
 }
 
-/** The session's configuration for the runtime's `initialize`. */
+const mapLists = <A, B>(lists: SandboxFilesystem<A>, entries: (entry: A) => B[]): SandboxFilesystem<B> => ({
+	allowWrite: lists.allowWrite.flatMap(entries),
+	denyWrite: lists.denyWrite.flatMap(entries),
+	denyRead: lists.denyRead.flatMap(entries),
+	allowRead: lists.allowRead.flatMap(entries),
+});
+
+/** Each list with every entry once, a literal one told apart by its path. */
+function uniqueLists<Entry extends SandboxPathEntry>(lists: SandboxFilesystem<Entry>): SandboxFilesystem<Entry> {
+	const unique = (entries: Entry[]): Entry[] => {
+		const seen = new Set<string>();
+		return entries.filter((entry) => {
+			const key = typeof entry === "string" ? `s:${entry}` : `l:${entry.path}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
+	};
+	return { allowWrite: unique(lists.allowWrite), denyWrite: unique(lists.denyWrite), denyRead: unique(lists.denyRead), allowRead: unique(lists.allowRead) };
+}
+
+/**
+ * The filesystem rules of a command run in `scope.cwd`, as the model's
+ * sandbox section and `/sandbox` show them. The deny rules' paths come after
+ * the settings' own lists, as in Claude Code. A glob expanded per command
+ * (a Linux write-deny glob) is shown as its pattern, so the text depends only
+ * on the settings and the directory and stays the same from one command to
+ * the next.
+ */
+export function sandboxFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): SandboxFilesystem {
+	return uniqueLists(mapLists(filesystemRules(settings, scope, host), (entry) => [typeof entry === "string" ? entry : entry.kind === "path" ? entry.path : entry.glob]));
+}
+
+/**
+ * The filesystem rules handed to the runtime for one command about to start
+ * in `scope.cwd`: {@link sandboxFilesystem}'s rules with each per-command glob
+ * expanded to the files it matches now ({@link expandDenyGlobs}). Built for
+ * every wrap, so a file that appeared since the last command is denied from
+ * this one on; one created while the command runs is not.
+ */
+export function sandboxCommandFilesystem(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}): SandboxFilesystem<SandboxPathEntry> {
+	const rules = filesystemRules(settings, scope, host);
+	const globs = [...rules.denyWrite, ...rules.denyRead].flatMap((entry) => (typeof entry !== "string" && entry.kind === "expand" ? [entry.glob] : []));
+	const expanded = globs.length > 0 ? expandDenyGlobs(globs) : new Map<string, SandboxPathEntry[]>();
+	return uniqueLists(mapLists(rules, (entry): SandboxPathEntry[] => (typeof entry === "string" ? [entry] : entry.kind === "path" ? [entry.path] : (expanded.get(entry.glob) ?? [literalDirectory(entry.glob)]))));
+}
+
+/** The session's configuration for the runtime's `initialize`: the rules of a command in `scope.cwd` at this moment. */
 export function sandboxRuntimeConfig(settings: SandboxSettings, scope: SandboxScope, host: SandboxHost = {}) {
 	return {
 		network: {
@@ -371,6 +492,6 @@ export function sandboxRuntimeConfig(settings: SandboxSettings, scope: SandboxSc
 			...(settings.network.allowLocalBinding ? { allowLocalBinding: true } : {}),
 			...(settings.network.allowUnixSockets.length > 0 ? { allowUnixSockets: [...settings.network.allowUnixSockets] } : {}),
 		},
-		filesystem: sandboxFilesystem(settings, scope, host),
+		filesystem: sandboxCommandFilesystem(settings, scope, host),
 	};
 }
