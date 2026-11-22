@@ -14,7 +14,10 @@ const tui = { requestRender: () => {}, terminal: { rows: 30, columns: 80 } };
 const keys = { matches: (data: string, binding: string) => data === "\x1b[5~" && binding === "tui.altScreen.pageUp" };
 
 function editor(viewOpen: () => boolean, moves: AgentViewScroll[] = []) {
-	return new PromptEditor(tui as never, theme as never, keys as never, () => "> ", undefined, undefined, undefined, undefined, () => (viewOpen() ? (move) => moves.push(move) : undefined));
+	return new PromptEditor(tui as never, theme as never, keys as never, {
+		marker: () => "> ",
+		scrollView: () => (viewOpen() ? (move: AgentViewScroll) => void moves.push(move) : undefined),
+	});
 }
 
 describe("PromptEditor and the agent view", () => {

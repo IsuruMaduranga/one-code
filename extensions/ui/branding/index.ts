@@ -23,7 +23,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../../lib/ui/argument-hints.ts";
 import { parseFrontmatterLoosely } from "../../lib/core/frontmatter.ts";
 import { promptTemplateFiles } from "../../lib/plugins/skill-scan.ts";
-import { modeCycleKey } from "../../lib/ui/keys.ts";
+import { modeCycleKey, taskToggleKey } from "../../lib/ui/keys.ts";
 import os from "node:os";
 import { basename, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -54,8 +54,11 @@ import { boundKey, linesComponent, safeThemeInverse, safeThemePaint, truncateLin
 import { AGENT_VIEW_CHANNEL, AGENT_VIEW_SCROLL_CHANNEL, type AgentViewAnnouncement, type AgentViewScroll, type AgentViewTarget } from "../../lib/agents/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { TitleAnimation } from "./title-animation.ts";
-import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
-import { sanitizeTitle } from "../../lib/ui/terminal-text.ts";
+import { PROMPT_PADDING, PromptEditor, type PromptEditorHooks } from "./prompt-editor.ts";
+import { CTRL_X_CHORD_CHANNEL } from "../../lib/ui/ctrl-x-chord.ts";
+import { shortcutColumns, shortcutLines } from "../../lib/ui/shortcuts-model.ts";
+import { PI_BUILTIN_COMMANDS } from "../../lib/plugins/skill-invoke.ts";
+import { sanitizeDisplayText, sanitizeTitle } from "../../lib/ui/terminal-text.ts";
 
 export { truncateLine };
 
@@ -94,8 +97,9 @@ export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - 
  * One curated hint line, not a keymap dump: only the controls someone cannot
  * discover on their own — the dials this package renames or hides state behind
  * (effort, permission mode, collapsed thinking/output) plus the two input
- * prefixes and the opt-in keyword nobody could guess. Everything else lives in
- * pi's own /hotkeys listing, which the line points at.
+ * prefixes and the opt-in keyword nobody could guess. Everything else is in
+ * the shortcuts panel `?` opens on an empty editor (and /help), which the line
+ * points at; pi's own /hotkeys table names shift+tab for its thinking dial.
  */
 /** pi's keyText over a binding named as a string. */
 const userKey = (binding: string): string => piKeyText(binding as Parameters<typeof piKeyText>[0]);
@@ -103,7 +107,7 @@ const userKey = (binding: string): string => piKeyText(binding as Parameters<typ
 /** The startup hints; a third field names the pi binding whose user key replaces the default. */
 const HINTS: [key: string, what: string, binding?: string][] = [
 	// First so it survives narrow terminals: the pointer to everything else.
-	["/hotkeys", "all keys"],
+	["?", "shortcuts"],
 	// pi calls this dial "thinking" and reserves shift+tab for it; we present
 	// it as Claude Code's "effort" so the key and /effort agree on the name.
 	["shift+tab", "effort", "app.thinking.cycle"],
@@ -192,7 +196,7 @@ export function bannerLines(
 	]
 		.filter(Boolean)
 		.join(paint("muted", " · "));
-	// Narrow terminals drop whole trailing hints (the /hotkeys pointer is
+	// Narrow terminals drop whole trailing hints (the ? pointer is
 	// first, so it always survives) instead of cutting one mid-word.
 	// A rebound pi key shows as bound; an unbound one drops its hint.
 	const bound = HINTS.flatMap(([key, what, binding]): [string, string][] => {
@@ -225,6 +229,19 @@ interface BrandingEditorUI {
 	theme?: unknown;
 }
 
+/** What the prompt editor reads from the rest of the extension. */
+interface EditorSources {
+	argumentHints: ReadonlyMap<string, CommandHint>;
+	agentView: { target?: AgentViewTarget };
+	scrollAgentView: (scroll: AgentViewScroll) => void;
+	/** The session's name (pi's `/name`, or the one session-title gave it). */
+	sessionName: () => string | undefined;
+	/** Whether a slash command exists now (pi's built-ins included). */
+	hasCommand: (name: string) => boolean;
+	/** The second key of a `ctrl+x` chord being offered right now. */
+	chordKey: () => string | undefined;
+}
+
 /**
  * Replace the core input editor with one that paints a "›" prompt marker, the
  * way Claude Code does. TUI-only (print/rpc have no editor), skipped when pi is
@@ -234,30 +251,26 @@ interface BrandingEditorUI {
  */
 function installPromptMarker(
 	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
-	argumentHints: ReadonlyMap<string, CommandHint>,
-	agentView: { target?: AgentViewTarget },
-	scrollAgentView: (scroll: AgentViewScroll) => void = () => {},
+	sources: EditorSources,
 ): void {
 	if (knobValue("NO_INPUT_MARKER") === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const ui = ctx.ui;
 	if (typeof ui.setEditorComponent !== "function") return;
+	const { argumentHints, agentView } = sources;
+	const paint = (color: string, text: string) => safeThemePaint(ui.theme)(color, text);
 	// The marker follows live theme changes because it is re-read per render.
-	const renderMarker = () => {
+	const marker = () => {
 		// Bold makes the chevron read heavier than the input text beside it.
-		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
+		return `\x1b[1m${paint("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
 	};
-	const renderHint = (text: string) => {
+	const hint = (text: string) => {
 		// While an agent is viewed the empty editor addresses it (lib/agents/agent-view.ts).
 		const placeholder = text === "" && agentView.target ? agentView.target.placeholder : hintForInput(text, argumentHints);
-		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
+		return placeholder === undefined ? undefined : paint("dim", placeholder);
 	};
-	const badge = () => agentView.target?.badge;
-	// While an agent is viewed, the viewport keys and the wheel scroll the view.
-	const scrollView = () => (agentView.target ? scrollAgentView : undefined);
-	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
 	// The editor can outlive this context across a session replacement; a stale
-	// context throws, and ↑ must still reach the editor then.
+	// context throws, and keys must still reach the editor then.
 	const queued = () => {
 		try {
 			return !ctx.isIdle() && ctx.hasPendingMessages();
@@ -265,10 +278,36 @@ function installPromptMarker(
 			return false;
 		}
 	};
-	ui.setEditorComponent(
-		(tui: unknown, theme: unknown, keybindings: unknown) =>
-			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued, scrollView),
-	);
+	const idle = () => {
+		try {
+			return ctx.isIdle();
+		} catch {
+			return true;
+		}
+	};
+	const hooks: PromptEditorHooks = {
+		marker,
+		hint,
+		badge: () => agentView.target?.badge,
+		paintBadge: (label) => safeThemeInverse(ui.theme)(paint("accent", ` ${label} `)),
+		queued,
+		// While an agent is viewed, the viewport keys and the wheel scroll the view.
+		scrollView: () => (agentView.target ? sources.scrollAgentView : undefined),
+		dim: (text) => paint("dim", text),
+		title: () => {
+			const name = sources.sessionName();
+			return name ? sanitizeDisplayText(name) : undefined;
+		},
+		idle,
+		// Claude Code's `?` panel, every key read from the user's bindings (lib/ui/shortcuts-model.ts).
+		shortcuts: (width, editorKeys) =>
+			shortcutLines(
+				shortcutColumns({ keyText: userKey, modeCycleKey: modeCycleKey(), taskToggleKey: taskToggleKey(), hasCommand: sources.hasCommand, editorKeys }),
+				width,
+			),
+		chordKey: sources.chordKey,
+	};
+	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, hooks));
 }
 
 /**
@@ -408,6 +447,26 @@ function brandingExtension(pi: ExtensionAPI) {
 	pi.events.on(AGENT_VIEW_CHANNEL, (data) => {
 		agentView.target = (data as AgentViewAnnouncement | undefined)?.target;
 	});
+	// A key the ctrl+x chord prefix offers to the chords belongs to the chord
+	// even when none claims it: the editor's ctrl+s stash leaves a ctrl+x ctrl+s
+	// alone. The offer and the editor's turn come in one synchronous dispatch.
+	let chordKeyOffered: string | undefined;
+	pi.events.on(CTRL_X_CHORD_CHANNEL, (data) => {
+		const message = data as { kind?: string; key?: string };
+		if (message.kind !== "key") return;
+		chordKeyOffered = message.key;
+		queueMicrotask(() => {
+			chordKeyOffered = undefined;
+		});
+	});
+	const hasCommand = (name: string): boolean => {
+		if (PI_BUILTIN_COMMANDS.has(name)) return true;
+		try {
+			return pi.getCommands().some((command) => command.name === name);
+		} catch {
+			return false;
+		}
+	};
 	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
 		const { command, ...hint } = data as ArgumentHint;
 		argumentHints.set(command, hint);
@@ -451,9 +510,20 @@ function brandingExtension(pi: ExtensionAPI) {
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(thinkingLabel(userKey));
-		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView, (scroll) =>
-			pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
-		);
+		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], {
+			argumentHints,
+			agentView,
+			scrollAgentView: (scroll) => pi.events.emit(AGENT_VIEW_SCROLL_CHANNEL, scroll satisfies AgentViewScroll),
+			sessionName: () => {
+				try {
+					return pi.getSessionName?.()?.trim() || undefined;
+				} catch {
+					return undefined;
+				}
+			},
+			hasCommand,
+			chordKey: () => chordKeyOffered,
+		});
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {

@@ -73,6 +73,7 @@ export const FEATURES = {
 	"run-status": { entries: ["request/run-status/index.ts"], required: true },
 	init: { entries: ["commands/init/index.ts"] },
 	clear: { entries: ["commands/clear/index.ts"] },
+	help: { entries: ["commands/help/index.ts"] },
 	tasks: { entries: ["tools/tasks/index.ts"] },
 	"plan-mode": { entries: ["safety/plan-mode/index.ts"] },
 	notebook: { entries: ["tools/notebook/index.ts"] },
