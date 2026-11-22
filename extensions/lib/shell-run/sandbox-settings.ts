@@ -188,14 +188,14 @@ export type RuleDenyPath = { kind: "path"; path: string } | { kind: "literal"; p
  * would hide nothing.
  */
 export function ruleDenyPaths(pattern: string, kind: "write" | "read", cwd: string, home: string, platform: NodeJS.Platform): RuleDenyPath[] {
-	const trimmed = pattern.trim();
-	const paths = trimmed.startsWith("//")
-		? [resolve(trimmed.slice(1))]
-		: trimmed === "~" || trimmed.startsWith("~/")
-			? [resolve(home, `.${trimmed.slice(1)}`)]
-			: trimmed.startsWith("/")
-				? [resolve(trimmed), resolve(cwd, `.${trimmed}`)]
-				: [resolve(cwd, trimmed)];
+	// Never trimmed: the gate matches the pattern with its spaces, so `Read(secret.txt )` is the file whose name ends in one.
+	const paths = pattern.startsWith("//")
+		? [resolve(pattern.slice(1))]
+		: pattern === "~" || pattern.startsWith("~/")
+			? [resolve(home, `.${pattern.slice(1)}`)]
+			: pattern.startsWith("/")
+				? [resolve(pattern), resolve(cwd, `.${pattern}`)]
+				: [resolve(cwd, pattern)];
 	return paths.map((path): RuleDenyPath => {
 		if (!hasUnescapedWildcard(path)) {
 			const exact = unescapeLiteral(path);

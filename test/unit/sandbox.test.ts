@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { isRepoFile, settingsSources } from "../../extensions/lib/profile/settings-files.ts";
 import { Type } from "typebox";
-import { decide, parseRules } from "../../extensions/lib/rules/matcher.ts";
+import { decide, parseRules, ruleMatches } from "../../extensions/lib/rules/matcher.ts";
 import { type ActiveSandbox, grantCommandHosts, reloadSandboxSettings, requestedHosts, runsSandboxed, sandboxedCommand, sandboxGateFacts, sandboxSettings, setSandboxForTest, unsandboxedRequest, useSandboxSettingsFor } from "../../extensions/lib/shell-run/sandbox.ts";
 import { checkoutProtectedFiles, linkedWorktreeGitDirs } from "../../extensions/lib/shell-run/sandbox-settings.ts";
 import { denialInputKey } from "../../extensions/safety/permissions/auto-mode/denials.ts";
@@ -169,6 +169,16 @@ describe.skipIf(process.platform === "win32")("the permission deny rules in the 
 		expect(write("config/")).toEqual(["/work/config"]);
 		// The gate reads `/x` as the absolute path, Claude Code against the project: both are denied.
 		expect(write("/config/prod.yaml")).toEqual(["/config/prod.yaml", "/work/config/prod.yaml"]);
+	});
+
+	it("keeps the spaces of a pattern, as the gate matches it", () => {
+		const [trailing, leading] = parseRules(["Read(secret.txt )", "Edit( notes.md)"]);
+		expect(denyRulePaths([trailing, leading])).toEqual({ write: [" notes.md"], read: ["secret.txt "] });
+		expect(read("secret.txt ")).toEqual(["/work/secret.txt "]);
+		expect(write(" notes.md")).toEqual(["/work/ notes.md"]);
+		// The gate denies exactly the file with the space, which is what the sandbox gets.
+		expect(ruleMatches(trailing, "read", "/work/secret.txt ", "/work")).toBe(true);
+		expect(ruleMatches(trailing, "read", "/work/secret.txt", "/work")).toBe(false);
 	});
 
 	it("passes a glob where the runtime reads it as the gate does, and expands a Linux write glob per command", () => {
