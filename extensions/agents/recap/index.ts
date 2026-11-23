@@ -35,6 +35,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-call.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
+import { pendingWork } from "../../lib/notify/session-work.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
 import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
@@ -124,6 +125,11 @@ function recapExtension(pi: ExtensionAPI) {
 	async function generate() {
 		const ctx = lastCtx;
 		if (!ctx?.hasUI || scheduler.hasFiredSinceTurn) return;
+		// Claude Code 2.1.330 skips the recap while background agents or workflows
+		// run ("[awaySummary] skipped: background work pending"); shells do not count.
+		// Not marked fired: the next keystroke or turn end re-arms it.
+		const pending = pendingWork(pi.events);
+		if (pending.agents > 0 || pending.workflows > 0) return;
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
 		const messages = branchMessages(ctx);

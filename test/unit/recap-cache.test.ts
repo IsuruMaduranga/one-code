@@ -128,3 +128,34 @@ describe("the standalone recap follows the current branch", () => {
 		expect(sent).not.toContain("BANANA");
 	});
 });
+
+describe("recap while background work runs", () => {
+	it("skips while an agent or workflow runs, as Claude Code does, and fires once it is done", async () => {
+		const { SESSION_WORK_CHANNEL } = await import("../../extensions/lib/notify/session-work.ts");
+		complete.mockResolvedValue(answer("You were building the parser."));
+		const fake = createFakePi();
+		recapExtension(fake.pi as never);
+		const tasks: Array<{ id: string; type: string; status: string; description: string }> = [{ id: "a1", type: "subagent", status: "running", description: "Look up" }];
+		fake.events.on(SESSION_WORK_CHANNEL, (data) => (data as { tasks: unknown[] }).tasks.push(...tasks));
+		const model = { api: "anthropic-messages", provider: "anthropic", id: "test" };
+		const earlier = { role: "user", content: "Earlier conversation.", timestamp: 1 };
+		const ctx = createFakeCtx({
+			hasUI: true,
+			model,
+			modelRegistry: { getAvailable: () => [model], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "test" }) },
+			sessionManager: { getBranch: () => [{ type: "message", id: "m1", parentId: null, message: earlier }] },
+		});
+		await fake.fire("session_start", {}, ctx);
+		await fake.fire("context", { messages: [earlier] }, ctx);
+		await fake.fire("agent_settled", {}, ctx);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(complete).not.toHaveBeenCalled();
+
+		// A shell alone does not hold it back; the agent's turn ending re-arms it.
+		tasks.splice(0, tasks.length, { id: "s1", type: "shell", status: "running", description: "npm run dev" });
+		await fake.fire("agent_start", {}, ctx);
+		await fake.fire("agent_settled", {}, ctx);
+		await vi.advanceTimersByTimeAsync(1000);
+		await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(1));
+	});
+});
