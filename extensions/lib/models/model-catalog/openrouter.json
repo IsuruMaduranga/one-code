@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-21T17:50:02.539Z",
+	"fetchedAt": "2026-11-23T08:11:02.727Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -721,7 +721,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000443",
+					"prompt": "0.0000000434",
 					"completion": "0.0000003"
 				}
 			},
@@ -793,8 +793,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000015",
-					"completion": "0.0000006"
+					"prompt": "0.0000003",
+					"completion": "0.0000012"
 				}
 			},
 			{
@@ -819,6 +819,18 @@
 				"pricing": {
 					"prompt": "0.00000005",
 					"completion": "0.00000015"
+				}
+			},
+			{
+				"id": "dots-studio/dots-3-note-preview:free",
+				"created": 1786680361,
+				"hugging_face_id": "dots-studio/dots3-note-prev",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0",
+					"completion": "0"
 				}
 			},
 			{
@@ -1335,7 +1347,7 @@
 				],
 				"pricing": {
 					"prompt": "0.00000008",
-					"completion": "0.00000045"
+					"completion": "0.00000016"
 				}
 			},
 			{
@@ -1343,8 +1355,8 @@
 				"created": 1741905510,
 				"hugging_face_id": "google/gemma-3-4b-it",
 				"pricing": {
-					"prompt": "0.00000005",
-					"completion": "0.0000001"
+					"prompt": "0.00000004",
+					"completion": "0.00000005"
 				}
 			},
 			{
@@ -1355,8 +1367,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000675",
-					"completion": "0.000000225"
+					"prompt": "0.00000009",
+					"completion": "0.0000003"
 				}
 			},
 			{
@@ -1428,8 +1440,8 @@
 				"created": 1688256000,
 				"hugging_face_id": "Gryphe/MythoMax-L2-13b",
 				"pricing": {
-					"prompt": "0.00000008",
-					"completion": "0.00000011"
+					"prompt": "0.0000003",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -1821,8 +1833,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000075",
-					"completion": "0.0000003"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -2199,8 +2211,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000253",
-					"completion": "0.0000088"
+					"prompt": "0.0000002403",
+					"completion": "0.0000084023"
 				}
 			},
 			{
@@ -3523,8 +3535,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000009",
-					"completion": "0.00000036"
+					"prompt": "0.00000005",
+					"completion": "0.00000025"
 				}
 			},
 			{
@@ -3547,8 +3559,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000017",
-					"completion": "0.000000085"
+					"prompt": "0.00000003",
+					"completion": "0.00000013"
 				}
 			},
 			{
@@ -4052,8 +4064,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000195",
-					"completion": "0.00000156"
+					"prompt": "0.00000026",
+					"completion": "0.0000026"
 				}
 			},
 			{
@@ -4145,8 +4157,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000001",
-					"completion": "0.0000009"
+					"prompt": "0.00000005",
+					"completion": "0.0000007"
 				}
 			},
 			{
@@ -4235,8 +4247,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000006",
-					"completion": "0.00000196"
+					"prompt": "0.000000035",
+					"completion": "0.0000015"
 				}
 			},
 			{
@@ -4543,8 +4555,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000825",
-					"completion": "0.00000033"
+					"prompt": "0.00000014",
+					"completion": "0.00000058"
 				}
 			},
 			{
@@ -4579,8 +4591,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000007506",
-					"completion": "0.0000022509"
+					"prompt": "0.000000834",
+					"completion": "0.000002501"
 				}
 			},
 			{
@@ -4976,8 +4988,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000004",
-					"completion": "0.00000175"
+					"prompt": "0.0000006",
+					"completion": "0.0000022"
 				}
 			},
 			{
@@ -5023,8 +5035,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000119",
-					"completion": "0.00000374"
+					"prompt": "0.0000014",
+					"completion": "0.0000044"
 				}
 			},
 			{
@@ -5205,8 +5217,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000999",
-					"completion": "0.000008"
+					"prompt": "0.0000001188",
+					"completion": "0.000005"
 				}
 			},
 			{
@@ -5216,8 +5228,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000044",
-					"completion": "0.000000132"
+					"prompt": "0.0000000434",
+					"completion": "0.0000003"
 				}
 			},
 			{
@@ -5250,7 +5262,7 @@
 				],
 				"pricing": {
 					"prompt": "0.0000001824",
-					"completion": "0.0000106066"
+					"completion": "0.0000110055"
 				}
 			},
 			{

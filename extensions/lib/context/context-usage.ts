@@ -18,7 +18,8 @@
  *   - the harness blocks, recognized by the words that open them, wherever
  *     they ride (a block of their own, or one of several merged into a
  *     system message, `harnessSegments`): the deferred-tool listing (its
- *     lines go to built-in or MCP tools), the agent listing (built-in tools),
+ *     lines go to built-in or MCP tools), the agent listing (a custom
+ *     agent's row is Custom agents, the rest built-in tools: `agentGroups`),
  *     the MCP servers' instructions, the skills listing, and instruction
  *     files (split per `Contents of <path> (<source>):` section); any other
  *     system-reminder of the first user message, and any other text of a
@@ -33,10 +34,12 @@
  * Pure: no pi extension API.
  */
 
+import { isAbsolute } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { ESTIMATED_IMAGE_CHARS, estimateCharTokens, estimateTextTokens } from "../models/pi-ai-estimate.ts";
 import { declarationsOf, toolName } from "../request/ledger/wire.ts";
 import { toolSearchResultText } from "../request/tool-search-text.ts";
+import { instructionType } from "./context-text.ts";
 
 /** The categories in Claude Code's order. */
 export const CONTEXT_CATEGORIES = [
@@ -44,6 +47,7 @@ export const CONTEXT_CATEGORIES = [
 	["systemTools", "System tools"],
 	["mcpTools", "MCP tools"],
 	["mcpInstructions", "MCP server instructions"],
+	["agents", "Custom agents"],
 	["memory", "Memory files"],
 	["skills", "Skills"],
 	["messages", "Messages"],
@@ -144,6 +148,8 @@ function unwrap(text: string): { body: string; framed: boolean } {
 export interface ContextItem {
 	name: string;
 	tokens: number;
+	/** Where it comes from, Claude Code's label: a custom agent's group (Project, User, Plugin (<name>)), an instruction file's type (Project, User, Local, Managed, AutoMem). */
+	group?: string;
 }
 
 /** The estimate of one request, before it is reconciled with the provider's count. */
@@ -151,6 +157,8 @@ export interface RequestBreakdown {
 	tokens: Record<ContextCategoryKey, number>;
 	memoryFiles: ContextItem[];
 	skills: ContextItem[];
+	/** Custom agents' rows of the agent listing, each with its group. */
+	agents: ContextItem[];
 	/** Loaded MCP tools (declared up front, or loaded by reference). */
 	mcpLoaded: ContextItem[];
 	/** MCP tools the model can load but has not. */
@@ -204,9 +212,14 @@ const HEADS: ReadonlyArray<readonly [string, BlockKind]> = [
 	[BLOCK_HEADS.instructions, "memory"],
 ];
 
-/** Where a merged block ends inside `text`: the first blank line before a tag, or before a line that is not a list row (`list`); -1 for none. */
+/**
+ * Where a merged block ends inside `text`: the first blank line before the
+ * turn budget's `<total_tokens>` tag (any other tag, an agent description's
+ * `<example>`, stays in the block), or before a line that is not a list row
+ * (`list`); -1 for none.
+ */
 function blockEnd(text: string, list: boolean): number {
-	const ends = [text.indexOf("\n\n<"), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
+	const ends = [text.indexOf("\n\n<total_tokens>"), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
 	return ends.length > 0 ? Math.min(...ends) : -1;
 }
 
@@ -251,12 +264,22 @@ export function harnessSegments(body: string): Array<{ kind?: BlockKind; text: s
 
 /**
  * Estimate what `request` holds, by category. `displayPath` shows an
- * instruction file's path the way the user names it.
+ * instruction file's path the way the user names it; `agentGroups` names each
+ * custom agent's group (an agent it does not name is built in).
  */
-export function breakdownRequest(request: RecordedRequestView, options: { displayPath?: (path: string) => string } = {}): RequestBreakdown {
+export interface BreakdownOptions {
+	displayPath?: (path: string) => string;
+	/** The agent listing's row names, each with a custom agent's group (undefined for a built-in row). */
+	agentGroups?: ReadonlyMap<string, string | undefined>;
+}
+
+export function breakdownRequest(request: RecordedRequestView, options: BreakdownOptions = {}): RequestBreakdown {
 	const tokens = Object.fromEntries(CONTEXT_CATEGORIES.map(([key]) => [key, 0])) as Record<ContextCategoryKey, number>;
 	const memory = new Map<string, number>();
+	const memoryTypes = new Map<string, string>();
 	const skills: ContextItem[] = [];
+	const agents: ContextItem[] = [];
+	const agentGroups = options.agentGroups ?? new Map<string, string | undefined>();
 	const mcpLoaded = new Map<string, number>();
 	const mcpAvailable = new Set<string>();
 	const show = options.displayPath ?? ((path: string) => path);
@@ -296,8 +319,29 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 				mcpAvailable.add(name);
 			}
 			tokens.systemTools += Math.max(0, rest);
-		} else if (kind === "agents") tokens.systemTools += textTokens(body);
-		else if (kind === "mcpInstructions") tokens.mcpInstructions += textTokens(body);
+		} else if (kind === "agents") {
+			// A row runs from its `- name: ` line, a name the catalog has, to the next row: a description may hold blank lines and `- x: ` bullets. The note after the list follows the last blank line.
+			const listEnd = body.lastIndexOf("\n\n");
+			let current: ContextItem | undefined;
+			let custom = 0;
+			for (const line of (listEnd > 0 ? body.slice(0, listEnd) : body).split("\n")) {
+				const row = /^- (\S+?): /.exec(line);
+				if (row && agentGroups.has(row[1])) {
+					const name = row[1];
+					const group = agentGroups.get(name);
+					// A listing sent again (the agent files changed) adds to the agent's row, not a second one.
+					current = group ? agents.find((item) => item.name === name) : undefined;
+					if (group && !current) agents.push((current = { name, tokens: 0, group }));
+				}
+				if (current) {
+					const share = textTokens(line);
+					current.tokens += share;
+					custom += share;
+				}
+			}
+			tokens.agents += custom;
+			tokens.systemTools += Math.max(0, textTokens(body) - custom);
+		} else if (kind === "mcpInstructions") tokens.mcpInstructions += textTokens(body);
 		else if (kind === "skills") {
 			tokens.skills += textTokens(body);
 			for (const line of body.split("\n")) {
@@ -316,6 +360,8 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 				if (match) {
 					close();
 					current = show(match[1]);
+					// A file the base does not word (a product's own) is the user's when it sits outside the project.
+					memoryTypes.set(current, instructionType(match[2]) ?? (current.startsWith("~") || isAbsolute(current) ? "User" : "Project"));
 					section = [line];
 				} else section.push(line);
 			}
@@ -348,8 +394,9 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 	const byName = (a: string, b: string) => a.toLowerCase().localeCompare(b.toLowerCase());
 	return {
 		tokens,
-		memoryFiles: [...memory].map(([name, size]) => ({ name, tokens: size })),
+		memoryFiles: [...memory].map(([name, size]) => ({ name, tokens: size, group: memoryTypes.get(name) })),
 		skills: skills.sort((a, b) => b.tokens - a.tokens),
+		agents: agents.sort((a, b) => b.tokens - a.tokens),
 		mcpLoaded: [...mcpLoaded].map(([name, size]) => ({ name, tokens: size })).sort((a, b) => byName(a.name, b.name)),
 		mcpAvailable: [...mcpAvailable].filter((name) => !mcpLoaded.has(name)).sort(byName),
 	};
@@ -444,6 +491,7 @@ export interface ContextUsage {
 	estimateError?: string;
 	memoryFiles: ContextItem[];
 	skills: ContextItem[];
+	agents: ContextItem[];
 	mcp: { loaded: ContextItem[]; available: string[] };
 }
 
@@ -488,7 +536,7 @@ export function contextUsage(input: ContextUsageInput): ContextUsage {
 	const window = Math.max(0, input.window);
 	const buffer = input.compaction?.enabled ? Math.min(window, Math.max(0, input.compaction.reserveTokens)) : 0;
 	const base = { model: input.model, window, buffer };
-	const empty = { memoryFiles: [], skills: [], mcp: { loaded: [], available: [] } };
+	const empty = { memoryFiles: [], skills: [], agents: [], mcp: { loaded: [], available: [] } };
 	const breakdown = input.breakdown;
 	if (!breakdown) return { ...base, ...empty, state: input.compacted ? "compacted" : "empty", categories: [], ...(input.estimateError !== undefined ? { estimateError: input.estimateError } : {}) };
 
@@ -521,6 +569,7 @@ export function contextUsage(input: ContextUsageInput): ContextUsage {
 		...(input.preview ? { preview: input.preview } : {}),
 		memoryFiles: scale(breakdown.memoryFiles),
 		skills: scale(breakdown.skills),
+		agents: scale(breakdown.agents),
 		mcp: { loaded: scale(breakdown.mcpLoaded), available: breakdown.mcpAvailable },
 	};
 }

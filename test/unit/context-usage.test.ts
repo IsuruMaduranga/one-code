@@ -13,7 +13,7 @@ import {
 	scaleToSum,
 } from "../../extensions/lib/context/context-usage.ts";
 import { contextText } from "../../extensions/lib/context/context-text.ts";
-import { renderContextUsage } from "../../extensions/lib/ui/context-usage-view.ts";
+import { contextReport, renderContextUsage } from "../../extensions/lib/ui/context-usage-view.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
@@ -116,11 +116,45 @@ describe("breakdownRequest", () => {
 		for (const key of ["systemTools", "mcpTools", "memory", "skills", "messages"] as const) expect(t[key]).toBeGreaterThan(0);
 		// The memory block's files, by section, with the display path applied.
 		expect(out.memoryFiles.map((file) => file.name)).toEqual(["/home/u/.claude/CLAUDE.md", "CLAUDE.md"]);
+		// Each with its type, by the section's descriptor.
+		expect(out.memoryFiles.map((file) => file.group)).toEqual(["User", "Project"]);
 		// Skills by size, a plugin skill's full name kept.
 		expect(out.skills.map((skill) => skill.name)).toEqual(["plugin:deploy", "simplify"]);
 		// Loaded: the eager MCP tool and the one a tool_reference loaded; available: the deferred one not loaded.
 		expect(out.mcpLoaded.map((item) => item.name)).toEqual(["mcp__docs__eager", "mcp__docs__fetch"]);
 		expect(out.mcpAvailable).toEqual(["mcp__docs__search"]);
+	});
+
+	it("counts a custom agent's row as Custom agents and a built-in one as System tools", () => {
+		const listing = `${BLOCK_HEADS.agents}\n- explore: Fast search.\n- reviewer: Reviews code\n- caveat: a bullet in its description.\n- pr:checker: Checks pull requests.\n\n<example>\nA pull request.\n</example>\n\n<example>One line.</example>\n- fork: clone this conversation.\n\nWhen you launch multiple agents, send them together.`;
+		const request = { api: "anthropic-messages", head: { model: "m" }, list: [{ role: "user", content: [{ type: "text", text: reminder(listing) }] }] };
+		const plain = breakdownRequest(request);
+		expect(plain.tokens.agents).toBe(0);
+		expect(plain.agents).toEqual([]);
+		const out = breakdownRequest(request, { agentGroups: new Map([["explore", undefined], ["reviewer", "Project"], ["pr:checker", "Plugin (pr)"], ["fork", undefined]]) });
+		const row = (text: string) => estimateTextTokens(text);
+		// A description's `- x: ` bullet, blank lines and examples stay in its row; the next catalog row and the note after the last blank line do not.
+		const reviewer = row("- reviewer: Reviews code") + row("- caveat: a bullet in its description.");
+		const checker = ["- pr:checker: Checks pull requests.", "", "<example>", "A pull request.", "</example>", "", "<example>One line.</example>"].reduce((sum, line) => sum + row(line), 0);
+		// Largest first.
+		expect(out.agents).toEqual([
+			{ name: "pr:checker", tokens: checker, group: "Plugin (pr)" },
+			{ name: "reviewer", tokens: reviewer, group: "Project" },
+		]);
+		expect(out.tokens.agents).toBe(reviewer + checker);
+		// The rest of the listing (its head, the built-in row and the note) stays System tools.
+		expect(out.tokens.systemTools).toBe(plain.tokens.systemTools - out.tokens.agents);
+		// A second listing in the same request counts its own rows once.
+		const twice = breakdownRequest({ ...request, list: [...request.list, ...request.list] }, { agentGroups: new Map([["explore", undefined], ["reviewer", "Project"], ["pr:checker", "Plugin (pr)"], ["fork", undefined]]) });
+		expect(twice.tokens.agents).toBe(2 * out.tokens.agents);
+		expect(twice.agents.map((item) => [item.name, item.tokens])).toEqual(out.agents.map((item) => [item.name, 2 * item.tokens]));
+	});
+
+	it("types a product's own instruction file by where it sits", () => {
+		const block = [BLOCK_HEADS.instructions, "", "Contents of /home/u/.onecode/ONECODE.md (product words for every project):", "", "a", "", "Contents of /proj/ONECODE.md (product words for this project):", "", "b"].join("\n");
+		const request = { api: "anthropic-messages", head: { model: "m" }, list: [{ role: "user", content: [{ type: "text", text: reminder(block) }] }] };
+		const out = breakdownRequest(request, { displayPath: (path) => path.replace("/home/u", "~").replace("/proj/", "") });
+		expect(out.memoryFiles.map((file) => [file.name, file.group])).toEqual([["~/.onecode/ONECODE.md", "User"], ["ONECODE.md", "Project"]]);
 	});
 
 	it("counts a deferred tool's schema only once it is loaded", () => {
@@ -318,6 +352,7 @@ function ccUsage(): ContextUsage {
 		buffer: 33_000,
 		free: 950_300,
 		memoryFiles: [],
+		agents: [],
 		skills: [
 			{ name: "dataviz", tokens: 482 },
 			{ name: "init", tokens: 17 },
@@ -331,6 +366,92 @@ function ccUsage(): ContextUsage {
 		},
 	};
 }
+
+describe("contextReport", () => {
+	it("gives the model Claude Code's Markdown report, whatever the screen shows", () => {
+		const usage = {
+			...ccUsage(),
+			agents: [{ name: "pr:checker", tokens: 200, group: "Plugin (pr)" }],
+			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200, group: "Project" }],
+			skills: [{ name: "dataviz", tokens: 482 }, { name: "plugin:deploy", tokens: 17 }],
+		};
+		expect(contextReport(usage)).toBe(
+			[
+				"## Context Usage",
+				"",
+				`**Model:** ${MODEL.id}  `,
+				"**Tokens:** 16.7k / 1m (2%)",
+				"",
+				"### Estimated usage by category",
+				"",
+				"| Category | Tokens | Percentage |",
+				"|----------|--------|------------|",
+				"| System prompt | 2.5k | 0.2% |",
+				"| System tools | 9.7k | 1.0% |",
+				"| MCP tools | 592 | 0.1% |",
+				"| MCP server instructions | 1.8k | 0.2% |",
+				"| Skills | 2.2k | 0.2% |",
+				"| Free space | 950.3k | 95.0% |",
+				"| Autocompact buffer | 33k | 3.3% |",
+				"",
+				"### MCP Tools",
+				"",
+				"| Tool | Server | Tokens |",
+				"|------|--------|--------|",
+				"| mcp__claude_ai_Claude_Docs__batch | claude_ai_Claude_Docs | 134 |",
+				"| mcp__claude_ai_Claude_Docs__guide | claude_ai_Claude_Docs | 170 |",
+				"",
+				"### Other MCP tools, by server",
+				"",
+				"| Server | Tools |",
+				"|--------|-------|",
+				"| claude_ai_Asana | 1 |",
+				"| claude_ai_Slack | 1 |",
+				"",
+				"### Custom Agents",
+				"",
+				"| Agent Type | Source | Tokens |",
+				"|------------|--------|--------|",
+				"| pr:checker | Plugin | 200 |",
+				"",
+				"### Memory Files",
+				"",
+				"| Type | Path | Tokens |",
+				"|------|------|--------|",
+				"| Project | CLAUDE.md | 1.2k |",
+				"",
+				"### Skills",
+				"",
+				"| Skill | Source | Tokens |",
+				"|-------|--------|--------|",
+				"| dataviz |  | ~480 |",
+				"| plugin:deploy | Plugin (plugin) | < 20 |",
+				"",
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("keeps the servers with the most tools when it caps the servers' table", () => {
+		const available = [...Array.from({ length: 11 }, (_, index) => `mcp__a${index}__tool`), "mcp__zz__one", "mcp__zz__two", "mcp__zz__three"];
+		const report = contextReport({ ...ccUsage(), mcp: { loaded: [], available } });
+		expect(report).toContain("| Server | Tools |\n|--------|-------|\n| zz | 3 |\n");
+		expect(report).toContain("| and 2 more | 2 |");
+	});
+
+	it("keeps each table's ten largest rows and sums the rest", () => {
+		const memoryFiles = Array.from({ length: 12 }, (_, index) => ({ name: `rules/${index}.md`, tokens: 100 + index, group: "Project" }));
+		const report = contextReport({ ...ccUsage(), memoryFiles });
+		expect(report).toContain("| Project | rules/11.md | 111 |");
+		expect(report).not.toContain("rules/1.md |");
+		expect(report).toContain("| and 2 more |  | 201 |");
+	});
+
+	it("says an estimate is one, and names what is over the window", () => {
+		expect(contextReport({ ...ccUsage(), preview: "first" })).toContain("**Tokens:** 16.7k / 1m (2%)\n\nThis token count is an estimate.\n\n");
+		expect(contextReport({ ...ccUsage(), total: 1_200_000 })).toContain("**Over limit:** Context exceeds the 1m-token limit by 200k tokens \u2014 run /compact or /clear to continue.\n");
+	});
+});
 
 describe("renderContextUsage", () => {
 	it("names a failed estimate instead of saying nothing was sent", () => {
@@ -368,6 +489,66 @@ describe("renderContextUsage", () => {
 			"     Skills · /skills",
 			"     ├ dataviz: ~480 tokens",
 			"     └ init: ~20 tokens",
+		]);
+	});
+
+	it("collapses each list to a count and its tokens, as Claude Code's fullscreen does", () => {
+		const usage = { ...ccUsage(), memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }] };
+		const lines = renderContextUsage(usage, { width: 160, collapsed: true });
+		expect(lines.slice(13)).toEqual([
+			"",
+			"     Auto-compact window:  1m tokens",
+			"",
+			"     MCP tools · /mcp (loaded on-demand)",
+			"     └ 4 tools · 304 tokens",
+			"",
+			"     Memory files · /memory",
+			"     └ 1 file · 1.2k tokens",
+			"",
+			"     Skills · /skills",
+			"     └ 2 skills · 2.2k tokens",
+			"",
+			"     /context all to expand",
+		]);
+		const withAgents = { ...ccUsage(), agents: [{ name: "reviewer", tokens: 300, group: "Project" }, { name: "pr:checker", tokens: 200, group: "Plugin (pr)" }] };
+		const agentLines = renderContextUsage(withAgents, { width: 160, collapsed: true, agentsDir: ".claude/agents/" });
+		const at = agentLines.indexOf("     Custom agents · .claude/agents/");
+		expect(agentLines.slice(at, at + 3)).toEqual(["     Custom agents · .claude/agents/", "     └ 2 agents · 500 tokens", ""]);
+		expect(agentLines[at - 2]).toBe("     └ 4 tools · 304 tokens");
+		// Nothing to list: no hint.
+		const bare = { ...ccUsage(), skills: [], mcp: { loaded: [], available: [] } };
+		expect(renderContextUsage(bare, { width: 160, collapsed: true }).join("\n")).not.toContain("/context all");
+	});
+
+	it("lists custom agents by group, Project then User then each plugin, before the memory files", () => {
+		const usage = {
+			...ccUsage(),
+			mcp: { loaded: [], available: [] },
+			agents: [
+				{ name: "zed:helper", tokens: 90, group: "Plugin (zed)" },
+				{ name: "mine", tokens: 120, group: "User" },
+				{ name: "abc:lint", tokens: 80, group: "Plugin (abc)" },
+				{ name: "reviewer", tokens: 300, group: "Project" },
+			],
+			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }],
+		};
+		// A transcript entry stored by a build before custom agents still draws.
+		const { agents: _agents, ...older } = usage;
+		expect(() => renderContextUsage(older as unknown as ContextUsage, { width: 160, collapsed: true })).not.toThrow();
+		const lines = renderContextUsage(usage, { width: 160, agentsDir: ".claude/agents/" });
+		const at = lines.indexOf("     Custom agents · .claude/agents/");
+		expect(lines.slice(at, at + 11)).toEqual([
+			"     Custom agents · .claude/agents/",
+			"     Project",
+			"     └ reviewer: 300 tokens",
+			"     User",
+			"     └ mine: 120 tokens",
+			"     Plugin (abc)",
+			"     └ abc:lint: 80 tokens",
+			"     Plugin (zed)",
+			"     └ zed:helper: 90 tokens",
+			"     Memory files · /memory",
+			"     └ CLAUDE.md: 1.2k tokens",
 		]);
 	});
 

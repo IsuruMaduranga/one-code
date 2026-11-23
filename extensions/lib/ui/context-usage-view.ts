@@ -5,7 +5,9 @@
  * name, model id, the total, "Estimated usage by category" and a row per
  * category, then free space and the autocompact buffer), the auto-compact
  * window, and the per-item lists (MCP tools loaded and available, memory
- * files, skills). With an identity `paint` the lines are the plain text RPC,
+ * files, skills), or with `collapsed` one count-and-tokens row per list and
+ * the "/context all to expand" hint (Claude Code's fullscreen presentation,
+ * `collapseDetailSections`). With an identity `paint` the lines are the plain text RPC,
  * one-shot runs and the command's stdout get.
  *
  * The grid follows Claude Code's sizes (`gridSize`), 5 columns under 80. When
@@ -24,13 +26,15 @@ import { wrapProse } from "./tui-render.ts";
  * Theme colours per category, after Claude Code's: grays for the system
  * prompt and tools, cyan for MCP tools, the brand colour for memory files,
  * amber for skills, violet for messages. Claude Code's colour for MCP server
- * instructions is not in the evidence; blue is our choice.
+ * instructions is not in the evidence; blue is our choice, and the syntax type
+ * colour for custom agents (lavender in Claude Code's screen).
  */
 const CATEGORY_COLORS: Record<ContextCategoryKey, string> = {
 	systemPrompt: "muted",
 	systemTools: "dim",
 	mcpTools: "mdCode",
 	mcpInstructions: "mdLink",
+	agents: "syntaxType",
 	memory: "accent",
 	skills: "warning",
 	messages: "syntaxNumber",
@@ -52,6 +56,10 @@ const NARROW_BELOW = 80;
 
 export interface ContextViewOptions {
 	width: number;
+	/** Each list as one count-and-tokens row plus a "/context all to expand" hint, as Claude Code shows them in fullscreen. */
+	collapsed?: boolean;
+	/** Where project agents live, the custom-agents section's note (the profile's project config folder plus `agents/`). */
+	agentsDir?: string;
 	paint?: (color: string, text: string) => string;
 	bold?: (text: string) => string;
 }
@@ -66,6 +74,25 @@ export function contextNote(usage: ContextUsage): string | undefined {
 	if (usage.preview === "compaction") return "Estimated from what the next request will send: nothing sent since the compaction.";
 	if (usage.unreconciled !== undefined) return `Rows are estimates: the provider counted ${formatContextTokens(usage.unreconciled)} tokens for the last request.`;
 	return undefined;
+}
+
+/** Claude Code's order of agent groups: Project, User, then each plugin by name. */
+const GROUP_ORDER = ["Project", "User"];
+
+/** `items` by group in Claude Code's order, each group's items as they came (largest first). */
+function byGroup(items: readonly ContextItem[]): Array<[string, ContextItem[]]> {
+	const groups = new Map<string, ContextItem[]>();
+	for (const item of items) {
+		const group = item.group ?? "";
+		const members = groups.get(group);
+		if (members) members.push(item);
+		else groups.set(group, [item]);
+	}
+	const rank = (group: string) => {
+		const at = GROUP_ORDER.indexOf(group);
+		return at >= 0 ? at : GROUP_ORDER.length;
+	};
+	return [...groups].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
 /** A tree list: `├` for every item but the last, which takes `└`. */
@@ -127,22 +154,116 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	if (usage.buffer > 0) out.push("", `${INDENT}Auto-compact window:  ${window} tokens`);
 
 	const sized = (item: ContextItem, prefix = "") => `${item.name}: ${dim(`${prefix}${formatContextTokens(item.tokens)} tokens`)}`;
+	const heading = (title: string, note: string) => `${INDENT}${bold(title)}${dim(` · ${note}`)}`;
+	const sum = (items: readonly ContextItem[]) => items.reduce((total, item) => total + item.tokens, 0);
 	const { loaded, available } = usage.mcp;
+	const mcpNote = `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`;
 	const hasMcp = loaded.length > 0 || available.length > 0;
+	const agentsNote = options.agentsDir ?? "agents/";
+	// A transcript entry drawn by a build before custom agents had no `agents`.
+	const agents = usage.agents ?? [];
+	const hasLists = hasMcp || agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
+	if (options.collapsed) {
+		// The category's row, so the summary matches the legend after the provider's count rescales the rows.
+		const categoryTokens = (key: ContextCategoryKey) => usage.categories.find((row) => row.key === key)?.tokens;
+		const summary = (title: string, note: string, items: readonly unknown[], noun: string, tokens: number) =>
+			items.length === 0 ? [] : ["", heading(title, note), `${INDENT}${dim(`└ ${items.length} ${noun}${items.length === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`];
+		out.push(
+			...summary("MCP tools", mcpNote, [...loaded, ...available], "tool", sum(loaded)),
+			...summary("Custom agents", agentsNote, agents, "agent", categoryTokens("agents") ?? sum(agents)),
+			...summary("Memory files", "/memory", usage.memoryFiles, "file", sum(usage.memoryFiles)),
+			// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
+			...summary("Skills", "/skills", usage.skills, "skill", categoryTokens("skills") ?? sum(usage.skills)),
+		);
+		if (hasLists) out.push("", `${INDENT}${dim("/context all to expand")}`);
+		return out;
+	}
 	// Claude Code runs the lists after MCP's together; the first list still gets a blank line above it.
-	if (!hasMcp && (usage.memoryFiles.length > 0 || usage.skills.length > 0)) out.push("");
+	if (!hasMcp && hasLists) out.push("");
 	if (hasMcp) {
-		out.push("", `${INDENT}${bold("MCP tools")}${dim(` · /mcp${available.length > 0 ? " (loaded on-demand)" : ""}`)}`);
+		out.push("", heading("MCP tools", mcpNote));
 		if (loaded.length > 0) out.push("", `${INDENT}${dim("Loaded")}`, ...tree(loaded.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 		if (available.length > 0) out.push("", `${INDENT}${dim("Available")}`, ...tree(available).map((line) => `${INDENT}${dim(line)}`));
 	}
+	if (agents.length > 0) {
+		out.push(heading("Custom agents", agentsNote));
+		for (const [group, items] of byGroup(agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
+	}
 	if (usage.memoryFiles.length > 0) {
-		out.push(`${INDENT}${bold("Memory files")}${dim(" · /memory")}`, ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
+		out.push(heading("Memory files", "/memory"), ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 	}
 	if (usage.skills.length > 0) {
 		// Claude Code rounds a skill's share to tens and marks it approximate.
 		const rounded = usage.skills.map((item) => ({ ...item, tokens: Math.max(10, Math.round(item.tokens / 10) * 10) }));
-		out.push(`${INDENT}${bold("Skills")}${dim(" · /skills")}`, ...tree(rounded.map((item) => sized(item, "~"))).map((line) => `${INDENT}${line}`));
+		out.push(heading("Skills", "/skills"), ...tree(rounded.map((item) => sized(item, "~"))).map((line) => `${INDENT}${line}`));
+	}
+	return out;
+}
+
+/** Rows each table of the report keeps before its "and N more" row. */
+const REPORT_ROWS = 10;
+
+/** `items` capped at REPORT_ROWS, largest first, and the row that sums the rest ("" when nothing is cut). */
+function capped<T extends { tokens: number }>(items: readonly T[], tokens: (n: number) => string): { kept: readonly T[]; more: string } {
+	if (items.length <= REPORT_ROWS) return { kept: items, more: "" };
+	const sorted = [...items].sort((a, b) => b.tokens - a.tokens);
+	const rest = sorted.slice(REPORT_ROWS);
+	return { kept: sorted.slice(0, REPORT_ROWS), more: `| and ${rest.length} more |  | ${tokens(rest.reduce((sum, item) => sum + item.tokens, 0))} |\n` };
+}
+
+/** A skill's share as Claude Code's report prints it: approximate, to tens. */
+const skillTokens = (tokens: number) => (tokens < 20 ? "< 20" : `~${formatContextTokens(Math.round(tokens / 10) * 10)}`);
+
+/** The server of an MCP tool's `mcp__<server>__<tool>` name. */
+const mcpServer = (name: string) => name.split("__")[1] ?? "";
+
+/**
+ * What the model reads for `/context`: Claude Code 2.1.330's Markdown report
+ * (findings §101), the same in every presentation, while the screen above is
+ * the user's alone. Each table keeps its largest ten rows. A skill's source is
+ * known only for a plugin's (its `plugin:` prefix), and an MCP tool not loaded
+ * has no size here, so the servers' table counts tools only.
+ */
+export function contextReport(usage: ContextUsage): string {
+	const tokens = formatContextTokens;
+	const share = (n: number) => `${((n / Math.max(1, usage.window)) * 100).toFixed(1)}%`;
+	let out = "## Context Usage\n\n";
+	out += `**Model:** ${usage.model.id || usage.model.name}  \n`;
+	out += usage.total === undefined ? `**Tokens:** ? / ${tokens(usage.window)}\n` : `**Tokens:** ${tokens(usage.total)} / ${tokens(usage.window)} (${Math.round((usage.total / Math.max(1, usage.window)) * 100)}%)\n`;
+	if (usage.total !== undefined && usage.total > usage.window) out += `**Over limit:** Context exceeds the ${tokens(usage.window)}-token limit by ${tokens(usage.total - usage.window)} tokens — run /compact or /clear to continue.\n`;
+	out += "\n";
+	const note = usage.preview !== undefined && usage.estimateError === undefined ? "This token count is an estimate." : contextNote(usage);
+	if (note) out += `${note}\n\n`;
+	const rows = usage.categories.filter((row) => row.tokens > 0);
+	if (rows.length > 0) {
+		out += "### Estimated usage by category\n\n| Category | Tokens | Percentage |\n|----------|--------|------------|\n";
+		for (const row of rows) out += `| ${row.name} | ${tokens(row.tokens)} | ${share(row.tokens)} |\n`;
+		if (usage.free !== undefined && usage.free > 0) out += `| Free space | ${tokens(usage.free)} | ${share(usage.free)} |\n`;
+		if (usage.buffer > 0) out += `| Autocompact buffer | ${tokens(usage.buffer)} | ${share(usage.buffer)} |\n`;
+		out += "\n";
+	}
+	const table = <T extends { tokens: number }>(title: string, head: string, rule: string, items: readonly T[], row: (item: T) => string, format = tokens) => {
+		if (items.length === 0) return;
+		const { kept, more } = capped(items, format);
+		out += `### ${title}\n\n${head}\n${rule}\n${kept.map((item) => `${row(item)}\n`).join("")}${more}\n`;
+	};
+	table("MCP Tools", "| Tool | Server | Tokens |", "|------|--------|--------|", usage.mcp.loaded, (item) => `| ${item.name} | ${mcpServer(item.name)} | ${tokens(item.tokens)} |`);
+	const servers = new Map<string, number>();
+	for (const name of usage.mcp.available) servers.set(mcpServer(name), (servers.get(mcpServer(name)) ?? 0) + 1);
+	if (servers.size > 0) {
+		const ranked = [...servers].sort((a, b) => b[1] - a[1]);
+		const kept = ranked.slice(0, REPORT_ROWS);
+		const rest = ranked.slice(REPORT_ROWS);
+		out += "### Other MCP tools, by server\n\n| Server | Tools |\n|--------|-------|\n";
+		out += kept.map(([server, count]) => `| ${server} | ${count} |\n`).join("");
+		if (rest.length > 0) out += `| and ${rest.length} more | ${rest.reduce((sum, [, count]) => sum + count, 0)} |\n`;
+		out += "\n";
+	}
+	table("Custom Agents", "| Agent Type | Source | Tokens |", "|------------|--------|--------|", usage.agents ?? [], (item) => `| ${item.name} | ${item.group?.startsWith("Plugin") ? "Plugin" : (item.group ?? "")} | ${tokens(item.tokens)} |`);
+	table("Memory Files", "| Type | Path | Tokens |", "|------|------|--------|", usage.memoryFiles, (item) => `| ${item.group ?? "Project"} | ${item.name} | ${tokens(item.tokens)} |`);
+	if ((usage.categories.find((row) => row.key === "skills")?.tokens ?? 0) > 0) {
+		const plugin = (name: string) => (name.includes(":") ? `Plugin (${name.slice(0, name.indexOf(":"))})` : "");
+		table("Skills", "| Skill | Source | Tokens |", "|-------|--------|--------|", usage.skills, (item) => `| ${item.name} | ${plugin(item.name)} | ${skillTokens(item.tokens)} |`, skillTokens);
 	}
 	return out;
 }

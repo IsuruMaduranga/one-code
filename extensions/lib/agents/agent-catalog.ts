@@ -20,6 +20,8 @@ import { readdirSync, readFileSync, type Stats, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../core/frontmatter.ts";
 import { projectConfigDir, userConfigDir } from "../profile/sources.ts";
+import { brandedId } from "../profile/brand.mjs";
+import { isPathAtOrUnder } from "../profile/paths.ts";
 import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 import { normalizeToolName } from "../rules/matcher.ts";
 import { subagentResultText } from "./subagent-text.ts";
@@ -206,6 +208,42 @@ export const BUNDLED_AGENTS_DIR = catalogDir("agents");
  */
 export function agentFileSources(cwd: string, home: string, pluginAgentDirs: readonly (string | AgentSource)[]): Array<string | AgentSource> {
 	return [BUNDLED_AGENTS_DIR, ...pluginAgentDirs, ...agentDirs(cwd, home)];
+}
+
+/**
+ * Asks the Agent tool's extension for its catalog's rows (`/context`):
+ * the emitter passes `{ cwd }` and reads back `agents`, left unset when no
+ * extension answers.
+ */
+export const AGENT_GROUPS_QUERY_CHANNEL = brandedId("agent-groups-query");
+
+export interface AgentGroupsQuery {
+	cwd: string;
+	/** Every row name of the agent listing (the fork's included), with a group for a custom agent. */
+	agents?: Array<{ name: string; group?: string }>;
+}
+
+/** Each row of the agent listing by name, with a custom agent's group (undefined for a built-in row); empty when no extension answers. */
+export function queryAgentGroups(events: { emit(channel: string, data: unknown): void }, cwd: string): Map<string, string | undefined> {
+	const query: AgentGroupsQuery = { cwd };
+	events.emit(AGENT_GROUPS_QUERY_CHANNEL, query);
+	return new Map((query.agents ?? []).map((agent) => [agent.name, agent.group]));
+}
+
+/**
+ * Claude Code's `/context` group for an agent: Project or User by the folder
+ * its file sits in, `Plugin (<name>)` for a plugin's, and undefined for a
+ * built-in one (the bundled catalog, or defined in code).
+ */
+export function agentGroup(agent: AgentDefinition, cwd: string, home: string, bundled = BUNDLED_AGENTS_DIR): string | undefined {
+	const file = agent.source;
+	if (file === "built-in" || isPathAtOrUnder(file, bundled)) return undefined;
+	const [user, project] = agentDirs(cwd, home);
+	// User first: started in the home directory, the two folders are one, and its agents are the user's.
+	if (isPathAtOrUnder(file, user)) return "User";
+	if (isPathAtOrUnder(file, project)) return "Project";
+	const at = agent.name.indexOf(":");
+	return at > 0 ? `Plugin (${agent.name.slice(0, at)})` : "Plugin";
 }
 
 /** A directory whose agents are exposed as `<namespace>:<name>` (plugins). */
