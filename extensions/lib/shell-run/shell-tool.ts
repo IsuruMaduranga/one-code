@@ -11,15 +11,13 @@
  * it is; extensions/tools/powershell/index.ts is the second consumer.
  */
 
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, type TObject, type TProperties, Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
-import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
 import { sandboxConfigured, sandboxedCommand } from "./sandbox.ts";
@@ -142,16 +140,6 @@ export function shellFinish(summary: BashFinishSummary, timeoutSeconds?: number)
 	return { status: "failed", detail: shellResultText().failureDetail(end) };
 }
 
-/** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
-export function taskLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
-	try {
-		const dir = join(sessionResultsDir(ctx), "bash", taskId);
-		mkdirSync(dir, { recursive: true });
-		return join(dir, "output.log");
-	} catch {
-		return undefined;
-	}
-}
 
 /**
  * Register the shell tool; the returned setter registers it again with a new
@@ -268,7 +256,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				};
 			}
 			const id = generateTaskId();
-			const logPath = taskLogPath(ctx, id);
+			const logPath = taskOutputPath(ctx, id); // one spool place for every shell tool; the shell panel reads it
 			const description = params.description || params.command.slice(0, 80);
 			const command = viaBash ? sandboxed.command : wrap(sandboxed.command);
 

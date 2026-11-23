@@ -108,7 +108,8 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { ClickToggles, clickToExpand, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
+import { ClickToggles, clickToExpand, elbowIndent, rowRenderers, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -2876,11 +2877,15 @@ function subagentsExtension(pi: ExtensionAPI) {
 	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
-		...withResultDisplay(
-			toolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
-				title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
-			}),
-			(result) => sendMessageResultDisplay(result.details),
+		// Claude Code draws no call line, only the dim result row (findings §103); a one-shot reply is a report and shows as text.
+		...rowRenderers<{ to?: string; summary?: string }>(
+			"Send Message",
+			(result, view) => {
+				const line = view.isError ? undefined : sendMessageResultDisplay(result.details);
+				// The agent's name can be the model's words, so its escapes are removed.
+				return line === undefined ? undefined : elbowIndent([view.theme.fg("dim", sanitizeDisplayText(line))]);
+			},
+			{ title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined) },
 		),
 		description: words.sendMessageDescription,
 		parameters: SendMessageParams,

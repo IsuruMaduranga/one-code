@@ -8,7 +8,7 @@
  * bash behavior — timeout handling, PI_* env, spawn hooks — stays exactly
  * pi's (its tail cut of a long output is replaced by Claude Code's head-first
  * one, lib/shell-run/spill-file.ts); the shared body in lib/shell-run/shell-tool.ts adds the background
- * branch (spool to `<sessionDir>/bash/<taskId>/output.log`, the shared
+ * branch (spool to `<session temp folder>/tasks/<taskId>.output`, the shared
  * background registry, a steered completion notification), and this file only
  * supplies what is bash's: pi's definition, the bash the session resolved
  * (lib/shell-run/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`

@@ -20,6 +20,7 @@ import { framesToText, notificationBody, parseNotificationFrames } from "../noti
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 import { sanitizeDisplayText } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
+import { isClassifierDenial } from "../rules/classifier-denial.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -611,6 +612,8 @@ export type RejectedFileOp = "write" | "update";
 
 /** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
 export const TOOL_USE_REJECTED = "Tool use rejected";
+/** Claude Code's row for an auto-mode denial, without its "· /feedback if incorrect" (One Code has no /feedback). */
+export const CLASSIFIER_DENIED_LINE = "Denied by auto mode classifier";
 
 /**
  * A file tool's `path` for the transcript, as Claude Code shows it: relative to
@@ -636,7 +639,10 @@ export function rejectionLine(
 	file?: { op: RejectedFileOp; path: string | undefined },
 ): string | undefined {
 	if (!isError) return undefined;
-	const kind = userDenialKind(textContent(result));
+	const text = textContent(result);
+	// The model reads the classifier's reason and what to do next; the user sees Claude Code's line.
+	if (isClassifierDenial(text)) return `  ⎿  ${theme.fg("dim", CLASSIFIER_DENIED_LINE)}`;
+	const kind = userDenialKind(text);
 	if (!kind) return undefined;
 	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
 	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
@@ -767,7 +773,8 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 /**
  * Renderers that draw nothing while the call runs and succeeds, for a tool
  * the user sees elsewhere (yield: the spinner and the agent rows show the
- * wait, and the notification follows it). A failed call still shows, drawn
+ * wait, and the notification follows it) or that is model bookkeeping
+ * (tool_search, which Claude Code never draws). A failed call still shows, drawn
  * as `toolRenderers(label)` draws it. pi drops a self-rendered tool with no
  * lines, spacer included (tool-execution.js).
  */
@@ -778,6 +785,46 @@ export function hiddenToolRenderers(label: string): ReturnType<typeof toolRender
 		renderShell: "self",
 		renderCall: (args, theme, context) => (context.isError ? shown.renderCall(args, theme, context) : none()),
 		renderResult: (result, options, theme, context) => (context.isError ? shown.renderResult(result, options, theme, context) : none()),
+	};
+}
+
+/** What a `rowRenderers` row builder draws with: the theme, the row's width, the call's arguments and whether it failed. */
+export interface RowView<TArgs = unknown> {
+	theme: ThemeLike;
+	width: number;
+	args?: TArgs;
+	isError: boolean;
+}
+
+/**
+ * Renderers for a tool Claude Code draws as one block with no call line
+ * (plan mode, AskUserQuestion; findings §103): nothing while it runs, then
+ * the lines `rows` builds from the settled result. A result `rows` returns
+ * undefined for (an error it does not cover, a session recorded before the
+ * details it reads) shows as `toolRenderers(label, fallback)` draws it, call
+ * line included. The rows replace the result on ctrl+o too, as Claude Code's do.
+ */
+export function rowRenderers<TArgs = any>(
+	label: string,
+	rows: (result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, view: RowView<TArgs>) => string[] | undefined,
+	fallback: ToolRenderSpec<TArgs> = {},
+): ReturnType<typeof toolRenderers> {
+	const shown = toolRenderers<TArgs>(label, fallback);
+	return {
+		renderShell: "self",
+		renderCall: () => linesComponent(() => []),
+		renderResult: (result, options, theme, context) =>
+			linesComponent((width) => {
+				if (options.isPartial) return [];
+				let built: string[] | undefined;
+				try {
+					built = rows(result, { theme, width, args: context.args, isError: context.isError });
+				} catch {
+					built = undefined;
+				}
+				if (built) return built;
+				return [...shown.renderCall(context.args, theme, { ...context, isPartial: false }).render(width), ...shown.renderResult(result, options, theme, context).render(width)];
+			}),
 	};
 }
 

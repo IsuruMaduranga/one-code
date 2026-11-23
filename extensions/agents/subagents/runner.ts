@@ -37,7 +37,7 @@ import { knobValue } from "../../lib/profile/knobs.ts";
 /** Claude Code's CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS, in the product's spelling. */
 const AGENT_STALL_KNOB = "ASYNC_AGENT_STALL_TIMEOUT_MS";
 import { parentModeExtension } from "./parent-mode.ts";
-import { type DeferRequest, deferLikeParentExtension, injectedByParent } from "../../lib/request/deferred.ts";
+import { type DeferRequest, deferLikeParentExtension, injectedByParent, TOOL_SEARCH } from "../../lib/request/deferred.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { type AbortReason, SessionTurnTracker, type TurnFailureSink } from "./session-turns.ts";
@@ -455,8 +455,10 @@ export class SubagentRuntime {
 				const wrote = childWrote(event as never);
 				if (wrote) this.onChildWrite(wrote, this.runNames.get(session.sessionId));
 				const e = event as { type?: string; toolName?: string; args?: unknown; isError?: boolean; result?: unknown; message?: { role?: string; content?: unknown } };
+				// The agent view hides a tool_search call and result, as the main transcript does.
+				const shown = e.toolName !== TOOL_SEARCH;
 				if (e.type === "tool_execution_start") {
-					sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });
+					if (shown) sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });
 					sink?.onActivity?.(e.toolName, e.args, tracker.turnText);
 				} else if (e.type === "tool_execution_end") {
 					// Display only: the child's persisted reminders (file-tracker, hook context) stay with the model.
@@ -464,7 +466,7 @@ export class SubagentRuntime {
 						firstNonEmptyLine(textContent(stripReminderBlocks(e.result as { content?: Array<{ type: string; text?: string }> }))),
 						200,
 					);
-					sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
+					if (shown) sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
 				} else if (e.type === "message_update" && e.message?.role === "assistant") {
 					sink?.onStreaming?.(e.message);
 				} else if (e.type === "message_end" && e.message?.role === "assistant") {

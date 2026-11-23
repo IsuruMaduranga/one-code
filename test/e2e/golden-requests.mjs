@@ -418,6 +418,8 @@ function makeNormalizer({ home, project, root }) {
 		for (const [from, to] of replacements) out = out.split(from).join(to);
 		// The scratchpad (lib/core/scratchpad.ts): <tmp>/onecode-<uid>/<project slug>/<session>/scratchpad.
 		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/scratchpad/g, "<SCRATCHPAD>");
+		// A background task's spool (persisted-output.ts taskOutputPath): <tmp>/onecode-<uid>/<project slug>/<session>/tasks/.
+		out = out.replace(/\/[^\s`'"]*\/onecode-\d+\/[^/\s]+\/[^/\s]+\/tasks\//g, "<SESSION_TEMP>/tasks/");
 		// Cron job ids (lib/agents/cron.ts, 8 hex digits) where results name them,
 		// and as cron_delete's input (Anthropic's object, OpenAI's JSON string).
 		out = out.replace(/\b(recurring job |one-shot task |Cancelled job |with id ')[0-9a-f]{8}\b/g, "$1<JOB_ID>");

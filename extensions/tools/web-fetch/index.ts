@@ -30,7 +30,8 @@ import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } 
 import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
 import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../../lib/request/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
+import { type Received, receivedLine } from "./received.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
 import { pageContent } from "./page-content.ts";
@@ -53,7 +54,7 @@ const USER_AGENT = `${brand.idPrefix}/0.1 (+${brand.homepage})`;
  * Declared up front because pi infers a tool's `details` generic from the first
  * `return` it sees; an early `details: {}` would narrow every field to undefined.
  */
-interface FetchDetails {
+interface FetchDetails extends Received {
 	url?: string;
 	totalChars?: number;
 	truncated?: boolean;
@@ -70,6 +71,8 @@ interface CacheEntry {
 	fetchedAt: number;
 	/** The page had no article structure, so the whole page was converted. */
 	noArticle?: boolean;
+	/** The response body's size and status, for the transcript row. */
+	received: Required<Received>;
 }
 
 /**
@@ -192,6 +195,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 
 			const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
 			const body = await readResponseText(response, controller.signal);
+			const received = { bytes: Buffer.byteLength(body), status: response.status, statusText: response.statusText };
 
 			let entry: CacheEntry;
 			if (contentType.includes("html")) {
@@ -201,11 +205,12 @@ function webFetchExtension(pi: ExtensionAPI) {
 					title: extracted.title,
 					fetchedAt: Date.now(),
 					noArticle: extracted.fallback,
+					received,
 				};
 			} else if (contentType.includes("json")) {
-				entry = { markdown: `\`\`\`json\n${body.trim()}\n\`\`\``, fetchedAt: Date.now() };
+				entry = { markdown: `\`\`\`json\n${body.trim()}\n\`\`\``, fetchedAt: Date.now(), received };
 			} else {
-				entry = { markdown: body.trim(), fetchedAt: Date.now() };
+				entry = { markdown: body.trim(), fetchedAt: Date.now(), received };
 			}
 
 			cache.set(url, entry);
@@ -226,7 +231,8 @@ function webFetchExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "web_fetch",
 		label: "Web Fetch",
-		...toolRenderers("Web Fetch"),
+		// The model reads the page with its framing; the user sees Claude Code's "Received 2.4KB (200 OK)", the text on ctrl+o.
+		...withResultDisplay(toolRenderers("Web Fetch"), (result, expanded) => (expanded ? undefined : receivedLine(result.details as FetchDetails | undefined))),
 		description: text.description("short"),
 		parameters: Type.Object({
 			url: Type.String({ description: text.params.url }),
@@ -301,7 +307,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 						};
 						return {
 							content: [{ type: "text", text: resultText(answer, { body: answered.answer, title: entry.title }, entry.noArticle) }],
-							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader, path: "local" },
+							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader, path: "local", ...entry.received },
 						};
 					}
 					readerFailure = answered.failure;
@@ -320,6 +326,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 						truncated: page.truncated,
 						nextOffset: page.nextOffset,
 						path: "local",
+						...entry.received,
 					},
 				};
 			} catch (error) {
@@ -330,7 +337,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
 					const redirect = webFetchResultText(view.live).redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
-					return { content: [{ type: "text", text: redirect }], details: { url: target } };
+					return { content: [{ type: "text", text: redirect }], details: { url: target, bytes: Buffer.byteLength(redirect), status: error.status } };
 				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";

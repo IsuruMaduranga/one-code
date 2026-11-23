@@ -32,7 +32,8 @@ import { deferBaseTool } from "../../lib/request/deferred.ts";
 import { productStateDir } from "../../lib/profile/paths.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
-import { toolRenderers, safeThemePaint } from "../../lib/ui/tui-render.ts";
+import { rowRenderers, safeThemePaint, stripReminderBlocks, textContent } from "../../lib/ui/tui-render.ts";
+import { enteredRows, exitedRows, type PlanDetails } from "./rows.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
 import type { PermissionMode } from "../../lib/rules/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
@@ -280,7 +281,8 @@ function planModeExtension(pi: ExtensionAPI) {
 		defineTool({
 			name: "enter_plan_mode",
 			label: "Enter plan mode",
-			...toolRenderers("Enter plan mode"),
+			// Claude Code's row and no call line (rows.ts); the model reads the plan file's path.
+			...rowRenderers("Enter plan mode", (result, view) => enteredRows(result.details as PlanDetails | undefined, view)),
 			description: text.descriptions.enter_plan_mode("short"),
 			parameters: Type.Object({}),
 			async execute(toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -302,7 +304,7 @@ function planModeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "exit_plan_mode",
 		label: "Exit plan mode",
-		...toolRenderers("Exit plan mode"),
+		...rowRenderers("Exit plan mode", (result, view) => exitedRows(result.details as PlanDetails | undefined, { ...view, text: textContent(stripReminderBlocks(result)) })),
 		description: text.descriptions.exit_plan_mode,
 		parameters: Type.Object({}),
 		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
@@ -464,7 +466,7 @@ function planModeExtension(pi: ExtensionAPI) {
 				pi.events.emit(REMINDER_CHANNEL, { text: planModeResultText().exited(path), toolCallId });
 				return {
 					content: [{ type: "text", text: planModeResultText().approved({ planFile: path, plan }) }],
-					details: { plan, approved: true },
+					details: { plan, approved: true, planFilePath: path },
 				};
 			}
 

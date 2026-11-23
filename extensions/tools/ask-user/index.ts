@@ -15,8 +15,8 @@ import { feature } from "../../lib/profile/feature.ts";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { canShowCustomUi } from "../../lib/notify/headless-output.ts";
-import { toolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint, withResultDisplay } from "../../lib/ui/tui-render.ts";
-import { askUserResultLines } from "../../lib/ui/result-summary-ask.ts";
+import { rowRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../../lib/ui/tui-render.ts";
+import { askUserRows } from "../../lib/ui/result-summary-ask.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { askThroughDialogs } from "./dialogs.ts";
@@ -54,13 +54,11 @@ function askUserExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "ask_user_question",
 		label: "Ask User",
-		// The model reads the answers in a sentence; the transcript shows `· question → answer` (details).
-		...withResultDisplay(
-			toolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
-				title: (a) => a?.questions?.[0]?.question,
-			}),
-			(result, expanded) => (expanded ? undefined : askUserResultLines(result.details)),
-		),
+		// The model reads the answers in a sentence; the transcript shows Claude Code's dim block, no call line (details).
+		...rowRenderers<{ questions?: Array<{ question?: string; options?: Array<{ label?: string }> }> }>("Ask User", (result, view) => {
+			const rows = view.isError ? undefined : askUserRows(result.details, view.args, view.width);
+			return rows?.map((row) => view.theme.fg("dim", row));
+		}),
 		description: text.description("short"),
 		promptSnippet: text.promptSnippet,
 		parameters: askParams(text.params),

@@ -23,7 +23,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { whenAborted } from "../../lib/core/abort.ts";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
-import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../../lib/request/persisted-output.ts";
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
@@ -31,7 +31,7 @@ import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.t
 import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
 import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
 import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
-import { ClickToggles, clickToExpand, dimMarkedLine, hiddenToolRenderers, TURN_MARK, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, dimMarkedLine, hiddenToolRenderers, withResultDisplay, TURN_MARK, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -104,7 +104,7 @@ import { toolsWithheldFrom, withOfferedTools } from "../../lib/models/model-fami
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../lib/plugins/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../lib/plugins/skill-scan.ts";
-import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { createWriteStream, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { pendingWork, querySessionWork, SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery, waitingForText } from "../../lib/notify/session-work.ts";
@@ -160,21 +160,6 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  */
 const shutdownNotice = () => processState<{ text?: string }>("background:shutdown-notice", () => ({}));
 
-/**
- * `<sessionDir>/monitor/<taskId>/output.log`, beside background shells'
- * `bash/<taskId>/`. A session-less run spools under the session's private
- * results dir (`sessionResultsDir`), so its output is never kept only as the
- * in-memory tail. Undefined when the folder cannot be made.
- */
-function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
-	try {
-		const dir = join(sessionResultsDir(ctx), "monitor", taskId);
-		mkdirSync(dir, { recursive: true });
-		return join(dir, "output.log");
-	} catch {
-		return undefined;
-	}
-}
 
 /**
  * `task_output`'s body. Past `TASK_OUTPUT_MAX_CHARS` a task with a spool file
@@ -491,7 +476,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				stored = tailCap(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
 				if (!chunk || spoolFailed) return;
 				if (!log) {
-					const path = monitorLogPath(ctx, id);
+					const path = taskOutputPath(ctx, id);
 					if (!path) return;
 					log = createWriteStream(path, { flags: "a" });
 					log.on("error", () => {
@@ -923,7 +908,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_stop",
 		label: "Stop Task",
-		...toolRenderers("Stop Task"),
+		// Claude Code's "<task> · stopped"; the model reads which task and how it ended.
+		...withResultDisplay(toolRenderers("Stop Task"), (result) => {
+			const stopped = (result.details as { stopped?: string } | undefined)?.stopped;
+			return stopped === undefined ? undefined : `${stopped} · stopped`;
+		}),
 		description: text.tasks.stopDescription,
 		parameters: Type.Object({
 			task_id: Type.String({ description: text.tasks.stopParams.taskId }),
@@ -946,7 +935,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							: text.tasks.stopRequested({ id: task.id, description: task.description }),
 					},
 				],
-				details: { taskId: task.id },
+				details: { taskId: task.id, stopped: task.description },
 			};
 		},
 	});

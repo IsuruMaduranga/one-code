@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ccWrapBuiltinRenderers, type ThemeLike } from "../../extensions/lib/ui/tui-render.ts";
 import { fileErrorKindOf, fileErrorLine, readSummary, searchCount, searchSummaryWords } from "../../extensions/lib/ui/result-summary-files.ts";
 import { shellBlockedLine } from "../../extensions/lib/ui/result-summary-shell.ts";
-import { askUserResultLines, DECLINED_LINE } from "../../extensions/lib/ui/result-summary-ask.ts";
+import { askUserRows } from "../../extensions/lib/ui/result-summary-ask.ts";
 import { THOUGHT_SHOWN_MS, ThinkingClock } from "../../extensions/lib/ui/thinking-clock.ts";
 import { composeWorkingMessage } from "../../extensions/ui/spinner/line.ts";
 import { executedErrorKind, refusalKind } from "../../extensions/safety/file-tracker/results.ts";
@@ -309,32 +309,31 @@ describe("the shell tool: a guard's refusal", () => {
 	});
 });
 
-describe("ask-user: the answers as question → answer lines", () => {
+describe("ask-user: Claude Code's answered and declined blocks", () => {
 	const answers = [
 		{ question: "Which database?", header: "DB", selected: ["Postgres"], freeform: false },
 		{ question: "Which cache?", header: "Cache", selected: ["Redis", "None"], freeform: false },
 	];
+	const args = { questions: [{ question: "Which color?", options: [{ label: "Red" }, { label: "Blue" }] }, { question: "Which size?", options: [{ label: "S" }, { label: "L" }] }] };
 
-	it("reads the answers from details", () => {
-		expect(askUserResultLines({ answers })).toBe("· Which database? → Postgres\n· Which cache? → Redis, None");
-		expect(askUserResultLines({ answers: [], declined: true })).toBe(DECLINED_LINE);
-		expect(askUserResultLines({ answers: [answers[0]], cancelled: true })).toBe(DECLINED_LINE);
-		expect(askUserResultLines({ answers: [{ question: "Q", selected: [] }] })).toBeUndefined();
-		expect(askUserResultLines(undefined)).toBeUndefined();
+	it("lists each answer as question → answer under the elbow", () => {
+		expect(askUserRows({ answers }, undefined, 80)).toEqual(["● Answered the questions:", "  ⎿  · Which database? → Postgres", "     · Which cache? → Redis, None"]);
 	});
 
-	it("renders them collapsed, the model's text expanded, and leaves the result alone", async () => {
-		const { default: askUserExtension } = await import("../../extensions/tools/ask-user/index.ts");
-		const fake = createFakePi();
-		askUserExtension(fake.pi as never);
-		const tool = fake.tools.get("ask_user_question") as any;
-		const modelText = askUserResultText.answered(answers);
-		const result = { content: [text(modelText)], details: { answers } };
-		const before = structuredClone(result);
-		const ctx = { args: {}, isError: false, state: {} };
-		expect(tool.renderResult(result, collapsed, plain, ctx).render(120)).toEqual(["  ⎿  · Which database? → Postgres", "     · Which cache? → Redis, None"]);
-		expect(tool.renderResult(result, expanded, plain, ctx).render(400).join(" ")).toContain(modelText.slice(0, 30));
-		expect(result).toEqual(before);
+	it("lists every question with its options when the user declined or dismissed", () => {
+		const declined = ["● Declined to answer the questions:", "  ⎿  · Which color? (Red / Blue)", "     · Which size? (S / L)"];
+		expect(askUserRows({ answers: [], declined: true }, args, 80)).toEqual(declined);
+		expect(askUserRows({ answers: [answers[0]], cancelled: true }, args, 80)).toEqual(declined);
+	});
+
+	it("wraps a long question with the elbow's hang", () => {
+		expect(askUserRows({ answers: [{ question: "Which of these colors?", selected: ["Red"] }] }, undefined, 25)).toEqual(["● Answered the questions:", "  ⎿  · Which of these", "     colors? → Red"]);
+	});
+
+	it("leaves a result with nothing to list to the tool's text", () => {
+		expect(askUserRows({ answers: [{ question: "Q", selected: [] }] }, undefined, 80)).toBeUndefined();
+		expect(askUserRows({ answers: [], declined: true }, undefined, 80)).toBeUndefined();
+		expect(askUserRows(undefined, args, 80)).toBeUndefined();
 	});
 });
 

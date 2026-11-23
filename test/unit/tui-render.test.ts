@@ -464,6 +464,17 @@ describe("a call the user rejected", () => {
 		expect(edit.renderResult(rejection(userDenialText("no")), opts, plainTheme, ctx({ path: "src/x.ts" })).render(120)).toEqual(["  ⎿  Tool use rejected"]);
 	});
 
+	it("draws auto mode's denial as Claude Code's one dim line, not the model's guidance", async () => {
+		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
+		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
+		const denial = rejection(refusalText({ kind: "classifierDenied", reason: "PII Data Handling" }));
+		expect(bash.renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+	});
+
 	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
 		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");

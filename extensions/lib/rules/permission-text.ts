@@ -11,6 +11,7 @@
 
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
 import { wordsInForce } from "../profile/live-words.ts";
+import { CLASSIFIER_DENIED } from "./classifier-denial.ts";
 
 /** Why the gate refused a call. */
 export type PermissionRefusal =
@@ -72,7 +73,7 @@ const PLAN_MODE =
 // so the model hears the block and can reach the goal a safe way (Claude
 // Code's own auto-mode denial).
 const classifierDenied = (reason: string) =>
-	`Permission for this action was denied by the auto-mode approval classifier. Reason: ${reason}\n\n` +
+	`${CLASSIFIER_DENIED} Reason: ${reason}\n\n` +
 	"If you have other tasks that don't depend on this action, continue with those. You *may* try to accomplish the goal a different, safe way (e.g. a less destructive command, or committing first so a change is recoverable), but do *not* try to work around or defeat this denial. If you believe this capability is essential, STOP and explain to the user what you were trying to do and why, and let them decide.";
 
 const classifierTimedOut = (reason: string) =>
