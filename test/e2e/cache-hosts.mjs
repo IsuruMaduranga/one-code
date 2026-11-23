@@ -24,8 +24,9 @@ import { join } from "node:path";
 export const DEFAULT_BLOCK = 256;
 
 /**
- * Hosts measured to read in larger blocks: the block size, and the offsets
- * (tokens before the reported prompt) the blocks are counted from.
+ * Hosts measured to read in larger blocks: the block size, the offsets
+ * (tokens before the reported prompt) the blocks are counted from, and any
+ * further shortfall past one block (`tail`).
  * OpenInference, 2026-11-16 (working-docs/findings/93): session reads plus 33
  * were whole 512-token blocks (28,639, 29,151, 29,663), and a classifier
  * prompt's identical repeat read 31,744, a whole number with no offset.
@@ -38,8 +39,23 @@ export const DEFAULT_BLOCK = 256;
  * 256 x floor((prompt - k) / 256) with k 261 or 262 (a repeat of 2,990 read
  * 2,560), and so did the matrix reads of 31,744 and 7,424. So a read falls
  * 261 to 517 tokens short, past one block.
+ * Alibaba, 2026-11-22 and 2026-11-23 (DeepSeek V4.1 Flash session reads): 27,648 of
+ * 28,601 and 28,608 in the matrix, and 26,624 or 27,136 of 27,309 to 27,458 replayed
+ * pinned, all whole 512-token blocks and 322 to 960 tokens short, so up to two blocks.
+ * CoreWeave and Pearl Research, 2026-11-23 (Qwen3.8-27b session reads, a hybrid
+ * attention model, which vLLM caches in whole blocks of 528): CoreWeave read 26,400
+ * (50 x 528) of 27,716, 1,316 short; Pearl Research 26,624 (52 x 512) of 27,810, 1,186
+ * short; so up to three blocks. CoreWeave's earlier flat 28,000 reads are not whole
+ * blocks and keep the default rule.
  */
-export const MEASURED_HOSTS = { OpenInference: { block: 512, offsets: [33, 0] }, Morph: { block: 512, offsets: [0] }, Relace: { block: 256, offsets: [0], tail: 262 } };
+export const MEASURED_HOSTS = {
+	OpenInference: { block: 512, offsets: [33, 0] },
+	Morph: { block: 512, offsets: [0] },
+	Relace: { block: 256, offsets: [0], tail: 262 },
+	Alibaba: { block: 512, offsets: [0], tail: 512 },
+	CoreWeave: { block: 528, offsets: [0], tail: 1056 },
+	"Pearl Research": { block: 512, offsets: [0], tail: 1024 },
+};
 
 /**
  * Waits before each retry of a lookup that 404'd (OpenRouter records a

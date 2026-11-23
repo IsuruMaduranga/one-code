@@ -32,6 +32,22 @@ describe("allowance", () => {
 		expect(allowance({ host: "Relace" }, 7_425)).toBe(DEFAULT_BLOCK);
 	});
 
+	it("allows the measured shortfalls of whole-block reads on Alibaba, CoreWeave and Pearl Research", () => {
+		// [host, previous prompt, read] from the 2026-11-22 and 2026-11-23 matrices and the pinned Alibaba replays.
+		const reads: Array<[string, number, number]> = [
+			["Alibaba", 28_601, 27_648],
+			["Alibaba", 28_608, 27_648],
+			["Alibaba", 27_452, 26_624],
+			["Alibaba", 27_458, 27_136],
+			["CoreWeave", 27_716, 26_400],
+			["Pearl Research", 27_810, 26_624],
+		];
+		for (const [host, prompt, read] of reads) expect(prompt - read, `${host} ${read}`).toBeLessThanOrEqual(allowance({ host }, read));
+		// A read that is not whole blocks, such as CoreWeave's flat 28,000, keeps the default.
+		expect(allowance({ host: "CoreWeave" }, 28_000)).toBe(DEFAULT_BLOCK);
+		expect(allowance({ host: "Alibaba" }, 27_650)).toBe(DEFAULT_BLOCK);
+	});
+
 	it("keeps the default on OpenInference for a read that is not whole blocks, or nothing", () => {
 		expect(allowance({ host: "OpenInference" }, 28_640)).toBe(DEFAULT_BLOCK);
 		expect(allowance({ host: "OpenInference" }, 0)).toBe(DEFAULT_BLOCK);
