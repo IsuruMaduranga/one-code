@@ -181,7 +181,8 @@ function contextExtension(pi: ExtensionAPI) {
 			const ui = canShowCustomUi(ctx);
 			// Claude Code collapses the lists only in its fullscreen presentation, unless asked for all.
 			const collapsed = ui && args.trim().toLowerCase() !== "all" && fullscreenTui(ctx);
-			const text = renderContextUsage(usage, { width: TEXT_WIDTH, collapsed, agentsDir: agentsDir() }).join("\n");
+			// The text (the model's breadcrumb, RPC, one-shot) always has the full lists: Claude Code collapses only what it displays.
+			const text = renderContextUsage(usage, { width: TEXT_WIDTH, agentsDir: agentsDir() }).join("\n");
 			if (ui) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage, collapsed, args: args.trim() });
 			else if (ctx.hasUI) ctx.ui.notify(text, "info");
 			else printAnswer(ctx, text);

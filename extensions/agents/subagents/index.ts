@@ -592,6 +592,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	// /context asks which agents are custom, and from where (lib/agents/agent-catalog.ts agentGroup).
+	// The answer is today's catalog: an agent deleted since the request /context reads counts as System tools there.
 	pi.events.on(AGENT_GROUPS_QUERY_CHANNEL, (data) => {
 		const query = data as AgentGroupsQuery;
 		const home = os.homedir();

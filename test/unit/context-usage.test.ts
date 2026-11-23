@@ -124,7 +124,7 @@ describe("breakdownRequest", () => {
 	});
 
 	it("counts a custom agent's row as Custom agents and a built-in one as System tools", () => {
-		const listing = `${BLOCK_HEADS.agents}\n- explore: Fast search.\n- reviewer: Reviews code\nacross two lines.\n- pr:checker: Checks pull requests.\n\nWhen you launch multiple agents, send them together.`;
+		const listing = `${BLOCK_HEADS.agents}\n- explore: Fast search.\n- reviewer: Reviews code\nacross two lines.\n- pr:checker: Checks pull requests.\n\n<example>\nA pull request.\n</example>\n\nWhen you launch multiple agents, send them together.`;
 		const request = { api: "anthropic-messages", head: { model: "m" }, list: [{ role: "user", content: [{ type: "text", text: reminder(listing) }] }] };
 		const plain = breakdownRequest(request);
 		expect(plain.tokens.agents).toBe(0);
@@ -132,16 +132,20 @@ describe("breakdownRequest", () => {
 		const out = breakdownRequest(request, { agentGroups: new Map([["reviewer", "Project"], ["pr:checker", "Plugin (pr)"]]) });
 		const row = (text: string) => estimateTextTokens(text);
 		const reviewer = row("- reviewer: Reviews code") + row("across two lines.");
+		// A description's blank lines and `<example>` stay in its row; the note after the last blank line does not.
+		const checker = ["- pr:checker: Checks pull requests.", "", "<example>", "A pull request.", "</example>"].reduce((sum, line) => sum + row(line), 0);
+		// Largest first.
 		expect(out.agents).toEqual([
+			{ name: "pr:checker", tokens: checker, group: "Plugin (pr)" },
 			{ name: "reviewer", tokens: reviewer, group: "Project" },
-			{ name: "pr:checker", tokens: row("- pr:checker: Checks pull requests."), group: "Plugin (pr)" },
 		]);
-		expect(out.tokens.agents).toBe(reviewer + row("- pr:checker: Checks pull requests."));
+		expect(out.tokens.agents).toBe(reviewer + checker);
 		// The rest of the listing (its head, the built-in row and the note) stays System tools.
 		expect(out.tokens.systemTools).toBe(plain.tokens.systemTools - out.tokens.agents);
 		// A second listing in the same request counts its own rows once.
 		const twice = breakdownRequest({ ...request, list: [...request.list, ...request.list] }, { agentGroups: new Map([["reviewer", "Project"], ["pr:checker", "Plugin (pr)"]]) });
 		expect(twice.tokens.agents).toBe(2 * out.tokens.agents);
+		expect(twice.agents.map((item) => [item.name, item.tokens])).toEqual(out.agents.map((item) => [item.name, 2 * item.tokens]));
 	});
 
 	it("counts a deferred tool's schema only once it is loaded", () => {
@@ -433,6 +437,9 @@ describe("renderContextUsage", () => {
 			],
 			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }],
 		};
+		// A transcript entry stored by a build before custom agents still draws.
+		const { agents: _agents, ...older } = usage;
+		expect(() => renderContextUsage(older as unknown as ContextUsage, { width: 160, collapsed: true })).not.toThrow();
 		const lines = renderContextUsage(usage, { width: 160, agentsDir: ".claude/agents/" });
 		const at = lines.indexOf("     Custom agents · .claude/agents/");
 		expect(lines.slice(at, at + 11)).toEqual([

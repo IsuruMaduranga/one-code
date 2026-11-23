@@ -160,16 +160,20 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	const mcpNote = `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`;
 	const hasMcp = loaded.length > 0 || available.length > 0;
 	const agentsNote = options.agentsDir ?? "agents/";
-	const hasLists = hasMcp || usage.agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
+	// A transcript entry drawn by a build before custom agents had no `agents`.
+	const agents = usage.agents ?? [];
+	const hasLists = hasMcp || agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
 	if (options.collapsed) {
+		// The category's row, so the summary matches the legend after the provider's count rescales the rows.
+		const categoryTokens = (key: ContextCategoryKey) => usage.categories.find((row) => row.key === key)?.tokens;
 		const summary = (title: string, note: string, items: readonly unknown[], noun: string, tokens: number) =>
 			items.length === 0 ? [] : ["", heading(title, note), `${INDENT}${dim(`└ ${items.length} ${noun}${items.length === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`];
 		out.push(
 			...summary("MCP tools", mcpNote, [...loaded, ...available], "tool", sum(loaded)),
-			...summary("Custom agents", agentsNote, usage.agents, "agent", sum(usage.agents)),
+			...summary("Custom agents", agentsNote, agents, "agent", categoryTokens("agents") ?? sum(agents)),
 			...summary("Memory files", "/memory", usage.memoryFiles, "file", sum(usage.memoryFiles)),
 			// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
-			...summary("Skills", "/skills", usage.skills, "skill", usage.categories.find((row) => row.key === "skills")?.tokens ?? sum(usage.skills)),
+			...summary("Skills", "/skills", usage.skills, "skill", categoryTokens("skills") ?? sum(usage.skills)),
 		);
 		if (hasLists) out.push("", `${INDENT}${dim("/context all to expand")}`);
 		return out;
@@ -181,9 +185,9 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 		if (loaded.length > 0) out.push("", `${INDENT}${dim("Loaded")}`, ...tree(loaded.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 		if (available.length > 0) out.push("", `${INDENT}${dim("Available")}`, ...tree(available).map((line) => `${INDENT}${dim(line)}`));
 	}
-	if (usage.agents.length > 0) {
+	if (agents.length > 0) {
 		out.push(heading("Custom agents", agentsNote));
-		for (const [group, items] of byGroup(usage.agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
+		for (const [group, items] of byGroup(agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 	}
 	if (usage.memoryFiles.length > 0) {
 		out.push(heading("Memory files", "/memory"), ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));

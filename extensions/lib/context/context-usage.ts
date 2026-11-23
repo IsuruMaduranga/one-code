@@ -210,9 +210,14 @@ const HEADS: ReadonlyArray<readonly [string, BlockKind]> = [
 	[BLOCK_HEADS.instructions, "memory"],
 ];
 
-/** Where a merged block ends inside `text`: the first blank line before a tag, or before a line that is not a list row (`list`); -1 for none. */
+/**
+ * Where a merged block ends inside `text`: the first blank line before a
+ * one-line tag (`<total_tokens>…</total_tokens>`; an agent description's
+ * multi-line `<example>` is not one), or before a line that is not a list row
+ * (`list`); -1 for none.
+ */
 function blockEnd(text: string, list: boolean): number {
-	const ends = [text.indexOf("\n\n<"), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
+	const ends = [text.search(/\n\n<([\w-]+)>[^\n]*<\/\1>/), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
 	return ends.length > 0 ? Math.min(...ends) : -1;
 }
 
@@ -311,16 +316,19 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 			}
 			tokens.systemTools += Math.max(0, rest);
 		} else if (kind === "agents") {
-			// A row runs from its `- name: ` line to the next row or a blank line (the note after the list).
+			// A row runs from its `- name: ` line to the next row (a description may hold blank lines); the note after the list follows the last blank line.
+			const listEnd = body.lastIndexOf("\n\n");
 			let current: ContextItem | undefined;
 			let custom = 0;
-			for (const line of body.split("\n")) {
+			for (const line of (listEnd > 0 ? body.slice(0, listEnd) : body).split("\n")) {
 				const row = /^- (\S+?): /.exec(line);
 				if (row) {
-					const group = agentGroups.get(row[1]);
-					current = group ? { name: row[1], tokens: 0, group } : undefined;
-					if (current) agents.push(current);
-				} else if (!line.trim()) current = undefined;
+					const name = row[1];
+					const group = agentGroups.get(name);
+					// A listing sent again (the agent files changed) adds to the agent's row, not a second one.
+					current = group ? agents.find((item) => item.name === name) : undefined;
+					if (group && !current) agents.push((current = { name, tokens: 0, group }));
+				}
 				if (current) {
 					const share = textTokens(line);
 					current.tokens += share;

@@ -238,8 +238,9 @@ export function agentGroup(agent: AgentDefinition, cwd: string, home: string, bu
 	const file = agent.source;
 	if (file === "built-in" || isPathAtOrUnder(file, bundled)) return undefined;
 	const [user, project] = agentDirs(cwd, home);
-	if (isPathAtOrUnder(file, project)) return "Project";
+	// User first: started in the home directory, the two folders are one, and its agents are the user's.
 	if (isPathAtOrUnder(file, user)) return "User";
+	if (isPathAtOrUnder(file, project)) return "Project";
 	const at = agent.name.indexOf(":");
 	return at > 0 ? `Plugin (${agent.name.slice(0, at)})` : "Plugin";
 }
