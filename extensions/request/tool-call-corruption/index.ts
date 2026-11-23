@@ -2,6 +2,7 @@
  * Reject damaged OpenRouter streams before tool execution, without changing the request prefix.
  * It also publishes the host that served each main-session reply, which it reads from the stream anyway, for /doctor,
  * and explains a main-session refusal caused by the profile's quantization floor (lib/request/openrouter-routing-defaults.ts).
+ * With the host and each reply's usage it also names a host that keeps missing the prompt cache (lib/request/openrouter-cache-watch.ts).
  */
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -24,6 +25,7 @@ import {
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
 import { repeatLimit, type RepeatTail, trailingRepeat } from "./repeat.ts";
 import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/request/openrouter-host.ts";
+import { cacheMissNotice, createCacheWatch } from "../../lib/request/openrouter-cache-watch.ts";
 import { activeOpenRouterRouting, routingFloorFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
@@ -64,6 +66,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	// OpenRouter names the serving provider on every chunk; a cancelled
 	// generation is never recorded, so the lookup cannot name it after a stop.
 	let streamProvider: string | undefined;
+	let cacheWatch = createCacheWatch();
 	let stopped = false;
 	// A suspect call goes back to the model once per run; the next one is corrupt.
 	let suspectReturned = false;
@@ -142,6 +145,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	pi.on("session_start", () => {
 		cancelLookups();
 		resetRun();
+		cacheWatch = createCacheWatch();
 	});
 	pi.on("session_shutdown", () => {
 		cancelLookups();
@@ -240,6 +244,13 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			if (announce && (streamProvider || responseId)) {
 				const model = ctx.model!;
 				pi.events.emit(OPENROUTER_HOST_CHANNEL, { model: `${model.provider}/${model.id}`, host: streamProvider, responseId } satisfies OpenRouterHostEvent);
+			}
+			// A host that keeps missing the cache: name it once, with how to skip it.
+			const usage = event.message.usage;
+			if (announce && streamProvider && usage && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
+				const model = ctx.model!;
+				const streak = cacheWatch.observe({ model: `${model.provider}/${model.id}`, host: streamProvider, input: usage.input, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite });
+				if (streak) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, cacheMissNotice(streak, (model.cost?.input ?? 0) - (model.cost?.cacheRead ?? 0)), "warning");
 			}
 		}
 	});

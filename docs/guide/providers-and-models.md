@@ -319,6 +319,36 @@ for every model. To turn the default off everywhere, set
 `/doctor report` shows which host served your last reply and, when
 OpenRouter lists it, the precision that host runs the model at.
 
+### When a host keeps missing the cache
+
+Hosts cache differently. Most read back nearly all of your previous prompt.
+Some read a few hundred tokens short, which costs next to nothing. A few read
+almost none of it, so every request pays the full input price. When the host
+serving your session misses the cache on three replies in a row, One Code
+names it once, with the tokens it sent again and, when the model's prices
+are known, what that cost.
+
+To stop using that host, add it to the ignored providers in your OpenRouter
+account settings, which covers every request on your account. To skip it
+for one model only, put its slug (the lowercase name OpenRouter's routing
+uses, such as `deepinfra`) in that model's `ignore` list in pi's
+`models.json`:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "modelOverrides": {
+        "qwen/qwen3.8-27b": { "compat": { "openRouterRouting": { "ignore": ["<host>"] } } }
+      }
+    }
+  }
+}
+```
+
+Prefer `ignore` over `only`. With `only`, every request fails while that one
+host is down or stops serving the model.
+
 ## Provider notes
 
 - Verification has focused on Anthropic, OpenAI, and OpenRouter. Other
