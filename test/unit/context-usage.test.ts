@@ -139,6 +139,9 @@ describe("breakdownRequest", () => {
 		expect(out.tokens.agents).toBe(reviewer + row("- pr:checker: Checks pull requests."));
 		// The rest of the listing (its head, the built-in row and the note) stays System tools.
 		expect(out.tokens.systemTools).toBe(plain.tokens.systemTools - out.tokens.agents);
+		// A second listing in the same request counts its own rows once.
+		const twice = breakdownRequest({ ...request, list: [...request.list, ...request.list] }, { agentGroups: new Map([["reviewer", "Project"], ["pr:checker", "Plugin (pr)"]]) });
+		expect(twice.tokens.agents).toBe(2 * out.tokens.agents);
 	});
 
 	it("counts a deferred tool's schema only once it is loaded", () => {
@@ -408,8 +411,8 @@ describe("renderContextUsage", () => {
 			"",
 			"     /context all to expand",
 		]);
-		const withAgents = { ...ccUsage(), agents: [{ name: "reviewer", tokens: 300, group: "Project" }, { name: "pr:checker", tokens: 200, group: "Plugin (pr)" }], agentsDir: ".claude/agents/" };
-		const agentLines = renderContextUsage(withAgents, { width: 160, collapsed: true });
+		const withAgents = { ...ccUsage(), agents: [{ name: "reviewer", tokens: 300, group: "Project" }, { name: "pr:checker", tokens: 200, group: "Plugin (pr)" }] };
+		const agentLines = renderContextUsage(withAgents, { width: 160, collapsed: true, agentsDir: ".claude/agents/" });
 		const at = agentLines.indexOf("     Custom agents · .claude/agents/");
 		expect(agentLines.slice(at, at + 3)).toEqual(["     Custom agents · .claude/agents/", "     └ 2 agents · 500 tokens", ""]);
 		expect(agentLines[at - 2]).toBe("     └ 4 tools · 304 tokens");
@@ -428,10 +431,9 @@ describe("renderContextUsage", () => {
 				{ name: "abc:lint", tokens: 80, group: "Plugin (abc)" },
 				{ name: "reviewer", tokens: 300, group: "Project" },
 			],
-			agentsDir: ".claude/agents/",
 			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200 }],
 		};
-		const lines = renderContextUsage(usage, { width: 160 });
+		const lines = renderContextUsage(usage, { width: 160, agentsDir: ".claude/agents/" });
 		const at = lines.indexOf("     Custom agents · .claude/agents/");
 		expect(lines.slice(at, at + 11)).toEqual([
 			"     Custom agents · .claude/agents/",
@@ -446,9 +448,6 @@ describe("renderContextUsage", () => {
 			"     Memory files · /memory",
 			"     └ CLAUDE.md: 1.2k tokens",
 		]);
-		// A transcript entry stored before the field existed still draws.
-		const { agents: _agents, ...older } = usage;
-		expect(() => renderContextUsage(older as unknown as ContextUsage, { width: 160 })).not.toThrow();
 	});
 
 	it("fits a 70-column terminal with the narrow grid", () => {

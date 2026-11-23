@@ -32,9 +32,9 @@
 import * as os from "node:os";
 import { type ExtensionAPI, type ExtensionCommandContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { branchUsage, breakdownRequest, type ContextUsage, contextUsage, previewRequest } from "../../lib/context/context-usage.ts";
+import { branchUsage, type BreakdownOptions, breakdownRequest, type ContextUsage, contextUsage, previewRequest } from "../../lib/context/context-usage.ts";
 import { queryDeferred } from "../../lib/request/deferred.ts";
-import { AGENT_GROUPS_QUERY_CHANNEL, type AgentGroupsQuery } from "../../lib/agents/agent-catalog.ts";
+import { queryAgentGroups } from "../../lib/agents/agent-catalog.ts";
 import { projectConfigDirName } from "../../lib/profile/sources.ts";
 import { renderReminders, STACK_QUERY_CHANNEL, type StackQuery } from "../../lib/request/reminders.ts";
 import { instructionRole, messagesKey, systemRoleLayout, withSystemRoleContext } from "../../lib/request/system-role.ts";
@@ -63,7 +63,14 @@ interface ContextEntryData {
 	args?: string;
 }
 
-/** Whether pi's TUI runs fullscreen: its own rule, the `--tui-mode` flag over the `tuiMode` setting (default fullscreen). */
+/** The custom-agents section's note: the profile's project config folder plus `agents/`. */
+const agentsDir = () => `${projectConfigDirName()}/agents/`;
+
+/**
+ * Whether pi's TUI runs fullscreen: its startup rule, the `--tui-mode` flag
+ * over the `tuiMode` setting (default fullscreen). pi exposes no live mode to
+ * an extension, so a mode switched later in the session is not seen here.
+ */
 function fullscreenTui(ctx: ExtensionCommandContext): boolean {
 	const at = process.argv.indexOf("--tui-mode");
 	const flag = at >= 0 ? process.argv[at + 1] : undefined;
@@ -89,9 +96,7 @@ function contextExtension(pi: ExtensionAPI) {
 	const measure = (ctx: ExtensionCommandContext): ContextUsage => {
 		const home = os.homedir();
 		const displayPath = (path: string) => (isPathAtOrUnder(path, ctx.cwd) ? relativeDisplayPath(ctx.cwd, path) : tildify(path, home));
-		const groups: AgentGroupsQuery = { cwd: ctx.cwd };
-		pi.events.emit(AGENT_GROUPS_QUERY_CHANNEL, groups);
-		const agentGroups = new Map((groups.agents ?? []).map((agent) => [agent.name, agent.group]));
+		const agentGroups = queryAgentGroups(pi.events, ctx.cwd);
 		const branch = ctx.sessionManager.getBranch() as Parameters<typeof branchUsage>[0];
 		const last = foldSession(ctx.sessionManager, sessionIdentity(pi, ctx.model)).lastRequest;
 		const replied = branchUsage(branch);
@@ -107,7 +112,6 @@ function contextExtension(pi: ExtensionAPI) {
 			compaction: compactionSettings(ctx),
 			compacted: replied.compacted,
 			breakdown,
-			agentsDir: `${projectConfigDirName()}/agents/`,
 			...(breakdown && preview ? { preview } : {}),
 			...(next?.error !== undefined ? { estimateError: next.error } : {}),
 			reported: recorded && replied.prompt !== undefined && typeof piUsage?.tokens === "number" ? { prompt: replied.prompt, total: piUsage.tokens } : undefined,
@@ -115,7 +119,7 @@ function contextExtension(pi: ExtensionAPI) {
 	};
 
 	/** The breakdown of the request the next prompt will send, or why estimating it failed: a broken estimate must not break /context, and the screen names the failure. */
-	const nextBreakdown = (ctx: ExtensionCommandContext, options: Parameters<typeof breakdownRequest>[1]): { breakdown?: ReturnType<typeof breakdownRequest>; error?: string } => {
+	const nextBreakdown = (ctx: ExtensionCommandContext, options: BreakdownOptions): { breakdown?: ReturnType<typeof breakdownRequest>; error?: string } => {
 		try {
 			return { breakdown: breakdownRequest(nextRequest(ctx), options) };
 		} catch (error) {
@@ -166,7 +170,7 @@ function contextExtension(pi: ExtensionAPI) {
 		const collapsed = entry.data?.collapsed === true;
 		const args = entry.data?.args ? ` ${entry.data.args}` : "";
 		// The command line above its result, as Claude Code's transcript shows it.
-		return linesComponent((width) => [`${paint("dim", USER_MARKER)} /context${args}`, ...renderContextUsage(usage, { width, paint, bold, collapsed })]);
+		return linesComponent((width) => [`${paint("dim", USER_MARKER)} /context${args}`, ...renderContextUsage(usage, { width, paint, bold, collapsed, agentsDir: agentsDir() })]);
 	});
 
 	registerLocalCommand(pi, "context", {
@@ -177,8 +181,8 @@ function contextExtension(pi: ExtensionAPI) {
 			const ui = canShowCustomUi(ctx);
 			// Claude Code collapses the lists only in its fullscreen presentation, unless asked for all.
 			const collapsed = ui && args.trim().toLowerCase() !== "all" && fullscreenTui(ctx);
-			const text = renderContextUsage(usage, { width: TEXT_WIDTH, collapsed }).join("\n");
-			if (ui) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage, collapsed, ...(args.trim() ? { args: args.trim() } : {}) });
+			const text = renderContextUsage(usage, { width: TEXT_WIDTH, collapsed, agentsDir: agentsDir() }).join("\n");
+			if (ui) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage, collapsed, args: args.trim() });
 			else if (ctx.hasUI) ctx.ui.notify(text, "info");
 			else printAnswer(ctx, text);
 			return text;

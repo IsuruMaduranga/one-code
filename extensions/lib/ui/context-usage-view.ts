@@ -58,6 +58,8 @@ export interface ContextViewOptions {
 	width: number;
 	/** Each list as one count-and-tokens row plus a "/context all to expand" hint, as Claude Code shows them in fullscreen. */
 	collapsed?: boolean;
+	/** Where project agents live, the custom-agents section's note (the profile's project config folder plus `agents/`). */
+	agentsDir?: string;
 	paint?: (color: string, text: string) => string;
 	bold?: (text: string) => string;
 }
@@ -74,7 +76,7 @@ export function contextNote(usage: ContextUsage): string | undefined {
 	return undefined;
 }
 
-/** Claude Code's order of agent groups: Project, User, then each plugin by name, then anything else. */
+/** Claude Code's order of agent groups: Project, User, then each plugin by name. */
 const GROUP_ORDER = ["Project", "User"];
 
 /** `items` by group in Claude Code's order, each group's items as they came (largest first). */
@@ -82,9 +84,14 @@ function byGroup(items: readonly ContextItem[]): Array<[string, ContextItem[]]> 
 	const groups = new Map<string, ContextItem[]>();
 	for (const item of items) {
 		const group = item.group ?? "";
-		groups.set(group, [...(groups.get(group) ?? []), item]);
+		const members = groups.get(group);
+		if (members) members.push(item);
+		else groups.set(group, [item]);
 	}
-	const rank = (group: string) => (GROUP_ORDER.includes(group) ? GROUP_ORDER.indexOf(group) : group.startsWith("Plugin") ? GROUP_ORDER.length : GROUP_ORDER.length + 1);
+	const rank = (group: string) => {
+		const at = GROUP_ORDER.indexOf(group);
+		return at >= 0 ? at : GROUP_ORDER.length;
+	};
 	return [...groups].sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
@@ -147,45 +154,44 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	if (usage.buffer > 0) out.push("", `${INDENT}Auto-compact window:  ${window} tokens`);
 
 	const sized = (item: ContextItem, prefix = "") => `${item.name}: ${dim(`${prefix}${formatContextTokens(item.tokens)} tokens`)}`;
+	const heading = (title: string, note: string) => `${INDENT}${bold(title)}${dim(` · ${note}`)}`;
+	const sum = (items: readonly ContextItem[]) => items.reduce((total, item) => total + item.tokens, 0);
 	const { loaded, available } = usage.mcp;
+	const mcpNote = `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`;
 	const hasMcp = loaded.length > 0 || available.length > 0;
-	const agents = usage.agents ?? [];
-	const agentsNote = usage.agentsDir ?? "agents/";
-	const hasLists = hasMcp || agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
+	const agentsNote = options.agentsDir ?? "agents/";
+	const hasLists = hasMcp || usage.agents.length > 0 || usage.memoryFiles.length > 0 || usage.skills.length > 0;
 	if (options.collapsed) {
-		const sum = (items: readonly ContextItem[]) => items.reduce((total, item) => total + item.tokens, 0);
-		const summary = (title: string, note: string, count: number, noun: string, tokens: number) => [
-			"",
-			`${INDENT}${bold(title)}${dim(` · ${note}`)}`,
-			`${INDENT}${dim(`└ ${count} ${noun}${count === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`,
-		];
-		if (hasMcp) out.push(...summary("MCP tools", `/mcp${available.length > 0 ? " (loaded on-demand)" : ""}`, loaded.length + available.length, "tool", sum(loaded)));
-		if (agents.length > 0) out.push(...summary("Custom agents", agentsNote, agents.length, "agent", sum(agents)));
-		if (usage.memoryFiles.length > 0) out.push(...summary("Memory files", "/memory", usage.memoryFiles.length, "file", sum(usage.memoryFiles)));
-		// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
-		const skillTokens = usage.categories.find((row) => row.key === "skills")?.tokens ?? sum(usage.skills);
-		if (usage.skills.length > 0) out.push(...summary("Skills", "/skills", usage.skills.length, "skill", skillTokens));
+		const summary = (title: string, note: string, items: readonly unknown[], noun: string, tokens: number) =>
+			items.length === 0 ? [] : ["", heading(title, note), `${INDENT}${dim(`└ ${items.length} ${noun}${items.length === 1 ? "" : "s"} · ${formatContextTokens(tokens)} tokens`)}`];
+		out.push(
+			...summary("MCP tools", mcpNote, [...loaded, ...available], "tool", sum(loaded)),
+			...summary("Custom agents", agentsNote, usage.agents, "agent", sum(usage.agents)),
+			...summary("Memory files", "/memory", usage.memoryFiles, "file", sum(usage.memoryFiles)),
+			// Claude Code counts the whole skills listing here (the category's row), not the sum of the skills' shares.
+			...summary("Skills", "/skills", usage.skills, "skill", usage.categories.find((row) => row.key === "skills")?.tokens ?? sum(usage.skills)),
+		);
 		if (hasLists) out.push("", `${INDENT}${dim("/context all to expand")}`);
 		return out;
 	}
 	// Claude Code runs the lists after MCP's together; the first list still gets a blank line above it.
 	if (!hasMcp && hasLists) out.push("");
 	if (hasMcp) {
-		out.push("", `${INDENT}${bold("MCP tools")}${dim(` · /mcp${available.length > 0 ? " (loaded on-demand)" : ""}`)}`);
+		out.push("", heading("MCP tools", mcpNote));
 		if (loaded.length > 0) out.push("", `${INDENT}${dim("Loaded")}`, ...tree(loaded.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 		if (available.length > 0) out.push("", `${INDENT}${dim("Available")}`, ...tree(available).map((line) => `${INDENT}${dim(line)}`));
 	}
-	if (agents.length > 0) {
-		out.push(`${INDENT}${bold("Custom agents")}${dim(` · ${agentsNote}`)}`);
-		for (const [group, items] of byGroup(agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
+	if (usage.agents.length > 0) {
+		out.push(heading("Custom agents", agentsNote));
+		for (const [group, items] of byGroup(usage.agents)) out.push(`${INDENT}${dim(group)}`, ...tree(items.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 	}
 	if (usage.memoryFiles.length > 0) {
-		out.push(`${INDENT}${bold("Memory files")}${dim(" · /memory")}`, ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
+		out.push(heading("Memory files", "/memory"), ...tree(usage.memoryFiles.map((item) => sized(item))).map((line) => `${INDENT}${line}`));
 	}
 	if (usage.skills.length > 0) {
 		// Claude Code rounds a skill's share to tens and marks it approximate.
 		const rounded = usage.skills.map((item) => ({ ...item, tokens: Math.max(10, Math.round(item.tokens / 10) * 10) }));
-		out.push(`${INDENT}${bold("Skills")}${dim(" · /skills")}`, ...tree(rounded.map((item) => sized(item, "~"))).map((line) => `${INDENT}${line}`));
+		out.push(heading("Skills", "/skills"), ...tree(rounded.map((item) => sized(item, "~"))).map((line) => `${INDENT}${line}`));
 	}
 	return out;
 }

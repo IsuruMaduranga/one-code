@@ -222,6 +222,13 @@ export interface AgentGroupsQuery {
 	agents?: Array<{ name: string; group: string }>;
 }
 
+/** Each custom agent's group by name, as the Agent tool's extension answers; empty when none answers. */
+export function queryAgentGroups(events: { emit(channel: string, data: unknown): void }, cwd: string): Map<string, string> {
+	const query: AgentGroupsQuery = { cwd };
+	events.emit(AGENT_GROUPS_QUERY_CHANNEL, query);
+	return new Map((query.agents ?? []).map((agent) => [agent.name, agent.group]));
+}
+
 /**
  * Claude Code's `/context` group for an agent: Project or User by the folder
  * its file sits in, `Plugin (<name>)` for a plugin's, and undefined for a
@@ -230,8 +237,9 @@ export interface AgentGroupsQuery {
 export function agentGroup(agent: AgentDefinition, cwd: string, home: string, bundled = BUNDLED_AGENTS_DIR): string | undefined {
 	const file = agent.source;
 	if (file === "built-in" || isPathAtOrUnder(file, bundled)) return undefined;
-	if (isPathAtOrUnder(file, join(projectConfigDir(cwd), "agents"))) return "Project";
-	if (isPathAtOrUnder(file, join(userConfigDir(home), "agents"))) return "User";
+	const [user, project] = agentDirs(cwd, home);
+	if (isPathAtOrUnder(file, project)) return "Project";
+	if (isPathAtOrUnder(file, user)) return "User";
 	const at = agent.name.indexOf(":");
 	return at > 0 ? `Plugin (${agent.name.slice(0, at)})` : "Plugin";
 }

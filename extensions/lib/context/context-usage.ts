@@ -260,7 +260,12 @@ export function harnessSegments(body: string): Array<{ kind?: BlockKind; text: s
  * instruction file's path the way the user names it; `agentGroups` names each
  * custom agent's group (an agent it does not name is built in).
  */
-export function breakdownRequest(request: RecordedRequestView, options: { displayPath?: (path: string) => string; agentGroups?: ReadonlyMap<string, string> } = {}): RequestBreakdown {
+export interface BreakdownOptions {
+	displayPath?: (path: string) => string;
+	agentGroups?: ReadonlyMap<string, string>;
+}
+
+export function breakdownRequest(request: RecordedRequestView, options: BreakdownOptions = {}): RequestBreakdown {
 	const tokens = Object.fromEntries(CONTEXT_CATEGORIES.map(([key]) => [key, 0])) as Record<ContextCategoryKey, number>;
 	const memory = new Map<string, number>();
 	const skills: ContextItem[] = [];
@@ -308,6 +313,7 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 		} else if (kind === "agents") {
 			// A row runs from its `- name: ` line to the next row or a blank line (the note after the list).
 			let current: ContextItem | undefined;
+			let custom = 0;
 			for (const line of body.split("\n")) {
 				const row = /^- (\S+?): /.exec(line);
 				if (row) {
@@ -315,13 +321,15 @@ export function breakdownRequest(request: RecordedRequestView, options: { displa
 					current = group ? { name: row[1], tokens: 0, group } : undefined;
 					if (current) agents.push(current);
 				} else if (!line.trim()) current = undefined;
-				if (current) current.tokens += textTokens(line);
+				if (current) {
+					const share = textTokens(line);
+					current.tokens += share;
+					custom += share;
+				}
 			}
-			const custom = agents.reduce((sum, item) => sum + item.tokens, 0);
 			tokens.agents += custom;
 			tokens.systemTools += Math.max(0, textTokens(body) - custom);
-		}
-		else if (kind === "mcpInstructions") tokens.mcpInstructions += textTokens(body);
+		} else if (kind === "mcpInstructions") tokens.mcpInstructions += textTokens(body);
 		else if (kind === "skills") {
 			tokens.skills += textTokens(body);
 			for (const line of body.split("\n")) {
@@ -470,8 +478,6 @@ export interface ContextUsage {
 	memoryFiles: ContextItem[];
 	skills: ContextItem[];
 	agents: ContextItem[];
-	/** Where project agents live, as the custom-agents section names it (the profile's project config folder plus `agents/`). */
-	agentsDir?: string;
 	mcp: { loaded: ContextItem[]; available: string[] };
 }
 
@@ -490,8 +496,6 @@ export interface ContextUsageInput {
 	preview?: "first" | "compaction";
 	/** Estimating the next request threw: its message. */
 	estimateError?: string;
-	/** Where project agents live, for the custom-agents section's note. */
-	agentsDir?: string;
 }
 
 /** The band within which the provider's count rescales the estimate; outside it one of the two is off and the rows stay estimates. */
@@ -517,7 +521,7 @@ export function scaleToSum(values: readonly number[], target: number): number[] 
 export function contextUsage(input: ContextUsageInput): ContextUsage {
 	const window = Math.max(0, input.window);
 	const buffer = input.compaction?.enabled ? Math.min(window, Math.max(0, input.compaction.reserveTokens)) : 0;
-	const base = { model: input.model, window, buffer, ...(input.agentsDir !== undefined ? { agentsDir: input.agentsDir } : {}) };
+	const base = { model: input.model, window, buffer };
 	const empty = { memoryFiles: [], skills: [], agents: [], mcp: { loaded: [], available: [] } };
 	const breakdown = input.breakdown;
 	if (!breakdown) return { ...base, ...empty, state: input.compacted ? "compacted" : "empty", categories: [], ...(input.estimateError !== undefined ? { estimateError: input.estimateError } : {}) };
