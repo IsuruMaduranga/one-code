@@ -49,6 +49,23 @@ const DESCRIPTORS: Record<Exclude<InstructionSource, "product" | "productGlobal"
 	agentsGlobal: "user's private global cross-tool agent instructions for all projects, AGENTS.md standard",
 };
 
+/** Claude Code's type for each instruction file source, the Type column of `/context`'s report. */
+const TYPES: Record<keyof typeof DESCRIPTORS, string> = {
+	global: "User",
+	managed: "Managed",
+	project: "Project",
+	local: "Local",
+	memory: "AutoMem",
+	agents: "Project",
+	agentsGlobal: "User",
+};
+
+/** An instruction file's type by its section's descriptor; undefined for one the base does not word (a product's own file). */
+export function instructionType(descriptor: string): string | undefined {
+	const source = (Object.keys(DESCRIPTORS) as Array<keyof typeof DESCRIPTORS>).find((key) => DESCRIPTORS[key] === descriptor);
+	return source && TYPES[source];
+}
+
 const CHANGES: Record<Exclude<ContextChange, "instructions">, string> = {
 	git: "git status changed",
 	memory: "the memory index changed",

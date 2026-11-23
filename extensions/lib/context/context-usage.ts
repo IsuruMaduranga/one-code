@@ -38,6 +38,7 @@ import { isPlainObject } from "../core/plain-object.ts";
 import { ESTIMATED_IMAGE_CHARS, estimateCharTokens, estimateTextTokens } from "../models/pi-ai-estimate.ts";
 import { declarationsOf, toolName } from "../request/ledger/wire.ts";
 import { toolSearchResultText } from "../request/tool-search-text.ts";
+import { instructionType } from "./context-text.ts";
 
 /** The categories in Claude Code's order. */
 export const CONTEXT_CATEGORIES = [
@@ -146,7 +147,7 @@ function unwrap(text: string): { body: string; framed: boolean } {
 export interface ContextItem {
 	name: string;
 	tokens: number;
-	/** Where a custom agent comes from, Claude Code's group label: Project, User, Plugin (<name>). */
+	/** Where it comes from, Claude Code's label: a custom agent's group (Project, User, Plugin (<name>)), an instruction file's type (Project, User, Local, Managed, AutoMem). */
 	group?: string;
 }
 
@@ -273,6 +274,7 @@ export interface BreakdownOptions {
 export function breakdownRequest(request: RecordedRequestView, options: BreakdownOptions = {}): RequestBreakdown {
 	const tokens = Object.fromEntries(CONTEXT_CATEGORIES.map(([key]) => [key, 0])) as Record<ContextCategoryKey, number>;
 	const memory = new Map<string, number>();
+	const memoryTypes = new Map<string, string>();
 	const skills: ContextItem[] = [];
 	const agents: ContextItem[] = [];
 	const agentGroups = options.agentGroups ?? new Map<string, string>();
@@ -356,6 +358,7 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 				if (match) {
 					close();
 					current = show(match[1]);
+					memoryTypes.set(current, instructionType(match[2]) ?? "Project");
 					section = [line];
 				} else section.push(line);
 			}
@@ -388,7 +391,7 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 	const byName = (a: string, b: string) => a.toLowerCase().localeCompare(b.toLowerCase());
 	return {
 		tokens,
-		memoryFiles: [...memory].map(([name, size]) => ({ name, tokens: size })),
+		memoryFiles: [...memory].map(([name, size]) => ({ name, tokens: size, group: memoryTypes.get(name) })),
 		skills: skills.sort((a, b) => b.tokens - a.tokens),
 		agents: agents.sort((a, b) => b.tokens - a.tokens),
 		mcpLoaded: [...mcpLoaded].map(([name, size]) => ({ name, tokens: size })).sort((a, b) => byName(a.name, b.name)),

@@ -199,3 +199,70 @@ export function renderContextUsage(usage: ContextUsage, options: ContextViewOpti
 	}
 	return out;
 }
+
+/** Rows each table of the report keeps before its "and N more" row. */
+const REPORT_ROWS = 10;
+
+/** `items` capped at REPORT_ROWS, largest first, and the row that sums the rest ("" when nothing is cut). */
+function capped<T extends { tokens: number }>(items: readonly T[], tokens: (n: number) => string): { kept: readonly T[]; more: string } {
+	if (items.length <= REPORT_ROWS) return { kept: items, more: "" };
+	const sorted = [...items].sort((a, b) => b.tokens - a.tokens);
+	const rest = sorted.slice(REPORT_ROWS);
+	return { kept: sorted.slice(0, REPORT_ROWS), more: `| and ${rest.length} more |  | ${tokens(rest.reduce((sum, item) => sum + item.tokens, 0))} |\n` };
+}
+
+/** A skill's share as Claude Code's report prints it: approximate, to tens. */
+const skillTokens = (tokens: number) => (tokens < 20 ? "< 20" : `~${formatContextTokens(Math.round(tokens / 10) * 10)}`);
+
+/** The server of an MCP tool's `mcp__<server>__<tool>` name. */
+const mcpServer = (name: string) => name.split("__")[1] ?? "";
+
+/**
+ * What the model reads for `/context`: Claude Code 2.1.330's Markdown report
+ * (findings §101), the same in every presentation, while the screen above is
+ * the user's alone. Each table keeps its largest ten rows. A skill's source is
+ * known only for a plugin's (its `plugin:` prefix), and an MCP tool not loaded
+ * has no size here, so the servers' table counts tools only.
+ */
+export function contextReport(usage: ContextUsage): string {
+	const tokens = formatContextTokens;
+	const share = (n: number) => `${((n / Math.max(1, usage.window)) * 100).toFixed(1)}%`;
+	let out = "## Context Usage\n\n";
+	out += `**Model:** ${usage.model.id || usage.model.name}  \n`;
+	out += usage.total === undefined ? `**Tokens:** ? / ${tokens(usage.window)}\n` : `**Tokens:** ${tokens(usage.total)} / ${tokens(usage.window)} (${Math.round((usage.total / Math.max(1, usage.window)) * 100)}%)\n`;
+	if (usage.total !== undefined && usage.total > usage.window) out += `**Over limit:** Context exceeds the ${tokens(usage.window)}-token limit by ${tokens(usage.total - usage.window)} tokens — run /compact or /clear to continue.\n`;
+	out += "\n";
+	const note = usage.preview !== undefined && usage.estimateError === undefined ? "This token count is an estimate." : contextNote(usage);
+	if (note) out += `${note}\n\n`;
+	const rows = usage.categories.filter((row) => row.tokens > 0);
+	if (rows.length > 0) {
+		out += "### Estimated usage by category\n\n| Category | Tokens | Percentage |\n|----------|--------|------------|\n";
+		for (const row of rows) out += `| ${row.name} | ${tokens(row.tokens)} | ${share(row.tokens)} |\n`;
+		if (usage.free !== undefined && usage.free > 0) out += `| Free space | ${tokens(usage.free)} | ${share(usage.free)} |\n`;
+		if (usage.buffer > 0) out += `| Autocompact buffer | ${tokens(usage.buffer)} | ${share(usage.buffer)} |\n`;
+		out += "\n";
+	}
+	const table = <T extends { tokens: number }>(title: string, head: string, rule: string, items: readonly T[], row: (item: T) => string, format = tokens) => {
+		if (items.length === 0) return;
+		const { kept, more } = capped(items, format);
+		out += `### ${title}\n\n${head}\n${rule}\n${kept.map((item) => `${row(item)}\n`).join("")}${more}\n`;
+	};
+	table("MCP Tools", "| Tool | Server | Tokens |", "|------|--------|--------|", usage.mcp.loaded, (item) => `| ${item.name} | ${mcpServer(item.name)} | ${tokens(item.tokens)} |`);
+	const servers = new Map<string, number>();
+	for (const name of usage.mcp.available) servers.set(mcpServer(name), (servers.get(mcpServer(name)) ?? 0) + 1);
+	if (servers.size > 0) {
+		const kept = [...servers].slice(0, REPORT_ROWS);
+		const rest = [...servers].slice(REPORT_ROWS);
+		out += "### Other MCP tools, by server\n\n| Server | Tools |\n|--------|-------|\n";
+		out += kept.map(([server, count]) => `| ${server} | ${count} |\n`).join("");
+		if (rest.length > 0) out += `| and ${rest.length} more | ${rest.reduce((sum, [, count]) => sum + count, 0)} |\n`;
+		out += "\n";
+	}
+	table("Custom Agents", "| Agent Type | Source | Tokens |", "|------------|--------|--------|", usage.agents ?? [], (item) => `| ${item.name} | ${item.group?.startsWith("Plugin") ? "Plugin" : (item.group ?? "")} | ${tokens(item.tokens)} |`);
+	table("Memory Files", "| Type | Path | Tokens |", "|------|------|--------|", usage.memoryFiles, (item) => `| ${item.group ?? "Project"} | ${item.name} | ${tokens(item.tokens)} |`);
+	if ((usage.categories.find((row) => row.key === "skills")?.tokens ?? 0) > 0) {
+		const plugin = (name: string) => (name.includes(":") ? `Plugin (${name.slice(0, name.indexOf(":"))})` : "");
+		table("Skills", "| Skill | Source | Tokens |", "|-------|--------|--------|", usage.skills, (item) => `| ${item.name} | ${plugin(item.name)} | ${skillTokens(item.tokens)} |`, skillTokens);
+	}
+	return out;
+}

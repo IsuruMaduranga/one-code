@@ -13,7 +13,7 @@ import {
 	scaleToSum,
 } from "../../extensions/lib/context/context-usage.ts";
 import { contextText } from "../../extensions/lib/context/context-text.ts";
-import { renderContextUsage } from "../../extensions/lib/ui/context-usage-view.ts";
+import { contextReport, renderContextUsage } from "../../extensions/lib/ui/context-usage-view.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { estimateTextTokens } from "../../extensions/lib/models/pi-ai-estimate.ts";
 import { toolSearchResultText } from "../../extensions/lib/request/tool-search-text.ts";
@@ -116,6 +116,8 @@ describe("breakdownRequest", () => {
 		for (const key of ["systemTools", "mcpTools", "memory", "skills", "messages"] as const) expect(t[key]).toBeGreaterThan(0);
 		// The memory block's files, by section, with the display path applied.
 		expect(out.memoryFiles.map((file) => file.name)).toEqual(["/home/u/.claude/CLAUDE.md", "CLAUDE.md"]);
+		// Each with its type, by the section's descriptor.
+		expect(out.memoryFiles.map((file) => file.group)).toEqual(["User", "Project"]);
 		// Skills by size, a plugin skill's full name kept.
 		expect(out.skills.map((skill) => skill.name)).toEqual(["plugin:deploy", "simplify"]);
 		// Loaded: the eager MCP tool and the one a tool_reference loaded; available: the deferred one not loaded.
@@ -357,6 +359,85 @@ function ccUsage(): ContextUsage {
 		},
 	};
 }
+
+describe("contextReport", () => {
+	it("gives the model Claude Code's Markdown report, whatever the screen shows", () => {
+		const usage = {
+			...ccUsage(),
+			agents: [{ name: "pr:checker", tokens: 200, group: "Plugin (pr)" }],
+			memoryFiles: [{ name: "CLAUDE.md", tokens: 1200, group: "Project" }],
+			skills: [{ name: "dataviz", tokens: 482 }, { name: "plugin:deploy", tokens: 17 }],
+		};
+		expect(contextReport(usage)).toBe(
+			[
+				"## Context Usage",
+				"",
+				`**Model:** ${MODEL.id}  `,
+				"**Tokens:** 16.7k / 1m (2%)",
+				"",
+				"### Estimated usage by category",
+				"",
+				"| Category | Tokens | Percentage |",
+				"|----------|--------|------------|",
+				"| System prompt | 2.5k | 0.2% |",
+				"| System tools | 9.7k | 1.0% |",
+				"| MCP tools | 592 | 0.1% |",
+				"| MCP server instructions | 1.8k | 0.2% |",
+				"| Skills | 2.2k | 0.2% |",
+				"| Free space | 950.3k | 95.0% |",
+				"| Autocompact buffer | 33k | 3.3% |",
+				"",
+				"### MCP Tools",
+				"",
+				"| Tool | Server | Tokens |",
+				"|------|--------|--------|",
+				"| mcp__claude_ai_Claude_Docs__batch | claude_ai_Claude_Docs | 134 |",
+				"| mcp__claude_ai_Claude_Docs__guide | claude_ai_Claude_Docs | 170 |",
+				"",
+				"### Other MCP tools, by server",
+				"",
+				"| Server | Tools |",
+				"|--------|-------|",
+				"| claude_ai_Asana | 1 |",
+				"| claude_ai_Slack | 1 |",
+				"",
+				"### Custom Agents",
+				"",
+				"| Agent Type | Source | Tokens |",
+				"|------------|--------|--------|",
+				"| pr:checker | Plugin | 200 |",
+				"",
+				"### Memory Files",
+				"",
+				"| Type | Path | Tokens |",
+				"|------|------|--------|",
+				"| Project | CLAUDE.md | 1.2k |",
+				"",
+				"### Skills",
+				"",
+				"| Skill | Source | Tokens |",
+				"|-------|--------|--------|",
+				"| dataviz |  | ~480 |",
+				"| plugin:deploy | Plugin (plugin) | < 20 |",
+				"",
+				"",
+			].join("\n"),
+		);
+	});
+
+	it("keeps each table's ten largest rows and sums the rest", () => {
+		const memoryFiles = Array.from({ length: 12 }, (_, index) => ({ name: `rules/${index}.md`, tokens: 100 + index, group: "Project" }));
+		const report = contextReport({ ...ccUsage(), memoryFiles });
+		expect(report).toContain("| Project | rules/11.md | 111 |");
+		expect(report).not.toContain("rules/1.md |");
+		expect(report).toContain("| and 2 more |  | 201 |");
+	});
+
+	it("says an estimate is one, and names what is over the window", () => {
+		expect(contextReport({ ...ccUsage(), preview: "first" })).toContain("**Tokens:** 16.7k / 1m (2%)\n\nThis token count is an estimate.\n\n");
+		expect(contextReport({ ...ccUsage(), total: 1_200_000 })).toContain("**Over limit:** Context exceeds the 1m-token limit by 200k tokens \u2014 run /compact or /clear to continue.\n");
+	});
+});
 
 describe("renderContextUsage", () => {
 	it("names a failed estimate instead of saying nothing was sent", () => {

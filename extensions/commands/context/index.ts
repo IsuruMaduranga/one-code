@@ -24,9 +24,10 @@
  * Shown as a local command result, like `/doctor report`: in the TUI a
  * display-only transcript entry (appendEntry: never in the model's context)
  * drawn at the terminal's width; in RPC a plain-text notice; in a one-shot
- * run printed. Its plain text is the command's stdout in the breadcrumb the
- * next prompt carries (`registerLocalCommand` with `reportsResult`), as
- * Claude Code passes its rendered `/context` to `onDone`.
+ * run printed. The model reads a Markdown report instead (`contextReport`),
+ * the command's stdout in the breadcrumb the next prompt carries
+ * (`registerLocalCommand` with `reportsResult`), as Claude Code passes the
+ * screen as display-only and the report as its meta message (findings §101).
  */
 
 import * as os from "node:os";
@@ -45,7 +46,7 @@ import { feature } from "../../lib/profile/feature.ts";
 import { isPathAtOrUnder, relativeDisplayPath, tildify } from "../../lib/profile/paths.ts";
 import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
-import { renderContextUsage } from "../../lib/ui/context-usage-view.ts";
+import { contextReport, renderContextUsage } from "../../lib/ui/context-usage-view.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { linesComponent, safeThemeBold, safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { USER_MARKER } from "../../lib/ui/user-message.ts";
@@ -181,12 +182,12 @@ function contextExtension(pi: ExtensionAPI) {
 			const ui = canShowCustomUi(ctx);
 			// Claude Code collapses the lists only in its fullscreen presentation, unless asked for all.
 			const collapsed = ui && args.trim().toLowerCase() !== "all" && fullscreenTui(ctx);
-			// The text (the model's breadcrumb, RPC, one-shot) always has the full lists: Claude Code collapses only what it displays.
-			const text = renderContextUsage(usage, { width: TEXT_WIDTH, agentsDir: agentsDir() }).join("\n");
+			// People see the screen; the model reads the Markdown report, the same in every presentation (findings §101).
+			const screen = () => renderContextUsage(usage, { width: TEXT_WIDTH, agentsDir: agentsDir() }).join("\n");
 			if (ui) pi.appendEntry<ContextEntryData>(ENTRY_TYPE, { usage, collapsed, args: args.trim() });
-			else if (ctx.hasUI) ctx.ui.notify(text, "info");
-			else printAnswer(ctx, text);
-			return text;
+			else if (ctx.hasUI) ctx.ui.notify(screen(), "info");
+			else printAnswer(ctx, screen());
+			return contextReport(usage);
 		},
 	});
 }
