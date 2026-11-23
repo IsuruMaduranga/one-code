@@ -29,6 +29,11 @@ describe("openrouter cache watch", () => {
 		expect(moved.observe(reply(23_000, 0, "B", "openrouter/deepseek/deepseek-v4.1-flash"))).toBeUndefined();
 	});
 
+	it("does not count a shrinking prompt's removed tokens as misses", () => {
+		const watch = createCacheWatch();
+		for (const prompt of [100_000, 10_000, 7_000, 4_000]) expect(watch.observe(reply(prompt, prompt))).toBeUndefined();
+	});
+
 	it("says what the misses cost and how to skip the host", () => {
 		const notice = cacheMissNotice({ model: "openrouter/qwen/qwen3.8-27b", host: "Cold Host", misses: 3, missedTokens: 63_000 }, 0.2);
 		expect(notice).toBe(

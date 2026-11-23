@@ -61,8 +61,10 @@ export function createCacheWatch(): CacheWatch {
 			const prompt = reply.input + reply.cacheRead + reply.cacheWrite;
 			if (prompt <= 0) return undefined;
 			const same = previous?.model === reply.model && previous.host === reply.host;
-			const shortfall = same && previous ? previous.prompt - reply.cacheRead : 0;
-			const miss = same && previous !== undefined && shortfall >= Math.max(MIN_MISS, previous.prompt / 4);
+			// A prompt that shrank (a compaction) can be read only as far as it reaches.
+			const reach = previous ? Math.min(previous.prompt, prompt) : 0;
+			const shortfall = same ? reach - reply.cacheRead : 0;
+			const miss = same && shortfall >= Math.max(MIN_MISS, reach / 4);
 			streak = miss ? { misses: streak.misses + 1, missedTokens: streak.missedTokens + shortfall } : { misses: 0, missedTokens: 0 };
 			previous = { model: reply.model, host: reply.host, prompt };
 			const key = `${reply.model}\n${reply.host}`;
