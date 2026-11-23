@@ -379,6 +379,9 @@ export function linesComponent(build: (width: number) => string[]): TuiComponent
 	};
 }
 
+/** Claude Code's TEARDROP_ASTERISK (figures.ts), the mark leading the turn-end line and the yield wait line. */
+export const TURN_MARK = "✻";
+
 /**
  * A dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
  * "※ recap: …") — the shared shape behind the turn-duration and recap
