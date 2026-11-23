@@ -16,7 +16,7 @@ export interface FixPromptInput {
 	 * THIS run's session directory: the project's directory under it, the only
 	 * transcripts the permission gate lets a session read (Claude Code's own
 	 * rule); with no saved session (`--no-session`), the run's private folder
-	 * the gate reads instead (lib/request/persisted-output.ts sessionResultsDir).
+	 * the gate reads instead (lib/request/persisted-output.ts projectSessionsDir).
 	 */
 	sessionDir: string;
 	/** False when the run saves no session, so `sessionDir` holds no transcripts. */

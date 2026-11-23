@@ -62,7 +62,7 @@ import { announceLocalCommand } from "../../lib/ui/local-command.ts";
 import { registeredMcpServers } from "../../tools/mcp/config.ts";
 import { sourceSwitchStatus, sourcesOff } from "../../lib/profile/sources.ts";
 import { promptCommandText } from "../../lib/plugins/skill-invoke.ts";
-import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { projectSessionsDir } from "../../lib/request/persisted-output.ts";
 import { PAGING_PANEL, panelUi } from "../../lib/ui/panel-focus.ts";
 import { fetchEndpointQuantizations, OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent, type ServedHost } from "../../lib/request/openrouter-host.ts";
 import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
@@ -242,7 +242,7 @@ function doctorExtension(pi: ExtensionAPI) {
 			install: installKind(),
 			productVersion: productVersion(),
 			sessionsDir: process.env[SESSION_DIR_VAR] || join(getAgentDir(), "sessions"),
-			sessionDir: sessionResultsDir(ctx),
+			sessionDir: projectSessionsDir(ctx),
 			sessionPersisted: !!ctx.sessionManager.getSessionDir(),
 			productSettingsPath: productSettingsPath(home),
 			productProjectSettingsPath: productProjectSettingsPath(ctx.cwd, home),

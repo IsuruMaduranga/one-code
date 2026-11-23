@@ -158,7 +158,7 @@ describe("web-fetch runtime regressions", () => {
 		vi.mocked(fetch).mockResolvedValueOnce(new Response(body));
 		const result = await harness()({ max_chars: 100_000 });
 		expect(result.content[0].text).toContain("<persisted-output>");
-		expect(readFileSync(join(work, "tool-results", "fetch-runtime.txt"), "utf8")).toContain(body);
+		expect(readFileSync(join(work, "fetch-runtime", "tool-results", "fetch-runtime.txt"), "utf8")).toContain(body);
 	});
 
 	it("keeps one deadline across same-host redirects", async () => {

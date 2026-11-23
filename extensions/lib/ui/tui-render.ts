@@ -828,6 +828,39 @@ export function rowRenderers<TArgs = any>(
 	};
 }
 
+/** Claude Code's dim row under a result the auto-mode classifier allowed (findings §103). */
+export const CLASSIFIER_ALLOWED_LINE = "Allowed by auto mode";
+
+/** Any tool's renderers as a tool-renderer resolver hands them over. */
+interface ResolvedRenderers {
+	renderShell?: string;
+	renderResult?: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => unknown;
+}
+
+/**
+ * A tool's renderers with Claude Code's dim `⎿ Allowed by auto mode` row under
+ * a successful result whose call `allowed(toolCallId)`, whatever draws the
+ * result: for a tool-renderer resolver. A tool pi frames itself draws its
+ * result inside a box, where the row would not belong, so it is left as is.
+ */
+export function withClassifierAllowedRow<R extends ResolvedRenderers>(renderers: R | undefined, allowed: (toolCallId: string) => boolean): R | undefined {
+	const renderResult = renderers?.renderResult;
+	if (!renderers || !renderResult || renderers.renderShell !== "self") return renderers;
+	return {
+		...renderers,
+		renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: { isError?: boolean; toolCallId?: string }) => {
+			const base = renderResult(result, options, theme, context) as TuiComponent | undefined;
+			if (typeof base?.render !== "function" || context.isError || options.isPartial || !context.toolCallId || !allowed(context.toolCallId)) return base;
+			const row = elbowIndent([theme.fg("dim", CLASSIFIER_ALLOWED_LINE)])[0];
+			const drawn = linesComponent((width) => {
+				const lines = base.render(width);
+				return lines.length > 0 ? [...lines, row] : lines;
+			});
+			return { render: drawn.render, invalidate: () => (drawn.invalidate(), base.invalidate()) };
+		},
+	};
+}
+
 /** True when a line is visually empty — ANSI codes (Box padding paints) don't count as content. */
 export function isBlankLine(line: string): boolean {
 	return line.replace(/\x1b\[[0-9;]*m/g, "").trim() === "";

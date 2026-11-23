@@ -16,6 +16,7 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
 import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import * as mcpClient from "../../extensions/tools/mcp/client.ts";
 import mcpExtension from "../../extensions/tools/mcp/index.ts";
@@ -560,7 +561,7 @@ describe("mcp wiring", () => {
 		const ctx = createFakeCtx({ cwd, sessionManager: { getSessionDir: () => cwd } });
 		const result = await fake.tools.get("mcp__demo__foo")!.execute("large-structured", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
 		expect(result.content[0].text).toContain("<persisted-output>");
-		const saved = readFileSync(join(cwd, "tool-results", "large-structured.txt"), "utf8");
+		const saved = readFileSync(join(sessionResultsDir(ctx), "tool-results", "large-structured.txt"), "utf8");
 		expect(saved).toContain("Summary only.");
 		expect(saved).toContain(JSON.stringify(data, null, 2));
 	});

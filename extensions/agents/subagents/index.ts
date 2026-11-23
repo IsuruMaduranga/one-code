@@ -107,7 +107,7 @@ import {
 	type TaskStatus,
 	withReview,
 } from "../../lib/notify/notifications.ts";
-import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { persistIfLarge, sessionResultsDir, taskOutputPath } from "../../lib/request/persisted-output.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 import { ClickToggles, clickToExpand, elbowIndent, rowRenderers, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
@@ -242,7 +242,7 @@ const nestedAgentParams = (words: SubagentsText) => {
 	});
 };
 
-/** Floor between interim output.log rewrites (onProgress fires per tool call/message). */
+/** Floor between interim spool rewrites (onProgress fires per tool call/message). */
 const LOG_WRITE_INTERVAL_MS = 250;
 /** Idle time after which a resident agent session is released (its session file keeps it reachable). */
 const RESIDENT_IDLE_MS = 15 * 60_000;
@@ -1413,9 +1413,23 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/** Relay a child's send_message {to: "main"} into this conversation. */
 	const notifyAgentMessage = (from: string, name: string, message: string) => announceAgentMessage(from, name, boundedMessage(name, message));
 
+	/**
+	 * Write a resident's spool. It sits in the temp folder, which the system may
+	 * clear while the agent idles, so the folder is made again; a failed write
+	 * costs only this copy (the hand-back carries the report), never the turn's
+	 * end.
+	 */
+	const writeSpool = (path: string, text: string) => {
+		try {
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, text);
+		} catch {
+			// the hand-back below still reports the turn
+		}
+	};
+
 	/** The spool a resident's turns are written to (`task_output` and the notification's `<output-file>`). */
-	const outputLogPath = (record: AgentRunRecord): string | undefined =>
-		record.sessionSearchDir ? join(record.sessionSearchDir, "output.log") : undefined;
+	const outputLogPath = (record: AgentRunRecord): string | undefined => record.outputFile;
 
 	/**
 	 * The hand-back for a resident agent's finished turn (its first report, an
@@ -1610,10 +1624,20 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * Session dir for a run's persisted child session and output log; undefined
-	 * → child runs --no-session. Under the session's harness dir
-	 * (`sessionResultsDir`): a session-less parent's is its private temp dir,
-	 * where the bare session dir ("") put `subagents/` in the project.
+	 * A new run's folders: its session folder, and the file its turns spool to,
+	 * the starting session's `tasks/<task id>.output` beside background shells,
+	 * where Claude Code keeps an agent's output file (`taskOutputPath`). A run
+	 * with no session folder spools nowhere.
+	 */
+	const runFiles = (ctx: ExtensionContext, taskId: string): { sessionSearchDir: string; outputFile?: string } => {
+		const sessionSearchDir = runSessionDir(ctx, taskId);
+		return sessionSearchDir ? { sessionSearchDir, outputFile: taskOutputPath(ctx, taskId) } : { sessionSearchDir: "" };
+	};
+	/**
+	 * Session dir for a run's persisted child session; undefined → child runs
+	 * --no-session. Under the session's harness dir (`sessionResultsDir`): a
+	 * session-less parent's is its private temp dir, where the bare session dir
+	 * ("") put `subagents/` in the project.
 	 */
 	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
 		try {
@@ -1721,7 +1745,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					name,
 					agent: agentDef.name,
 					taskId,
-					sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+					...runFiles(ctx, taskId),
 					// The SPAWNING agent's cwd, not the top-level session's: a worktree-
 					// isolated parent's nested spawns must work in the same worktree.
 					cwd: parentRecord.cwd,
@@ -2085,7 +2109,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// onTurnEnd below flushes the final state, so the tail is never lost.
 				if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
 					lastLogWrite = Date.now();
-					writeFileSync(logPath, text);
+					writeSpool(logPath, text);
 				}
 			},
 			sink: live.sink,
@@ -2097,7 +2121,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				registry.sessionFileFor(p.record);
 				live.settle();
 				lastOutput = resident.handle.snapshot().text || outcome.output;
-				if (logPath) writeFileSync(logPath, lastOutput);
+				if (logPath) writeSpool(logPath, lastOutput);
 				// The handler is claimed now (so a message arriving mid-review pairs
 				// with the NEXT turn), but runs only once auto mode's hand-back
 				// review of this turn's action sequence has answered, so the
@@ -2221,7 +2245,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				name,
 				agent: FORK_AGENT,
 				taskId,
-				sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+				...runFiles(ctx, taskId),
 				cwd: workCwd(ctx),
 				depth: 0,
 				description: btwForkDescription(request.question),
@@ -2374,7 +2398,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 							name: request.name,
 							agent: request.agent,
 							taskId,
-							sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+							...runFiles(ctx, taskId),
 							cwd: workCwd(ctx),
 							model: request.model,
 							thinking: request.thinking,

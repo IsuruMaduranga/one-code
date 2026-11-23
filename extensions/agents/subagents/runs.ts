@@ -22,6 +22,8 @@ export interface AgentRunRecord {
 	taskId: string;
 	/** Directory the run's session file was created under (searched lazily). */
 	sessionSearchDir: string;
+	/** Where its turns spool (`taskOutputPath` of the session that started it); none for a session-less run. */
+	outputFile?: string;
 	/** Resolved session file, once known. */
 	sessionFile?: string;
 	cwd: string;

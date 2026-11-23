@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
 import webExtension from "../../extensions/tools/web/index.ts";
 import { NATIVE_SEARCH_TIMEOUT_MS } from "../../extensions/tools/web/native-call.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -49,7 +50,7 @@ describe("web_search through the real pi-web-search transport", () => {
 		const result = await execute();
 		expect(result.details.backend).toBe("google/gemini-test");
 		expect(result.content[0].text).toContain("<persisted-output>");
-		const saved = readFileSync(join(dir, "tool-results", "search-real-transport.txt"), "utf8");
+		const saved = readFileSync(join(sessionResultsDir({ sessionManager: { getSessionDir: () => dir, getSessionId: () => "fake-session" } }), "tool-results", "search-real-transport.txt"), "utf8");
 		expect(saved).toContain(answer);
 		expect(saved).toContain("https://example.com/source");
 		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];

@@ -83,7 +83,7 @@ import { autoMemoryEnabled } from "../../lib/context/auto-memory.ts";
 import { projectMemoryDir } from "../../lib/context/memory.ts";
 import { queueNotice } from "../../lib/notify/notices.ts";
 import { canShowCustomUi, rpcReadOnlyText } from "../../lib/notify/headless-output.ts";
-import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { projectSessionsDir, sessionResultsDir } from "../../lib/request/persisted-output.ts";
 import { privateSessionScratchpadDir, privateSessionTempDir } from "../../lib/core/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -157,7 +157,7 @@ import { autoModeSystemNote } from "./auto-mode/system-note.ts";
 import { announceArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
 import { permissionText, refusalText, unansweredAskReason } from "../../lib/rules/permission-text.ts";
-import { liveUiCtx } from "../../lib/ui/tui-render.ts";
+import { liveUiCtx, withClassifierAllowedRow } from "../../lib/ui/tui-render.ts";
 import { askPermission } from "../../lib/ui/permission-dialog.ts";
 import { askView } from "./ask-view.ts";
 
@@ -624,8 +624,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (!autoConfig.logDecisions) return;
 		try {
-			// Beside the transcripts; a session-less run's private temp dir, never the project.
-			const file = join(sessionResultsDir(ctx), "auto-mode-decisions.jsonl");
+			const file = join(projectSessionsDir(ctx), "auto-mode-decisions.jsonl");
 			appendDecision(file, decisionEntry({ sessionId: ctx.sessionManager.getSessionId?.(), ...entry }));
 		} catch {
 			// Logging must never break the gate.
@@ -1073,7 +1072,21 @@ function permissionsExtension(pi: ExtensionAPI) {
 		inFlightMainCalls = [];
 	});
 
+	/**
+	 * The calls the auto-mode classifier allowed this process, by tool call id,
+	 * for Claude Code's dim `⎿ Allowed by auto mode` row under their results.
+	 * Display only and never persisted, as Claude Code's is not: a resumed
+	 * session draws no row.
+	 */
+	const classifierAllowed = new Set<string>();
+	pi.registerToolRenderer?.((_name, next) => withClassifierAllowedRow(next(), (id) => classifierAllowed.has(id)));
+
+	let allowedFor: string | undefined;
 	pi.on("session_start", (event, ctx) => {
+		// A /reload keeps the session and its transcript, so its rows stay.
+		const sessionId = ctx.sessionManager.getSessionId();
+		if (sessionId !== allowedFor) classifierAllowed.clear();
+		allowedFor = sessionId;
 		childPermissionSession?.abort();
 		childPermissionSession = new AbortController();
 		badgeCtx = ctx;
@@ -1613,6 +1626,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 				if (outcome.decision === "allow") {
 					noteAllow();
 					denials.settle(inputKey);
+					// The classifier itself cleared it (a fast-path allow has no tier): the
+					// transcript says so under the result, as Claude Code does.
+					if (outcome.tier !== undefined) classifierAllowed.add(event.toolCallId);
 					// The classifier read the call's own hosts with the command: they hold for this one run.
 					grantCommandHosts(event.toolCallId, hosts);
 					return undefined;
