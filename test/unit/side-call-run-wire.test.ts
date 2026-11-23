@@ -72,7 +72,12 @@ function inlineReference(kind: "btw" | "recap" | "reader", model: Model<Api>): [
 	return [{ ...model, baseUrl: auth.baseUrl } as Model<Api>, options];
 }
 
+// Three user turns: the recap runs only after Claude Code's minimum of three.
 const history = [
+	{ role: "user", content: "Open the build script.", timestamp: 1 },
+	{ role: "assistant", content: [{ type: "text", text: "Opened it." }], api: "anthropic-messages", provider: "anthropic", model: "claude-wire", usage: {}, stopReason: "stop", timestamp: 1 },
+	{ role: "user", content: "Which test fails?", timestamp: 1 },
+	{ role: "assistant", content: [{ type: "text", text: "The parser test." }], api: "anthropic-messages", provider: "anthropic", model: "claude-wire", usage: {}, stopReason: "stop", timestamp: 1 },
 	{ role: "user", content: "Earlier question about the build.", timestamp: 1 },
 	{ role: "assistant", content: [{ type: "text", text: "Earlier answer: run the tests first." }], api: "anthropic-messages", provider: "anthropic", model: "claude-wire", usage: {}, stopReason: "stop", timestamp: 2 },
 ];

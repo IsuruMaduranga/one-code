@@ -1,8 +1,8 @@
 /**
  * Recognising an Anthropic Messages request body inside a `before_provider_request`
  * payload (pure). Shared by context-management (clear_thinking), compaction
- * (its replayed request), tool-search (deferred tool definitions) and
- * idle-compact (the cache lifetime).
+ * (its replayed request), tool-search (deferred tool definitions), and
+ * idle-compact and recap (the cache lifetime, the rate-limit status).
  */
 
 /** Anthropic Messages API shape: `messages` + `max_tokens`, and not an OpenAI `input`. */
@@ -93,4 +93,12 @@ export function hasOneHourCache(payload: unknown): boolean {
 		list(body.tools).some(oneHour) ||
 		list(body.messages).some((message) => oneHour(message) || list((message as { content?: unknown } | null)?.content).some(oneHour))
 	);
+}
+
+/** Anthropic's subscription rate-limit status header: "allowed" while under the limit. */
+const RATE_LIMIT_STATUS_HEADER = "anthropic-ratelimit-unified-status";
+
+/** The rate-limit status in a provider response's headers (any letter case), or undefined when it has none. */
+export function rateLimitStatus(headers: Readonly<Record<string, string>> | undefined): string | undefined {
+	return Object.entries(headers ?? {}).find(([name]) => name.toLowerCase() === RATE_LIMIT_STATUS_HEADER)?.[1];
 }

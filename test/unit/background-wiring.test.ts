@@ -43,7 +43,7 @@ import { MONITOR_BATCH_MAX_LINES } from "../../extensions/tools/background/monit
 import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery, wakeupPending } from "../../extensions/lib/notify/session-work.ts";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agents/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
@@ -235,10 +235,13 @@ describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () =
 		const listed = await fake.tools.get("cron_list")!.execute("c", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
 		expect(list.mock.calls).toEqual([[{ jobs: [{ id: expect.stringMatching(/^[0-9a-f]{8}$/), cadence: "Every day at 12:01 PM", recurring: false, prompt: "check the build" }] }]]);
 		expect(listed.content[0].text).toBe(list.mock.results[0].value);
+		// The recap reads this to skip while a wakeup is pending.
+		expect(wakeupPending(fake.events)).toBe(true);
 
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		expect(wakeups(fake)).toHaveLength(1);
 		expect((wakeups(fake)[0].message.content as Array<{ text: string }>)[0].text).toBe("check the build");
+		expect(wakeupPending(fake.events)).toBe(false);
 	});
 
 	it("rejects a call missing a field with Claude Code's errors, and keeps a pending wakeup", async () => {
@@ -583,10 +586,11 @@ describe("background wiring: cron tools", () => {
 	it("answers the Stop hook's query with its pending jobs", async () => {
 		const fake = mount();
 		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "poll" }, liveSessionCtx());
-		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		const query: SessionWorkQuery = { crons: [], tasks: [], wakeupPending: false };
 		fake.events.emit(SESSION_WORK_CHANNEL, query);
 		expect(query.crons).toEqual([{ id: created.details.jobId, schedule: "*/10 * * * *", recurring: true, prompt: "poll" }]);
 		expect(query.tasks).toEqual([]);
+		expect(query.wakeupPending).toBe(false); // a cron job is not a wakeup
 	});
 
 	it("/clear cancels every job and says so in the next session; nothing fires afterwards", async () => {

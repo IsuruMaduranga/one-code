@@ -282,6 +282,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
 		const query = data as SessionWorkQuery;
 		query.crons.push(...cron.list().map(sessionCron));
+		query.wakeupPending ||= dynamicLoop.hasPending();
 		query.tasks.push(...registry.running().map(sessionBackgroundTask));
 	});
 

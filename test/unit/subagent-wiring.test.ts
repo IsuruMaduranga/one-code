@@ -999,7 +999,7 @@ describe("task_output beside a background agent's hand-back", () => {
 // so the resident must not be counted a second time.
 describe("a resident's later turn in the session work", () => {
 	const residentWork = (h: Awaited<ReturnType<typeof mount>>) => {
-		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		const query: SessionWorkQuery = { crons: [], tasks: [], wakeupPending: false };
 		h.fake.events.emit(SESSION_WORK_CHANNEL, query);
 		return query.tasks;
 	};

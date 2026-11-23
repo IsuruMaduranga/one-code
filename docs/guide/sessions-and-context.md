@@ -189,14 +189,23 @@ needs.
 
 ## While you are away
 
-After five minutes without a keystroke following a turn, One Code shows a
-short recap of what the model was doing and what comes next, prefixed with
-`※ recap:`. The recap is produced by a cheap model on your provider using
-Claude Code's own recap prompt, is display-only, and is never sent back to
+Three minutes after a turn ends, once you haven't typed for 30 seconds, One
+Code shows a short recap of what the model was doing and what comes next, prefixed with
+`※ recap:`. The recap reads the session's prompt cache on the session's
+model (or, when it can't, runs on a cheap model on your provider) using
+Claude Code's own recap prompt. It's display-only and never sent back to
 the model. Its cost is included in the footer's total.
 
+A recap waits until it's worth it and cheap. It needs at least three user
+turns in the session, and two more since the last recap. It doesn't run
+while you have a draft in the prompt box, while a background agent or
+workflow runs, while a wakeup is scheduled, near your rate limit, or once
+the prompt cache has gone cold (about four and a half minutes after the
+turn on a five-minute cache). A recap that fails is tried again after the
+next idle period, up to three times a turn.
+
 Set `ONECODE_RECAP_IDLE_MS` to change the delay (in milliseconds) or `ONECODE_FEATURES_OFF=recap`
-to turn recaps off.
+to turn recaps off. The first three recaps of a run end with that reminder.
 
 ## Continue, resume, and branch
 
