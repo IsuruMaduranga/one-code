@@ -27,6 +27,7 @@ import { activeProfile, setActiveProfileForTest, setLaunchArgsForTest } from "..
 import type { ThinkingDefaults } from "../../extensions/lib/profile/thinking-defaults.ts";
 import { readRecord, type EntryLike } from "../../extensions/lib/request/ledger/records.ts";
 import { stubHome } from "./helpers/home.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 const PROVIDER = "tier-provider";
 const model = (id: string) =>
@@ -112,7 +113,7 @@ async function start({ model: initial = CHEAP, settings = {}, thinkingLevel, ses
 	const widgets: Array<[string, unknown]> = [];
 	const uiContext: Record<string, unknown> = Object.fromEntries(UI_METHODS.split(" ").map((name) => [name, () => undefined]));
 	uiContext.setWidget = (key: string, widget: unknown) => widgets.push([key, widget]);
-	uiContext.theme = { fg: (_color: string, text: string) => text, dim: (text: string) => text };
+	uiContext.theme = plainTheme;
 	await session.bindExtensions({ mode: ui ? "tui" : "print", ...(ui ? { uiContext: uiContext as never } : {}), onError: (error) => errors.push(`${error.event}: ${error.error}`) });
 	const notes = () => widgets.filter(([key, widget]) => key === "effort-note" && widget !== undefined).length;
 	return { session, reasoning, errors, notes };

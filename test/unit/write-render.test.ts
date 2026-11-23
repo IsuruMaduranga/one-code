@@ -14,13 +14,14 @@ import {
 	writeDetails,
 	writeResultLines,
 } from "../../extensions/tools/tool-style/write-render.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 const tagged: ThemeLike = {
 	fg: (color, text) => `<${color}>${text}</>`,
 	bold: (text) => `<b>${text}</b>`,
 	italic: (text) => `<i>${text}</i>`,
 };
-const plain: ThemeLike = { fg: (_color, text) => text, bold: (text) => text, italic: (text) => text };
+const plain: ThemeLike = plainTheme;
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
 const fakeDiff = (before: string, after: string) => `-1 ${before}\n+1 ${after}`;

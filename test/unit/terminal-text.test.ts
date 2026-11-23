@@ -13,6 +13,7 @@ import {
 import { promptTitle } from "../../extensions/tools/mcp/trust.ts";
 import { parseTitle } from "../../extensions/agents/session-title/title.ts";
 import { LiveRunRegistry } from "../../extensions/agents/subagents/live-runs.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 // Text One Code did not write, carrying what a hostile or merely noisy source
 // can put in it: a terminal retitle (OSC 0), a clipboard write (OSC 52), a
@@ -26,7 +27,7 @@ const HOSTILE = [
 ].join("\n");
 
 /** A theme that paints nothing, so any ESC, BEL or CR in the output leaked from the input. */
-const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+const plain: ThemeLike = plainTheme;
 // biome-ignore lint: control characters are the point
 const CONTROL = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
 

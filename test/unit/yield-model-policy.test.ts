@@ -16,6 +16,7 @@ import { toolsWithheldFrom, withOfferedTools } from "../../extensions/lib/models
 import { projectConfigDirName } from "../../extensions/lib/profile/sources.ts";
 import { hiddenToolRenderers } from "../../extensions/lib/ui/tui-render.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 const claude = { provider: "anthropic", id: "claude-sonnet-5-5", input: ["text"], cost: { input: 3, output: 15 } };
 const gpt = { provider: "openai", id: "gpt-6.1-terra", input: ["text"], cost: { input: 3, output: 15 } };
@@ -95,7 +96,7 @@ describe("the session's model decides yield", () => {
 });
 
 describe("hiddenToolRenderers", () => {
-	const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text, bg: (_color: string, text: string) => text };
+	const theme = plainTheme;
 
 	it("draws nothing for a call that runs or succeeds", () => {
 		const renderers = hiddenToolRenderers("Wait for background work");

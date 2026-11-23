@@ -3,8 +3,9 @@ import { agentViewTarget, applyBorderBadge, fitBadge, scrolledView, unwrapUserMe
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
 import { moveTasksSelection, quitNote, renderTasksDialog, tasksItems } from "../../extensions/agents/subagents/tasks-dialog.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
-const paint = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const paint = plainTheme;
 
 // Claude Code 2.1.283's agent view and /tasks dialog (findings §40).
 describe("agentViewTarget", () => {

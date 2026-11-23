@@ -15,8 +15,9 @@ import {
 	type ModeView,
 	type PanelPaint,
 } from "../../extensions/context/memory/panel.ts";
+import { plainTheme } from "../../test/unit/helpers/plain-theme.ts";
 
-const plainPaint: PanelPaint = { fg: (_c, t) => t, bold: (t) => t };
+const plainPaint: PanelPaint = plainTheme;
 /** One Code's "Config sources" switch, true for Claude-compatible. */
 const view = (running: boolean, saved: boolean, fromEnv?: boolean): ModeView => ({ running, saved, ...(fromEnv ? { fromEnv } : {}), switch: sources.switch! });
 const MODE = view(true, true);

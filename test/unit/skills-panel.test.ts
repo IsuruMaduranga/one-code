@@ -15,6 +15,7 @@ import {
 import { decodeSkillsKey } from "../../extensions/tools/skill/panel/keys.ts";
 import { renderSkillsPanel } from "../../extensions/tools/skill/panel/render.ts";
 import { applySkillsKey, followRow, initialSkillsState, type SkillsRow, visibleRows } from "../../extensions/tools/skill/panel/state.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "skills-"));
 
@@ -142,7 +143,7 @@ describe("/skills panel state machine", () => {
 	});
 
 	it("wraps the key hints at 60 columns and labels bundled rows", () => {
-		const paint = { fg: (_c: string, t: string) => t, bold: (t: string) => t };
+		const paint = plainTheme;
 		const withBundled: SkillsRow[] = [...rows, { key: "project:loop", name: "loop", scope: "bundled", tokens: 40, state: "on", locked: false }];
 		const lines = renderSkillsPanel({ state: initialSkillsState(), rows: withBundled, width: 60, height: 24 }, paint);
 		expect(lines.every((line) => line.length <= 60)).toBe(true);

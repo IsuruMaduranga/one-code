@@ -23,11 +23,12 @@ import { type ShellBlock, shellResultText } from "../../extensions/lib/shell-run
 import { askUserResultText } from "../../extensions/tools/ask-user/text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { useShippedProfileWithAllTools } from "./helpers/profile.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 // grep, find and ls are tools a profile may turn off; this file renders them.
 useShippedProfileWithAllTools();
 
-const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
+const plain: ThemeLike = plainTheme;
 const tagged: ThemeLike = { fg: (c, t) => `<${c}>${t}</>`, bold: (t) => `<b>${t}</b>`, italic: (t) => t };
 const text = (value: string) => ({ type: "text", text: value });
 const collapsed = { expanded: false, isPartial: false };

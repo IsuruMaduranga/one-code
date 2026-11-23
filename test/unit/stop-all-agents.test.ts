@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { STOP_ALL_CONFIRM, STOP_ALL_CONFIRM_MS, STOP_ALL_HINT, StopAllPresses, stopAllNote } from "../../extensions/agents/subagents/stop-all.ts";
 import { buildRows, renderStrip, stripHint } from "../../extensions/agents/subagents/panel-render.ts";
 import { LiveRunRegistry } from "../../extensions/agents/subagents/live-runs.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 describe("StopAllPresses", () => {
 	it("asks on the first press and stops on a second inside three seconds", () => {
@@ -69,7 +70,7 @@ describe("the strip's stop-all note", () => {
 	});
 
 	it("sits on the right of the main row", () => {
-		const plain = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+		const plain = plainTheme;
 		const rows = [{ label: "main", status: "idle", activity: "", depth: 0, startedAt: 0, tokens: 0 }] as never;
 		const [main] = renderStrip({ rows, width: 80, now: 0, mainNote: STOP_ALL_HINT }, plain);
 		expect(main).toMatch(/main\s+ctrl\+x ctrl\+k to stop agents$/);

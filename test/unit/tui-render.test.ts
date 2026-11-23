@@ -31,6 +31,7 @@ import {
 	stripReminderBlocks,
 } from "../../extensions/lib/ui/tui-render.ts";
 import { notificationWords } from "../../extensions/lib/notify/notification-words.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 /** `text` without whitespace: compares text a renderer may have wrapped. */
 const squash = (text: string) => text.replace(/\s+/g, "");
@@ -97,8 +98,7 @@ describe("callLine / resultLines", () => {
 	});
 
 	it("keeps a code line's indentation when an expanded result wraps on a narrow row", () => {
-		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
-		const lines = resultLines(plain, "def f():\n        run()", true, false, { width: 20 });
+		const lines = resultLines(plainTheme, "def f():\n        run()", true, false, { width: 20 });
 		expect(lines).toEqual(["  ⎿  def f():", "             run()"]);
 	});
 
@@ -350,9 +350,8 @@ describe("notificationUserMarkdown: a notification that opened the first turn as
 describe("notificationComponent wraps long body lines instead of cutting them", () => {
 	it("splits the preamble across lines at a narrow width, continuation at column 0", () => {
 		// A plain theme: the tagging stub's `<muted>` markers would count as columns.
-		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 		const report = agentMessage({ from: "a1", body: "r", handBack: true });
-		const lines = notificationComponent(plain, report, true).render(30);
+		const lines = notificationComponent(plainTheme, report, true).render(30);
 		// The header, the preamble over at least two lines, the report.
 		expect(lines.length).toBeGreaterThan(3);
 		expect(lines.every((l) => l.length <= 30)).toBe(true);
@@ -444,7 +443,6 @@ describe("linesComponent memoization", () => {
 });
 
 describe("a call the user rejected", () => {
-	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 	const rejection = (text: string) => ({ content: [{ type: "text", text }] });
 	const opts = { expanded: true, isPartial: false };
 
@@ -477,7 +475,6 @@ describe("a call the user rejected", () => {
 });
 
 describe("pi's render context under the wrapper", () => {
-	const plainTheme: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
 
 	it("hides pi 1.1.0's shell duration and pins the base renderers' padding", async () => {
 		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
@@ -703,8 +700,7 @@ describe("the expand hint follows the user's keybinding (pi 1.5.0 keyText)", () 
 
 	it("puts the hint in the collapsed trailer, or leaves the trailer bare", () => {
 		const text = Array.from({ length: 9 }, (_, i) => `line ${i}`).join("\n");
-		const plain: ThemeLike = { fg: (_c, t) => t, bold: (t) => t, italic: (t) => t };
-		expect(resultLines(plain, text, false, false, { hint: "alt+e to expand" }).at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
-		expect(resultLines(plain, text, false, false, { hint: null }).at(-1)?.trim()).toBe("… +4 lines");
+		expect(resultLines(plainTheme, text, false, false, { hint: "alt+e to expand" }).at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
+		expect(resultLines(plainTheme, text, false, false, { hint: null }).at(-1)?.trim()).toBe("… +4 lines");
 	});
 });

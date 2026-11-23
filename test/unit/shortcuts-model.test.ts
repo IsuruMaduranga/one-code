@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { applyHelpKey, commandRows, guideUrl, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../extensions/lib/ui/shortcuts-help.ts";
 import { shortcutColumns, shortcutLines, type ShortcutSources } from "../../extensions/lib/ui/shortcuts-model.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 /** pi's default keys, as its keyText names them. */
 const PI_KEYS: Record<string, string> = {
@@ -103,7 +104,7 @@ describe("shortcutLines", () => {
 });
 
 describe("the /help panel", () => {
-	const plain = { fg: (_color: string, text: string) => text, bold: (text: string) => text, inverse: (text: string) => `[${text}]` };
+	const plain = { ...plainTheme, inverse: (text: string) => `[${text}]` };
 	const data: HelpData = {
 		intro: "One Code, the Claude Code experience, on any model.",
 		shortcuts: shortcutColumns(sources()),

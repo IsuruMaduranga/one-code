@@ -6,6 +6,7 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { AGENT_CRON_CHANNEL, type AgentCronRequest } from "../../extensions/lib/agents/agent-cron.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 /** The background extension with one running agent task, and the reminders it emits. */
 function mount() {
@@ -47,7 +48,7 @@ describe("the yield tool", () => {
 		expect(result.details.waiting).toBe("Waiting for 1 background agent to finish");
 		expect(visible.mock.calls).toEqual([[false], [true]]);
 
-		const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text, bg: (_color: string, text: string) => text };
+		const theme = plainTheme;
 		const renderResult = tool.renderResult as unknown as (...args: unknown[]) => { render(width: number): string[] };
 		const row = (details: unknown, isError = false) => renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError }).render(80);
 		expect(row(result.details)).toEqual(["✻ Waiting for 1 background agent to finish"]);
