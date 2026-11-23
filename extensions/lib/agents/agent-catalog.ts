@@ -211,7 +211,7 @@ export function agentFileSources(cwd: string, home: string, pluginAgentDirs: rea
 }
 
 /**
- * Asks the Agent tool's extension for its catalog's custom agents (`/context`):
+ * Asks the Agent tool's extension for its catalog's rows (`/context`):
  * the emitter passes `{ cwd }` and reads back `agents`, left unset when no
  * extension answers.
  */
@@ -219,11 +219,12 @@ export const AGENT_GROUPS_QUERY_CHANNEL = brandedId("agent-groups-query");
 
 export interface AgentGroupsQuery {
 	cwd: string;
-	agents?: Array<{ name: string; group: string }>;
+	/** Every row name of the agent listing (the fork's included), with a group for a custom agent. */
+	agents?: Array<{ name: string; group?: string }>;
 }
 
-/** Each custom agent's group by name, as the Agent tool's extension answers; empty when none answers. */
-export function queryAgentGroups(events: { emit(channel: string, data: unknown): void }, cwd: string): Map<string, string> {
+/** Each row of the agent listing by name, with a custom agent's group (undefined for a built-in row); empty when no extension answers. */
+export function queryAgentGroups(events: { emit(channel: string, data: unknown): void }, cwd: string): Map<string, string | undefined> {
 	const query: AgentGroupsQuery = { cwd };
 	events.emit(AGENT_GROUPS_QUERY_CHANNEL, query);
 	return new Map((query.agents ?? []).map((agent) => [agent.name, agent.group]));

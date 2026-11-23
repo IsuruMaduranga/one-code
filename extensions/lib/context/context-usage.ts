@@ -34,6 +34,7 @@
  * Pure: no pi extension API.
  */
 
+import { isAbsolute } from "node:path";
 import { isPlainObject } from "../core/plain-object.ts";
 import { ESTIMATED_IMAGE_CHARS, estimateCharTokens, estimateTextTokens } from "../models/pi-ai-estimate.ts";
 import { declarationsOf, toolName } from "../request/ledger/wire.ts";
@@ -212,13 +213,13 @@ const HEADS: ReadonlyArray<readonly [string, BlockKind]> = [
 ];
 
 /**
- * Where a merged block ends inside `text`: the first blank line before a
- * one-line tag (`<total_tokens>…</total_tokens>`; an agent description's
- * multi-line `<example>` is not one), or before a line that is not a list row
+ * Where a merged block ends inside `text`: the first blank line before the
+ * turn budget's `<total_tokens>` tag (any other tag, an agent description's
+ * `<example>`, stays in the block), or before a line that is not a list row
  * (`list`); -1 for none.
  */
 function blockEnd(text: string, list: boolean): number {
-	const ends = [text.search(/\n\n<([\w-]+)>[^\n]*<\/\1>/), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
+	const ends = [text.indexOf("\n\n<total_tokens>"), list ? text.search(/\n\n(?!- )/) : -1].filter((at) => at > 0);
 	return ends.length > 0 ? Math.min(...ends) : -1;
 }
 
@@ -268,7 +269,8 @@ export function harnessSegments(body: string): Array<{ kind?: BlockKind; text: s
  */
 export interface BreakdownOptions {
 	displayPath?: (path: string) => string;
-	agentGroups?: ReadonlyMap<string, string>;
+	/** The agent listing's row names, each with a custom agent's group (undefined for a built-in row). */
+	agentGroups?: ReadonlyMap<string, string | undefined>;
 }
 
 export function breakdownRequest(request: RecordedRequestView, options: BreakdownOptions = {}): RequestBreakdown {
@@ -277,7 +279,7 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 	const memoryTypes = new Map<string, string>();
 	const skills: ContextItem[] = [];
 	const agents: ContextItem[] = [];
-	const agentGroups = options.agentGroups ?? new Map<string, string>();
+	const agentGroups = options.agentGroups ?? new Map<string, string | undefined>();
 	const mcpLoaded = new Map<string, number>();
 	const mcpAvailable = new Set<string>();
 	const show = options.displayPath ?? ((path: string) => path);
@@ -318,13 +320,13 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 			}
 			tokens.systemTools += Math.max(0, rest);
 		} else if (kind === "agents") {
-			// A row runs from its `- name: ` line to the next row (a description may hold blank lines); the note after the list follows the last blank line.
+			// A row runs from its `- name: ` line, a name the catalog has, to the next row: a description may hold blank lines and `- x: ` bullets. The note after the list follows the last blank line.
 			const listEnd = body.lastIndexOf("\n\n");
 			let current: ContextItem | undefined;
 			let custom = 0;
 			for (const line of (listEnd > 0 ? body.slice(0, listEnd) : body).split("\n")) {
 				const row = /^- (\S+?): /.exec(line);
-				if (row) {
+				if (row && agentGroups.has(row[1])) {
 					const name = row[1];
 					const group = agentGroups.get(name);
 					// A listing sent again (the agent files changed) adds to the agent's row, not a second one.
@@ -358,7 +360,8 @@ export function breakdownRequest(request: RecordedRequestView, options: Breakdow
 				if (match) {
 					close();
 					current = show(match[1]);
-					memoryTypes.set(current, instructionType(match[2]) ?? "Project");
+					// A file the base does not word (a product's own) is the user's when it sits outside the project.
+					memoryTypes.set(current, instructionType(match[2]) ?? (current.startsWith("~") || isAbsolute(current) ? "User" : "Project"));
 					section = [line];
 				} else section.push(line);
 			}

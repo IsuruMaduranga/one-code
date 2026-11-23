@@ -596,10 +596,8 @@ function subagentsExtension(pi: ExtensionAPI) {
 	pi.events.on(AGENT_GROUPS_QUERY_CHANNEL, (data) => {
 		const query = data as AgentGroupsQuery;
 		const home = os.homedir();
-		query.agents = loadAgents(query.cwd).flatMap((agent) => {
-			const group = agentGroup(agent, query.cwd, home);
-			return group ? [{ name: agent.name, group }] : [];
-		});
+		const fork = /^- (\S+?): /.exec(subagentResultText().forkRow)?.[1];
+		query.agents = [...loadAgents(query.cwd).map((agent) => ({ name: agent.name, group: agentGroup(agent, query.cwd, home) })), ...(fork ? [{ name: fork }] : [])];
 	});
 
 	/**

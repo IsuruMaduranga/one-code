@@ -251,8 +251,9 @@ export function contextReport(usage: ContextUsage): string {
 	const servers = new Map<string, number>();
 	for (const name of usage.mcp.available) servers.set(mcpServer(name), (servers.get(mcpServer(name)) ?? 0) + 1);
 	if (servers.size > 0) {
-		const kept = [...servers].slice(0, REPORT_ROWS);
-		const rest = [...servers].slice(REPORT_ROWS);
+		const ranked = [...servers].sort((a, b) => b[1] - a[1]);
+		const kept = ranked.slice(0, REPORT_ROWS);
+		const rest = ranked.slice(REPORT_ROWS);
 		out += "### Other MCP tools, by server\n\n| Server | Tools |\n|--------|-------|\n";
 		out += kept.map(([server, count]) => `| ${server} | ${count} |\n`).join("");
 		if (rest.length > 0) out += `| and ${rest.length} more | ${rest.reduce((sum, [, count]) => sum + count, 0)} |\n`;
