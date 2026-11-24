@@ -118,6 +118,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+t** | Show or hide thinking blocks. |
 | **alt+t** (**ctrl+\\** on macOS) | Show or hide the task list. |
 | **ctrl+o** | Expand or collapse a tool's output. |
+| **ctrl+b** (twice inside tmux) | Send the running foreground command to the background. |
 | **ctrl+p**, **shift+ctrl+p** | Cycle models forward or backward. |
 | **ctrl+l** | Open the model picker. |
 | **Esc** | Interrupt the model. |

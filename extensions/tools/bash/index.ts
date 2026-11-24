@@ -27,6 +27,7 @@ import { Type } from "typebox";
 import { childProcessEnv, LAUNCHER_ENV_VAR } from "../../lib/app/app-launch.mjs";
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../../lib/shell-run/shell-spawn.ts";
+import { detachable } from "../../lib/shell-run/foreground-run.ts";
 import { registerShellTool, sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { type DescriptionForm, followDescriptionForm } from "../../lib/profile/tool-variants.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../lib/rules/modes.ts";
@@ -98,10 +99,12 @@ export function bashTool(pi: ExtensionAPI, { announce }: { announce: boolean }) 
 		parameters: bashParams(text.bashParams, text.sandbox),
 		sandboxText: () => text.sandbox,
 		base,
-		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
+		// pi's own local executor, wrapped so a running command can be sent to the background (lib/shell-run/foreground-run.ts).
+		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook, operations: detachable(createLocalBashOperations({ shellPath })) })),
 		guard: bashGuardBlock,
 		words: () => shellResultText(view.live),
 		backgroundShell: () => bash.spawn,
+		backgroundKey: announce,
 	});
 	followDescriptionForm(pi, (next, tier, withheldTools) => {
 		form = next;

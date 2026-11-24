@@ -47,7 +47,7 @@ describe("BackgroundRegistry", () => {
 	});
 
 	it("generates b-prefixed short ids", () => {
-		expect(generateTaskId()).toMatch(/^b[0-9a-f]{7}$/);
+		expect(generateTaskId()).toMatch(/^b[0-9a-z]{8}$/);
 	});
 });
 

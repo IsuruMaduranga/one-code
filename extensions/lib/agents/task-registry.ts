@@ -52,8 +52,11 @@ export interface BackgroundTask {
 	ownUI?: boolean;
 }
 
+const TASK_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** A task id in Claude Code's shape: `b` and eight characters of `[0-9a-z]`. */
 export function generateTaskId(): string {
-	return `b${randomBytes(4).toString("hex").slice(0, 7)}`;
+	return `b${Array.from(randomBytes(8), (byte) => TASK_ID_ALPHABET[byte % TASK_ID_ALPHABET.length]).join("")}`;
 }
 
 export class BackgroundRegistry {

@@ -430,8 +430,8 @@ function makeNormalizer({ home, project, root }) {
 		out = out.replace(/(updated <DATE> )\d{2}:\d{2}( UTC)/g, "$1<HH:MM>$2");
 		// The wakeup's clock time (tools/background/wakeup.ts formatScheduled).
 		out = out.replace(/(Next wakeup scheduled for )\d{2}:\d{2}:\d{2}/g, "$1<CLOCK>");
-		// Background task ids (lib/agents/task-registry.ts generateTaskId): "b" and 7 hex digits.
-		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/|bash\/)b[0-9a-f]{7}\b/g, "$1<TASK_ID>");
+		// Background task ids (lib/agents/task-registry.ts generateTaskId): "b" and 8 characters of [0-9a-z].
+		out = out.replace(/\b(task |Monitor |subagents\/|tasks\/|tool-results\/|bash\/)b[0-9a-z]{8}\b/g, "$1<TASK_ID>");
 		// pi names a spilled bash output with a random suffix.
 		out = out.replace(/\bpi-bash-[0-9a-f]{16}\.log\b/g, "pi-bash-<SPILL>.log");
 		// A workflow run's id (agents/workflow/run-manager.ts) and the seconds it took.
