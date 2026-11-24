@@ -86,7 +86,14 @@ describe.skipIf(process.platform === "win32")("the key that sends a running comm
 		// The file is there while the command runs, as in Claude Code.
 		const tasks = dirname(taskOutputPath(h.ctx as never, "probe")!);
 		// The stream writes behind the transcript update, so wait for the bytes.
-		await settled(() => readdirSync(tasks).some((file) => readFileSync(join(tasks, file), "utf8") === "before\n"));
+		const holds = (file: string) => {
+			try {
+				return readFileSync(join(tasks, file), "utf8") === "before\n";
+			} catch {
+				return false; // gone between the listing and the read
+			}
+		};
+		await settled(() => readdirSync(tasks).some(holds));
 		expect((await result).content[0].text).toBe("before\nafter");
 		expect(readdirSync(tasks)).toEqual([]);
 	});

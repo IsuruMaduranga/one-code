@@ -6,12 +6,12 @@
  * output is a working-space read in every mode.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
-import { boundSpillIn, keepSpillReadable, piSpillPath } from "../../extensions/lib/shell-run/spill-file.ts";
+import { boundSpillIn, dropSpill, keepSpillReadable, piSpillPath } from "../../extensions/lib/shell-run/spill-file.ts";
 import { decide } from "../../extensions/lib/rules/matcher.ts";
 import { createFakeCtx } from "./helpers/fake-pi.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
@@ -166,5 +166,26 @@ describe("piSpillPath", () => {
 		expect(boundSpillIn(`[Full output: ${decoy}]`, resultsDir, bound)).toBe(`[Full output: ${decoy}]`);
 		expect(existsSync(decoy)).toBe(true);
 		rmSync(decoy);
+	});
+});
+
+describe("dropSpill", () => {
+	it("deletes the spill file an abandoned run's error names", () => {
+		const file = join(tmpdir(), `pi-bash-${randomBytes(8).toString("hex")}.log`);
+		writeFileSync(file, "output");
+		dropSpill(new Error(`aborted\n\n[Full output: ${file}]`));
+		expect(existsSync(file)).toBe(false);
+	});
+
+	it("does not raise when the file cannot be deleted", () => {
+		// A folder under the spill's name: a plain delete of it fails on every platform.
+		const folder = join(tmpdir(), `pi-bash-${randomBytes(8).toString("hex")}.log`);
+		mkdirSync(folder);
+		try {
+			expect(() => dropSpill(new Error(`aborted\n\n[Full output: ${folder}]`))).not.toThrow();
+			expect(existsSync(folder)).toBe(true);
+		} finally {
+			rmSync(folder, { recursive: true, force: true });
+		}
 	});
 });
