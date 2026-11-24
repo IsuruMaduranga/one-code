@@ -108,6 +108,7 @@ import {
 	withReview,
 } from "../../lib/notify/notifications.ts";
 import { persistIfLarge, sessionResultsDir, taskOutputPath } from "../../lib/request/persisted-output.ts";
+import { isOutputLink, linkOutputFile } from "./output-link.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
 import { ClickToggles, clickToExpand, elbowIndent, rowRenderers, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
@@ -1428,8 +1429,22 @@ function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** The spool a resident's turns are written to (`task_output` and the notification's `<output-file>`). */
+	/** A resident's output file (the launch line and the notification's `<output-file>`). */
 	const outputLogPath = (record: AgentRunRecord): string | undefined => record.outputFile;
+
+	/**
+	 * Keep a resident's output file current: a link to its session file once
+	 * pi has written one (output-link.ts), and until then, or where a link
+	 * cannot be made, a spool of the turn's text so far.
+	 */
+	const updateOutputFile = (record: AgentRunRecord, text: string) => {
+		const path = record.outputFile;
+		if (!path) return;
+		const sessionFile = registry.sessionFileFor(record);
+		if (sessionFile && linkOutputFile(path, sessionFile)) return;
+		// Never through a link: the write would replace the run's transcript.
+		if (text && !isOutputLink(path)) writeSpool(path, text);
+	};
 
 	/**
 	 * The hand-back for a resident agent's finished turn (its first report, an
@@ -1624,10 +1639,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * A new run's folders: its session folder, and the file its turns spool to,
-	 * the starting session's `tasks/<task id>.output` beside background shells,
+	 * A new run's folders: its session folder, and its output file, the
+	 * starting session's `tasks/<task id>.output` beside background shells,
 	 * where Claude Code keeps an agent's output file (`taskOutputPath`). A run
-	 * with no session folder spools nowhere.
+	 * with no session folder has no output file.
 	 */
 	const runFiles = (ctx: ExtensionContext, taskId: string): { sessionSearchDir: string; outputFile?: string } => {
 		const sessionSearchDir = runSessionDir(ctx, taskId);
@@ -2109,7 +2124,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// onTurnEnd below flushes the final state, so the tail is never lost.
 				if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
 					lastLogWrite = Date.now();
-					writeSpool(logPath, text);
+					updateOutputFile(p.record, text);
 				}
 			},
 			sink: live.sink,
@@ -2118,10 +2133,11 @@ function subagentsExtension(pi: ExtensionAPI) {
 			mainToolCallId: () => mainCallOf(p.record.taskId),
 			onTurnStart: () => live.wake(),
 			onTurnEnd: (outcome) => {
-				registry.sessionFileFor(p.record);
 				live.settle();
 				lastOutput = resident.handle.snapshot().text || outcome.output;
-				if (logPath) writeSpool(logPath, lastOutput);
+				// Resolves the run's session file too, now that the child has written it.
+				updateOutputFile(p.record, lastOutput);
+				registry.sessionFileFor(p.record);
 				// The handler is claimed now (so a message arriving mid-review pairs
 				// with the NEXT turn), but runs only once auto mode's hand-back
 				// review of this turn's action sequence has answered, so the

@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -342,6 +342,28 @@ describe("a resumed agent's background turn", () => {
 		expect(runtime.runner.run).toHaveBeenCalledOnce();
 		expect(h.tasks.get(reply.details.taskId!)?.status).toBe("running");
 		expect(runtime.runner.run.mock.calls[0][0].background).toBe(true);
+	});
+});
+
+describe.skipIf(process.platform === "win32")("a resident agent's output file", () => {
+	it("is a link to the run's session file once the child has written it", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		const record = spawned.details.agentRuns[0];
+		const sessionFile = join(record.sessionSearchDir, "child.jsonl");
+		writeFileSync(sessionFile, "transcript\n");
+		runtime.finish([], "FIRST REPORT");
+		expect(readlinkSync(record.outputFile!)).toBe(sessionFile);
+		expect(readFileSync(sessionFile, "utf8")).toBe("transcript\n");
+	});
+
+	it("is a spool of the reply while the run has no session file", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const spawned = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate", name: "worker" })) as { details: { agentRuns: AgentRunRecord[] } };
+		runtime.finish([], "FIRST REPORT");
+		expect(readFileSync(spawned.details.agentRuns[0].outputFile!, "utf8")).toBe("Agent output");
 	});
 });
 
