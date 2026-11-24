@@ -23,7 +23,7 @@
  * output, so the block names it and nothing is copied.
  */
 
-import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { persistedFilePreview, persistIfLarge } from "../request/persisted-output.ts";
@@ -53,11 +53,15 @@ export function piSpillPath(text: string, tmp: string = tmpdir()): string | unde
 	return path;
 }
 
-/** Move `from` into `dir`, keeping its name; the new path, or undefined when it could not move. */
-function moveInto(from: string, dir: string): string | undefined {
-	const to = join(dir, basename(from));
+/** Where a run's spill file is kept: `tool-results/<id>.txt`, the name `persistIfLarge` gives the same run's output. */
+function movedSpillPath(resultsDir: string, bound: OutputBound): string {
+	return join(resultsDir, "tool-results", `${bound.id}.txt`);
+}
+
+/** Move `from` to `to`; the new path, or undefined when it could not move. */
+function moveTo(from: string, to: string): string | undefined {
 	try {
-		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
 		try {
 			renameSync(from, to);
 		} catch {
@@ -85,7 +89,7 @@ export function boundSpillIn(text: string, resultsDir: string, bound: OutputBoun
 	const output = text.slice(0, end);
 	const from = piSpillPath(output, tmp);
 	if (!from) return persistIfLarge(output, { dir: resultsDir, id: bound.id, maxBytes: bound.inlineMax }) + text.slice(end);
-	const to = moveInto(from, resultsDir);
+	const to = moveTo(from, movedSpillPath(resultsDir, bound));
 	if (!to) return text;
 	// pi's note ends the output; anything else keeps pi's text.
 	const whole = output.includes(PI_NOTE) && output.endsWith(`${from}]`) ? wholeOutput(to, bound.inlineMax) : undefined;
@@ -98,6 +102,16 @@ function wholeOutput(path: string, inlineMax: number): string | undefined {
 		return statSync(path).size <= inlineMax ? readFileSync(path, "utf8") : persistedFilePreview(path);
 	} catch {
 		return undefined;
+	}
+}
+
+/** Delete the spill file an abandoned run's error names, when pi wrote one. */
+export function dropSpill(error: unknown): void {
+	const from = error instanceof Error ? piSpillPath(error.message) : undefined;
+	try {
+		if (from) rmSync(from, { force: true });
+	} catch {
+		// Best effort: a file that cannot be deleted (held open, on Windows) is left behind.
 	}
 }
 
@@ -131,7 +145,7 @@ export async function keepSpillReadable<R extends TextResult>(run: () => Promise
 	const rewritten = rewrite(text.text, (result as { isError?: boolean }).isError === true);
 	if (rewritten === text.text) return result;
 	const from = piSpillPath(text.text);
-	const to = from ? join(resultsDir, basename(from)) : undefined;
+	const to = from ? movedSpillPath(resultsDir, bound) : undefined;
 	return {
 		...result,
 		content: result.content.map((block) => (block === text ? { ...block, text: rewritten } : block)),

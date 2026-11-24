@@ -36,7 +36,7 @@ import { requireText } from "../../lib/profile/profile.ts";
 import type { EnterWorktreeFailure, RemoveBlocker } from "./text.ts";
 import type { WorktreeGuardRefusal } from "../../lib/rules/worktree-guard-text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
-import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../../lib/context/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../../lib/profile/sources.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -61,6 +61,24 @@ interface WorktreeState {
 interface WorktreeDetails {
 	/** null = session exited the worktree; undefined = tool did not change state. */
 	worktreeState?: WorktreeState | null;
+	/** How exit_worktree left, for the transcript row only. */
+	exited?: { action: "keep" | "remove"; branch?: string; originalCwd: string };
+	/** Why the branch of an attached worktree could not be read, for the transcript row only. */
+	branchError?: string;
+}
+
+/** Claude Code's enter_worktree row: the model reads where commands now run and how to return. */
+function enteredDisplay(details: WorktreeDetails | undefined): string | undefined {
+	const state = details?.worktreeState;
+	if (!state) return undefined;
+	return `Switched to worktree${state.branch ? ` on branch ${state.branch}` : ""}\n${state.path}${details.branchError ? `\nCould not read its branch: ${details.branchError}` : ""}`;
+}
+
+/** Claude Code's exit_worktree row. */
+function exitedDisplay(details: WorktreeDetails | undefined): string | undefined {
+	const exited = details?.exited;
+	if (!exited) return undefined;
+	return `${exited.action === "keep" ? "Kept" : "Removed"} worktree${exited.branch ? ` (branch ${exited.branch})` : ""}\nReturned to ${exited.originalCwd}`;
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
@@ -205,7 +223,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "enter_worktree",
 		label: "Enter Worktree",
-		...toolRenderers("Enter Worktree"),
+		...withResultDisplay(toolRenderers("Enter Worktree"), (result) => enteredDisplay(result.details as WorktreeDetails | undefined)),
 		description: text.descriptions.enter_worktree(projectConfigDirName()),
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: text.params.enter.name })),
@@ -254,7 +272,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				applyState(next, toolCallId);
 				return {
 					content: [{ type: "text", text: worktreeResultText.enter.switched({ session: next, branchError }) }],
-					details: { worktreeState: next } satisfies WorktreeDetails,
+					details: { worktreeState: next, branchError } satisfies WorktreeDetails,
 				};
 			}
 
@@ -305,7 +323,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "exit_worktree",
 		label: "Exit Worktree",
-		...toolRenderers("Exit Worktree"),
+		...withResultDisplay(toolRenderers("Exit Worktree"), (result) => exitedDisplay(result.details as WorktreeDetails | undefined)),
 		description: text.descriptions.exit_worktree,
 		parameters: Type.Object({
 			action: StringEnum(["keep", "remove"] as const, { description: text.params.exit.action }),
@@ -324,7 +342,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				applyState(undefined);
 				return {
 					content: [{ type: "text", text: worktreeResultText.exit.kept({ session: current, exists: existsSync(current.path) }) }],
-					details: { worktreeState: null } satisfies WorktreeDetails,
+					details: { worktreeState: null, exited: { action: "keep", branch: current.branch, originalCwd: current.originalCwd } } satisfies WorktreeDetails,
 				};
 			}
 
@@ -384,7 +402,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 			}
 			return {
 				content: [{ type: "text", text: worktreeResultText.exit.removed(current) }],
-				details: { worktreeState: null } satisfies WorktreeDetails,
+				details: { worktreeState: null, exited: { action: "remove", branch: current.branch, originalCwd: current.originalCwd } } satisfies WorktreeDetails,
 			};
 		},
 	});

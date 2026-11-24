@@ -9,9 +9,6 @@
 import { type PendingWork, waitingForText } from "../../lib/notify/session-work.ts";
 import { countNoun, formatDuration } from "../../lib/ui/tui-render.ts";
 
-/** CC's TEARDROP_ASTERISK (figures.ts), the mark leading the duration line. */
-export const TURN_MARK = "✻";
-
 /**
  * `<Verb> for <duration>` — duration formatted like the spinner's elapsed
  * clock — then Claude Code's ` · done <time>` when the finish time is known,

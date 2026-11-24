@@ -118,6 +118,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+t** | Show or hide thinking blocks. |
 | **alt+t** (**ctrl+\\** on macOS) | Show or hide the task list. |
 | **ctrl+o** | Expand or collapse a tool's output. |
+| **ctrl+b** (twice inside tmux) | Send the running foreground command to the background. |
 | **ctrl+p**, **shift+ctrl+p** | Cycle models forward or backward. |
 | **ctrl+l** | Open the model picker. |
 | **Esc** | Interrupt the model. |
@@ -195,7 +196,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `ONECODE_FEATURES_OFF=turn-duration` | Remove the post-turn timing line. |
 | `ONECODE_FEATURES_OFF=recap` | Turn off the "while you were away" recap. |
 | `ONECODE_FEATURES_OFF=session-title` | Turn off the automatic session title. |
-| `ONECODE_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
+| `ONECODE_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 180000, never more than 0.8 of the prompt cache's lifetime). |
 | `ONECODE_FEATURES_OFF=compaction` | Use pi's compaction summary instead of Claude Code's. |
 | `ONECODE_FEATURES_OFF=idle-compact` | Turn off compaction of an idle session before its prompt cache expires. |
 | `ONECODE_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |

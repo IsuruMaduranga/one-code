@@ -18,8 +18,9 @@ function sources(dir: string): string[] {
 	});
 }
 
-// A `name:` line, at most two lines, then the renderer's label.
-const REGISTRATION = /name: "([a-z_]+)",\n(?:[^\n]*\n){0,2}?\s*\.\.\.toolRenderers\("([^"]+)"/g;
+// A `name:` line, at most three lines, then the renderer's label: `toolRenderers`
+// (generic or not, bare or inside `withResultDisplay`), `hiddenToolRenderers` or `rowRenderers`.
+const REGISTRATION = /name: "([a-z_]+)",\n(?:[^\n]*\n){0,3}?\s*\.\.\.(?:withResultDisplay\(\s*)?(?:toolRenderers(?:<[^\n]*?>)?|hiddenToolRenderers|rowRenderers(?:<[^\n]*?>)?)\("([^"]+)"/g;
 
 describe("agent view tool labels", () => {
 	const pairs = sources(EXTENSIONS).flatMap((file) => [...readFileSync(file, "utf8").replace(/\r\n/g, "\n").matchAll(REGISTRATION)].map((m) => ({ name: m[1], label: m[2] })));

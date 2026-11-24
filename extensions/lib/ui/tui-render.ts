@@ -20,6 +20,7 @@ import { framesToText, notificationBody, parseNotificationFrames } from "../noti
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 import { sanitizeDisplayText } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
+import { isClassifierDenial } from "../rules/classifier-denial.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -379,6 +380,9 @@ export function linesComponent(build: (width: number) => string[]): TuiComponent
 	};
 }
 
+/** Claude Code's TEARDROP_ASTERISK (figures.ts), the mark leading the turn-end line and the yield wait line. */
+export const TURN_MARK = "✻";
+
 /**
  * A dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
  * "※ recap: …") — the shared shape behind the turn-duration and recap
@@ -608,6 +612,8 @@ export type RejectedFileOp = "write" | "update";
 
 /** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
 export const TOOL_USE_REJECTED = "Tool use rejected";
+/** Claude Code's row for an auto-mode denial, without its "· /feedback if incorrect" (One Code has no /feedback). */
+export const CLASSIFIER_DENIED_LINE = "Denied by auto mode classifier";
 
 /**
  * A file tool's `path` for the transcript, as Claude Code shows it: relative to
@@ -633,7 +639,10 @@ export function rejectionLine(
 	file?: { op: RejectedFileOp; path: string | undefined },
 ): string | undefined {
 	if (!isError) return undefined;
-	const kind = userDenialKind(textContent(result));
+	const text = textContent(result);
+	// The model reads the classifier's reason and what to do next; the user sees Claude Code's line.
+	if (isClassifierDenial(text)) return `  ⎿  ${theme.fg("dim", CLASSIFIER_DENIED_LINE)}`;
+	const kind = userDenialKind(text);
 	if (!kind) return undefined;
 	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
 	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
@@ -764,7 +773,8 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 /**
  * Renderers that draw nothing while the call runs and succeeds, for a tool
  * the user sees elsewhere (yield: the spinner and the agent rows show the
- * wait, and the notification follows it). A failed call still shows, drawn
+ * wait, and the notification follows it) or that is model bookkeeping
+ * (tool_search, which Claude Code never draws). A failed call still shows, drawn
  * as `toolRenderers(label)` draws it. pi drops a self-rendered tool with no
  * lines, spacer included (tool-execution.js).
  */
@@ -775,6 +785,79 @@ export function hiddenToolRenderers(label: string): ReturnType<typeof toolRender
 		renderShell: "self",
 		renderCall: (args, theme, context) => (context.isError ? shown.renderCall(args, theme, context) : none()),
 		renderResult: (result, options, theme, context) => (context.isError ? shown.renderResult(result, options, theme, context) : none()),
+	};
+}
+
+/** What a `rowRenderers` row builder draws with: the theme, the row's width, the call's arguments and whether it failed. */
+export interface RowView<TArgs = unknown> {
+	theme: ThemeLike;
+	width: number;
+	args?: TArgs;
+	isError: boolean;
+}
+
+/**
+ * Renderers for a tool Claude Code draws as one block with no call line
+ * (plan mode, AskUserQuestion; findings §103): nothing while it runs, then
+ * the lines `rows` builds from the settled result. A result `rows` returns
+ * undefined for (an error it does not cover, a session recorded before the
+ * details it reads) shows as `toolRenderers(label, fallback)` draws it, call
+ * line included. The rows replace the result on ctrl+o too, as Claude Code's do.
+ */
+export function rowRenderers<TArgs = any>(
+	label: string,
+	rows: (result: { content?: Array<{ type: string; text?: string }>; details?: unknown }, view: RowView<TArgs>) => string[] | undefined,
+	fallback: ToolRenderSpec<TArgs> = {},
+): ReturnType<typeof toolRenderers> {
+	const shown = toolRenderers<TArgs>(label, fallback);
+	return {
+		renderShell: "self",
+		renderCall: () => linesComponent(() => []),
+		renderResult: (result, options, theme, context) =>
+			linesComponent((width) => {
+				if (options.isPartial) return [];
+				let built: string[] | undefined;
+				try {
+					built = rows(result, { theme, width, args: context.args, isError: context.isError });
+				} catch {
+					built = undefined;
+				}
+				if (built) return built;
+				return [...shown.renderCall(context.args, theme, { ...context, isPartial: false }).render(width), ...shown.renderResult(result, options, theme, context).render(width)];
+			}),
+	};
+}
+
+/** Claude Code's dim row under a result the auto-mode classifier allowed (findings §103). */
+export const CLASSIFIER_ALLOWED_LINE = "Allowed by auto mode";
+
+/** Any tool's renderers as a tool-renderer resolver hands them over. */
+interface ResolvedRenderers {
+	renderShell?: string;
+	renderResult?: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: any, context: any) => unknown;
+}
+
+/**
+ * A tool's renderers with Claude Code's dim `⎿ Allowed by auto mode` row under
+ * a successful result whose call `allowed(toolCallId)`, whatever draws the
+ * result: for a tool-renderer resolver. A tool pi frames itself draws its
+ * result inside a box, where the row would not belong, so it is left as is.
+ */
+export function withClassifierAllowedRow<R extends ResolvedRenderers>(renderers: R | undefined, allowed: (toolCallId: string) => boolean): R | undefined {
+	const renderResult = renderers?.renderResult;
+	if (!renderers || !renderResult || renderers.renderShell !== "self") return renderers;
+	return {
+		...renderers,
+		renderResult: (result: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: { isError?: boolean; toolCallId?: string }) => {
+			const base = renderResult(result, options, theme, context) as TuiComponent | undefined;
+			if (typeof base?.render !== "function" || context.isError || options.isPartial || !context.toolCallId || !allowed(context.toolCallId)) return base;
+			const row = elbowIndent([theme.fg("dim", CLASSIFIER_ALLOWED_LINE)])[0];
+			const drawn = linesComponent((width) => {
+				const lines = base.render(width);
+				return lines.length > 0 ? [...lines, row] : lines;
+			});
+			return { render: drawn.render, invalidate: () => (drawn.invalidate(), base.invalidate()) };
+		},
 	};
 }
 

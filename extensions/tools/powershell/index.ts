@@ -27,6 +27,7 @@ import { createPowerShellToolDefinition } from "@earendil-works/pi-coding-agent"
 import { Type } from "typebox";
 import { perCwd } from "../../lib/core/per-cwd.ts";
 import { bashSpawn, createPowerShellOperations, createSandboxedPowerShellOperations, POWERSHELL_TOOL_PREFIX, powerShellBashLine, powerShellEdition, powerShellSpawn } from "../../lib/shell-run/shell-spawn.ts";
+import { detachable } from "../../lib/shell-run/foreground-run.ts";
 import { registerShellTool, sandboxParams } from "../../lib/shell-run/shell-tool.ts";
 import { sessionView, textForModel } from "../../lib/agents/child-extensions.ts";
 import { followDescriptionForm } from "../../lib/profile/tool-variants.ts";
@@ -73,7 +74,7 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 					sandboxed: {
 						bash: () => bashSpawn().spawn,
 						line: (command: string) => powerShellBashLine(spec, command),
-						foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: createSandboxedPowerShellOperations() })),
+						foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: detachable(createSandboxedPowerShellOperations()) })),
 					},
 				}
 			: {}),
@@ -88,10 +89,11 @@ export function powershellTool(pi: ExtensionAPI, { announce }: { announce: boole
 				? [text.powershellPrimary]
 				: []),
 		],
-		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations })),
+		foreground: perCwd((cwd: string) => createPowerShellToolDefinition(cwd, { operations: detachable(operations) })),
 		guard: powershellGuardBlock,
 		words: () => shellResultText(view.live),
 		backgroundShell: () => spec,
+		backgroundKey: announce,
 		// The foreground path prepends the tool's prefix inside the operations; the background spawn needs it too.
 		wrapBackgroundCommand: (command) => `${POWERSHELL_TOOL_PREFIX}${command}`,
 	});

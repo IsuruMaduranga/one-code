@@ -25,7 +25,7 @@ import { featureEnabled } from "../../lib/profile/profile.ts";
 import { rulesetOwner } from "./auto-mode/classifier-prompt.ts";
 import { feature } from "../../lib/profile/feature.ts";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { hasReviewableWork, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../lib/rules/auto-mode-actions.ts";
@@ -83,8 +83,8 @@ import { autoMemoryEnabled } from "../../lib/context/auto-memory.ts";
 import { projectMemoryDir } from "../../lib/context/memory.ts";
 import { queueNotice } from "../../lib/notify/notices.ts";
 import { canShowCustomUi, rpcReadOnlyText } from "../../lib/notify/headless-output.ts";
-import { sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { privateSessionScratchpadDir } from "../../lib/core/scratchpad.ts";
+import { projectSessionsDir, sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { privateSessionScratchpadDir, privateSessionTempDir } from "../../lib/core/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../../lib/request/reminders.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
 import { processState } from "../../lib/profile/process-state.ts";
@@ -157,7 +157,7 @@ import { autoModeSystemNote } from "./auto-mode/system-note.ts";
 import { announceArgumentHint } from "../../lib/ui/argument-hints.ts";
 import { userDenialText } from "../../lib/consent/user-denial.ts";
 import { permissionText, refusalText, unansweredAskReason } from "../../lib/rules/permission-text.ts";
-import { liveUiCtx } from "../../lib/ui/tui-render.ts";
+import { liveUiCtx, withClassifierAllowedRow } from "../../lib/ui/tui-render.ts";
 import { askPermission } from "../../lib/ui/permission-dialog.ts";
 import { askView } from "./ask-view.ts";
 
@@ -421,8 +421,14 @@ function permissionsExtension(pi: ExtensionAPI) {
 	let secretPaths: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
 	let harnessReadableRoots: string[] = [];
-	/** The shipped docs the `one-code-guide` agent reads (lib/agents/guide-docs.ts): readable, never writable. */
-	let docsDirPaths: string[] = [];
+	/**
+	 * Readable, never writable: the shipped docs the `one-code-guide` agent reads
+	 * (lib/agents/guide-docs.ts), and the project's private temp folder, where
+	 * every session of this project, a subagent's included, spools background
+	 * output (`taskOutputPath`), as Claude Code allows reads of its project temp
+	 * folder (findings §103).
+	 */
+	let readOnlyDirPaths: string[] = [];
 	/**
 	 * Workspace directories (workspace.ts): from settings, where the
 	 * repository's own files apply only once the user trusts them, from
@@ -447,7 +453,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const trusted = settingsWorkspaceDirs.filter((dir) => projectAllowTrusted || !isRepoFile(dir.source)).map((dir) => dir.path);
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
-		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
+		readableRoots = [...harnessReadableRoots, ...readOnlyDirPaths, ...workspaceDirs];
 		if (sessionStarted) announceWorkspace();
 	};
 	/** What the system prompt was last told the workspace is (lib/rules/workspace-channel.ts). */
@@ -618,8 +624,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (!autoConfig.logDecisions) return;
 		try {
-			// Beside the transcripts; a session-less run's private temp dir, never the project.
-			const file = join(sessionResultsDir(ctx), "auto-mode-decisions.jsonl");
+			const file = join(projectSessionsDir(ctx), "auto-mode-decisions.jsonl");
 			appendDecision(file, decisionEntry({ sessionId: ctx.sessionManager.getSessionId?.(), ...entry }));
 		} catch {
 			// Logging must never break the gate.
@@ -1067,7 +1072,21 @@ function permissionsExtension(pi: ExtensionAPI) {
 		inFlightMainCalls = [];
 	});
 
+	/**
+	 * The calls the auto-mode classifier allowed this process, by tool call id,
+	 * for Claude Code's dim `⎿ Allowed by auto mode` row under their results.
+	 * Display only and never persisted, as Claude Code's is not: a resumed
+	 * session draws no row.
+	 */
+	const classifierAllowed = new Set<string>();
+	pi.registerToolRenderer?.((_name, next) => withClassifierAllowedRow(next(), (id) => classifierAllowed.has(id)));
+
+	let allowedFor: string | undefined;
 	pi.on("session_start", (event, ctx) => {
+		// A /reload keeps the session and its transcript, so its rows stay.
+		const sessionId = ctx.sessionManager.getSessionId();
+		if (sessionId !== allowedFor) classifierAllowed.clear();
+		allowedFor = sessionId;
 		childPermissionSession?.abort();
 		childPermissionSession = new AbortController();
 		badgeCtx = ctx;
@@ -1107,7 +1126,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());
 		harnessReadableRoots = [memoryDirPath, scratchpadDirPath, resultsDirPath, sessionDirPath].filter((d): d is string => !!d).map(resolvedOrSelf);
-		docsDirPaths = guideDocsDirs().map(resolvedOrSelf);
+		const sessionTemp = privateSessionTempDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		readOnlyDirPaths = [...guideDocsDirs(), ...(sessionTemp ? [dirname(sessionTemp)] : [])].map(resolvedOrSelf);
 		// `--add-dir`: each directory is validated like one added in the panel.
 		flagWorkspaceDirs = [];
 		for (const entry of parseAddDirFlag(pi.getFlag("add-dir") as string | undefined)) {
@@ -1476,7 +1496,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 				workspaceDirs: dirs,
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
 				blockReadsOutsideWorkingDirectories: blockOutsideReads,
-				readOnlyDirs: docsDirPaths,
+				readOnlyDirs: readOnlyDirPaths,
 				powershellParse,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
@@ -1606,6 +1626,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 				if (outcome.decision === "allow") {
 					noteAllow();
 					denials.settle(inputKey);
+					// The classifier itself cleared it (a fast-path allow has no tier): the
+					// transcript says so under the result, as Claude Code does.
+					if (outcome.tier !== undefined) classifierAllowed.add(event.toolCallId);
 					// The classifier read the call's own hosts with the command: they hold for this one run.
 					grantCommandHosts(event.toolCallId, hosts);
 					return undefined;
@@ -1806,7 +1829,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			// The child's own model: a cheaper subagent gets the stricter gate.
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
 			blockReadsOutsideWorkingDirectories: blockOutsideReads,
-			readOnlyDirs: call.resultsDirPath && resultsDirPath ? [...docsDirPaths, resultsDirPath] : docsDirPaths,
+			readOnlyDirs: call.resultsDirPath && resultsDirPath ? [...readOnlyDirPaths, resultsDirPath] : readOnlyDirPaths,
 			powershellParse,
 		});
 

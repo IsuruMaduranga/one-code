@@ -74,7 +74,7 @@ import { recordState } from "../../lib/request/ledger/state.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
-import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { hiddenToolRenderers } from "../../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
@@ -508,7 +508,8 @@ function toolSearchExtension(pi: ExtensionAPI) {
 		// A literal, like every registration: agent-view-tool-labels.test.ts reads them from source.
 		name: "tool_search",
 		label: "Tool Search",
-		...toolRenderers("Tool Search"),
+		// Loading a tool is model bookkeeping: the transcript shows only a failed search (Claude Code shows none).
+		...hiddenToolRenderers("Tool Search"),
 		description: words.description,
 		promptSnippet: words.promptSnippet,
 		parameters: Type.Object({

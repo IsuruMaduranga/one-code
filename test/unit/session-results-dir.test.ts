@@ -35,8 +35,8 @@ describe("sessionResultsDir without a session dir", () => {
 		expect(sessionResultsDir(inMemory("s", "/p/one"))).not.toBe(sessionResultsDir(inMemory("s", "/p/two")));
 	});
 
-	it("keeps a real session dir when there is one", () => {
-		expect(sessionResultsDir({ sessionManager: { getSessionDir: () => "/home/u/.pi/agent/sessions/x" } })).toBe("/home/u/.pi/agent/sessions/x");
+	it("is the session's own folder inside a real session dir, as Claude Code's per-session folder", () => {
+		expect(sessionResultsDir({ sessionManager: { getSessionDir: () => "/home/u/.pi/agent/sessions/x", getSessionId: () => "abc" } })).toBe(join("/home/u/.pi/agent/sessions/x", "abc"));
 	});
 
 	it("is where persistIfLarge writes", () => {

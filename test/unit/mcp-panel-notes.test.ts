@@ -2,8 +2,9 @@
 import { describe, expect, it } from "vitest";
 import { renderMcpPanel } from "../../extensions/tools/mcp/panel/render.ts";
 import { initialMcpState } from "../../extensions/tools/mcp/panel/state.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
-const paint = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as never;
+const paint = plainTheme as never;
 const server = { name: "docs", group: "User MCPs", status: "connected", toolCount: 3, configLocation: "~/.onecode/mcp.json" } as never;
 const render = (configNotes: string[], height: number, entries: never[] = []) =>
 	renderMcpPanel({ state: initialMcpState(), entries, width: 80, height, notices: [], configNotes, settled: true, where: "~/.onecode/mcp.json" }, paint);

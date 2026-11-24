@@ -49,6 +49,15 @@ notified with the result. While it runs, the model can read the log file
 with `read` or stop the command with `task_stop`. There's no separate tool
 for fetching a task's output: the notification brings the result.
 
+You can also send a command that's already running to the background. Once
+a foreground command has run for two seconds, a hint appears under it:
+press **ctrl+b** and the command keeps running as a background shell while
+the model gets its turn back. The model is told you backgrounded it and where
+the output goes, and it's notified when the command exits, the same as for
+`run_in_background`. Inside tmux, press **ctrl+b** twice, because tmux takes
+the first press as its own prefix. When no command is running, **ctrl+b**
+still moves the cursor left in the editor.
+
 Running and recently finished shells appear in the panel below the editor:
 
 1. Press **↓** from an empty editor to focus the shells chip.

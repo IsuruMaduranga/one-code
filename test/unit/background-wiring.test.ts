@@ -43,7 +43,7 @@ import { MONITOR_BATCH_MAX_LINES } from "../../extensions/tools/background/monit
 import { TASK_REGISTER_CHANNEL } from "../../extensions/lib/agents/task-registry.ts";
 import { DEFAULT_COALESCE_MS, escapeTaskText, monitorEndedSummary, monitorEventSummary, NOTIFICATION_ID_KEY, oneShotNote } from "../../extensions/lib/notify/notifications.ts";
 import { requireText } from "../../extensions/lib/profile/profile.ts";
-import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery, wakeupPending } from "../../extensions/lib/notify/session-work.ts";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agents/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/plugins/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/plugins/skill-scan.ts";
@@ -54,6 +54,7 @@ import { WORKTREE_CHANNEL } from "../../extensions/lib/agents/worktree-channel.t
 import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { resetProcessStateForTest } from "../../extensions/lib/profile/process-state.ts";
 import { toolResultsText } from "../../extensions/lib/request/tool-results-text.ts";
+import { taskOutputPath } from "../../extensions/lib/request/persisted-output.ts";
 import { backgroundWords } from "../../extensions/tools/background/text.ts";
 import { shippedProfileWithAllTools, useShippedProfileWithAllTools } from "./helpers/profile.ts";
 import { setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
@@ -75,8 +76,12 @@ const summaryTag = (summary: string) => `<summary>${escapeTaskText(summary)}</su
 const fullLoopFire = () => words.loop.withPreamble({ persistent: false, tick: words.loop.tick("autonomous") });
 const shortLoopFire = () => words.loop.tick("autonomous");
 
+/** Session temp folders a test's spool landed in, removed after it. */
+const cleanups: string[] = [];
+
 afterEach(() => {
 	vi.restoreAllMocks();
+	for (const dir of cleanups.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 function mount(): FakePi {
@@ -235,10 +240,13 @@ describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () =
 		const listed = await fake.tools.get("cron_list")!.execute("c", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
 		expect(list.mock.calls).toEqual([[{ jobs: [{ id: expect.stringMatching(/^[0-9a-f]{8}$/), cadence: "Every day at 12:01 PM", recurring: false, prompt: "check the build" }] }]]);
 		expect(listed.content[0].text).toBe(list.mock.results[0].value);
+		// The recap reads this to skip while a wakeup is pending.
+		expect(wakeupPending(fake.events)).toBe(true);
 
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		expect(wakeups(fake)).toHaveLength(1);
 		expect((wakeups(fake)[0].message.content as Array<{ text: string }>)[0].text).toBe("check the build");
+		expect(wakeupPending(fake.events)).toBe(false);
 	});
 
 	it("rejects a call missing a field with Claude Code's errors, and keeps a pending wakeup", async () => {
@@ -583,10 +591,11 @@ describe("background wiring: cron tools", () => {
 	it("answers the Stop hook's query with its pending jobs", async () => {
 		const fake = mount();
 		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "poll" }, liveSessionCtx());
-		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		const query: SessionWorkQuery = { crons: [], tasks: [], wakeupPending: false };
 		fake.events.emit(SESSION_WORK_CHANNEL, query);
 		expect(query.crons).toEqual([{ id: created.details.jobId, schedule: "*/10 * * * *", recurring: true, prompt: "poll" }]);
 		expect(query.tasks).toEqual([]);
+		expect(query.wakeupPending).toBe(false); // a cron job is not a wakeup
 	});
 
 	it("/clear cancels every job and says so in the next session; nothing fires afterwards", async () => {
@@ -869,7 +878,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const dir = mkdtempSync(join(tmpdir(), "monitor-spool-"));
 		try {
 			const fake = mount();
-			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir, getSessionId: () => `monitor-spool-${process.pid}` } });
 			const start = (await fake.tools.get("monitor")!.execute(
 				"c1",
 				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
@@ -881,7 +890,10 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 				content: Array<{ text: string }>;
 				details: { logPath?: string };
 			};
-			const logPath = join(dir, "monitor", start.details.taskId, "output.log");
+			// The spool is in the session temp folder, never beside the transcripts (findings §103).
+			const logPath = taskOutputPath(ctx, start.details.taskId)!;
+			cleanups.push(join(logPath, "..", ".."));
+			expect(logPath.startsWith(dir)).toBe(false);
 			expect(out.details.logPath).toBe(logPath);
 			const body = out.content[0].text.split("\n\n").slice(1).join("\n\n");
 			expect(body.startsWith(words.tasks.clippedHeader({ path: logPath }))).toBe(true);
@@ -942,7 +954,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
 				undefined,
 				undefined,
-				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
+				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir, getSessionId: () => `monitor-oneshot-${process.pid}` } }),
 			)) as { content: Array<{ text: string }> };
 			expect(ranToEnd.mock.calls[0][0]).toMatchObject({ end: { kind: "completed" }, events: 12000 });
 			expect(result.content[0].text).toBe(ranToEnd.mock.results[0].value);
@@ -952,8 +964,9 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			expect(persisted).toHaveBeenCalledOnce();
 			const { file } = persisted.mock.calls[0][0];
 			expect(output).toContain(persisted.mock.results[0].value);
-			expect(file.startsWith(join(dir, "monitor"))).toBe(true);
-			expect(file.endsWith("output.log")).toBe(true);
+			cleanups.push(join(file, "..", ".."));
+			expect(file).toContain(join(`monitor-oneshot-${process.pid}`, "tasks"));
+			expect(file.endsWith(".output")).toBe(true);
 			expect(existsSync(join(dir, "tool-results"))).toBe(false);
 			const saved = readFileSync(file, "utf8");
 			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
@@ -978,12 +991,12 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const file: string | undefined = persisted.mock.calls[0][0].file;
 		expect(file).toBeDefined();
 		try {
-			expect(file!).toContain(join("monitor-sessionless-test", "monitor"));
+			expect(file!).toContain(join("monitor-sessionless-test", "tasks"));
 			const saved = readFileSync(file!, "utf8");
 			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
 			expect(saved).toContain("line-12000-padding-padding-padding");
 		} finally {
-			rmSync(join(file!, "..", "..", ".."), { recursive: true, force: true });
+			rmSync(join(file!, "..", ".."), { recursive: true, force: true });
 		}
 	});
 

@@ -9,6 +9,7 @@ import { isMap, isScalar, parseDocument, visit } from "yaml";
 import { parseRule } from "./claude-rules.ts";
 import type { MemoryIndexCut, MemoryIndexSize } from "./context-text.ts";
 import { contextWords } from "./context-words.ts";
+import { formatSize } from "../ui/text-width.ts";
 
 /**
  * Claude Code loads only the first 200 lines or 25,000 characters of
@@ -68,19 +69,6 @@ export function truncateIndex(content: string): string {
 				? { kind: "lines", lines, limit: INDEX_MAX_LINES }
 				: { kind: "both", lines, size: formatSize(chars) };
 	return `${kept}\n\n${contextWords().memoryIndexCut({ size, cut })}\n`;
-}
-
-/** A size the way Claude Code prints it: `N bytes`, else `N.NKB`/`MB` with a trailing `.0` dropped. */
-function formatSize(n: number): string {
-	const units = ["KB", "MB", "GB"];
-	let value = n / 1024;
-	if (value < 1) return `${n} bytes`;
-	let unit = 0;
-	while (value >= 1024 && unit < units.length - 1) {
-		value /= 1024;
-		unit++;
-	}
-	return `${value.toFixed(1).replace(/\.0$/, "")}${units[unit]}`;
 }
 
 /** Claude Code's quote of the first cut line: at most `max` characters, cut at a word when that keeps over half. */

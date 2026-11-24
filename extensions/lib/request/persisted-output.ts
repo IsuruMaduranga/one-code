@@ -20,8 +20,12 @@ import { privateSessionTempDir } from "../core/scratchpad.ts";
 import { toolResultsText } from "./tool-results-text.ts";
 
 /**
- * Where a session's oversized outputs are persisted — the session dir,
- * matching Claude Code's `<session-dir>/tool-results/<id>.txt`. A session-less
+ * Where a session's oversized outputs are persisted, and its subagents' runs:
+ * the session's own folder inside the project's sessions folder,
+ * `<sessions>/<project>/<session-id>/`, as Claude Code keeps
+ * `~/.claude/projects/<project>/<session-id>/tool-results/` and `subagents/`.
+ * Until 2026-11-24 it was the project's sessions folder itself, so every
+ * session's `tool-results/` was one folder beside the transcripts. A session-less
  * run (`--no-session`, every workflow agent, a subagent of a session-less
  * parent) has no such dir, so the session's own private temp dir serves
  * (`<tmp>/onecode-<uid>/<project-slug>/<session-id>`, 0700, beside its
@@ -34,18 +38,48 @@ import { toolResultsText } from "./tool-results-text.ts";
  * otherwise truncate: cutting text loses context, a file keeps it one `read`
  * away.
  */
-export function sessionResultsDir(
-	ctx: { cwd?: string; sessionManager?: { getSessionDir?: () => string | undefined; getSessionId?: () => string } } | undefined,
-): string {
-	let sessionId: string | undefined;
+export function sessionResultsDir(ctx: SessionCtx | undefined): string {
 	try {
 		const dir = ctx?.sessionManager?.getSessionDir?.();
-		if (dir) return dir;
-		sessionId = ctx?.sessionManager?.getSessionId?.();
+		if (dir) return join(dir, safeSessionId(ctx));
 	} catch {
 		// fall through to the private temp folder
 	}
-	const id = (sessionId || `process-${process.pid}`).replace(/[^A-Za-z0-9._-]/g, "_");
+	return sessionTempDir(ctx);
+}
+
+/**
+ * The project's session folder, where every session's transcript sits: auto
+ * mode's decision log (one for the project, each line naming its session) and
+ * the transcripts /doctor reads. A session-less run has none, so its own
+ * private folder serves, never the project.
+ */
+export function projectSessionsDir(ctx: SessionCtx | undefined): string {
+	try {
+		const dir = ctx?.sessionManager?.getSessionDir?.();
+		if (dir) return dir;
+	} catch {
+		// the session's own folder below
+	}
+	return sessionTempDir(ctx);
+}
+
+/** The session's id as a folder name, or a process-scoped one when it has none. */
+function safeSessionId(ctx: SessionCtx | undefined): string {
+	let sessionId: string | undefined;
+	try {
+		sessionId = ctx?.sessionManager?.getSessionId?.();
+	} catch {
+		// a process-scoped name below
+	}
+	return (sessionId || `process-${process.pid}`).replace(/[^A-Za-z0-9._-]/g, "_");
+}
+
+type SessionCtx = { cwd?: string; sessionManager?: { getSessionDir?: () => string | undefined; getSessionId?: () => string } };
+
+/** The session's private temp folder (the scratchpad's parent), else a private folder in One Code's state. */
+function sessionTempDir(ctx: SessionCtx | undefined): string {
+	const id = safeSessionId(ctx);
 	const temp = privateSessionTempDir(ctx?.cwd ?? process.cwd(), id);
 	if (temp) return temp;
 	const fallback = join(productStateDir(), "tmp", id);
@@ -55,6 +89,24 @@ export function sessionResultsDir(
 		// persistIfLarge names the failed write in its own result.
 	}
 	return fallback;
+}
+
+/**
+ * `<session temp folder>/tasks/<taskId>.output`, where a background shell or
+ * monitor spools, as Claude Code's `getTaskOutputDir()` does. The model reads
+ * this file, so it must not sit beside the session transcripts: auto mode's
+ * classifier takes a path under the sessions folder for a transcript store
+ * (findings §103). The folder does not outlive a reboot, nor does the task.
+ * Undefined when the folder cannot be made.
+ */
+export function taskOutputPath(ctx: SessionCtx | undefined, taskId: string): string | undefined {
+	try {
+		const dir = join(sessionTempDir(ctx), "tasks");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		return join(dir, `${taskId}.output`);
+	} catch {
+		return undefined;
+	}
 }
 
 /** Claude Code persists around this size; pi's bash truncation uses 50KB too. */

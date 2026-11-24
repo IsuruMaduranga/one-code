@@ -44,7 +44,7 @@ import { recordUsage } from "../../lib/notify/usage-bus.ts";
 import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { productSettingsPath } from "../../lib/profile/product-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { formatDuration, toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { nativeSearchResult, ProviderSearchError } from "./native-results.ts";
 import { runNativeSearch } from "./native-call.ts";
@@ -76,6 +76,15 @@ interface SearchDetails {
 	failures?: string[];
 	native?: boolean;
 	error?: unknown;
+	/** How long the search took, for the transcript row only. */
+	durationMs?: number;
+}
+
+/** Claude Code's web_search row, "Did 1 search in 2s": the model reads the results and their framing. */
+function searchedDisplay(details: SearchDetails | undefined): string | undefined {
+	if (details?.durationMs === undefined) return undefined;
+	const time = details.durationMs >= 1000 ? formatDuration(0, details.durationMs) : `${Math.round(details.durationMs)}ms`;
+	return `Did 1 search in ${time}`;
 }
 
 function webExtension(pi: ExtensionAPI) {
@@ -94,7 +103,9 @@ function webExtension(pi: ExtensionAPI) {
 	const tool = defineTool({
 		name: "web_search",
 		label: "Web Search",
-		...toolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }),
+		...withResultDisplay(toolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }), (result, expanded) =>
+			expanded ? undefined : searchedDisplay(result.details as SearchDetails | undefined),
+		),
 		description: text.description("short"),
 		parameters: Type.Object({
 			query: Type.String({ minLength: 2, description: text.params.query }),
@@ -102,6 +113,7 @@ function webExtension(pi: ExtensionAPI) {
 			blocked_domains: Type.Optional(Type.Array(Type.String(), { description: text.params.blocked_domains })),
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			const started = Date.now();
 			const filters = { allowed: params.allowed_domains, blocked: params.blocked_domains };
 			const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
 			const cancelled = () => ({
@@ -139,7 +151,7 @@ function webExtension(pi: ExtensionAPI) {
 					const answer = webSearchResultText.nativeAnswer({ answer: native.text, cutOff: native.cutOff, sourceLines: sources.map(sourceLine), spec: native.spec, filtered });
 					return {
 						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
-						details: { query: params.query, native: true, backend: `anthropic web_search via ${native.spec}`, resultCount: sources.length } as SearchDetails,
+						details: { query: params.query, native: true, backend: `anthropic web_search via ${native.spec}`, resultCount: sources.length, durationMs: Date.now() - started } as SearchDetails,
 					};
 				}
 				if (native.kind === "fell-back") notes.unshift(webSearchResultText.nativeFellBack(nativeWebResultText.fallback(native.fallback)));
@@ -161,7 +173,7 @@ function webExtension(pi: ExtensionAPI) {
 					const answer = withNotes(webSearchResultText.providerAnswer({ answer: result.answer, sources: result.sources, extra: result.extra, backend, filtered }));
 					return {
 						content: [{ type: "text", text: persistIfLarge(answer, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
-						details: { ...result.details, query: params.query, native: true, backend } as SearchDetails,
+						details: { ...result.details, query: params.query, native: true, backend, durationMs: Date.now() - started } as SearchDetails,
 					};
 				} catch (error) {
 					if (signal?.aborted) return cancelled();
@@ -204,6 +216,7 @@ function webExtension(pi: ExtensionAPI) {
 						keyless: outcome.backend.keyless,
 						resultCount: outcome.results.length,
 						failures: outcome.attempts.length ? outcome.attempts.map(webSearchResultText.attempt) : undefined,
+						durationMs: Date.now() - started,
 					} as SearchDetails,
 				};
 			} catch (error) {

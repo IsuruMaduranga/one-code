@@ -39,6 +39,8 @@ export interface SessionBackgroundTask {
 export interface SessionWorkQuery {
 	crons: SessionCron[];
 	tasks: SessionBackgroundTask[];
+	/** A `schedule_wakeup` wakeup is armed (one of `crons`); not a hook payload field. */
+	wakeupPending: boolean;
 }
 
 /** The hook payload's field cap (Claude Code: 1000 characters, then an in-string marker). */
@@ -68,9 +70,14 @@ export function sessionBackgroundTask(task: { id: string; kind: string; status: 
 
 /** What will wake the session later, read back after the synchronous emit (the background extension fills it). */
 export function querySessionWork(events: { emit(channel: string, data: unknown): void }): SessionWorkQuery {
-	const query: SessionWorkQuery = { crons: [], tasks: [] };
+	const query: SessionWorkQuery = { crons: [], tasks: [], wakeupPending: false };
 	events.emit(SESSION_WORK_CHANNEL, query);
 	return query;
+}
+
+/** Whether a `schedule_wakeup` wakeup is armed: Claude Code's "loop wakeup pending". */
+export function wakeupPending(events: { emit(channel: string, data: unknown): void }): boolean {
+	return querySessionWork(events).wakeupPending;
 }
 
 /** Background work still running: agents and workflows (Claude Code's pending counts), and every other task (shells, monitors). */
@@ -90,8 +97,8 @@ export function pendingWork(events: { emit(channel: string, data: unknown): void
 
 /**
  * Claude Code 2.1.327's "Waiting for 1 background agent to finish" (findings
- * §94), shown at turn end in place of "Done in Ns" and, here, on the spinner
- * while the model waits in `yield`. Agents and workflows are named; other
+ * §94), shown at turn end in place of "Done in Ns" and, here, as the row of
+ * a `yield` call while it waits. Agents and workflows are named; other
  * tasks are counted only when nothing else runs, so a wait on a shell still
  * says what it waits for. Undefined when nothing runs.
  */

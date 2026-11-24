@@ -23,7 +23,7 @@ import { restoreLatestDetails } from "../../lib/request/branch-restore.ts";
 import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import { deferBaseTool, WITHHOLD_CHANNEL } from "../../lib/request/deferred.ts";
 import { taskToolsEnabled } from "../../lib/models/model-tier.ts";
-import { toolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
+import { hiddenToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../../lib/ui/tui-render.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
 import { requireText, toolLive } from "../../lib/profile/profile.ts";
 import {
@@ -181,10 +181,11 @@ function tasksExtension(pi: ExtensionAPI) {
 		};
 	};
 
+	// The pinned widget shows the list, so a successful call draws nothing, as in Claude Code.
 	pi.registerTool({
 		name: "task_create",
 		label: "Create Task",
-		...toolRenderers("Create Task"),
+		...hiddenToolRenderers("Create Task"),
 		description: text.descriptions.task_create,
 		parameters: Type.Object({
 			subject: Type.String({ description: text.params.create.subject }),
@@ -202,7 +203,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_get",
 		label: "Get Task",
-		...toolRenderers("Get Task"),
+		...hiddenToolRenderers("Get Task"),
 		description: text.descriptions.task_get,
 		parameters: Type.Object({
 			taskId: Type.String({ description: text.params.get.taskId }),
@@ -217,7 +218,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_list",
 		label: "List Tasks",
-		...toolRenderers("List Tasks", { maxCollapsedLines: 12 }),
+		...hiddenToolRenderers("List Tasks"),
 		description: text.descriptions.task_list,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
@@ -228,7 +229,7 @@ function tasksExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_update",
 		label: "Update Task",
-		...toolRenderers("Update Task"),
+		...hiddenToolRenderers("Update Task"),
 		description: text.descriptions.task_update,
 		parameters: Type.Object({
 			taskId: Type.String({ description: text.params.update.taskId }),

@@ -127,7 +127,7 @@ describe("a product's context block", () => {
 		/** The file a pointer names, found by its name under the session's tool-results folder (a temp path may hold spaces). */
 		const pointerFile = (text: string, dir: string) => {
 			const name = text.match(/context-layout-[0-9a-f]+\.txt/)?.[0];
-			const file = name && join(dir, "tool-results", name);
+			const file = name && join(dir, "s", "tool-results", name);
 			return file && text.includes(file) ? file : undefined;
 		};
 

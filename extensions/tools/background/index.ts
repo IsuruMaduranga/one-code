@@ -23,7 +23,7 @@ import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-
 import { Type } from "typebox";
 import { whenAborted } from "../../lib/core/abort.ts";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
-import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../../lib/request/persisted-output.ts";
 import { KILL_GRACE_MS, waitForChildExit } from "../../lib/shell-run/process-tree.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import { bashSpawn } from "../../lib/shell-run/shell-spawn.ts";
@@ -31,7 +31,7 @@ import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.t
 import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
 import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
 import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
-import { ClickToggles, clickToExpand, hiddenToolRenderers, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, dimMarkedLine, hiddenToolRenderers, withResultDisplay, TURN_MARK, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -104,10 +104,10 @@ import { toolsWithheldFrom, withOfferedTools } from "../../lib/models/model-fami
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../lib/plugins/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../lib/plugins/skill-scan.ts";
-import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { createWriteStream, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { querySessionWork, SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../../lib/notify/session-work.ts";
+import { pendingWork, querySessionWork, SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery, waitingForText } from "../../lib/notify/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
 import { queueNotice } from "../../lib/notify/notices.ts";
 import { makeRecord, RECORD } from "../../lib/request/ledger/records.ts";
@@ -160,21 +160,6 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
  */
 const shutdownNotice = () => processState<{ text?: string }>("background:shutdown-notice", () => ({}));
 
-/**
- * `<sessionDir>/monitor/<taskId>/output.log`, beside background shells'
- * `bash/<taskId>/`. A session-less run spools under the session's private
- * results dir (`sessionResultsDir`), so its output is never kept only as the
- * in-memory tail. Undefined when the folder cannot be made.
- */
-function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
-	try {
-		const dir = join(sessionResultsDir(ctx), "monitor", taskId);
-		mkdirSync(dir, { recursive: true });
-		return join(dir, "output.log");
-	} catch {
-		return undefined;
-	}
-}
 
 /**
  * `task_output`'s body. Past `TASK_OUTPUT_MAX_CHARS` a task with a spool file
@@ -282,6 +267,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
 		const query = data as SessionWorkQuery;
 		query.crons.push(...cron.list().map(sessionCron));
+		query.wakeupPending ||= dynamicLoop.hasPending();
 		query.tasks.push(...registry.running().map(sessionBackgroundTask));
 	});
 
@@ -490,7 +476,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 				stored = tailCap(`${stored}${chunk}`, STORED_OUTPUT_CAP, text.monitor.earlierTruncated);
 				if (!chunk || spoolFailed) return;
 				if (!log) {
-					const path = monitorLogPath(ctx, id);
+					const path = taskOutputPath(ctx, id);
 					if (!path) return;
 					log = createWriteStream(path, { flags: "a" });
 					log.on("error", () => {
@@ -852,57 +838,81 @@ function backgroundExtension(pi: ExtensionAPI) {
 	// (delivered right after this result), the user queues a message, a
 	// scheduled prompt is due, nothing is left that could report, the call is
 	// aborted, or the cap passes; the reason rides the result as a reminder.
-	// The TUI draws no row for it: the spinner and the agent rows already show
-	// the wait, and the notification follows it.
+	// The TUI draws its row as the dim "✻ Waiting for 1 background agent to
+	// finish" line a turn ends with while agents still run (ui/turn-duration),
+	// and hides pi's working line while it waits: waiting inside a turn and
+	// after one look the same, since in both whatever the user types reaches
+	// the model.
 	const yieldLabel = "Wait for background work";
+	const yieldHidden = hiddenToolRenderers(yieldLabel);
 	pi.registerTool({
 		name: "yield",
 		label: yieldLabel,
-		...hiddenToolRenderers(yieldLabel),
+		...yieldHidden,
+		renderResult: (result, options, theme, context) => {
+			const waiting = (result?.details as { waiting?: string } | undefined)?.waiting;
+			return waiting && !context.isError ? dimMarkedLine(theme, TURN_MARK, waiting) : yieldHidden.renderResult(result, options, theme, context);
+		},
 		description: text.yield.description,
 		parameters: Type.Object({}),
 		// After an Agent or bash call in the same reply, so the work it waits for is registered.
 		executionMode: "sequential",
-		async execute(toolCallId, _params, signal, _onUpdate, ctx) {
+		async execute(toolCallId, _params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
 			const startedAt = Date.now();
 			let end: YieldEnd;
+			let waiting: string | undefined;
 			if (yieldedInReply) end = { kind: "duplicate" };
 			// A one-shot run blocks on every agent and shell: nothing is in the background to wait for.
 			else if (!sessionOutlivesTurn(ctx.mode)) end = { kind: "nothingRunning" };
 			else {
 				yieldedInReply = true;
-				end = await waitForBackground(
-					{
-						backlog: () => {
-							const query: NotifierBacklogQuery = { coalescing: 0, handed: 0 };
-							pi.events.emit(NOTIFIER_BACKLOG_CHANNEL, query);
-							return query;
+				// The row's line, drawn now as a partial result and kept in the final one.
+				waiting = waitingForText(pendingWork(pi.events));
+				// The row replaces pi's working line, so hide it only when there is a row. Nothing
+				// else hides that line, so the finally shows it again rather than restoring a saved state.
+				const hide = waiting !== undefined && ctx.hasUI;
+				if (waiting) onUpdate?.({ content: [], details: { waiting } });
+				if (hide) ctx.ui.setWorkingVisible(false);
+				try {
+					end = await waitForBackground(
+						{
+							backlog: () => {
+								const query: NotifierBacklogQuery = { coalescing: 0, handed: 0 };
+								pi.events.emit(NOTIFIER_BACKLOG_CHANNEL, query);
+								return query;
+							},
+							// Every extension's running work: registry tasks, workflow runs, and
+							// residents busy on a later turn (lib/notify/session-work.ts).
+							running: () => querySessionWork(pi.events).tasks.length,
+							userMessageQueued: () => ctx.hasPendingMessages(),
+							// Only a main-session job starts a turn here; a subagent's job fires into the agent.
+							scheduledDue: () => {
+								const now = Date.now();
+								return cron.list().some((job) => job.agentId === undefined && job.nextFireAt <= now);
+							},
+							onHanded: (listener) => pi.events.on(NOTIFICATION_HANDED_CHANNEL, listener),
 						},
-						// Every extension's running work: registry tasks, workflow runs, and
-						// residents busy on a later turn (lib/notify/session-work.ts).
-						running: () => querySessionWork(pi.events).tasks.length,
-						userMessageQueued: () => ctx.hasPendingMessages(),
-						// Only a main-session job starts a turn here; a subagent's job fires into the agent.
-						scheduledDue: () => {
-							const now = Date.now();
-							return cron.list().some((job) => job.agentId === undefined && job.nextFireAt <= now);
-						},
-						onHanded: (listener) => pi.events.on(NOTIFICATION_HANDED_CHANNEL, listener),
-					},
-					signal ? AbortSignal.any([signal, sessionEnded.signal]) : sessionEnded.signal,
-				);
+						signal ? AbortSignal.any([signal, sessionEnded.signal]) : sessionEnded.signal,
+					);
+				} finally {
+					if (hide) ctx.ui.setWorkingVisible(true);
+				}
 			}
 			const resumed = text.yield.resumed({ waitedMs: Date.now() - startedAt, end });
 			pi.events.emit(REMINDER_CHANNEL, { text: resumed, toolCallId } satisfies ReminderPayload);
-			return { content: [{ type: "text", text: text.yield.ended }], details: { end: end.kind } };
+			return { content: [{ type: "text", text: text.yield.ended }], details: { end: end.kind, waiting } };
 		},
 	});
 
 	pi.registerTool({
 		name: "task_stop",
 		label: "Stop Task",
-		...toolRenderers("Stop Task"),
+		// Claude Code's "<task> · stopped"; the model reads which task and how it ended.
+		...withResultDisplay(toolRenderers("Stop Task"), (result) => {
+			const stopped = (result.details as { stopped?: string } | undefined)?.stopped;
+			return stopped === undefined ? undefined : `${stopped} · stopped`;
+		}),
 		description: text.tasks.stopDescription,
 		parameters: Type.Object({
 			task_id: Type.String({ description: text.tasks.stopParams.taskId }),
@@ -925,7 +935,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 							: text.tasks.stopRequested({ id: task.id, description: task.description }),
 					},
 				],
-				details: { taskId: task.id },
+				details: { taskId: task.id, stopped: task.description },
 			};
 		},
 	});

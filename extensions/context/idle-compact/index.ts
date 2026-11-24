@@ -24,7 +24,7 @@ import { featureEnabled } from "../../lib/profile/profile.ts";
 import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { hasOneHourCache } from "../../lib/request/anthropic-payload.ts";
+import { hasOneHourCache, rateLimitStatus as responseRateLimitStatus } from "../../lib/request/anthropic-payload.ts";
 import { modelSpec } from "../../lib/models/model-policy.ts";
 import { LAST_REQUEST_CHANNEL, type RequestCapture } from "../../lib/side-calls/request-replay.ts";
 import { unrefTimers } from "../../lib/core/timer-ops.ts";
@@ -33,7 +33,6 @@ import { type ArmedRequest, IDLE_COMPACT_NOTICE, IdleCompactTimer, type IdleComp
 
 const ENTRY_TYPE = brandedId("idle-compact");
 const NOTICE_MARK = "●";
-const RATE_LIMIT_HEADER = "anthropic-ratelimit-unified-status";
 
 /** pi's auto-compaction setting; unreadable settings mean pi's default, on. */
 function autoCompactionOn(cwd: string): boolean {
@@ -93,8 +92,7 @@ function idleCompactExtension(pi: ExtensionAPI) {
 
 	pi.on("after_provider_response", (event) => {
 		if (!timer.pending) return;
-		const entry = Object.entries(event.headers ?? {}).find(([name]) => name.toLowerCase() === RATE_LIMIT_HEADER);
-		rateLimitStatus = entry?.[1];
+		rateLimitStatus = responseRateLimitStatus(event.headers);
 	});
 
 	pi.on("message_end", (event) => {

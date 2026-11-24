@@ -11,23 +11,23 @@
  * it is; extensions/tools/powershell/index.ts is the second consumer.
  */
 
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, type TObject, type TProperties, Type } from "typebox";
-import { generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
-import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
+import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
+import { type BashFinishSummary, runBackgroundBashBlocking, shellTask, startBackgroundBash, tailCap } from "./bash-background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
-import { persistedFilePreview, persistIfLarge, sessionResultsDir } from "../request/persisted-output.ts";
+import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
 import { sandboxConfigured, sandboxedCommand } from "./sandbox.ts";
 import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "./sandbox-settings.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
-import { keepSpillReadable } from "./spill-file.ts";
-import { ccWrapBuiltinRenderers, withResultDisplay } from "../ui/tui-render.ts";
+import { dropSpill, keepSpillReadable } from "./spill-file.ts";
+import { ForegroundRun } from "./foreground-run.ts";
+import { isKeyRelease, keyId } from "../ui/key-input.ts";
+import { ccWrapBuiltinRenderers, elbowIndent, linesComponent, withResultDisplay } from "../ui/tui-render.ts";
 import { shellBlockedLine } from "../ui/result-summary-shell.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
 import { shellResultText } from "./shell-text.ts";
@@ -119,6 +119,21 @@ export interface ShellToolSpec<P extends TObject> {
 	sandboxed?: { bash(): ShellSpawn | undefined; line(command: string): string; foreground(cwd: string): ShellToolExecutor };
 	/** Rewrites the command for a background spawn (PowerShell prepends its UTF-8 prefix). Default: identity. */
 	wrapBackgroundCommand?: (command: string) => string;
+	/** Listen for the key that sends a running foreground command to the background. The main session only: a child has no terminal of its own. */
+	backgroundKey?: boolean;
+}
+
+/** Claude Code's key for sending a running foreground command to the background. */
+export const BACKGROUND_KEY = "ctrl+b";
+/** Claude Code shows the key's hint once a command has run this long. */
+export const BACKGROUND_HINT_AFTER_MS = 2_000;
+
+/**
+ * The hint under a running command, in Claude Code's words. tmux takes the
+ * first ctrl+b as its own prefix, so the key is pressed twice there.
+ */
+export function backgroundHint(env: NodeJS.ProcessEnv = process.env): string {
+	return env.TMUX ? "(ctrl+b ctrl+b (twice) to run in background)" : "(ctrl+b to run in background)";
 }
 
 /**
@@ -142,16 +157,6 @@ export function shellFinish(summary: BashFinishSummary, timeoutSeconds?: number)
 	return { status: "failed", detail: shellResultText().failureDetail(end) };
 }
 
-/** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
-export function taskLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
-	try {
-		const dir = join(sessionResultsDir(ctx), "bash", taskId);
-		mkdirSync(dir, { recursive: true });
-		return join(dir, "output.log");
-	} catch {
-		return undefined;
-	}
-}
 
 /**
  * Register the shell tool; the returned setter registers it again with a new
@@ -169,6 +174,34 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	const originalCommands = trackOriginalCommands(pi);
 	const notify = (text: string, details: Record<string, unknown>) => notifyTask("task-notification", text, details);
 	const wrap = spec.wrapBackgroundCommand ?? ((command: string) => command);
+	/** The runs in the foreground now: what the background key lets go of. */
+	const foreground = new Set<ForegroundRun>();
+	// The key reaches the editor as cursor-left unless a command is running:
+	// only then is it taken. Every running command goes, as in Claude Code; one
+	// still waiting on its permission prompt has not started and stays.
+	// Each shell tool listens for its own runs and pi-tui stops at the first
+	// listener that takes a key, so a bash and a powershell command running
+	// side by side need the key once each.
+	let stopListening: (() => void) | undefined;
+	if (spec.backgroundKey) {
+		pi.on("session_start", (_event, ctx) => {
+			stopListening?.();
+			stopListening = undefined;
+			// The listener is also what a running row reads to say the key works.
+			if (!ctx.hasUI || !sessionOutlivesTurn(ctx.mode)) return;
+			stopListening = ctx.ui.onTerminalInput((data) => {
+				// A kitty terminal sends a release after every press; it is not a second key.
+				if (foreground.size === 0 || isKeyRelease(data) || keyId(data) !== BACKGROUND_KEY) return undefined;
+				let detached = false;
+				for (const run of foreground) detached = run.detach() || detached;
+				return detached ? { consume: true } : undefined;
+			});
+		});
+		pi.on("session_shutdown", () => {
+			stopListening?.();
+			stopListening = undefined;
+		});
+	}
 
 	// `● Label(cmd)` / elbow-indented output, like every other One Code tool.
 	// Not passing base.renderCall also drops its timer state, so the misleading
@@ -186,6 +219,20 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 		return expanded ? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})` : "Running in the background (↓ to manage)";
 	});
 
+	// A row still running after two seconds names the key under its output.
+	const renderResult: typeof wrapped.renderResult = (result, options, theme, context) => {
+		const shown = wrapped.renderResult(result, options, theme, context);
+		if (!options.isPartial || !stopListening || !context?.state) return shown;
+		const startedAt = (context.state.ccRunningSince ??= Date.now()) as number;
+		if (Date.now() - startedAt < BACKGROUND_HINT_AFTER_MS) return shown;
+		const hint = theme.fg("dim", backgroundHint());
+		const drawn = linesComponent((width) => {
+			const lines = shown.render(width);
+			return lines.length > 0 ? [...lines, `     ${hint}`] : elbowIndent([hint]);
+		});
+		return { render: drawn.render, invalidate: () => (drawn.invalidate(), shown.invalidate?.()) };
+	};
+
 	const definition = {
 		name: spec.name,
 		label: spec.base.label,
@@ -202,7 +249,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 		constrainedSampling: spec.base.constrainedSampling,
 		renderShell: wrapped.renderShell,
 		renderCall: wrapped.renderCall as ToolDefinition<P>["renderCall"],
-		renderResult: wrapped.renderResult as ToolDefinition<P>["renderResult"],
+		renderResult: renderResult as ToolDefinition<P>["renderResult"],
 		parameters: spec.parameters,
 		async execute(toolCallId, rawParams, signal, onUpdate, ctx) {
 			const params = rawParams as Static<P> & ShellToolParams;
@@ -233,15 +280,84 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
 			const timeoutSeconds = (explicitTimeout ? Math.min(params.timeout!, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS) / 1000;
 
+			// Every run has a task id from its start, as in Claude Code: it names the
+			// run's output file, its persisted output, and the task a key or
+			// `run_in_background` makes of it.
+			const id = generateTaskId();
+			const logPath = taskOutputPath(ctx, id); // one spool place for every shell tool; the shell panel reads it
+			const description = params.description || params.command.slice(0, 80);
+			// How a task that left the turn reports its end (a background run, or a foreground one the key sent there).
+			const notifyFinished = (finishedTask: BackgroundTask, summary: BashFinishSummary) => {
+				// The command's own host list ends with the command.
+				sandboxed.run?.finish();
+				// Claude Code's shell completion names the output file and nothing
+				// else — the model reads it (or task_output) when it needs the text.
+				// Without a spool file the tail rides `<result>` so nothing is lost.
+				const { status, detail } = shellFinish(summary);
+				// What the sandbox denied the command rides its completion: the log holds only the command's own words.
+				const denied = sandboxed.run?.withViolations("").trim() ?? "";
+				const tail = finishedTask.logPath ? "" : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim();
+				notify(
+					taskNotification({
+						kind: "shell",
+						taskId: id,
+						toolUseId: toolCallId,
+						outputFile: finishedTask.logPath,
+						status,
+						summary: shellSummary(description, status, summary.exitCode, detail),
+						result: [tail, denied].filter(Boolean).join("\n") || undefined,
+					}),
+					{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath, [TASK_COMPLETION_KEY]: true },
+				);
+			};
+
 			if (!params.run_in_background) {
+				// The run writes `tasks/<id>.output` from its first byte and can be let
+				// go of while it runs (foreground-run.ts). Only where the key is
+				// offered: a one-shot run has nowhere to deliver a completion, and
+				// a child session has no terminal.
+				const run = stopListening ? new ForegroundRun(logPath, words(), signal) : undefined;
+				if (run) foreground.add(run);
+				const executing = (viaBash ? viaBash.foreground(ctx.cwd) : spec.foreground(ctx.cwd)).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, run?.signal ?? signal, onUpdate, ctx);
+				if (run) {
+					const ended = executing.then(() => "ended" as const, () => "ended" as const);
+					const first = await Promise.race([ended, run.detached.then(() => "detached" as const)]);
+					foreground.delete(run);
+					if (first === "detached") {
+						// pi's tool ends with an abort nobody reads; a spill file it wrote is dropped.
+						void executing.then(undefined, (error: unknown) => dropSpill(error));
+						const task: BackgroundTask = shellTask({
+							id,
+							description,
+							command: params.command,
+							logPath: () => run.outputFile(),
+							output: () => run.output(),
+							stop: () => run.stop(),
+							startedAt: run.startedAt,
+							// Settled before the completion is sent, as a background run's is: `finished` never rejects.
+							finished: run.ended.then((end) => {
+								task.status = end.stopped ? "stopped" : end.exitCode === 0 ? "completed" : "failed";
+								task.finishedAt = Date.now();
+							}),
+						});
+						void run.ended.then((end) => task.finished.then(() => notifyFinished(task, { exitCode: end.exitCode, signal: null, stopped: end.stopped, timedOut: false, output: run.output(), logPath: task.logPath })));
+						pi.events.emit(TASK_REGISTER_CHANNEL, task);
+						return {
+							// The file as the spool names it now: a write that failed already dropped it.
+							content: [{ type: "text" as const, text: words().manuallyBackgrounded({ id, ...(task.logPath ? { logPath: task.logPath } : {}) }) }],
+							details: { taskId: id, logPath: task.logPath },
+						};
+					}
+					await run.discard();
+				}
 				// pi spills a long output to os.tmpdir(), outside every readable root;
 				// move it where the model's read of it is a working-space read, and
 				// cut the output Claude Code's way (its head, not pi's tail). Then
 				// Claude Code's result text (`Exit code N` first, trimmed output).
 				const result = await keepSpillReadable(
-					() => (viaBash ? viaBash.foreground(ctx.cwd) : spec.foreground(ctx.cwd)).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
+					() => executing,
 					sessionResultsDir(ctx),
-					{ inlineMax: INLINE_OUTPUT_CAP, id: `${spec.name}-${toolCallId}` },
+					{ inlineMax: INLINE_OUTPUT_CAP, id },
 				)
 					.catch((error: unknown) => {
 						// A command that timed out or was stopped still says what the sandbox denied it (a host retried until the deadline).
@@ -267,9 +383,6 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					details: {},
 				};
 			}
-			const id = generateTaskId();
-			const logPath = taskLogPath(ctx, id);
-			const description = params.description || params.command.slice(0, 80);
 			const command = viaBash ? sandboxed.command : wrap(sandboxed.command);
 
 			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: a
@@ -325,29 +438,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				cwd: ctx.cwd,
 				logPath,
 				shell,
-				onFinished: (finishedTask, summary) => {
-					// The command's own host list ends with the command.
-					sandboxed.run?.finish();
-					// Claude Code's shell completion names the output file and nothing
-					// else — the model reads it (or task_output) when it needs the text.
-					// Without a spool file the tail rides `<result>` so nothing is lost.
-					const { status, detail } = shellFinish(summary);
-					// What the sandbox denied the command rides its completion: the log holds only the command's own words.
-					const denied = sandboxed.run?.withViolations("").trim() ?? "";
-					const tail = finishedTask.logPath ? "" : tailCap(summary.output, NOTIFY_OUTPUT_CAP, words().earlierTruncated).trim();
-					notify(
-						taskNotification({
-							kind: "shell",
-							taskId: id,
-							toolUseId: toolCallId,
-							outputFile: finishedTask.logPath,
-							status,
-							summary: shellSummary(description, status, summary.exitCode, detail),
-							result: [tail, denied].filter(Boolean).join("\n") || undefined,
-						}),
-						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath: finishedTask.logPath, [TASK_COMPLETION_KEY]: true },
-					);
-				},
+				onFinished: notifyFinished,
 			});
 			// The shell panel lists the task by the model's command, not a wrapped one.
 			task.command = params.command;

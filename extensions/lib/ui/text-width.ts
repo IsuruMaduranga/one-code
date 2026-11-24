@@ -296,3 +296,16 @@ export function fitPainted(line: string, maxCols: number): { text: string; width
 	}
 	return { text: out, width };
 }
+
+/** A size the way Claude Code prints it: `N bytes`, else `N.NKB`/`MB` with a trailing `.0` dropped. */
+export function formatSize(n: number): string {
+	const units = ["KB", "MB", "GB"];
+	let value = n / 1024;
+	if (value < 1) return `${n} bytes`;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit++;
+	}
+	return `${value.toFixed(1).replace(/\.0$/, "")}${units[unit]}`;
+}

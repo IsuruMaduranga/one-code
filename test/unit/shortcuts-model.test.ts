@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { applyHelpKey, commandRows, guideUrl, type HelpData, helpListRows, helpPanelLines, helpText, initialHelpState } from "../../extensions/lib/ui/shortcuts-help.ts";
 import { shortcutColumns, shortcutLines, type ShortcutSources } from "../../extensions/lib/ui/shortcuts-model.ts";
 import { visibleWidth } from "../../extensions/lib/ui/text-width.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 /** pi's default keys, as its keyText names them. */
 const PI_KEYS: Record<string, string> = {
@@ -41,6 +42,7 @@ describe("shortcutColumns", () => {
 				"ctrl+\\ to toggle tasks",
 				"\\ then enter for newline",
 				"↓ to manage agents",
+				"ctrl+b to run in background",
 			],
 			[
 				"ctrl+- to undo",
@@ -96,14 +98,14 @@ describe("shortcutLines", () => {
 			const lines = shortcutLines(columns, width);
 			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
-		expect(shortcutLines(columns, 70)).toHaveLength(11);
-		expect(shortcutLines(columns, 40)).toHaveLength(22);
+		expect(shortcutLines(columns, 70)).toHaveLength(12);
+		expect(shortcutLines(columns, 40)).toHaveLength(23);
 		expect(shortcutLines(columns, 20).some((line) => line.endsWith("…"))).toBe(true);
 	});
 });
 
 describe("the /help panel", () => {
-	const plain = { fg: (_color: string, text: string) => text, bold: (text: string) => text, inverse: (text: string) => `[${text}]` };
+	const plain = { ...plainTheme, inverse: (text: string) => `[${text}]` };
 	const data: HelpData = {
 		intro: "One Code, the Claude Code experience, on any model.",
 		shortcuts: shortcutColumns(sources()),

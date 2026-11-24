@@ -18,8 +18,8 @@ import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { trackShellTasks } from "../../lib/shell-run/shell-tasks.ts";
 import { pendingWork } from "../../lib/notify/session-work.ts";
-import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
-import { formatDoneAt, TURN_MARK, turnDurationText } from "./line.ts";
+import { dimMarkedLine, TURN_MARK } from "../../lib/ui/tui-render.ts";
+import { formatDoneAt, turnDurationText } from "./line.ts";
 import { TurnSpan } from "./span.ts";
 import { pickCompletionVerb } from "./verbs.ts";
 

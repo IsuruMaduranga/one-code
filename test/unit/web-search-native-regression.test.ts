@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionResultsDir } from "../../extensions/lib/request/persisted-output.ts";
 import webExtension from "../../extensions/tools/web/index.ts";
 import type { ProviderSearchFailure } from "../../extensions/tools/web/text.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -50,7 +51,7 @@ describe("provider-native search results", () => {
 		const result = await execute();
 		const text = result.content.map((block) => block.text).join("\n");
 		expect(text).toContain("<persisted-output>");
-		const saved = readFileSync(join(dir, "tool-results", "search-native.txt"), "utf8");
+		const saved = readFileSync(join(sessionResultsDir({ sessionManager: { getSessionDir: () => dir, getSessionId: () => "fake-session" } }), "tool-results", "search-native.txt"), "utf8");
 		expect(saved).toContain(answer);
 		expect(saved).toContain("https://example.com/tail");
 		expect(saved).not.toContain("[Truncated]");
@@ -83,7 +84,7 @@ describe("provider-native search results", () => {
 		vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ web: { results: [{ title: "Brave result", url: "https://example.com", description: "Result snippet" }] } }), { headers: { "content-type": "application/json" } })));
 		const result = await execute();
 		expect(result.content[0].text).toContain("<persisted-output>");
-		const saved = readFileSync(join(dir, "tool-results", "search-native.txt"), "utf8");
+		const saved = readFileSync(join(sessionResultsDir({ sessionManager: { getSessionDir: () => dir, getSessionId: () => "fake-session" } }), "tool-results", "search-native.txt"), "utf8");
 		expect(saved).toContain(reason);
 		expect(saved).toContain("Brave result");
 	});

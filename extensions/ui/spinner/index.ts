@@ -8,11 +8,8 @@
  *   thinking run ends, `· thought for Ns` closes the stats
  *   (lib/ui/thinking-clock.ts).
  *
- * - While the model waits in `yield`, the verb gives way to what it waits
- *   for: "Waiting for 1 background agent to finish… (1m 49s · ↓ 68 tokens)",
- *   Claude Code's turn-end wording (findings §94). The yield call itself is
- *   hidden in the transcript, so without it a long wait looks like a stuck
- *   turn.
+ * - While the model waits in `yield`, the yield tool hides the working line
+ *   and draws its own waiting row (tools/background).
  *
  * Context usage is shown by the footer extension, not here (the two once
  * duplicated an above-input token counter).
@@ -24,7 +21,6 @@
 
 import { feature } from "../../lib/profile/feature.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { pendingWork, waitingForText } from "../../lib/notify/session-work.ts";
 import { ThinkingClock } from "../../lib/ui/thinking-clock.ts";
 import { safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { composeWorkingMessage, messageChars, spinnerFrames } from "./line.ts";
@@ -32,8 +28,6 @@ import { pickVerb } from "./verbs.ts";
 
 const FRAME_INTERVAL_MS = 120;
 const TICK_MS = 1000;
-/** The background extension's wait tool (tools/background/index.ts). */
-const YIELD_TOOL = "yield";
 
 function spinnerExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
@@ -48,19 +42,16 @@ function spinnerExtension(pi: ExtensionAPI) {
 	 */
 	let streamingMessage: unknown;
 	let ticker: ReturnType<typeof setInterval> | undefined;
-	/** The yield calls running now, by tool call id. */
-	const waits = new Set<string>();
 	/** The last thinking run's length, for `thought for Ns`. */
 	const thinking = new ThinkingClock();
 
 	const updateWorkingMessage = () => {
 		const ctx = lastCtx;
 		if (!ctx?.hasUI || !turnStartedAt) return;
-		const waiting = waits.size > 0 ? waitingForText(pendingWork(pi.events)) : undefined;
 		const now = Date.now();
 		ctx.ui.setWorkingMessage(
 			composeWorkingMessage({
-				verb: waiting ?? verb,
+				verb,
 				elapsedMs: now - turnStartedAt,
 				responseChars: settledChars + messageChars(streamingMessage),
 				thought: thinking.segment(now),
@@ -102,16 +93,6 @@ function spinnerExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("tool_execution_start", (event) => {
-		if (event.toolName !== YIELD_TOOL) return;
-		waits.add(event.toolCallId);
-		updateWorkingMessage();
-	});
-
-	pi.on("tool_execution_end", (event) => {
-		if (waits.delete(event.toolCallId)) updateWorkingMessage();
-	});
-
 	pi.on("message_update", (event) => {
 		if (event.message.role !== "assistant") return;
 		streamingMessage = event.message;
@@ -139,7 +120,6 @@ function spinnerExtension(pi: ExtensionAPI) {
 	// unlike the gated duration line) only when pi will not continue by itself.
 	pi.on("agent_settled", (_event, ctx) => {
 		stopTicker();
-		waits.clear();
 		thinking.reset();
 		turnStartedAt = 0;
 		if (ctx.hasUI) ctx.ui.setWorkingMessage(); // restore pi's default for non-turn work

@@ -7,8 +7,9 @@
 import { describe, expect, it } from "vitest";
 import { agentResultDisplay, sendMessageResultDisplay } from "../../extensions/agents/subagents/result-display.ts";
 import { withResultDisplay } from "../../extensions/lib/ui/tui-render.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
-const plain = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const plain = plainTheme;
 const lines = ["⏳ explore-1 (task b90a3848) running in background — output file: /tmp/out.log"];
 const launch = { background: true, agentRuns: [{ name: "explore-1" }], lines };
 

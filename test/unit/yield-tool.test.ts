@@ -6,6 +6,7 @@ import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { AGENT_CRON_CHANNEL, type AgentCronRequest } from "../../extensions/lib/agents/agent-cron.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/notify/session-work.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
 /** The background extension with one running agent task, and the reminders it emits. */
 function mount() {
@@ -30,6 +31,32 @@ function mount() {
 }
 
 describe("the yield tool", () => {
+	it("draws its row as the turn-end waiting line and hides the working line while it waits", async () => {
+		const { fake, task } = mount();
+		await fake.fire("message_start", { message: { role: "assistant" } }, createFakeCtx({}));
+		const updates: unknown[] = [];
+		const tool = fake.tools.get("yield")!;
+		const ctx = createFakeCtx({ hasUI: true, mode: "tui" });
+		const visible = (ctx.ui as { setWorkingVisible: { mock: { calls: unknown[][] } } }).setWorkingVisible;
+		const wait = tool.execute("call_r", {}, undefined, (update: unknown) => updates.push(update), ctx) as Promise<{ details: { waiting?: string } }>;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(updates).toEqual([{ content: [], details: { waiting: "Waiting for 1 background agent to finish" } }]);
+		expect(visible.mock.calls).toEqual([[false]]);
+		task.status = "completed";
+		fake.events.emit(NOTIFICATION_HANDED_CHANNEL, { customType: "subagent-result" });
+		const result = await wait;
+		expect(result.details.waiting).toBe("Waiting for 1 background agent to finish");
+		expect(visible.mock.calls).toEqual([[false], [true]]);
+
+		const theme = plainTheme;
+		const renderResult = tool.renderResult as unknown as (...args: unknown[]) => { render(width: number): string[] };
+		const row = (details: unknown, isError = false) => renderResult({ content: [], details }, { expanded: false, isPartial: false }, theme, { isError }).render(80);
+		expect(row(result.details)).toEqual(["✻ Waiting for 1 background agent to finish"]);
+		// A wait that never started draws nothing; a failed one still shows its call.
+		expect(row({ end: "duplicate" })).toEqual([]);
+		expect(row(result.details, true).join("\n")).not.toContain("✻");
+	});
+
 	it("waits while an agent runs, and returns when its report is handed to pi, with the reason on the result", async () => {
 		const { fake, task, reminders, call } = mount();
 		await fake.fire("message_start", { message: { role: "assistant" } }, createFakeCtx({}));
@@ -76,10 +103,13 @@ describe("the yield tool", () => {
 	it("ends when the session shuts down, so nothing polls a dead session", async () => {
 		const { fake, call } = mount();
 		await fake.fire("message_start", { message: { role: "assistant" } }, createFakeCtx({}));
-		const wait = call("call_s");
+		const ctx = createFakeCtx({ hasUI: true, mode: "tui" });
+		const wait = call("call_s", ctx);
 		await new Promise((resolve) => setTimeout(resolve, 50));
 		await fake.fire("session_shutdown", { type: "session_shutdown" }, createFakeCtx({}));
 		await expect(wait).resolves.toMatchObject({ details: { end: "interrupted" } });
+		// An interrupted wait still shows the working line again.
+		expect((ctx.ui as { setWorkingVisible: unknown }).setWorkingVisible).toHaveBeenLastCalledWith(true);
 	});
 
 	it("counts work another extension reports as running: a busy resident agent or a workflow run", async () => {

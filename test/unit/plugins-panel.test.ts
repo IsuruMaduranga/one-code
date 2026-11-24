@@ -17,12 +17,9 @@ import {
 } from "../../extensions/tools/plugins/panel/state.ts";
 import type { MarketplaceSnapshot } from "../../extensions/tools/plugins/marketplace/sync.ts";
 import type { Plugin } from "../../extensions/lib/plugins/plugins.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
 
-const paint: PanelPaint = {
-	fg: (_color, text) => text,
-	bold: (text) => text,
-	inverse: (text) => `[${text}]`,
-};
+const paint: PanelPaint = { ...plainTheme, inverse: (text) => `[${text}]` };
 
 const snapshot = (name: string, plugins: Array<{ name: string; description?: string }>): MarketplaceSnapshot => ({
 	name,

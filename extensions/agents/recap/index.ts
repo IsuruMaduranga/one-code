@@ -1,12 +1,15 @@
 /**
- * recap extension — Claude Code's "while you were away" summary (the ※ line).
+ * recap extension: Claude Code's "while you were away" summary (the ※ line).
  *
- * CC fires it when the terminal has been blurred for 5 minutes; pi exposes no
- * terminal focus/blur event, so the closest faithful trigger is an idle timer:
- * armed when a turn ends, reset on any keystroke (onTerminalInput) and cleared
- * while a turn runs, it fires after CC's 5-minute lull with no interaction. At
- * most one recap per user turn (firedSinceTurn), matching CC's
- * hasSummarySinceLastUserTurn guard.
+ * Claude Code 2.1.330 fires it 3 minutes after a turn ends, once the terminal
+ * is blurred; pi exposes no terminal focus/blur event, so the closest faithful
+ * trigger is an idle timer: armed when a turn ends, held back 30 s after any
+ * keystroke (onTerminalInput) and cleared while a turn runs. The delay is capped at 0.8
+ * of the prompt cache's lifetime. When it fires, Claude Code's skips apply in
+ * its order (policy.ts, findings §102): a stale cache, the rate limit, a draft
+ * in the prompt box, background agents or workflows, a pending wakeup, a recap
+ * in flight, three failures this turn, and too few user turns (three in all,
+ * two since the last recap, counted on the branch).
  *
  * Generation is Claude Code 2.1.261's: the session's last provider request
  * replayed unchanged on the session model, the reply that answered it, then
@@ -19,22 +22,24 @@
  * from the session when the recap runs) and name-only stubs of
  * the active tools (some providers reject a history carrying tool_use blocks
  * with no tools declared). The result is a display-only entry (appendEntry,
- * not in LLM context). Best-effort throughout: any failure just shows nothing.
+ * not in LLM context); the first three of a run end with how to turn recaps
+ * off. Best-effort throughout: any failure just shows nothing.
  *
  * Deviations from CC, logged in working-docs/decisions: the session-memory block is
- * omitted (decoupling). A failed recap does not retry until the next turn (one
- * attempt per turn, success or not). Turning the `recap` feature off opts out; *_RECAP_IDLE_MS
- * overrides the 5-minute delay.
+ * omitted (decoupling). Turning the `recap` feature off opts out; *_RECAP_IDLE_MS
+ * overrides the 3-minute delay.
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
-import { brandedId } from "../../lib/profile/brand.mjs";
+import { brandedId, envName } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { followLastExchange, replaySideCall } from "../../lib/side-calls/replay-call.ts";
 import { recordUsage } from "../../lib/notify/usage-bus.ts";
+import { pendingWork, wakeupPending } from "../../lib/notify/session-work.ts";
+import { hasOneHourCache, rateLimitStatus as responseRateLimitStatus } from "../../lib/request/anthropic-payload.ts";
 import { pickEconomicalContainedModel } from "../../lib/models/model-tier.ts";
 import { CONVERSATION_CACHE_PLACEMENT } from "../../lib/side-calls/side-call-cache.ts";
 import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run.ts";
@@ -43,18 +48,25 @@ import { unrefTimers } from "../../lib/core/timer-ops.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
 import { requireText } from "../../lib/profile/profile.ts";
 import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
+import { type BranchMark, FIVE_MINUTE_CACHE_MS, HINTED_RECAPS, ONE_HOUR_CACHE_MS, RECAP_DELAY_MS, recapDelayMs, recapSkip } from "./policy.ts";
 import { RecapScheduler } from "./scheduler.ts";
 import { recapResultText } from "./text.ts";
 
 const ENTRY_TYPE = brandedId("recap");
-const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
 const RECAP_MAX_TOKENS = 256; // 1-3 short sentences
 const RECAP_TIMEOUT_MS = 30_000;
 
-/** The idle delay before a recap, overridable via *_RECAP_IDLE_MS (floor 1s). */
-function idleMs(): number {
+/** The configured delay before a recap, overridable via *_RECAP_IDLE_MS (floor 1s). */
+function configuredDelayMs(): number {
 	const raw = Number(knobValue("RECAP_IDLE_MS"));
-	return Number.isFinite(raw) && raw >= 1000 ? raw : DEFAULT_IDLE_MS;
+	return Number.isFinite(raw) && raw >= 1000 ? raw : RECAP_DELAY_MS;
+}
+
+/** A branch entry as the turn count sees it: Claude Code counts every user-type message, tool results and shell input included. */
+function branchMark(entry: { type: string; customType?: string; message?: { role?: string } }): BranchMark {
+	if (entry.type === "custom") return entry.customType === ENTRY_TYPE ? "recap" : undefined;
+	const role = entry.type === "message" ? entry.message?.role : undefined;
+	return role === "user" || role === "toolResult" || role === "bashExecution" ? "user" : undefined;
 }
 
 interface RecapData {
@@ -75,6 +87,14 @@ function recapExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	let inFlight: AbortController | undefined;
 	let inputHookRegistered = false;
+	/** When the last turn ended in this session; the cache's age is measured from it. */
+	let lastTurnEndAt: number | undefined;
+	let rateLimitStatus: string | undefined;
+	/** Recaps shown in this run (Claude Code counts per process), for the turn-off hint on the first ones. */
+	let shown = 0;
+
+	/** The lifetime of the cache the recap reads: one hour when the last request asked for it, else the provider's five minutes. */
+	const cacheLifetimeMs = (model: Model<Api> | undefined) => (hasOneHourCache(exchange.forModel(model)?.capture.payload) ? ONE_HOUR_CACHE_MS : FIVE_MINUTE_CACHE_MS);
 
 	const abortInFlight = () => {
 		inFlight?.abort();
@@ -83,7 +103,8 @@ function recapExtension(pi: ExtensionAPI) {
 
 	const scheduler = new RecapScheduler(
 		unrefTimers,
-		idleMs,
+		Date.now,
+		() => recapDelayMs(configuredDelayMs(), cacheLifetimeMs(lastCtx?.model)),
 		() => true,
 		() => void generate(),
 	);
@@ -105,7 +126,7 @@ function recapExtension(pi: ExtensionAPI) {
 		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: text.prompt, timestamp: Date.now() }];
 		// Thinking off unless the model cannot disable it; withReasoningFallback
 		// sends a level up front for catalog-marked models and retries on the 400
-		// for the rest. Fires on a 5-min idle timer, so no cross-call memo.
+		// for the rest. Fires on a minutes-long idle timer, so no cross-call memo.
 		const result = await runSideCall({
 			kind: "recap",
 			model: choice.model,
@@ -123,34 +144,50 @@ function recapExtension(pi: ExtensionAPI) {
 
 	async function generate() {
 		const ctx = lastCtx;
-		if (!ctx?.hasUI || scheduler.hasFiredSinceTurn) return;
+		const model = ctx?.model as Model<Api> | undefined;
+		if (!ctx?.hasUI || !model) return;
+		const pending = pendingWork(pi.events);
+		const skip = recapSkip({
+			now: Date.now(),
+			lastTurnEndAt,
+			cacheLifetimeMs: cacheLifetimeMs(model),
+			rateLimitStatus,
+			draft: ctx.ui.getEditorText(),
+			pendingAgents: pending.agents,
+			pendingWorkflows: pending.workflows,
+			wakeupPending: wakeupPending(pi.events),
+			inFlight: inFlight !== undefined,
+			failuresThisTurn: scheduler.failuresThisTurn,
+			marks: ctx.sessionManager.getBranch().map(branchMark),
+		});
+		if (skip !== null) return;
 		// The current branch, read now: a /tree or a compaction since the last
 		// request changed it, and pi fires no `context` event for either.
 		const messages = branchMessages(ctx);
 		if (!messages.length) return;
-		abortInFlight();
 		const controller = new AbortController();
 		inFlight = controller;
 		try {
-			const model = ctx.model;
-			if (!model) return;
-			const replayed = await replaySideCall(ctx, model as Model<Api>, exchange, text.prompt, {
+			const replayed = await replaySideCall(ctx, model, exchange, text.prompt, {
 				signal: controller.signal,
 				timeoutMs: RECAP_TIMEOUT_MS,
 				onUsage: (usage) => recordUsage(pi, "recap", usage),
 			});
-			const content = replayed ?? (await standaloneRecap(ctx, model as Model<Api>, messages, controller.signal));
+			const content = replayed ?? (await standaloneRecap(ctx, model, messages, controller.signal));
 			if (controller.signal.aborted) return;
-			if (!content) return;
-			scheduler.markFired();
-			pi.appendEntry<RecapData>(ENTRY_TYPE, { content });
+			if (!content) {
+				scheduler.markFailed();
+				return;
+			}
+			const hinted = shown < HINTED_RECAPS;
+			shown++;
+			pi.appendEntry<RecapData>(ENTRY_TYPE, { content: hinted ? `${content} ${recapResultText.offHint(envName("FEATURES_OFF"))}` : content });
 		} catch {
-			// Best-effort: a failed recap shows nothing — and does not retry. Without
-			// this the failure re-arms on every keystroke (interacted() → arm()),
-			// hammering the provider once per idle period until a turn resets it.
-			// An abort means a new turn or session already reset the scheduler; a
-			// late markFired there would suppress that turn's own recap.
-			if (!controller.signal.aborted) scheduler.markFired();
+			// Best-effort: a failed recap shows nothing. Claude Code tries again on the
+			// next blur (here, the next idle period) up to three failures a turn.
+			// An abort means a new turn or session already reset the scheduler; a late
+			// count there would spend that turn's budget.
+			if (!controller.signal.aborted) scheduler.markFailed();
 		} finally {
 			if (inFlight === controller) inFlight = undefined;
 		}
@@ -163,6 +200,8 @@ function recapExtension(pi: ExtensionAPI) {
 		// fresh conversation.
 		scheduler.reset();
 		abortInFlight();
+		lastTurnEndAt = undefined;
+		rateLimitStatus = undefined;
 		if (!ctx.hasUI) return;
 		// Reset the idle clock on any keystroke — the closest signal to CC's
 		// terminal-blur trigger pi exposes. Registered ONCE (session_start fires
@@ -185,8 +224,8 @@ function recapExtension(pi: ExtensionAPI) {
 
 	// Settle, not agent_end: `agent_end` fires per run, and arming the idle
 	// timer there could fire a recap during a retry backoff longer than the
-	// configured idle (*_RECAP_IDLE_MS floors at 1s), burning the
-	// one-per-turn budget mid-turn.
+	// configured idle (*_RECAP_IDLE_MS floors at 1s): a recap mid-turn, or a
+	// failed one spending the turn's failure budget.
 	pi.on("agent_settled", (_event, ctx) => {
 		lastCtx = ctx;
 		// Unconditional: turnEnded() both clears turn state and arms the idle
@@ -194,7 +233,12 @@ function recapExtension(pi: ExtensionAPI) {
 		// block all future re-arming) if a turn ever ends without UI. Arming
 		// without UI is harmless — generate() bails on !hasUI and the timer is
 		// unref'd, so a one-shot -p process exits before it can fire.
+		lastTurnEndAt = Date.now();
 		scheduler.turnEnded();
+	});
+
+	pi.on("after_provider_response", (event) => {
+		rateLimitStatus = responseRateLimitStatus(event.headers);
 	});
 
 	// Released after the abort, so a call that finished first keeps no socket (releaseSideCalls).

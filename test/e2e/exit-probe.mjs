@@ -82,6 +82,8 @@ const TUI_SETTLE_MS = 6_000;
 /** A command typed into the TUI is typed again when it shows no effect within this long, at most this many times. */
 const TUI_COMMAND_MS = 5_000;
 const TUI_COMMAND_TRIES = 4;
+/** How long ctrl+b may take to turn a foreground command into a background one. */
+const DETACH_MS = 10_000;
 /** Between two polls of the process table. */
 const POLL_MS = isWin ? 500 : 100;
 
@@ -212,6 +214,7 @@ function makeWorld(tag) {
 		PATH: `${bin}${isWin ? ";" : ":"}${process.env.PATH ?? process.env.Path ?? ""}`,
 		EXIT_PROBE_TAG: tag,
 		EXIT_PROBE_PROC: procScript,
+		EXIT_PROBE_DETACHED: join(root, "detached"),
 	};
 	if (isWin) delete env.Path;
 	return { root, project, env };
@@ -437,8 +440,12 @@ async function runEnding(ending) {
 			await pollUntil(ready, Date.now() + TUI_START_MS);
 			// The prompt is typed either way, so a slow start still gets its chance; a run that passes only because of that is still reported.
 			if (!ready()) result.problems.push(`${ending.id}: the TUI was not ready within ${TUI_START_MS / 1000} s (bracketed paste on and the SessionStart hook run); the prompt was typed anyway`);
-			pi.write(`${PROMPT}\r`);
+			pi.write(`${PROMPT.replace("PROBE_TOOLS", "PROBE_TOOLS PROBE_FG")}\r`);
 			const seen = await waitForSpawners(tag, ending.starts, pi.pid);
+			// The foreground command holds the turn: ctrl+b sends it to the background, and the fixture marks the result.
+			pi.write("\x02");
+			await pollUntil(() => existsSync(world.env.EXIT_PROBE_DETACHED), Date.now() + DETACH_MS);
+			if (!existsSync(world.env.EXIT_PROBE_DETACHED)) result.problems.push(`${ending.id}: ctrl+b did not send the foreground command to the background within ${DETACH_MS / 1000} s`);
 			if (ending.id === "tui-crash") {
 				// The command took effect once pi crashed or exited; finish judges which.
 				const tries = await submitTuiCommand(pi, "/probe-crash", () => !pi.running() || pi.output().includes(CRASH_TEXT));

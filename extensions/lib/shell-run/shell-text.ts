@@ -95,6 +95,8 @@ export interface ShellResultText {
 	noBackgroundShell(p: { label: string }): string;
 	/** A background run's launch result; `logPath` is its output file, when it has one. */
 	backgroundStarted(p: { id: string; logPath?: string }): string;
+	/** The result of a foreground run the user sent to the background with the key. */
+	manuallyBackgrounded(p: { id: string; logPath?: string }): string;
 	/** How a run ended, as the one-shot result and the task notification put it ("completed", "failed (exit code 2)"). */
 	finish(end: ShellEnd): string;
 	/** Why a run failed when an exit code does not say (a timeout, a signal), for the task notification; undefined otherwise. */
@@ -214,6 +216,7 @@ export const shellResultWords = (live: LiveTools): ShellResultText => ({
 			live,
 			STARTED_PASSAGES,
 		),
+	manuallyBackgrounded: ({ id, logPath }) => `Command was manually backgrounded by user with ID: ${id}.${logPath ? ` Output is being written to: ${logPath}.` : ""}`,
 	finish,
 	failureDetail,
 	ranToEnd: ({ label, id, description, end, note, deadline, logPath, output }) => {

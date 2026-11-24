@@ -73,54 +73,125 @@ export function spawnOwnedShell({ shell, command, cwd }: { shell: ShellSpawn; co
 	return spawnOwnedTree((detached) => spawnShellCommand(shell, command, { cwd, ...detached, stdio: ["ignore", "pipe", "pipe"] }));
 }
 
+/**
+ * What a shell task keeps of its output: the raw bytes in `logPath`, and the
+ * last `STORED_OUTPUT_CAP` characters in memory for `task.output()`. A
+ * background shell and a foreground run a key sent to the background
+ * (foreground-run.ts) share it.
+ */
+export interface OutputSpool {
+	/** The file while it holds everything written; undefined once a write failed, so a partial file is never named as the output. */
+	logPath(): string | undefined;
+	/** A writer for one stream: its own decoder, so a UTF-8 character split across two reads stays one character. */
+	appender(): (chunk: Buffer) => void;
+	/** Add text that is not the command's output (a spawn error). */
+	note(text: string): void;
+	/** What `task.output()` returns. */
+	text(running: boolean): string;
+	/** Flush the decoders and the file; resolves once `logPath` holds what `text` returns, or was dropped. */
+	close(): Promise<void>;
+}
+
+export function createOutputSpool(logPath: string | undefined, text: StartBackgroundBashOptions["text"]): OutputSpool {
+	let stored = "";
+	let overflowed = false;
+	let path = logPath;
+	const log = logPath ? createWriteStream(logPath, { flags: "a" }) : undefined;
+	// Never name a missing or partial file as the full output.
+	log?.on("error", () => {
+		path = undefined;
+	});
+	const decoders: StringDecoder[] = [];
+	const add = (more: string) => {
+		const all = stored + more;
+		overflowed ||= all.length > STORED_OUTPUT_CAP;
+		stored = tailCap(all, STORED_OUTPUT_CAP, text.earlierTruncated);
+	};
+	return {
+		logPath: () => path,
+		appender: () => {
+			const decoder = new StringDecoder("utf8");
+			decoders.push(decoder);
+			return (chunk) => {
+				add(decoder.write(chunk));
+				// The log gets the raw bytes.
+				if (path) log?.write(chunk);
+			};
+		},
+		note: (more) => {
+			stored = stored ? `${stored}\n${more}` : more;
+		},
+		text: (running) => (overflowed && !path ? `${text.spoolLost({ keptChars: STORED_OUTPUT_CAP })}${stored}` : stored || (running ? "" : text.emptyOutput)),
+		close: () => {
+			// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
+			const rest = decoders.map((decoder) => decoder.end()).join("");
+			if (rest) add(rest);
+			// end() flushes asynchronously; the file must not be short of what
+			// text() returns when a reader is sent to it by the completion
+			// notification. `close` follows a clean end and an error alike; a
+			// stuck stream (a write that never calls back) must not keep the
+			// task running, so after a second it is dropped and the partial
+			// file is no longer named.
+			if (!log || log.closed) return Promise.resolve();
+			return new Promise((resolve) => {
+				const fallback = setTimeout(() => {
+					path = undefined;
+					log.destroy();
+					resolve();
+				}, 1_000);
+				log.once("close", () => {
+					clearTimeout(fallback);
+					resolve();
+				});
+				log.end();
+			});
+		},
+	};
+}
+
+/** A running shell as the task list holds it: a background run, or a foreground one sent there. */
+export function shellTask(p: Pick<BackgroundTask, "id" | "description" | "command" | "output" | "stop" | "finished"> & { logPath: () => string | undefined; startedAt?: number }): BackgroundTask {
+	return {
+		id: p.id,
+		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
+		kind: "bash",
+		description: p.description,
+		command: p.command,
+		status: "running",
+		startedAt: p.startedAt ?? Date.now(),
+		// Read each time: a failed write drops the file, so a partial one is never named.
+		get logPath() {
+			return p.logPath();
+		},
+		ownUI: true, // rendered live by the subagents panel's shell manager
+		output: p.output,
+		stop: p.stop,
+		finished: p.finished,
+	};
+}
+
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
 	const tree = spawnOwnedShell({ shell: options.shell ?? bashSpawnOrThrow(), command: options.command, cwd: options.cwd });
 	const child = tree.child;
 
-	let stored = "";
-	let overflowed = false;
-	let spoolFailed = false;
 	let ended = false;
 	let stopRequested = false;
 	let timedOut = false;
-	const log = options.logPath ? createWriteStream(options.logPath, { flags: "a" }) : undefined;
-	log?.on("error", () => {
-		// Never name a missing or partial file as the full output.
-		spoolFailed = true;
-		task.logPath = undefined;
-	});
-
-	// One streaming decoder per stream: a UTF-8 character split across two
-	// reads must not become two U+FFFD. The log gets the raw bytes.
-	const stdoutText = new StringDecoder("utf8");
-	const stderrText = new StringDecoder("utf8");
-	const appender = (decoder: StringDecoder) => (chunk: Buffer) => {
-		const text = stored + decoder.write(chunk);
-		overflowed ||= text.length > STORED_OUTPUT_CAP;
-		stored = tailCap(text, STORED_OUTPUT_CAP, options.text.earlierTruncated);
-		if (!spoolFailed) log?.write(chunk);
-	};
-	child.stdout?.on("data", appender(stdoutText));
-	child.stderr?.on("data", appender(stderrText));
+	const spool = createOutputSpool(options.logPath, options.text);
+	child.stdout?.on("data", spool.appender());
+	child.stderr?.on("data", spool.appender());
 
 	let finish!: () => void;
 	const finished = new Promise<void>((resolve) => {
 		finish = resolve;
 	});
 
-	const task: BackgroundTask = {
+	const task: BackgroundTask = shellTask({
 		id: options.id,
-		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
-		kind: "bash",
 		description: options.description,
 		command: options.command,
-		status: "running",
-		startedAt: Date.now(),
-		logPath: options.logPath,
-		ownUI: true, // rendered live by the subagents panel's shell manager
-		output: () => overflowed && !task.logPath
-			? `${options.text.spoolLost({ keptChars: STORED_OUTPUT_CAP })}${stored}`
-			: stored || (task.status === "running" ? "" : options.text.emptyOutput),
+		logPath: spool.logPath,
+		output: () => spool.text(task.status === "running"),
 		stop: () => {
 			stopRequested = true;
 			// SIGTERM the tree, SIGKILL after the grace: a command that traps TERM
@@ -128,7 +199,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 			tree.stop(KILL_GRACE_MS);
 		},
 		finished,
-	};
+	});
 
 	let timer: NodeJS.Timeout | undefined;
 	if (options.timeoutSeconds && options.timeoutSeconds > 0) {
@@ -143,39 +214,13 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		if (ended) return;
 		ended = true;
 		if (timer) clearTimeout(timer);
-		// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
-		const rest = stdoutText.end() + stderrText.end();
-		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP, options.text.earlierTruncated);
-		let completed = false;
-		const complete = () => {
-			if (completed) return;
-			completed = true;
+		// `finished` resolves only once the log file holds what output() returns.
+		void spool.close().then(() => {
 			task.status = status;
 			task.finishedAt = Date.now();
 			finish();
 			options.onFinished(task, { exitCode, signal, stopped: stopRequested, timedOut, output: task.output(), logPath: task.logPath });
-		};
-		// end() flushes asynchronously; `finished` must not resolve while the
-		// log file is still short of what output() returns, or a reader sent to
-		// logPath by the completion notification can see a truncated file.
-		// `close` follows a clean end and an error alike; a stuck stream (a
-		// write that never calls back) must not keep the task running, so after
-		// a second it is dropped and the partial file is no longer named.
-		if (log && !log.closed) {
-			const fallback = setTimeout(() => {
-				spoolFailed = true;
-				task.logPath = undefined;
-				log.destroy();
-				complete();
-			}, 1_000);
-			log.once("close", () => {
-				clearTimeout(fallback);
-				complete();
-			});
-			log.end();
-		} else {
-			complete();
-		}
+		});
 	};
 
 	// Exit plus a short stdio grace, not `close`: a descendant the stop missed
@@ -183,7 +228,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	waitForChildExit(child).then(
 		({ code, signal }) => end(stopRequested ? "stopped" : timedOut || code !== 0 ? "failed" : "completed", code, signal),
 		(error: Error) => {
-			stored = stored ? `${stored}\n${error.message}` : error.message;
+			spool.note(error.message);
 			end("failed", null, null);
 		},
 	);
