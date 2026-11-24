@@ -337,7 +337,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
 					const redirect = webFetchResultText(view.live).redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
-					return { content: [{ type: "text", text: redirect }], details: { url: target, bytes: Buffer.byteLength(redirect), status: error.status } };
+					return { content: [{ type: "text", text: redirect }], details: { url: target, status: error.status } };
 				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";

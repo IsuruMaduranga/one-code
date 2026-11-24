@@ -93,6 +93,11 @@ export class ForegroundRun {
 		return this.state === "running";
 	}
 
+	/** True once a detach took. */
+	private get released(): boolean {
+		return this.state === "detached";
+	}
+
 	/** What the task's `output()` returns once the run is in the background. */
 	output(): string {
 		return this.spool.text(this.state !== "ended");
@@ -162,7 +167,8 @@ export class ForegroundRun {
 				(error: unknown) => ({ error }),
 			);
 		const first = await Promise.race([settled, this.detached.then(() => "released" as const)]);
-		if (first === "released") {
+		// The state decides, not the race: a detach that took owns the command's end even if the command settled first.
+		if (first === "released" || this.released) {
 			// The command lives on; its end is the task's, not this call's.
 			void settled.then(async (outcome) => {
 				this.state = "ended";

@@ -108,7 +108,11 @@ function wholeOutput(path: string, inlineMax: number): string | undefined {
 /** Delete the spill file an abandoned run's error names, when pi wrote one. */
 export function dropSpill(error: unknown): void {
 	const from = error instanceof Error ? piSpillPath(error.message) : undefined;
-	if (from) rmSync(from, { force: true });
+	try {
+		if (from) rmSync(from, { force: true });
+	} catch {
+		// Best effort: a file that cannot be deleted (held open, on Windows) is left behind.
+	}
 }
 
 type TextResult = { content: Array<{ type: string; text?: string }>; details?: unknown };

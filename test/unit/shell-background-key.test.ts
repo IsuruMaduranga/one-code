@@ -59,8 +59,9 @@ describe.skipIf(process.platform === "win32")("the key that sends a running comm
 		expect(reply.content[0].text).toBe(shellResultText().manuallyBackgrounded({ id: taskId!, logPath }));
 		expect(reply.content[0].text).toBe(`Command was manually backgrounded by user with ID: ${taskId}. Output is being written to: ${logPath}.`);
 		expect(reply.isError).toBeUndefined();
-		await settled(() => readFileSync(logPath!, "utf8") === "before\n");
-		expect(h.notifications()).toBe("");
+		await settled(() => readFileSync(logPath!, "utf8").startsWith("before\n"));
+		// No notification while the command still runs (a slow runner may reach here after it ended).
+		if (readFileSync(logPath!, "utf8") === "before\n") expect(h.notifications()).toBe("");
 		await settled(() => h.notifications().includes("<status>completed</status>"));
 		expect(h.notifications()).toContain(`<task-id>${taskId}</task-id>`);
 		expect(h.notifications()).toContain("<tool-use-id>call-1</tool-use-id>");

@@ -466,7 +466,8 @@ export class SubagentRuntime {
 						firstNonEmptyLine(textContent(stripReminderBlocks(e.result as { content?: Array<{ type: string; text?: string }> }))),
 						200,
 					);
-					if (shown) sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
+					// A hidden tool's failure still shows, as in the main transcript.
+					if (shown || e.isError) sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
 				} else if (e.type === "message_update" && e.message?.role === "assistant") {
 					sink?.onStreaming?.(e.message);
 				} else if (e.type === "message_end" && e.message?.role === "assistant") {

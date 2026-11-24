@@ -63,13 +63,15 @@ interface WorktreeDetails {
 	worktreeState?: WorktreeState | null;
 	/** How exit_worktree left, for the transcript row only. */
 	exited?: { action: "keep" | "remove"; branch?: string; originalCwd: string };
+	/** Why the branch of an attached worktree could not be read, for the transcript row only. */
+	branchError?: string;
 }
 
 /** Claude Code's enter_worktree row: the model reads where commands now run and how to return. */
 function enteredDisplay(details: WorktreeDetails | undefined): string | undefined {
 	const state = details?.worktreeState;
 	if (!state) return undefined;
-	return `Switched to worktree${state.branch ? ` on branch ${state.branch}` : ""}\n${state.path}`;
+	return `Switched to worktree${state.branch ? ` on branch ${state.branch}` : ""}\n${state.path}${details.branchError ? `\nCould not read its branch: ${details.branchError}` : ""}`;
 }
 
 /** Claude Code's exit_worktree row. */
@@ -270,7 +272,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				applyState(next, toolCallId);
 				return {
 					content: [{ type: "text", text: worktreeResultText.enter.switched({ session: next, branchError }) }],
-					details: { worktreeState: next } satisfies WorktreeDetails,
+					details: { worktreeState: next, branchError } satisfies WorktreeDetails,
 				};
 			}
 
