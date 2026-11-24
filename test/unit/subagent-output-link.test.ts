@@ -49,6 +49,16 @@ describe.skipIf(process.platform === "win32")("a resident agent's output file", 
 		expect(lstatSync(path).isSymbolicLink()).toBe(true);
 	});
 
+	it("keeps the text spool where a link is refused", () => {
+		mkdirSync(join(dir, "tasks"));
+		writeFileSync(path, "reply so far");
+		// A folder in the way of the link's temporary name stands in for a refused symlink.
+		mkdirSync(`${path}.link`);
+		writeFileSync(join(`${path}.link`, "held"), "");
+		expect(linkOutputFile(path, target)).toBe(false);
+		expect(readFileSync(path, "utf8")).toBe("reply so far");
+	});
+
 	it("reports a link it cannot make", () => {
 		writeFileSync(join(dir, "tasks"), "a file where the folder should be");
 		expect(linkOutputFile(path, target)).toBe(false);

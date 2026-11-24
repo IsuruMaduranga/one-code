@@ -333,16 +333,19 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 							logPath: () => run.outputFile(),
 							output: () => run.output(),
 							stop: () => run.stop(),
+							startedAt: run.startedAt,
+							// Settled before the completion is sent, as a background run's is: `finished` never rejects.
 							finished: run.ended.then((end) => {
 								task.status = end.stopped ? "stopped" : end.exitCode === 0 ? "completed" : "failed";
 								task.finishedAt = Date.now();
-								notifyFinished(task, { exitCode: end.exitCode, signal: null, stopped: end.stopped, timedOut: false, output: run.output(), logPath: task.logPath });
 							}),
 						});
+						void run.ended.then((end) => task.finished.then(() => notifyFinished(task, { exitCode: end.exitCode, signal: null, stopped: end.stopped, timedOut: false, output: run.output(), logPath: task.logPath })));
 						pi.events.emit(TASK_REGISTER_CHANNEL, task);
 						return {
-							content: [{ type: "text" as const, text: words().manuallyBackgrounded({ id, ...(logPath ? { logPath } : {}) }) }],
-							details: { taskId: id, logPath },
+							// The file as the spool names it now: a write that failed already dropped it.
+							content: [{ type: "text" as const, text: words().manuallyBackgrounded({ id, ...(task.logPath ? { logPath: task.logPath } : {}) }) }],
+							details: { taskId: id, logPath: task.logPath },
 						};
 					}
 					await run.discard();

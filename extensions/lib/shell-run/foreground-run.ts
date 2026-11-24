@@ -49,6 +49,9 @@ export class ForegroundRun {
 	/** After a detach: resolves when the command ends, its output file flushed. Never rejects. */
 	readonly ended: Promise<ForegroundRunEnd>;
 
+	/** When the run was made, for the task a detach turns it into. */
+	readonly startedAt = Date.now();
+
 	private readonly process = new AbortController();
 	private readonly spool: OutputSpool;
 	private readonly unhook: () => void;
@@ -106,7 +109,8 @@ export class ForegroundRun {
 	 * is not running (not started yet, or already over).
 	 */
 	detach(): boolean {
-		if (this.state !== "running") return false;
+		// A command already being stopped (its deadline, an Esc) is not kept: its end is that stop's to report.
+		if (this.state !== "running" || this.process.signal.aborted) return false;
 		this.state = "detached";
 		if (this.timer) clearTimeout(this.timer);
 		this.unhook();
@@ -124,7 +128,11 @@ export class ForegroundRun {
 	async discard(): Promise<void> {
 		this.unhook();
 		await this.spool.close();
-		if (this.logPath) rmSync(this.logPath, { force: true });
+		try {
+			if (this.logPath) rmSync(this.logPath, { force: true });
+		} catch {
+			// Best effort (a file another process holds, on Windows): the command's result must not turn into this error.
+		}
 	}
 
 	/** Run `command` through `inner`; called by the wrapped operations. */

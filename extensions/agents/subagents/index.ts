@@ -1443,7 +1443,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 		const sessionFile = registry.sessionFileFor(record);
 		if (sessionFile && linkOutputFile(path, sessionFile)) return true;
 		// Never through a link: the write would replace the run's transcript.
-		if (text && !isOutputLink(path)) writeSpool(path, text);
+		if (!isOutputLink(path)) writeSpool(path, text);
 		return false;
 	};
 
@@ -2215,7 +2215,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 			description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
 			status: "running",
 			startedAt: Date.now(),
-			logPath,
+			// Only while it is the text spool: `task_output` names this file as the report's full text, and a link holds the transcript.
+			get logPath() {
+				return logPath && !isOutputLink(logPath) ? logPath : undefined;
+			},
 			output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
 			stop: () => stopAgent(p.record.taskId, handle),
 			resident: () => !handle.exited(),

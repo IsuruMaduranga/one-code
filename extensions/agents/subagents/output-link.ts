@@ -10,7 +10,7 @@
  * again when it is gone.
  */
 
-import { lstatSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
+import { lstatSync, mkdirSync, readlinkSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
@@ -24,12 +24,20 @@ export function linkOutputFile(path: string, target: string): boolean {
 	} catch {
 		// absent, or a text spool written before the session file existed
 	}
+	// Made beside the path and renamed over it: where a link is refused, the text spool already there stays.
+	const made = `${path}.link`;
 	try {
 		mkdirSync(dirname(path), { recursive: true });
-		rmSync(path, { force: true });
-		symlinkSync(target, path);
+		rmSync(made, { force: true });
+		symlinkSync(target, made);
+		renameSync(made, path);
 		return true;
 	} catch {
+		try {
+			rmSync(made, { force: true });
+		} catch {
+			// nothing was made (the folder itself is missing or not a folder)
+		}
 		return false;
 	}
 }

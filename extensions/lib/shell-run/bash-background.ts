@@ -150,7 +150,7 @@ export function createOutputSpool(logPath: string | undefined, text: StartBackgr
 }
 
 /** A running shell as the task list holds it: a background run, or a foreground one sent there. */
-export function shellTask(p: Pick<BackgroundTask, "id" | "description" | "command" | "output" | "stop" | "finished"> & { logPath: () => string | undefined }): BackgroundTask {
+export function shellTask(p: Pick<BackgroundTask, "id" | "description" | "command" | "output" | "stop" | "finished"> & { logPath: () => string | undefined; startedAt?: number }): BackgroundTask {
 	return {
 		id: p.id,
 		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
@@ -158,7 +158,7 @@ export function shellTask(p: Pick<BackgroundTask, "id" | "description" | "comman
 		description: p.description,
 		command: p.command,
 		status: "running",
-		startedAt: Date.now(),
+		startedAt: p.startedAt ?? Date.now(),
 		// Read each time: a failed write drops the file, so a partial one is never named.
 		get logPath() {
 			return p.logPath();

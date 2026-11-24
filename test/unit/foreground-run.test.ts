@@ -104,6 +104,8 @@ describe("a detachable foreground run", () => {
 		const run = new ForegroundRun(undefined, text, caller.signal);
 		const { result } = start(run, fake.inner);
 		caller.abort();
+		// A command already being stopped is not kept running in the background.
+		expect(run.detach()).toBe(false);
 		await expect(result).rejects.toThrow("aborted");
 	});
 
