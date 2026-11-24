@@ -23,6 +23,7 @@
  * any library's listener would: pi then survives a SIGINT.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { writeFileSync } from "node:fs";
 import { installScriptedModel, type ToolCall } from "./golden-fixture.ts";
 
 /** A path for a bash command line on every platform (Git Bash reads forward slashes). */
@@ -54,6 +55,8 @@ function roundsFor(text: string): ToolCall[][] {
 	return [
 		[call("load", "tool_search", { query: "select:monitor" }), ...first],
 		[call("monitor", "monitor", { command: procCommand("sleep", "monitor"), description: "probe monitor", timeout_ms: 1_800_000 })],
+		// A foreground command that holds the turn until the probe presses ctrl+b (PROBE_FG, interactive runs).
+		...(text.includes("PROBE_FG") ? [[call("fg_detached", "bash", { command: procCommand("sleep", "fg-detached"), description: "probe fg", timeout: 600_000 })]] : []),
 	];
 }
 
@@ -64,6 +67,11 @@ export default function exitProbeFixture(pi: ExtensionAPI) {
 		roundsFor,
 		// A background bash that finishes at once is steered in mid-script; the script reads past it.
 		ignore: (message) => message.role === "user" && JSON.stringify(message.content).includes("<task-notification>"),
+	});
+	// The probe waits for this file: proof that the key sent the foreground command to the background.
+	pi.on("tool_result", (event) => {
+		const file = process.env.EXIT_PROBE_DETACHED;
+		if (file && JSON.stringify(event.content).includes("manually backgrounded")) writeFileSync(file, "");
 	});
 	pi.registerCommand("probe-crash", {
 		description: "Throw outside every handler (the exit probe's crash ending)",

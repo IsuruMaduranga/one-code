@@ -42,6 +42,7 @@ describe("shortcutColumns", () => {
 				"ctrl+\\ to toggle tasks",
 				"\\ then enter for newline",
 				"↓ to manage agents",
+				"ctrl+b to run in background",
 			],
 			[
 				"ctrl+- to undo",
@@ -97,8 +98,8 @@ describe("shortcutLines", () => {
 			const lines = shortcutLines(columns, width);
 			for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 		}
-		expect(shortcutLines(columns, 70)).toHaveLength(11);
-		expect(shortcutLines(columns, 40)).toHaveLength(22);
+		expect(shortcutLines(columns, 70)).toHaveLength(12);
+		expect(shortcutLines(columns, 40)).toHaveLength(23);
 		expect(shortcutLines(columns, 20).some((line) => line.endsWith("…"))).toBe(true);
 	});
 });

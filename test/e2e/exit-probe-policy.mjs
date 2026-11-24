@@ -20,6 +20,7 @@ export const SPAWNERS = [
 	{ id: "bg-running", what: "background bash still running" },
 	{ id: "monitor", what: "monitor still running (30-minute deadline)" },
 	{ id: "sub-daemon", what: "worker a subagent's background bash leaves" },
+	{ id: "fg-detached", what: "foreground bash sent to the background with ctrl+b (interactive runs only: it needs the key)" },
 ];
 
 /**
@@ -27,7 +28,9 @@ export const SPAWNERS = [
  * the old session started are judged. `posix`: needs signals or a pty.
  * `starts`: the spawners the run's script exercises.
  */
-const ALL = SPAWNERS.map((s) => s.id);
+const TUI = SPAWNERS.map((s) => s.id);
+/** What a run with no terminal can start: everything but the spawner that needs a key press. */
+const ALL = TUI.filter((id) => id !== "fg-detached");
 const PRINT = ["lsp", "mcp", "hook", "bg-daemon", "bg-noterm", "sub-daemon"];
 export const ENDINGS = [
 	{ id: "print-done", label: "one-shot -p run finishes", starts: PRINT },
@@ -37,8 +40,8 @@ export const ENDINGS = [
 	{ id: "rpc-sighup", label: "SIGHUP to pi", posix: true, starts: ALL },
 	{ id: "rpc-sigint", label: "SIGINT twice to pi's process group (ctrl+c)", posix: true, starts: ALL },
 	{ id: "rpc-crash", label: "uncaught exception in RPC mode (Node's default exit)", starts: ALL },
-	{ id: "tui-crash", label: "uncaught exception in interactive mode (pi's crash handler)", posix: true, tui: true, starts: ALL },
-	{ id: "tui-ctrlc", label: "ctrl+c twice in interactive mode", posix: true, tui: true, starts: ALL },
+	{ id: "tui-crash", label: "uncaught exception in interactive mode (pi's crash handler)", posix: true, tui: true, starts: TUI },
+	{ id: "tui-ctrlc", label: "ctrl+c twice in interactive mode", posix: true, tui: true, starts: TUI },
 	{
 		id: "rpc-sigint-held",
 		label: "SIGINT to pi while another listener holds it (pi keeps running: nothing may be ended)",

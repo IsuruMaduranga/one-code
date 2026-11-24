@@ -88,6 +88,7 @@ export function shortcutColumns(sources: ShortcutSources): Shortcut[][] {
 			{ key: sources.taskToggleKey, text: "to toggle tasks" },
 			{ key: "\\ then enter", text: "for newline" },
 			{ key: "↓", text: "to manage agents" },
+			{ key: "ctrl+b", text: "to run in background" },
 		],
 		[
 			{ binding: "tui.editor.undo", key: "ctrl+-", text: "to undo" },
