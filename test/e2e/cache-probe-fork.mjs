@@ -11,7 +11,7 @@
  *   node test/e2e/cache-probe-fork.mjs <session-dir> --model <provider/model>
  *
  * Reads the run's session files: the main session (top level) and the fork's
- * (`subagents/<task>/`). The parent's request is its reply that called
+ * (`<session id>/subagents/<task>/`). The parent's request is its reply that called
  * Agent; the fork's first reply is the first assistant entry in the fork's file
  * timestamped after that call (the fork's file opens with copies of the
  * parent's entries). The fork must read the parent's whole prompt, less one
@@ -77,13 +77,19 @@ const mainFile = mainFiles[0];
 const spawn = assistants(mainFile).find(({ message }) => Array.isArray(message.content) && message.content.some((block) => block?.type === "toolCall" && block.name === "Agent"));
 if (!spawn) fail("the parent never called Agent (the model did not fork)");
 
-const subagents = join(dir, "subagents");
-let forkFiles = [];
-try {
-	forkFiles = readdirSync(subagents).flatMap((task) => jsonlIn(join(subagents, task)));
-} catch {
-	// no subagents folder: no fork ran
+/** The names in `folder`, or none when it does not exist. */
+function namesIn(folder) {
+	try {
+		return readdirSync(folder);
+	} catch {
+		return [];
+	}
 }
+// A session's subagent runs are in its own folder, `<session id>/subagents/<task>/`.
+const forkFiles = namesIn(dir).flatMap((session) => {
+	const subagents = join(dir, session, "subagents");
+	return namesIn(subagents).flatMap((task) => jsonlIn(join(subagents, task)));
+});
 const forkReplies = forkFiles.flatMap((file) => assistants(file)).filter(({ at }) => at > spawn.at).sort((a, b) => a.at - b.at);
 if (forkReplies.length === 0) fail("no fork reply after the Agent call (the fork did not run)");
 
