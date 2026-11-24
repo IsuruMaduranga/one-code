@@ -149,6 +149,27 @@ export function createOutputSpool(logPath: string | undefined, text: StartBackgr
 	};
 }
 
+/** A running shell as the task list holds it: a background run, or a foreground one sent there. */
+export function shellTask(p: Pick<BackgroundTask, "id" | "description" | "command" | "output" | "stop" | "finished"> & { logPath: () => string | undefined }): BackgroundTask {
+	return {
+		id: p.id,
+		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
+		kind: "bash",
+		description: p.description,
+		command: p.command,
+		status: "running",
+		startedAt: Date.now(),
+		// Read each time: a failed write drops the file, so a partial one is never named.
+		get logPath() {
+			return p.logPath();
+		},
+		ownUI: true, // rendered live by the subagents panel's shell manager
+		output: p.output,
+		stop: p.stop,
+		finished: p.finished,
+	};
+}
+
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
 	const tree = spawnOwnedShell({ shell: options.shell ?? bashSpawnOrThrow(), command: options.command, cwd: options.cwd });
 	const child = tree.child;
@@ -165,18 +186,11 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		finish = resolve;
 	});
 
-	const task: BackgroundTask = {
+	const task: BackgroundTask = shellTask({
 		id: options.id,
-		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
-		kind: "bash",
 		description: options.description,
 		command: options.command,
-		status: "running",
-		startedAt: Date.now(),
-		get logPath() {
-			return spool.logPath();
-		},
-		ownUI: true, // rendered live by the subagents panel's shell manager
+		logPath: spool.logPath,
 		output: () => spool.text(task.status === "running"),
 		stop: () => {
 			stopRequested = true;
@@ -185,7 +199,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 			tree.stop(KILL_GRACE_MS);
 		},
 		finished,
-	};
+	});
 
 	let timer: NodeJS.Timeout | undefined;
 	if (options.timeoutSeconds && options.timeoutSeconds > 0) {

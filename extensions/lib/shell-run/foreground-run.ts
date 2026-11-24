@@ -19,6 +19,7 @@
  */
 
 import { rmSync } from "node:fs";
+import { whenAborted } from "../core/abort.ts";
 import { createOutputSpool, type OutputSpool, type StartBackgroundBashOptions } from "./bash-background.ts";
 
 /** pi's shell operations (`BashOperations`), structurally. */
@@ -55,7 +56,6 @@ export class ForegroundRun {
 	private timer: NodeJS.Timeout | undefined;
 	private timedOut = false;
 	private stopRequested = false;
-	private letGo: (() => void) | undefined;
 	private markDetached!: () => void;
 	private markEnded!: (end: ForegroundRunEnd) => void;
 
@@ -64,9 +64,12 @@ export class ForegroundRun {
 		text: StartBackgroundBashOptions["text"],
 		caller?: AbortSignal,
 	) {
-		// pi's tool sees a signal that never aborts by itself: the wrapper turns
-		// the caller's abort into a stop of the process while the run is attached.
-		this.signal = new AbortController().signal;
+		// pi's tool sees a signal of the run's own, which follows the caller's
+		// abort only while the run is attached. Should pi ever hand its
+		// operations another signal, the lookup misses and the command runs
+		// undetachable, but an Esc still stops it.
+		const tool = new AbortController();
+		this.signal = tool.signal;
 		this.spool = createOutputSpool(logPath, text);
 		this.detached = new Promise((resolve) => {
 			this.markDetached = resolve;
@@ -74,12 +77,11 @@ export class ForegroundRun {
 		this.ended = new Promise((resolve) => {
 			this.markEnded = resolve;
 		});
-		const onAbort = () => {
-			if (this.state !== "detached") this.process.abort();
-		};
-		if (caller?.aborted) onAbort();
-		else caller?.addEventListener("abort", onAbort, { once: true });
-		this.unhook = () => caller?.removeEventListener("abort", onAbort);
+		this.unhook = whenAborted(caller, () => {
+			if (this.state === "detached") return;
+			this.process.abort();
+			tool.abort();
+		});
 		runs.set(this.signal, this);
 	}
 
@@ -109,7 +111,6 @@ export class ForegroundRun {
 		if (this.timer) clearTimeout(this.timer);
 		this.unhook();
 		this.markDetached();
-		this.letGo?.();
 		return true;
 	}
 
@@ -152,10 +153,7 @@ export class ForegroundRun {
 				(result) => ({ result }),
 				(error: unknown) => ({ error }),
 			);
-		const released = new Promise<"released">((resolve) => {
-			this.letGo = () => resolve("released");
-		});
-		const first = await Promise.race([settled, released]);
+		const first = await Promise.race([settled, this.detached.then(() => "released" as const)]);
 		if (first === "released") {
 			// The command lives on; its end is the task's, not this call's.
 			void settled.then(async (outcome) => {

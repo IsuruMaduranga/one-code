@@ -101,6 +101,14 @@ describe.skipIf(process.platform === "win32")("the key that sends a running comm
 		expect(readFileSync(logPath!, "utf8")).toBe("before\n");
 	});
 
+	it("still stops a foreground command on the call's abort, through pi's own tool", async () => {
+		const h = await mount();
+		const abort = new AbortController();
+		const result = h.fake.tools.get("bash")!.execute("call-2", { command: "echo before; sleep 30; echo after" }, abort.signal, undefined, h.ctx) as Promise<Result>;
+		setTimeout(() => abort.abort(), 300);
+		await expect(result).rejects.toThrow(/before[\s\S]*Command aborted/);
+	});
+
 	it("takes no key in a one-shot run, which has nowhere to deliver a completion", async () => {
 		const h = await mount("print");
 		const { printed, result } = h.run("echo before; sleep 0.3; echo after");

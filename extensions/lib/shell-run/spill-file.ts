@@ -23,7 +23,7 @@
  * output, so the block names it and nothing is copied.
  */
 
-import { copyFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { persistedFilePreview, persistIfLarge } from "../request/persisted-output.ts";
@@ -108,12 +108,7 @@ function wholeOutput(path: string, inlineMax: number): string | undefined {
 /** Delete the spill file an abandoned run's error names, when pi wrote one. */
 export function dropSpill(error: unknown): void {
 	const from = error instanceof Error ? piSpillPath(error.message) : undefined;
-	if (!from) return;
-	try {
-		unlinkSync(from);
-	} catch {
-		// already gone
-	}
+	if (from) rmSync(from, { force: true });
 }
 
 type TextResult = { content: Array<{ type: string; text?: string }>; details?: unknown };

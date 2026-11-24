@@ -14,7 +14,7 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { type Static, type TObject, type TProperties, Type } from "typebox";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../agents/task-registry.ts";
-import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./bash-background.ts";
+import { type BashFinishSummary, runBackgroundBashBlocking, shellTask, startBackgroundBash, tailCap } from "./bash-background.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, TASK_COMPLETION_KEY, type TaskStatus, taskNotification } from "../notify/notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../shell/original-command.ts";
 import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../request/persisted-output.ts";
@@ -27,7 +27,7 @@ import type { ShellSpawn } from "./shell-spawn.ts";
 import { dropSpill, keepSpillReadable } from "./spill-file.ts";
 import { ForegroundRun } from "./foreground-run.ts";
 import { isKeyRelease, keyId } from "../ui/key-input.ts";
-import { ccWrapBuiltinRenderers, withResultDisplay } from "../ui/tui-render.ts";
+import { ccWrapBuiltinRenderers, elbowIndent, linesComponent, withResultDisplay } from "../ui/tui-render.ts";
 import { shellBlockedLine } from "../ui/result-summary-shell.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
 import { shellResultText } from "./shell-text.ts";
@@ -179,15 +179,16 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// The key reaches the editor as cursor-left unless a command is running:
 	// only then is it taken. Every running command goes, as in Claude Code; one
 	// still waiting on its permission prompt has not started and stays.
+	// Each shell tool listens for its own runs and pi-tui stops at the first
+	// listener that takes a key, so a bash and a powershell command running
+	// side by side need the key once each.
 	let stopListening: (() => void) | undefined;
-	/** The key works in this session, so a running row says so. */
-	let keyOffered = false;
 	if (spec.backgroundKey) {
 		pi.on("session_start", (_event, ctx) => {
 			stopListening?.();
 			stopListening = undefined;
-			keyOffered = ctx.hasUI && sessionOutlivesTurn(ctx.mode);
-			if (!keyOffered) return;
+			// The listener is also what a running row reads to say the key works.
+			if (!ctx.hasUI || !sessionOutlivesTurn(ctx.mode)) return;
 			stopListening = ctx.ui.onTerminalInput((data) => {
 				// A kitty terminal sends a release after every press; it is not a second key.
 				if (foreground.size === 0 || isKeyRelease(data) || keyId(data) !== BACKGROUND_KEY) return undefined;
@@ -221,17 +222,15 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// A row still running after two seconds names the key under its output.
 	const renderResult: typeof wrapped.renderResult = (result, options, theme, context) => {
 		const shown = wrapped.renderResult(result, options, theme, context);
-		if (!options.isPartial || !keyOffered || !context?.state) return shown;
+		if (!options.isPartial || !stopListening || !context?.state) return shown;
 		const startedAt = (context.state.ccRunningSince ??= Date.now()) as number;
 		if (Date.now() - startedAt < BACKGROUND_HINT_AFTER_MS) return shown;
 		const hint = theme.fg("dim", backgroundHint());
-		return {
-			render: (width: number) => {
-				const lines = shown.render(width);
-				return [...lines, lines.length > 0 ? `     ${hint}` : `  ⎿  ${hint}`];
-			},
-			invalidate: () => shown.invalidate?.(),
-		};
+		const drawn = linesComponent((width) => {
+			const lines = shown.render(width);
+			return lines.length > 0 ? [...lines, `     ${hint}`] : elbowIndent([hint]);
+		});
+		return { render: drawn.render, invalidate: () => (drawn.invalidate(), shown.invalidate?.()) };
 	};
 
 	const definition = {
@@ -314,9 +313,10 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 
 			if (!params.run_in_background) {
 				// The run writes `tasks/<id>.output` from its first byte and can be let
-				// go of while it runs (foreground-run.ts). Only where the session
-				// outlives the turn: a one-shot run has nowhere to deliver a completion.
-				const run = sessionOutlivesTurn(ctx.mode) ? new ForegroundRun(logPath, words(), signal) : undefined;
+				// go of while it runs (foreground-run.ts). Only where the key is
+				// offered: a one-shot run has nowhere to deliver a completion, and
+				// a child session has no terminal.
+				const run = stopListening ? new ForegroundRun(logPath, words(), signal) : undefined;
 				if (run) foreground.add(run);
 				const executing = (viaBash ? viaBash.foreground(ctx.cwd) : spec.foreground(ctx.cwd)).execute(toolCallId, { command: sandboxed.command, timeout: timeoutSeconds }, run?.signal ?? signal, onUpdate, ctx);
 				if (run) {
@@ -326,17 +326,11 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					if (first === "detached") {
 						// pi's tool ends with an abort nobody reads; a spill file it wrote is dropped.
 						void executing.then(undefined, (error: unknown) => dropSpill(error));
-						const task: BackgroundTask = {
+						const task: BackgroundTask = shellTask({
 							id,
-							kind: "bash",
 							description,
 							command: params.command,
-							status: "running",
-							startedAt: Date.now(),
-							get logPath() {
-								return run.outputFile();
-							},
-							ownUI: true,
+							logPath: () => run.outputFile(),
 							output: () => run.output(),
 							stop: () => run.stop(),
 							finished: run.ended.then((end) => {
@@ -344,7 +338,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 								task.finishedAt = Date.now();
 								notifyFinished(task, { exitCode: end.exitCode, signal: null, stopped: end.stopped, timedOut: false, output: run.output(), logPath: task.logPath });
 							}),
-						};
+						});
 						pi.events.emit(TASK_REGISTER_CHANNEL, task);
 						return {
 							content: [{ type: "text" as const, text: words().manuallyBackgrounded({ id, ...(logPath ? { logPath } : {}) }) }],

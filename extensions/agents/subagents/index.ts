@@ -1435,15 +1435,16 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/**
 	 * Keep a resident's output file current: a link to its session file once
 	 * pi has written one (output-link.ts), and until then, or where a link
-	 * cannot be made, a spool of the turn's text so far.
+	 * cannot be made, a spool of the turn's text so far. True once it is the link.
 	 */
-	const updateOutputFile = (record: AgentRunRecord, text: string) => {
+	const updateOutputFile = (record: AgentRunRecord, text: string): boolean => {
 		const path = record.outputFile;
-		if (!path) return;
+		if (!path) return false;
 		const sessionFile = registry.sessionFileFor(record);
-		if (sessionFile && linkOutputFile(path, sessionFile)) return;
+		if (sessionFile && linkOutputFile(path, sessionFile)) return true;
 		// Never through a link: the write would replace the run's transcript.
 		if (text && !isOutputLink(path)) writeSpool(path, text);
+		return false;
 	};
 
 	/**
@@ -2037,6 +2038,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 
 		const logPath = outputLogPath(p.record);
 		let lastLogWrite = 0;
+		let linked = false;
 		let finish!: () => void;
 		const finished = new Promise<void>((resolve) => {
 			finish = resolve;
@@ -2122,9 +2124,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 				// turn text so far, and this path now carries EVERY run — an
 				// unthrottled sync rewrite would be O(n²) bytes on the hot path.
 				// onTurnEnd below flushes the final state, so the tail is never lost.
-				if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
+				// A link needs no upkeep while the turn runs; the turn's end checks it again.
+				if (logPath && text && !linked && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
 					lastLogWrite = Date.now();
-					updateOutputFile(p.record, text);
+					linked = updateOutputFile(p.record, text);
 				}
 			},
 			sink: live.sink,
@@ -2135,8 +2138,9 @@ function subagentsExtension(pi: ExtensionAPI) {
 			onTurnEnd: (outcome) => {
 				live.settle();
 				lastOutput = resident.handle.snapshot().text || outcome.output;
-				// Resolves the run's session file too, now that the child has written it.
-				updateOutputFile(p.record, lastOutput);
+				// Makes the link again when the temp folder was cleared while the agent worked.
+				linked = updateOutputFile(p.record, lastOutput);
+				// For a run with no output file: resolve its session file now that the child has written it.
 				registry.sessionFileFor(p.record);
 				// The handler is claimed now (so a message arriving mid-review pairs
 				// with the NEXT turn), but runs only once auto mode's hand-back
