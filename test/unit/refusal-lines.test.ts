@@ -20,7 +20,7 @@ describe("refusalLine", () => {
 			[{ kind: "userBlockedOutsideReads" }, "Blocked: outside the working directories"],
 			[{ kind: "unansweredResume" }, "Denied: the approval prompt went unanswered"],
 			[{ kind: "rule", rule: 'Bash(echo "x":*)' }, 'Denied by permission rule Bash(echo "x":*)'],
-			[{ kind: "classifierDenied", reason: "PII" }, "Denied by auto mode classifier"],
+			[{ kind: "classifierDenied", reason: "PII" }, "Blocked by auto mode"],
 			[{ kind: "childNoClassifier", outsideWorkingDir: true }, "Denied: this agent cannot reach auto mode's classifier"],
 			[{ kind: "childNeedsApproval", outsideWorkingDir: false }, "Needs approval, which an agent cannot ask for"],
 			[{ kind: "childNeedsApproval", outsideWorkingDir: true }, "Needs approval, which an agent cannot ask for"],

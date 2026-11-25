@@ -464,18 +464,20 @@ describe("a call the user rejected", () => {
 		expect(edit.renderResult(rejection(userDenialText("no")), opts, plainTheme, ctx({ path: "src/x.ts" })).render(120)).toEqual(["  ⎿  Tool use rejected"]);
 	});
 
-	it("draws auto mode's denial as Claude Code's one dim line, not the model's guidance", async () => {
+	it("draws auto mode's denial as Claude Code's two lines in both views, never the model's guidance", async () => {
 		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
 		const denial = rejection(refusalText({ kind: "classifierDenied", reason: "PII Data Handling" }));
-		const collapsed = { ...opts, expanded: false };
-		expect(bash.renderResult(denial, collapsed, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
-		expect(toolRenderers("Web Fetch").renderResult(denial, collapsed, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
-		// ctrl+o shows the whole text the model read.
-		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(400).join("\n")).toContain("PII Data Handling");
+		const row = ["  ⎿  Blocked by auto mode · /permissions to review", "     │ Auto mode: PII Data Handling"];
+		for (const view of [opts, { ...opts, expanded: false }]) {
+			expect(bash.renderResult(denial, view, plainTheme, ctx).render(120)).toEqual(row);
+			expect(toolRenderers("Web Fetch").renderResult(denial, view, plainTheme, ctx).render(120)).toEqual(row);
+		}
+		const blank = rejection(refusalText({ kind: "classifierDenied", reason: "" }));
+		expect(bash.renderResult(blank, opts, plainTheme, ctx).render(120)[1]).toBe("     │ Auto mode: No reason provided");
 	});
 
 	it("draws a classifier that gave no verdict or timed out as its reason only, not the model's guidance", async () => {

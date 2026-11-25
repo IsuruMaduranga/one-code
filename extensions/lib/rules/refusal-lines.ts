@@ -17,8 +17,15 @@ import { sanitizeTitle } from "../ui/terminal-text.ts";
 /** The first sentence of auto mode's denial. */
 export const CLASSIFIER_DENIED = "Permission for this action was denied by the auto-mode approval classifier.";
 
-/** Claude Code's row for an auto-mode denial, without its "· /feedback if incorrect" (One Code has no /feedback). */
-export const CLASSIFIER_DENIED_LINE = "Denied by auto mode classifier";
+/**
+ * Claude Code's row for an auto-mode denial (2.1.332, findings §103), without
+ * the link to its docs. The transcript adds the review hint and the reason
+ * line (lib/ui/tui-render.ts `rejectionLine`).
+ */
+export const CLASSIFIER_DENIED_LINE = "Blocked by auto mode";
+
+/** What sits between the denial's first sentence and its reason (permission-text.ts `classifierDenied`). */
+const CLASSIFIER_REASON_LEAD = `${CLASSIFIER_DENIED} Reason: `;
 
 /**
  * The opening of the guidance after auto mode's reason when the classifier
@@ -79,6 +86,16 @@ export const FLOOR_OPENING = "Auto mode blocked this call without consulting the
 /** Whether a tool result is auto mode's denial. */
 export function isClassifierDenial(text: string): boolean {
 	return text.startsWith(CLASSIFIER_DENIED);
+}
+
+/**
+ * The classifier's reason in auto mode's denial, or undefined when the text
+ * is not one. An empty reason reads "No reason provided", as Claude Code's does.
+ */
+export function classifierDenialReason(text: string): string | undefined {
+	if (!text.startsWith(CLASSIFIER_REASON_LEAD)) return undefined;
+	const reason = text.slice(CLASSIFIER_REASON_LEAD.length).split("\n\n")[0].trim();
+	return sanitizeTitle(reason) || "No reason provided";
 }
 
 /** A template's text as a pattern that matches any value in its slot, captured. */

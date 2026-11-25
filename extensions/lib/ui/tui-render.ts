@@ -20,7 +20,7 @@ import { framesToText, notificationBody, parseNotificationFrames } from "../noti
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 import { sanitizeDisplayText, sanitizeTitle } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
-import { refusalLine } from "../rules/refusal-lines.ts";
+import { CLASSIFIER_DENIED_LINE, classifierDenialReason, refusalLine } from "../rules/refusal-lines.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -623,14 +623,15 @@ export function displayToolPath(raw: string, cwd: string | undefined): string {
 }
 
 /**
- * The result line for a call the user rejected, or undefined when the result
- * is not a rejection. The model reads the whole rejection text; the transcript
- * shows Claude Code's short line instead: "User rejected write to <path>" for a
- * file tool rejected without a reason, "Tool use rejected" otherwise. A
- * rejection without a reason also stops the turn, and the turn's own
- * "Interrupted" line follows it. Auto mode's refusals are shortened the same
- * way, and so are the harness's other refusals: the transcript shows what
- * happened, never the model's guidance (lib/rules/refusal-lines.ts).
+ * The result lines for a call the user or the harness refused, or undefined
+ * when the result is not a refusal. The model reads the whole text; the
+ * transcript shows Claude Code's short line instead: "User rejected write to
+ * <path>" for a file tool rejected without a reason, "Tool use rejected"
+ * otherwise. A rejection without a reason also stops the turn, and the turn's
+ * own "Interrupted" line follows it. Auto mode's denial draws Claude Code's
+ * "Blocked by auto mode" line and the classifier's reason under it. The
+ * harness's other refusals draw what happened, never the model's guidance
+ * (lib/rules/refusal-lines.ts).
  */
 export function rejectionLine(
 	theme: ThemeLike,
@@ -638,17 +639,25 @@ export function rejectionLine(
 	isError: boolean,
 	expanded: boolean,
 	file?: { op: RejectedFileOp; path: string | undefined },
-): string | undefined {
+): string[] | undefined {
 	if (!isError) return undefined;
 	const text = textContent(result);
-	// A harness refusal: the model reads what happened and what to do next; the user sees what happened,
+	// Auto mode's denial is Claude Code's two lines in both views: what happened, then the classifier's reason.
+	const reason = classifierDenialReason(text);
+	if (reason !== undefined) {
+		return [
+			`  ⎿  ${theme.fg("dim", `${CLASSIFIER_DENIED_LINE} · /permissions to review`)}`,
+			`     ${theme.fg("dim", `│ Auto mode: ${reason}`)}`,
+		];
+	}
+	// Another harness refusal: the model reads what happened and what to do next; the user sees what happened,
 	// and ctrl+o shows the whole text (decisions/tui.md).
 	const refusal = refusalLine(text);
-	if (refusal) return expanded ? undefined : `  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`;
+	if (refusal) return expanded ? undefined : [`  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`];
 	const kind = userDenialKind(text);
 	if (!kind) return undefined;
-	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
-	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+	if (kind === "stop" && file?.path) return [`  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`];
+	return [`  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`];
 }
 
 /** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
@@ -744,7 +753,7 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 		) {
 			const stripped = stripReminderBlocks(result);
 			const rejected = rejectionLine(theme, stripped, context.isError, options.expanded);
-			if (rejected) return linesComponent(() => [rejected]);
+			if (rejected) return linesComponent(() => rejected);
 			const shown = options.expanded ? undefined : shownLineOf(result.details);
 			if (shown) return linesComponent(() => elbowIndent([theme.fg(shown.color, sanitizeDisplayText(shown.text))]));
 			let text: string | undefined;
@@ -1102,7 +1111,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 				op: opts.rejectedAs,
 				path: path ? displayToolPath(path, context.cwd) : undefined,
 			});
-			if (rejected) return linesComponent(() => [rejected]);
+			if (rejected) return linesComponent(() => rejected);
 			if (context.isError && !options.isPartial) {
 				const short = shownLineOf(result.details) ?? orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
 				if (short) {
