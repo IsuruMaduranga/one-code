@@ -163,8 +163,15 @@ export interface SubagentModelResolution {
 	 * so the fix is named. Undefined for an ordinary unavailable model.
 	 */
 	unresolvedReason?: string;
-	/** One-line warnings the parent should surface (fallbacks, provider crossings). */
+	/** One-line notes on the choice (fallbacks, provider crossings, alias readings): the model reads them all. */
 	notices: string[];
+	/** The notices that are routine (an alias read as a tier on this provider): the user is not told them. */
+	routine?: string[];
+}
+
+/** The notices the user is told: all but the routine ones. */
+export function userNotices(resolution: Pick<SubagentModelResolution, "notices" | "routine">): string[] {
+	return resolution.notices.filter((notice) => !resolution.routine?.includes(notice));
 }
 
 /**
@@ -248,7 +255,12 @@ function resolveAlias(
 export function resolveSubagentModel(input: ResolveInput): SubagentModelResolution {
 	const { available, sessionModel } = input;
 	const notices: string[] = [];
-	const note = (notice: SubagentModelNotice) => notices.push(subagentModelWordsInForce().notice(notice));
+	const routine: string[] = [];
+	const note = (notice: SubagentModelNotice) => {
+		const text = subagentModelWordsInForce().notice(notice);
+		notices.push(text);
+		if (notice.kind === "aliasAsTier" || notice.kind === "aliasMissing") routine.push(text);
+	};
 
 	const chain: { value: string; source: "call" | "agent" | "default" }[] = [];
 	if (input.requested) chain.push({ value: input.requested, source: "call" });
@@ -297,7 +309,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		const alias = wanted.toLowerCase();
 		if (alias in ALIAS_TIER) {
 			const resolved = resolveAlias(alias, contained, available, sessionModel, requireImageInput);
-			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices };
+			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices, routine };
 			// SCOPE the claim to this session's provider family (subagent-model-text.ts
 			// says why).
 			const session = sessionModel ? spec(sessionModel) : undefined;
@@ -307,7 +319,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				// (WEAK-MODEL-REVIEW-2026-09-06 L4) — `subagentModelNotes` repeats the
 				// spec, but this line says WHY it is not Sonnet.
 				note({ kind: "aliasAsTier", alias, session, resolved: spec(resolved.model) });
-				return { model: resolved.model, source: entry.source, notices };
+				return { model: resolved.model, source: entry.source, notices, routine };
 			}
 			// Nothing capable contained at all (an unpriced/opaque provider, or no
 			// session model): keep walking the chain — the agent's model / configured
@@ -354,7 +366,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				}
 				note({ kind: "otherProviderHonored", model: spec(resolved), session: spec(sessionModel), source: entry.source });
 			}
-			return { model: resolved, source: entry.source, notices };
+			return { model: resolved, source: entry.source, notices, routine };
 		}
 
 		if (entry.source === "call") {
@@ -376,7 +388,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// Per-call model failed and nothing downstream resolved: surface it so the
 	// caller shows the menu and the model retries, rather than silently dropping
 	// to the automatic/session pick for a model the main model named.
-	if (callFailed) return { source: "call", unresolved: callFailed, unresolvedReason: callFailedReason, notices };
+	if (callFailed) return { source: "call", unresolved: callFailed, unresolvedReason: callFailedReason, notices, routine };
 
 	// Automatic selection is a cost optimisation, so it needs price evidence:
 	// with the session price unknown there is no demonstrable saving, and picking
@@ -392,8 +404,8 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// vendor, never dearer than the session where both are priced. Reuse the
 		// `contained` set computed above for the hot path.
 		const paired = pairedModel("subagent", available, sessionModel, { contained, requireImageInput });
-		if (paired?.kind === "session") return { model: sessionModel, source: "session", notices };
-		if (paired) return { model: paired.model, source: "automatic", notices };
+		if (paired?.kind === "session") return { model: sessionModel, source: "session", notices, routine };
+		if (paired) return { model: paired.model, source: "automatic", notices, routine };
 		// Otherwise the candidates are always strictly cheaper than the session
 		// model, and there are none when the session price is unknown, so a
 		// cheap-tier pick never silently upgrades an unpriced session.
@@ -401,11 +413,11 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// isAutoSelectable); a moving alias stays allowed here (Mistral serves
 		// most models only as `-latest`).
 		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput })[0];
-		if (cheaper) return { model: cheaper, source: "automatic", notices };
+		if (cheaper) return { model: cheaper, source: "automatic", notices, routine };
 	}
 
-	if (sessionModel) return { model: sessionModel, source: "session", notices };
-	return { model: available[0], source: "session", notices };
+	if (sessionModel) return { model: sessionModel, source: "session", notices, routine };
+	return { model: available[0], source: "session", notices, routine };
 }
 
 /**

@@ -62,7 +62,7 @@ import { toolCallEntry, type TranscriptEntry } from "./auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest, writtenArguments } from "./auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "./auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "./auto-mode/instructions.ts";
-import { describeCandidate, isSilentFallback } from "../../lib/models/classifier-model.ts";
+import { describeCandidate } from "../../lib/models/classifier-model.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../../lib/shell/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage, permissionGrantReminder, sandboxAskSuffix } from "./auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "./auto-mode/pause.ts";
@@ -100,8 +100,8 @@ import {
 	isPathSubjectTool,
 } from "../../lib/rules/matcher.ts";
 import { type SessionGrant, sessionAllowsApply, sessionGrant } from "./session-grant.ts";
-import { formatModel, modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "../../lib/rules/modes.ts";
-import { intrinsicTier, usesClaudeCodeFastPaths } from "../../lib/models/model-tier.ts";
+import { modeBadge, nextMode, PERMISSION_MODE_STATE, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "../../lib/rules/modes.ts";
+import { usesClaudeCodeFastPaths } from "../../lib/models/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, sessionPermissionBridge, SUBAGENT_GATE_CHANNEL } from "../../lib/agents/subagent-gate.ts";
 import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
 import { followWorkCwd } from "../../lib/agents/worktree-channel.ts";
@@ -345,8 +345,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
 	// project file is still refused. See working-docs/decisions/auto-mode.md.
 	let mode: PermissionMode = "auto";
-	/** Whether the session model gets Claude Code's fast paths, for the model-switch notice. */
-	let gateFastPaths: boolean | undefined;
 	/** `permissions.blockReadsOutsideWorkingDirectories` from any settings source. */
 	let blockOutsideReads = false;
 	/** The first outside-read prompt was answered on this machine (read once, then kept). */
@@ -661,13 +659,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 			classifierState.notified.add(notice.text);
 			if (notice.level === "warning") badgeCtx.ui.notify(notice.text, "warning");
 			else info.push(notice.text);
-		}
-		const first = choice.candidates.find((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-		const key = first ? `using:${first.model.provider}/${first.model.id}` : undefined;
-		if (first && key && !classifierState.notified.has(key)) {
-			classifierState.notified.add(key);
-			if (choice.fallback) classifierState.notified.add(choice.fallback.text);
-			if (!isSilentFallback(choice.fallback)) info.push(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`);
 		}
 		if (info.length === 0) return;
 		if (opts.batched) queueNotice(pi.events, badgeCtx, "info", info.join("\n"));
@@ -1093,7 +1084,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		sessionEpoch++;
 		panels.reset();
-		gateFastPaths = usesClaudeCodeFastPaths(ctx.model);
 		// Not awaited: the grammar loads in a few milliseconds, and the gate
 		// awaits it per call. Only a failed load is worth telling the user about.
 		void bashParserReady().then(() => {
@@ -1199,20 +1189,8 @@ function permissionsExtension(pi: ExtensionAPI) {
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
 		resetClassifierChoice(event.model, "batched");
 		// The gate reads the model's tier on every call, so a switch takes effect
-		// on the next one; a switch across the workhorse/cheap line says so.
-		const fastPaths = usesClaudeCodeFastPaths(event.model);
-		if (gateFastPaths !== undefined && fastPaths !== gateFastPaths && event.model) {
-			const name = `${formatModel(event.model.provider, event.model.id)} (${intrinsicTier(event.model)} tier)`;
-			queueNotice(
-				pi.events,
-				ctx,
-				"info",
-				fastPaths
-					? `${name}: permissions now follow the standard fast paths.`
-					: `${name}: permissions now use ${brand.name}'s stricter checks, so more calls prompt or go to the auto-mode classifier.`,
-			);
-		}
-		gateFastPaths = fastPaths;
+		// on the next one, unannounced: which checks a tier gets is the gate's
+		// routine choice, not news for the user.
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's

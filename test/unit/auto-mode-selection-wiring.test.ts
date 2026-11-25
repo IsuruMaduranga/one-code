@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/lib/rules/modes.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
@@ -45,25 +45,25 @@ describe("automatic classifier selection wiring", () => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	it("announces the window fallback at startup and re-picks on a model switch", async () => {
+	it("picks a classifier containing the window at startup and re-picks on a model switch, unannounced", async () => {
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-7-astra");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.map(([text]) => text)).toEqual(expect.arrayContaining([expect.stringMatching(/gpt-7-astra.*(?:window|context)/)]));
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-7-sol");
-		expect(notify.mock.calls.some(([text]) => /gpt-7-sol\b/.test(text))).toBe(true);
+		await flushNotices();
+		expect(notify.mock.calls.some(([text]) => /screen|gpt-7-(?:astra|sol)/.test(String(text)))).toBe(false);
 	});
 
-	it("announces the session fallback below frontier and replaces it on a frontier switch", async () => {
+	it("falls back to the session below frontier, unannounced, and replaces it on a frontier switch", async () => {
 		// No cheaper model contains its window, so the session screens itself.
 		const belowFrontier = model("gpt-5.6-sol", 1_000_000, 5);
 		ctx.model = belowFrontier;
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.filter(([text]) => /in its workhorse tier or above contains/.test(text))).toHaveLength(1);
+		expect(notify.mock.calls.some(([text]) => /tier or above contains|screen/.test(String(text)))).toBe(false);
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-7-sol");
@@ -120,11 +120,10 @@ describe("automatic classifier selection wiring", () => {
 		await command.handler("model clear", ctx);
 		expect(JSON.parse(readFileSync(settings, "utf8")).autoMode).toBeUndefined();
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-7-astra");
-		// pi folds back-to-back info notices into one line, so the confirmation
-		// and the announcement are one notice (findings §63).
+		// The confirmation names the automatic chain; nothing else is announced.
 		const infos = notify.mock.calls.slice(before).filter(([, level]) => level === "info").map(([text]) => String(text));
 		expect(infos).toHaveLength(1);
 		expect(infos[0]).toContain("autoMode.classifierModel cleared");
-		expect(infos[0]).toMatch(/\nAuto mode (?:is screening|will screen) calls with openai-codex\/gpt-7-astra/);
+		expect(infos[0]).not.toMatch(/will screen|is screening/);
 	});
 });

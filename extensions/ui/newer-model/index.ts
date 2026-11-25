@@ -21,7 +21,7 @@ function newerModelExtension(pi: ExtensionAPI) {
 		const suggestion = newerModelSuggestion(withoutUnusable(ctx.modelRegistry.getAvailable(), unusable), model);
 		if (!suggestion) return;
 		// Joined with the other extensions' startup and model-switch notices (lib/notify/notices.ts).
-		queueNotice(pi.events, ctx, "info", `${suggestion.text} ${suggestion.fix}`);
+		queueNotice(pi.events, ctx, "info", suggestion.notice);
 		shown.add(key);
 	};
 

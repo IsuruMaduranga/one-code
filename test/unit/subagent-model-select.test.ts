@@ -18,6 +18,7 @@ import {
 	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
+	userNotices,
 } from "../../extensions/lib/models/subagent-model.ts";
 import type { SubagentModelNotice } from "../../extensions/lib/models/subagent-model-text.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
@@ -126,6 +127,9 @@ describe("resolveSubagentModel: aliases", () => {
 		expect(resolution.model?.id).toBe("gpt-5.1");
 		expect(resolution.source).toBe("call");
 		expect(resolution.notices[0]).toBe(notice({ kind: "aliasAsTier", alias: "sonnet", session: "openai/gpt-5.1", resolved: "openai/gpt-5.1" }));
+		// The model reads the alias reading; the user is not told it (a routine choice).
+		expect(subagentModelNotes(resolution)[0]).toBe(resolution.notices[0]);
+		expect(userNotices(resolution)).toEqual([]);
 	});
 
 	it("reads an alias as its tier: sonnet → the cheapest workhorse-class model, haiku → the cheapest capable one", () => {

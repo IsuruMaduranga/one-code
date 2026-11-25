@@ -46,6 +46,7 @@ import {
 	type SubagentModelResolution,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelNotes,
+	userNotices,
 	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
@@ -747,7 +748,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
 		const { available, configured, resolution, text } = modelMenu(ctx, sessionModel);
-		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 		// The user's own subagentModel setting is honoured, so say what it costs:
 		// a newer model in its line, or a model far weaker than the session's.
 		if (resolution.source === "default" && resolution.model) {
@@ -1755,7 +1756,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					available,
 					requireImageInput: supportsImageInput(ctx.model),
 				});
-				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 				const modelNotes = subagentModelNotes(resolution);
 				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 
@@ -2506,7 +2507,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 							}),
 						});
 					}
-					for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+					for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 					for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
 					const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 					p.request.model = resolved;
