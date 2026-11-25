@@ -248,7 +248,7 @@ export interface ResolvedProfile {
 	user?: UserProfile;
 	/** The features the user's settings file turns off (`featuresOff`, lib/profile/settings-file.ts), as read at launch. */
 	settingsOff: readonly string[];
-	/** Why each `featuresOff` id the settings file names was skipped (unknown, required or a guard); absent when none was. */
+	/** Why each `featuresOff` id the settings file names was skipped (unknown, required, a guard, or a launch it would fail); absent when none was. */
 	settingsOffIgnored?: readonly string[];
 	/** Why each off feature is off, the first source that turned it off; /config hides what the product turns off. */
 	featuresOffBy: ReadonlyMap<FeatureId, FeatureOffSource>;
@@ -358,6 +358,30 @@ export function resolveProfile(
 	launchTools?: PiToolFilter,
 	productProfile: string | undefined = profileSelection.productProfile,
 	settingsFileOff: readonly string[] = [],
+): ResolvedProfile {
+	const resolve = (off: readonly string[]) => resolveWith(profile, env, profileDir, extensionsRoot, user, launchTools, productProfile, off);
+	try {
+		return resolve(settingsFileOff);
+	} catch (error) {
+		// The settings file is never a reason not to start: a switch that conflicts with the rest
+		// (a feature or tool another one needs, a user profile's wording) is dropped and reported.
+		// Without it the launch fails for its own reasons, and says so.
+		if (settingsFileOff.length === 0) throw error;
+		const resolved = resolve([]);
+		const conflict = `${settingsFileOff.map((id) => `"${id}"`).join(", ")} (${error instanceof Error ? error.message : String(error)})`;
+		return { ...resolved, settingsOffIgnored: [...(resolved.settingsOffIgnored ?? []), conflict] };
+	}
+}
+
+function resolveWith(
+	profile: Profile,
+	env: NodeJS.ProcessEnv,
+	profileDir: string,
+	extensionsRoot: string,
+	user: UserProfile | undefined,
+	launchTools: PiToolFilter | undefined,
+	productProfile: string | undefined,
+	settingsFileOff: readonly string[],
 ): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
 	// The settings file is lasting state /config writes: an id it cannot turn off

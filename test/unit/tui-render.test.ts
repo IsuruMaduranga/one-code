@@ -478,6 +478,13 @@ describe("a call the user rejected", () => {
 		}
 		const blank = rejection(refusalText({ kind: "classifierDenied", reason: "" }));
 		expect(bash.renderResult(blank, opts, plainTheme, ctx).render(120)[1]).toBe("     │ Auto mode: No reason provided");
+		// A long reason wraps under the bar instead of running off the edge.
+		const long = rejection(refusalText({ kind: "classifierDenied", reason: "The command deletes files outside the project that the user never mentioned" }));
+		const lines = bash.renderResult(long, opts, plainTheme, ctx).render(60);
+		expect(lines[0]).toBe("  ⎿  Blocked by auto mode · /permissions to review");
+		expect(lines.length).toBeGreaterThan(2);
+		expect(lines.every((line) => line.length <= 60)).toBe(true);
+		expect(lines.slice(1).map((line) => line.replace(/^ {5}│ /, "")).join("")).toBe("Auto mode: The command deletes files outside the project that the user never mentioned");
 	});
 
 	it("draws a classifier that gave no verdict or timed out as its reason only, not the model's guidance", async () => {

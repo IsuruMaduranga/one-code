@@ -639,25 +639,28 @@ export function rejectionLine(
 	isError: boolean,
 	expanded: boolean,
 	file?: { op: RejectedFileOp; path: string | undefined },
-): string[] | undefined {
+): ((width: number) => string[]) | undefined {
 	if (!isError) return undefined;
 	const text = textContent(result);
-	// Auto mode's denial is Claude Code's two lines in both views: what happened, then the classifier's reason.
+	// Auto mode's denial is Claude Code's two lines in both views: what happened, then the classifier's reason, wrapped.
 	const reason = classifierDenialReason(text);
 	if (reason !== undefined) {
-		return [
+		return (width) => [
 			`  ⎿  ${theme.fg("dim", `${CLASSIFIER_DENIED_LINE} · /permissions to review`)}`,
-			`     ${theme.fg("dim", `│ Auto mode: ${reason}`)}`,
+			...wrapPlainText(`Auto mode: ${reason}`, Math.max(1, width - 7)).map((line) => `     ${theme.fg("dim", `│ ${line}`)}`),
 		];
 	}
 	// Another harness refusal: the model reads what happened and what to do next; the user sees what happened,
 	// and ctrl+o shows the whole text (decisions/tui.md).
 	const refusal = refusalLine(text);
-	if (refusal) return expanded ? undefined : [`  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`];
+	if (refusal) return expanded ? undefined : () => [`  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`];
 	const kind = userDenialKind(text);
 	if (!kind) return undefined;
-	if (kind === "stop" && file?.path) return [`  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`];
-	return [`  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`];
+	if (kind === "stop" && file?.path) {
+		const head = rejectedFileHead(theme, file.op, file.path);
+		return () => [`  ⎿  ${head}`];
+	}
+	return () => [`  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`];
 }
 
 /** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
@@ -753,7 +756,7 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 		) {
 			const stripped = stripReminderBlocks(result);
 			const rejected = rejectionLine(theme, stripped, context.isError, options.expanded);
-			if (rejected) return linesComponent(() => rejected);
+			if (rejected) return linesComponent(rejected);
 			const shown = options.expanded ? undefined : shownLineOf(result.details);
 			if (shown) return linesComponent(() => elbowIndent([theme.fg(shown.color, sanitizeDisplayText(shown.text))]));
 			let text: string | undefined;
@@ -1111,7 +1114,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 				op: opts.rejectedAs,
 				path: path ? displayToolPath(path, context.cwd) : undefined,
 			});
-			if (rejected) return linesComponent(() => rejected);
+			if (rejected) return linesComponent(rejected);
 			if (context.isError && !options.isPartial) {
 				const short = shownLineOf(result.details) ?? orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
 				if (short) {
