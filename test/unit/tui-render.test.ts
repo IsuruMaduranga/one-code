@@ -475,6 +475,24 @@ describe("a call the user rejected", () => {
 		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
 	});
 
+	it("draws a classifier that gave no verdict or timed out as its reason only, not the model's guidance", async () => {
+		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
+		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
+		const noVerdict = "The auto-mode classifier returned no verdict (Codex error: Our servers are currently overloaded.).";
+		const timedOut = "The classifier model is temporarily unavailable (timed out), so the call was not judged either way.";
+		for (const [kind, reason] of [
+			["classifierNoVerdict", noVerdict],
+			["classifierTimedOut", timedOut],
+		] as const) {
+			const result = rejection(refusalText({ kind, reason }));
+			expect(bash.renderResult(result, opts, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+			expect(toolRenderers("Web Fetch").renderResult(result, opts, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+		}
+	});
+
 	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
 		const { ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const { userDenialText } = await import("../../extensions/lib/consent/user-denial.ts");

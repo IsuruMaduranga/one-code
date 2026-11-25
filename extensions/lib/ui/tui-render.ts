@@ -20,7 +20,7 @@ import { framesToText, notificationBody, parseNotificationFrames } from "../noti
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 import { sanitizeDisplayText } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
-import { isClassifierDenial } from "../rules/classifier-denial.ts";
+import { refusalLine } from "../rules/refusal-lines.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -612,8 +612,6 @@ export type RejectedFileOp = "write" | "update";
 
 /** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
 export const TOOL_USE_REJECTED = "Tool use rejected";
-/** Claude Code's row for an auto-mode denial, without its "· /feedback if incorrect" (One Code has no /feedback). */
-export const CLASSIFIER_DENIED_LINE = "Denied by auto mode classifier";
 
 /**
  * A file tool's `path` for the transcript, as Claude Code shows it: relative to
@@ -630,7 +628,9 @@ export function displayToolPath(raw: string, cwd: string | undefined): string {
  * shows Claude Code's short line instead: "User rejected write to <path>" for a
  * file tool rejected without a reason, "Tool use rejected" otherwise. A
  * rejection without a reason also stops the turn, and the turn's own
- * "Interrupted" line follows it.
+ * "Interrupted" line follows it. Auto mode's refusals are shortened the same
+ * way, and so are the harness's other refusals: the transcript shows what
+ * happened, never the model's guidance (lib/rules/refusal-lines.ts).
  */
 export function rejectionLine(
 	theme: ThemeLike,
@@ -640,8 +640,9 @@ export function rejectionLine(
 ): string | undefined {
 	if (!isError) return undefined;
 	const text = textContent(result);
-	// The model reads the classifier's reason and what to do next; the user sees Claude Code's line.
-	if (isClassifierDenial(text)) return `  ⎿  ${theme.fg("dim", CLASSIFIER_DENIED_LINE)}`;
+	// A harness refusal: the model reads what happened and what to do next; the user sees what happened.
+	const refusal = refusalLine(text);
+	if (refusal) return `  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`;
 	const kind = userDenialKind(text);
 	if (!kind) return undefined;
 	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
