@@ -74,7 +74,7 @@ import { recordState } from "../../lib/request/ledger/state.ts";
 import { LEDGER_PLAN_CHANNEL, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, RENDER_CHANNEL, type RenderRequest } from "../../lib/request/reminders.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
-import { hiddenToolRenderers } from "../../lib/ui/tui-render.ts";
+import { hiddenToolRenderers, shownLine } from "../../lib/ui/tui-render.ts";
 import { normalizeToolName } from "../../lib/rules/matcher.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { toolSearchResultText } from "../../lib/request/tool-search-text.ts";
@@ -551,7 +551,7 @@ function toolSearchExtension(pi: ExtensionAPI) {
 			if (matches.length === 0) {
 				return {
 					content: [{ type: "text", text: toolSearchResultText.noMatch({ query: params.query, missing, withdrawn, loadable: available.map((t) => t.name) }) }],
-					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[] },
+					details: { matches: [] as string[], added: [] as string[], notFound, refused: [] as string[], ...shownLine(`No tools matched "${params.query}"`, "error") },
 					isError: true,
 				};
 			}

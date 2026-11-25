@@ -30,7 +30,7 @@ import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } 
 import { tryNativeWeb } from "../../lib/request/anthropic-server-call.ts";
 import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../../lib/request/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../../lib/request/persisted-output.ts";
-import { toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
+import { shownLine, toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
 import { type Received, receivedLine } from "./received.ts";
 import { registerFormTool } from "../../lib/profile/tool-variants.ts";
 import { readResponseText, WebFetchFailure } from "./response.ts";
@@ -281,7 +281,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				if (native.kind === "cancelled") return cancelled();
 				if (native.kind === "answered") {
 					const answer: FetchAnswer = { kind: "native", reader: native.spec, cutOff: native.cutOff };
-					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native" } };
+					return { content: [{ type: "text", text: resultText(answer, { body: native.text }) }], details: { url: target, reader: native.spec, path: "native", ...shownLine("Answered by the provider's web fetch") } };
 				}
 				if (native.kind === "fell-back") nativeFallback = nativeWebResultText.fallback(native.fallback);
 			}
@@ -337,7 +337,7 @@ function webFetchExtension(pi: ExtensionAPI) {
 				// and what to try next.
 				if (error instanceof CrossHostRedirect) {
 					const redirect = webFetchResultText(view.live).redirect({ originalUrl: target, redirectUrl: error.redirectUrl, status: error.status, prompt: params.prompt });
-					return { content: [{ type: "text", text: redirect }], details: { url: target, status: error.status } };
+					return { content: [{ type: "text", text: redirect }], details: { url: target, status: error.status, ...shownLine(`Redirected to ${error.redirectUrl} (${error.status})`) } };
 				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";

@@ -36,7 +36,7 @@ import { resolveThroughLinks } from "../../lib/shell/paths.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { tryReadFile } from "../../lib/plugins/plugins.ts";
 import { REMINDER_CHANNEL } from "../../lib/request/reminders.ts";
-import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, shownLine, truncateLine } from "../../lib/ui/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, type AutoMemoryView, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel, settingChanges } from "./panel.ts";
@@ -161,6 +161,8 @@ function memoryExtension(pi: ExtensionAPI) {
 		} else if (status === "over") {
 			return {
 				content: [...(event.content ?? []), { type: "text", text: memoryText.indexOverLimit(limits) }],
+				// The write succeeded; the model also reads how to shorten the index.
+				details: { ...(event.details as object | undefined), ...shownLine("Saved, but MEMORY.md is over its size limit", "error") },
 				isError: true,
 			};
 		}

@@ -279,6 +279,18 @@ export type SandboxRefusal =
 	/** The call's own host list has an entry the sandbox rejects. */
 	| { kind: "hosts"; reason: string };
 
+/** A refusal's transcript line: what stopped the command, without the model's guidance. */
+export function sandboxRefusalLine(refusal: SandboxRefusal): string {
+	switch (refusal.kind) {
+		case "noBash":
+			return "Not run: the sandbox needs a bash on PATH";
+		case "hosts":
+			return `Not run: allowed_domains has an entry the sandbox rejects (${refusal.reason})`;
+		case "unavailable":
+			return `Not run: the required sandbox is not running (${refusal.reason})`;
+	}
+}
+
 /** How one shell call runs. */
 export type SandboxedCommand =
 	/** `command` is what the shell gets; `run` is set when it is the wrapped one. */

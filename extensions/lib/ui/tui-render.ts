@@ -743,6 +743,8 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 			const stripped = stripReminderBlocks(result);
 			const rejected = rejectionLine(theme, stripped, context.isError);
 			if (rejected) return linesComponent(() => [rejected]);
+			const shown = options.expanded ? undefined : shownLineOf(result.details);
+			if (shown) return linesComponent(() => elbowIndent([theme.fg(shown.color, sanitizeDisplayText(shown.text))]));
 			let text: string | undefined;
 			try {
 				text = spec.result?.(result, context.args, context.isError);
@@ -904,6 +906,23 @@ export interface CcWrapOptions<TArgs = any> {
 export interface ShortLine {
 	text: string;
 	color: "error" | "dim";
+}
+
+/**
+ * A result's transcript line, which a tool puts in `details.shown` when its
+ * text is guidance for the model (what to do next) that the user need not
+ * read. The transcript draws the line in place of the text, and ctrl+o shows
+ * the whole text. `details` never reach the model.
+ */
+export function shownLine(text: string, color: ShortLine["color"] = "dim"): { shown: ShortLine } {
+	return { shown: { text, color } };
+}
+
+/** The line a result's `details.shown` holds, or undefined when it holds none. */
+export function shownLineOf(details: unknown): ShortLine | undefined {
+	const shown = (details as { shown?: unknown } | undefined)?.shown as { text?: unknown; color?: unknown } | undefined;
+	if (!shown || typeof shown.text !== "string" || shown.text === "") return undefined;
+	return { text: shown.text, color: shown.color === "error" ? "error" : "dim" };
 }
 
 /** The result fields the summary and short-line hooks read. */
@@ -1082,7 +1101,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			});
 			if (rejected) return linesComponent(() => [rejected]);
 			if (context.isError && !options.isPartial) {
-				const short = orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
+				const short = shownLineOf(result.details) ?? orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
 				if (short) {
 					// The whole text, expanded, goes under the elbow too: an edit's base view
 					// would show it as the call's body and print no result.
