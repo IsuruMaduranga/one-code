@@ -507,8 +507,8 @@ export function withRecordedHead(payload: WirePayload, head: Record<string, unkn
 	// on Codex, where pi-ai also sends the session's own id as the `session-id`
 	// header after every extension hook; a body key that disagrees with it read
 	// nothing live (findings §75). A fork child still reads its parent's cache
-	// there: its runtime hands pi-ai the parent's session id, so the header and
-	// the key agree (lib/agents/agent-loader.ts withParentSessionId). pi's own
+	// there: its agent sends the parent's session id, so the header and the key
+	// agree (lib/agents/agent-loader.ts codexRoutingId). pi's own
 	// `/fork` starts a session whose id no extension can set, and misses.
 	const fields = api === "openai-codex-responses" ? ["system", "instructions"] : ["system", "instructions", "prompt_cache_key"];
 	for (const field of fields) if (field in head) out[field] = recordedValue(head[field], payload[field]);

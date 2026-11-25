@@ -68,41 +68,6 @@ export async function createSharedModelRuntime(agentDir: string): Promise<ModelR
 	return withShortCacheRetention(runtime);
 }
 
-/**
- * `runtime` as a fork sees it: the fork's own Codex requests go out under its
- * parent's session id, everything else unchanged.
- *
- * pi-ai builds a Codex request's `session-id` header, `x-client-request-id`
- * and body `prompt_cache_key` from `options.sessionId`, after every extension
- * hook, and the fork is its own session: so a fork read only a sliver of the
- * prefix it shares with its parent (findings §75). pi hands every agent
- * request to its runtime's `streamSimple` with that option, so a fork's runtime
- * substitutes its parent's id there. Only a request under the fork's own id
- * (`ownSessionId`: its agent turns and pi's cache warmer) is rerouted; a side
- * call keeps its own `<session>:<kind>` key (lib/side-calls/side-call-run.ts).
- * A Codex WebSocket cached under the parent's id is shared safely: a busy
- * socket makes the other session open its own, and a request that does not
- * extend a socket's last one is sent whole.
- *
- * A proxy, not a copy: every other member reads and writes the shared runtime,
- * its methods bound once.
- */
-export function withParentSessionId<T extends Pick<ModelRuntime, "streamSimple">>(runtime: T, parentSessionId: string, ownSessionId: () => string | undefined): T {
-	const streamSimple: ModelRuntime["streamSimple"] = (model, context, options) =>
-		runtime.streamSimple(model, context, model.api === "openai-codex-responses" && options?.sessionId !== undefined && options.sessionId === ownSessionId() ? { ...options, sessionId: parentSessionId } : options);
-	const bound = new Map<PropertyKey, unknown>();
-	return new Proxy(runtime, {
-		get(target, prop) {
-			if (prop === "streamSimple") return streamSimple;
-			const value = Reflect.get(target, prop, target);
-			if (typeof value !== "function") return value;
-			let method = bound.get(prop);
-			if (method === undefined) bound.set(prop, (method = value.bind(target)));
-			return method;
-		},
-	});
-}
-
 export interface AgentLoaderOptions {
 	cwd: string;
 	agentDir: string;
@@ -196,10 +161,42 @@ export interface OpenChildSessionOptions {
 	 */
 	startReason?: "startup" | "resume" | "fork";
 	/**
+	 * A fork's parent session id. On Codex the fork's own requests go out under
+	 * it, so they read the parent's prompt cache (see codexRoutingId).
+	 */
+	parentSessionId?: string;
+	/**
 	 * Where a child extension's handler errors go. An SDK session has no listener
 	 * of its own, so without this a throwing child handler leaves no trace.
 	 */
 	onError?: (error: ExtensionError) => void;
+}
+
+/**
+ * The session id a fork's agent should send its requests under, when it is not
+ * the fork's own: its parent's, on Codex only.
+ *
+ * pi-ai builds a Codex request's `session-id` header, `x-client-request-id`
+ * and body `prompt_cache_key` from `options.sessionId`, after every extension
+ * hook, and the fork is its own session: so a fork read only a sliver of the
+ * prefix it shares with its parent (findings §75). pi takes that option from
+ * the public `Agent.sessionId`, read on every request, while the storage id
+ * stays the session manager's: so files, compaction and side calls (their own
+ * `<session>:<kind>` key, lib/side-calls/side-call-run.ts) keep the fork's id.
+ *
+ * Codex only, because other providers key more than the cache by the same id
+ * (Anthropic's message-thread continuation, Bedrock's strict-tool flag), and on
+ * the ones that key only the cache the ledger already sends the parent's body
+ * key (extensions/request/ledger/wire.ts). pi's cache warmer starts only for
+ * requests under the storage id, but it warms only models with a prompt-cache
+ * lifetime, and no Codex model declares one (pi 1.6.0): nothing is lost.
+ * A Codex WebSocket pooled under the parent's id is shared safely: a busy
+ * socket makes the other session open its own, and a request that does not
+ * extend a socket's last one is sent whole. Decided once at open: a child
+ * session never switches its model.
+ */
+export function codexRoutingId(api: string | undefined, parentSessionId: string | undefined): string | undefined {
+	return api === "openai-codex-responses" ? parentSessionId : undefined;
 }
 
 /**
@@ -220,6 +217,8 @@ export async function openChildSession(options: OpenChildSessionOptions): Promis
 		resourceLoader: loader,
 		sessionStartEvent: { type: "session_start", reason: options.startReason ?? "startup" },
 	});
+	const routingId = codexRoutingId(session.model?.api, options.parentSessionId);
+	if (routingId !== undefined) session.agent.sessionId = routingId;
 	await session.bindExtensions({ onError: options.onError });
 	return session;
 }
