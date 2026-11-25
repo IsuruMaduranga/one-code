@@ -464,15 +464,46 @@ describe("a call the user rejected", () => {
 		expect(edit.renderResult(rejection(userDenialText("no")), opts, plainTheme, ctx({ path: "src/x.ts" })).render(120)).toEqual(["  ⎿  Tool use rejected"]);
 	});
 
-	it("draws auto mode's denial as Claude Code's one dim line, not the model's guidance", async () => {
+	it("draws auto mode's denial as Claude Code's two lines in both views, never the model's guidance", async () => {
 		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
 		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
 		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
 		const denial = rejection(refusalText({ kind: "classifierDenied", reason: "PII Data Handling" }));
-		expect(bash.renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
-		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+		const row = ["  ⎿  Blocked by auto mode · /permissions to review", "     │ Auto mode: PII Data Handling"];
+		for (const view of [opts, { ...opts, expanded: false }]) {
+			expect(bash.renderResult(denial, view, plainTheme, ctx).render(120)).toEqual(row);
+			expect(toolRenderers("Web Fetch").renderResult(denial, view, plainTheme, ctx).render(120)).toEqual(row);
+		}
+		const blank = rejection(refusalText({ kind: "classifierDenied", reason: "" }));
+		expect(bash.renderResult(blank, opts, plainTheme, ctx).render(120)[1]).toBe("     │ Auto mode: No reason provided");
+		// A long reason wraps under the bar instead of running off the edge.
+		const long = rejection(refusalText({ kind: "classifierDenied", reason: "The command deletes files outside the project that the user never mentioned" }));
+		const lines = bash.renderResult(long, opts, plainTheme, ctx).render(60);
+		expect(lines[0]).toBe("  ⎿  Blocked by auto mode · /permissions to review");
+		expect(lines.length).toBeGreaterThan(2);
+		expect(lines.every((line) => line.length <= 60)).toBe(true);
+		expect(lines.slice(1).map((line) => line.replace(/^ {5}│ /, "")).join("")).toBe("Auto mode: The command deletes files outside the project that the user never mentioned");
+	});
+
+	it("draws a classifier that gave no verdict or timed out as its reason only, not the model's guidance", async () => {
+		const { toolRenderers, ccWrapBuiltinRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
+		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
+		const noVerdict = "The auto-mode classifier returned no verdict (Codex error: Our servers are currently overloaded.).";
+		const timedOut = "The classifier model is temporarily unavailable (timed out), so the call was not judged either way.";
+		for (const [kind, reason] of [
+			["classifierNoVerdict", noVerdict],
+			["classifierTimedOut", timedOut],
+		] as const) {
+			const result = rejection(refusalText({ kind, reason }));
+			const collapsed = { ...opts, expanded: false };
+			expect(bash.renderResult(result, collapsed, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+			expect(toolRenderers("Web Fetch").renderResult(result, collapsed, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+		}
 	});
 
 	it("leaves other errors, and a success that quotes the text, to the normal view", async () => {
@@ -713,5 +744,62 @@ describe("the expand hint follows the user's keybinding (pi 1.5.0 keyText)", () 
 		const text = Array.from({ length: 9 }, (_, i) => `line ${i}`).join("\n");
 		expect(resultLines(plainTheme, text, false, false, { hint: "alt+e to expand" }).at(-1)?.trim()).toBe("… +4 lines (alt+e to expand)");
 		expect(resultLines(plainTheme, text, false, false, { hint: null }).at(-1)?.trim()).toBe("… +4 lines");
+	});
+});
+
+describe("a result's shown line (details.shown)", () => {
+	const result = { content: [{ type: "text", text: "The agent is still running.\n\nYou will be notified automatically when it completes." }], details: { taskId: "t1", shown: { text: "Task is still running…", color: "dim" } } };
+
+	it("replaces the model's text on a success and an error, and ctrl+o shows the whole text", async () => {
+		const { toolRenderers, hiddenToolRenderers } = await import("../../extensions/lib/ui/tui-render.ts");
+		const tool = toolRenderers("Task Output");
+		const collapsed = { expanded: false, isPartial: false };
+		expect(tool.renderResult(result, collapsed, plainTheme, { isError: false }).render(120)).toEqual(["  ⎿  Task is still running…"]);
+		expect(tool.renderResult(result, collapsed, plainTheme, { isError: true }).render(120)).toEqual(["  ⎿  Task is still running…"]);
+		expect(hiddenToolRenderers("Tool Search").renderResult(result, collapsed, plainTheme, { isError: true }).render(120)).toEqual(["  ⎿  Task is still running…"]);
+		const expanded = tool.renderResult(result, { expanded: true, isPartial: false }, plainTheme, { isError: false }).render(120).join("\n");
+		expect(expanded).toContain("You will be notified automatically");
+	});
+
+	it("is the short error row of a builtin's failure", async () => {
+		const { ccWrapBuiltinRenderers, shownLine } = await import("../../extensions/lib/ui/tui-render.ts");
+		const base = { renderResult: () => ({ render: () => ["BASE"], invalidate() {} }) };
+		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
+		const refused = { content: [{ type: "text", text: "…no bash was found, so the command was not run. Tell the user…" }], details: shownLine("Not run: the sandbox needs a bash on PATH", "error") };
+		expect(bash.renderResult(refused, { expanded: false, isPartial: false }, plainTheme, { args: {}, isError: true, state: {} }).render(120)).toEqual(["  ⎿  Not run: the sandbox needs a bash on PATH"]);
+	});
+
+	it("ignores a malformed or empty field", async () => {
+		const { shownLineOf } = await import("../../extensions/lib/ui/tui-render.ts");
+		expect(shownLineOf(undefined)).toBeUndefined();
+		expect(shownLineOf({ shown: { text: "" } })).toBeUndefined();
+		expect(shownLineOf({ shown: "x" })).toBeUndefined();
+		expect(shownLineOf({ shown: { text: "x", color: "red" } })).toEqual({ text: "x", color: "dim" });
+	});
+});
+
+describe("the tools' shown lines", () => {
+	it("words every Agent refusal that carries guidance, and keeps the gate's fact for a nested denial", async () => {
+		const { refusalShownLine, subagentResultText } = await import("../../extensions/lib/agents/subagent-text.ts");
+		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
+		expect(refusalShownLine({ kind: "sessionEnding", lines: ["x"] })).toBe("No agent started: the session is ending");
+		expect(refusalShownLine({ kind: "noRun", to: "reviewer", known: [] })).toBe('No agent run named "reviewer"');
+		expect(refusalShownLine({ kind: "unknownModel", model: "nope", menu: "" })).toBe('Unknown model "nope"');
+		// A model that exists but cannot run the call keeps its reason, not "unknown".
+		expect(refusalShownLine({ kind: "unknownModel", model: "m", reason: "Requested subagent model m is text-only, but this session works with images. Pick an image-capable model.", menu: "" })).toBe(
+			"Requested subagent model m is text-only, but this session works with images.",
+		);
+		expect(refusalShownLine({ kind: "nestedDenied", reason: refusalText({ kind: "planMode" }) })).toBe("Nested agent refused: Blocked in plan mode");
+		expect(refusalShownLine({ kind: "expensiveModel", gate: "opus is expensive.\nmore", menu: "" })).toBe("opus is expensive.");
+		// A refusal that is already a short fact keeps its words.
+		expect(refusalShownLine({ kind: "deliveryFailed", name: "a", osMessage: "EPIPE" })).toBeUndefined();
+		expect(subagentResultText().refused({ kind: "deliveryFailed", name: "a", osMessage: "EPIPE" })).toBe("Could not deliver the message to a: EPIPE");
+	});
+
+	it("words each sandbox refusal", async () => {
+		const { sandboxRefusalLine } = await import("../../extensions/lib/shell-run/sandbox.ts");
+		expect(sandboxRefusalLine({ kind: "noBash" })).toBe("Not run: the sandbox needs a bash on PATH");
+		expect(sandboxRefusalLine({ kind: "hosts", reason: "bad port" })).toBe("Not run: allowed_domains has an entry the sandbox rejects (bad port)");
+		expect(sandboxRefusalLine({ kind: "unavailable", reason: "no bwrap" })).toBe("Not run: the required sandbox is not running (no bwrap)");
 	});
 });

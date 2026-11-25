@@ -18,9 +18,9 @@
 import { isAbsolute, relative } from "node:path";
 import { framesToText, notificationBody, parseNotificationFrames } from "../notify/notifications.ts";
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
-import { sanitizeDisplayText } from "./terminal-text.ts";
+import { sanitizeDisplayText, sanitizeTitle } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
-import { isClassifierDenial } from "../rules/classifier-denial.ts";
+import { CLASSIFIER_DENIED_LINE, classifierDenialReason, refusalLine } from "../rules/refusal-lines.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -612,8 +612,6 @@ export type RejectedFileOp = "write" | "update";
 
 /** Claude Code's transcript line for a call the user rejected with a reason, or for a tool with no line of its own. */
 export const TOOL_USE_REJECTED = "Tool use rejected";
-/** Claude Code's row for an auto-mode denial, without its "· /feedback if incorrect" (One Code has no /feedback). */
-export const CLASSIFIER_DENIED_LINE = "Denied by auto mode classifier";
 
 /**
  * A file tool's `path` for the transcript, as Claude Code shows it: relative to
@@ -625,27 +623,44 @@ export function displayToolPath(raw: string, cwd: string | undefined): string {
 }
 
 /**
- * The result line for a call the user rejected, or undefined when the result
- * is not a rejection. The model reads the whole rejection text; the transcript
- * shows Claude Code's short line instead: "User rejected write to <path>" for a
- * file tool rejected without a reason, "Tool use rejected" otherwise. A
- * rejection without a reason also stops the turn, and the turn's own
- * "Interrupted" line follows it.
+ * The result lines for a call the user or the harness refused, or undefined
+ * when the result is not a refusal. The model reads the whole text; the
+ * transcript shows Claude Code's short line instead: "User rejected write to
+ * <path>" for a file tool rejected without a reason, "Tool use rejected"
+ * otherwise. A rejection without a reason also stops the turn, and the turn's
+ * own "Interrupted" line follows it. Auto mode's denial draws Claude Code's
+ * "Blocked by auto mode" line and the classifier's reason under it. The
+ * harness's other refusals draw what happened, never the model's guidance
+ * (lib/rules/refusal-lines.ts).
  */
 export function rejectionLine(
 	theme: ThemeLike,
 	result: { content?: Array<{ type: string; text?: string }> },
 	isError: boolean,
+	expanded: boolean,
 	file?: { op: RejectedFileOp; path: string | undefined },
-): string | undefined {
+): ((width: number) => string[]) | undefined {
 	if (!isError) return undefined;
 	const text = textContent(result);
-	// The model reads the classifier's reason and what to do next; the user sees Claude Code's line.
-	if (isClassifierDenial(text)) return `  ⎿  ${theme.fg("dim", CLASSIFIER_DENIED_LINE)}`;
+	// Auto mode's denial is Claude Code's two lines in both views: what happened, then the classifier's reason, wrapped.
+	const reason = classifierDenialReason(text);
+	if (reason !== undefined) {
+		return (width) => [
+			`  ⎿  ${theme.fg("dim", `${CLASSIFIER_DENIED_LINE} · /permissions to review`)}`,
+			...wrapPlainText(`Auto mode: ${reason}`, Math.max(1, width - 7)).map((line) => `     ${theme.fg("dim", `│ ${line}`)}`),
+		];
+	}
+	// Another harness refusal: the model reads what happened and what to do next; the user sees what happened,
+	// and ctrl+o shows the whole text (decisions/tui.md).
+	const refusal = refusalLine(text);
+	if (refusal) return expanded ? undefined : () => [`  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`];
 	const kind = userDenialKind(text);
 	if (!kind) return undefined;
-	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
-	return `  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`;
+	if (kind === "stop" && file?.path) {
+		const head = rejectedFileHead(theme, file.op, file.path);
+		return () => [`  ⎿  ${head}`];
+	}
+	return () => [`  ⎿  ${theme.fg("dim", TOOL_USE_REJECTED)}`];
 }
 
 /** "User rejected <op> to <path>", dimmed with the path in bold: a file tool's reasonless rejection, before the `⎿` elbow. */
@@ -740,8 +755,10 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 			context: { args?: TArgs; isError: boolean },
 		) {
 			const stripped = stripReminderBlocks(result);
-			const rejected = rejectionLine(theme, stripped, context.isError);
-			if (rejected) return linesComponent(() => [rejected]);
+			const rejected = rejectionLine(theme, stripped, context.isError, options.expanded);
+			if (rejected) return linesComponent(rejected);
+			const shown = options.expanded ? undefined : shownLineOf(result.details);
+			if (shown) return linesComponent(() => elbowIndent([theme.fg(shown.color, sanitizeDisplayText(shown.text))]));
 			let text: string | undefined;
 			try {
 				text = spec.result?.(result, context.args, context.isError);
@@ -899,10 +916,28 @@ export interface CcWrapOptions<TArgs = any> {
 	errorLine?: (result: ResultView, args: TArgs | undefined, cwd: string | undefined) => ShortLine | undefined;
 }
 
-/** A short transcript line and its colour token (an error's, or a dim note). */
+/** A short transcript line and its colour token (an error's, or a dim note): a tool's own row, or a refusal's (lib/rules/refusal-lines.ts). */
 export interface ShortLine {
 	text: string;
 	color: "error" | "dim";
+}
+
+/**
+ * A result's transcript line, which a tool puts in `details.shown` when its
+ * text is guidance for the model (what to do next) that the user need not
+ * read. The transcript draws the line in place of the text, and ctrl+o shows
+ * the whole text. `details` never reach the model.
+ */
+export function shownLine(text: string, color: ShortLine["color"] = "dim"): { shown: ShortLine } {
+	return { shown: { text, color } };
+}
+
+/** The line a result's `details.shown` holds, or undefined when it holds none. */
+export function shownLineOf(details: unknown): ShortLine | undefined {
+	const shown = (details as { shown?: unknown } | undefined)?.shown as { text?: unknown; color?: unknown } | undefined;
+	if (!shown || typeof shown.text !== "string" || shown.text.trim() === "") return undefined;
+	// One line, whatever the tool put in it (a launch error, a URL).
+	return { text: sanitizeTitle(shown.text), color: shown.color === "error" ? "error" : "dim" };
 }
 
 /** The result fields the summary and short-line hooks read. */
@@ -1075,13 +1110,13 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			const state = context.state as { ccCallBody?: CallBody; ccInnerCall?: TuiComponent };
 			state.ccCallBody = "keep";
 			const path = rawTitle(context.args);
-			const rejected = rejectionLine(theme, result, context.isError, opts.rejectedAs && {
+			const rejected = rejectionLine(theme, result, context.isError, options.expanded, opts.rejectedAs && {
 				op: opts.rejectedAs,
 				path: path ? displayToolPath(path, context.cwd) : undefined,
 			});
-			if (rejected) return linesComponent(() => [rejected]);
+			if (rejected) return linesComponent(rejected);
 			if (context.isError && !options.isPartial) {
-				const short = orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
+				const short = shownLineOf(result.details) ?? orUndefined(() => opts.errorLine?.(result, context.args, context.cwd));
 				if (short) {
 					// The whole text, expanded, goes under the elbow too: an edit's base view
 					// would show it as the call's body and print no result.

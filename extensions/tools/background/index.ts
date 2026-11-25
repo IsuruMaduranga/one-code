@@ -31,7 +31,7 @@ import { sandboxedCommand, type SandboxRun } from "../../lib/shell-run/sandbox.t
 import { trackOriginalCommands } from "../../lib/shell/original-command.ts";
 import { commandHosts } from "../../lib/shell-run/sandbox-settings.ts";
 import { sandboxParams } from "../../lib/shell-run/shell-tool.ts";
-import { ClickToggles, clickToExpand, dimMarkedLine, hiddenToolRenderers, withResultDisplay, TURN_MARK, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, dimMarkedLine, hiddenToolRenderers, shownLine, withResultDisplay, TURN_MARK, toolRenderers, customMessageText, expandHintFor, formatDuration, formatFireTime, notificationComponent, scheduledTaskComponent } from "../../lib/ui/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -767,7 +767,8 @@ function backgroundExtension(pi: ExtensionAPI) {
 			if (task.kind === "subagent" && task.status === "running") {
 				return {
 					content: [{ type: "text", text: `${text.tasks.taskLine(shownTask(task))}\n\n${text.tasks.agentStillRunning}` }],
-					details: { taskId: task.id, status: task.status, logPath: task.logPath },
+					// Claude Code's dim row for a running task; the model also reads how to wait.
+					details: { taskId: task.id, status: task.status, logPath: task.logPath, ...shownLine("Task is still running…") },
 				};
 			}
 
@@ -960,7 +961,7 @@ function backgroundExtension(pi: ExtensionAPI) {
 			if (params.stop === true) {
 				const cancelled = dynamicLoop.stop();
 				runCron();
-				return { content: [{ type: "text", text: text.wakeup.stopped({ cancelled }) }], details: { stopped: true, cancelledWakeups: cancelled } };
+				return { content: [{ type: "text", text: text.wakeup.stopped({ cancelled }) }], details: { stopped: true, cancelledWakeups: cancelled, ...shownLine("Loop stopped") } };
 			}
 			if (params.delaySeconds === undefined || params.reason === undefined) return fail("delayAndReason");
 			if (params.prompt === undefined) return fail("prompt");
@@ -968,10 +969,11 @@ function backgroundExtension(pi: ExtensionAPI) {
 			const now = Date.now();
 			const scheduled = dynamicLoop.schedule(params.delaySeconds, params.prompt, now);
 			runCron();
-			if (!scheduled) return { content: [{ type: "text", text: text.wakeup.agedOut }], details: { scheduledFor: 0 } };
+			if (!scheduled) return { content: [{ type: "text", text: text.wakeup.agedOut }], details: { scheduledFor: 0, ...shownLine("Loop ended: it reached its maximum duration") } };
+			const when = scheduledText(scheduled, now);
 			return {
-				content: [{ type: "text", text: scheduling(text.wakeup.scheduled(scheduledText(scheduled, now)), ctx) }],
-				details: { ...scheduled, reason: params.reason, noop: params.noop },
+				content: [{ type: "text", text: scheduling(text.wakeup.scheduled(when), ctx) }],
+				details: { ...scheduled, reason: params.reason, noop: params.noop, ...shownLine(`Next wakeup at ${when.clock} (in ${formatDuration(0, when.inSeconds * 1000)})`) },
 			};
 		},
 	});

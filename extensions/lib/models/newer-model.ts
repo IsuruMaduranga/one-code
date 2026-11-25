@@ -48,8 +48,11 @@ function blendedPrice(model: Model<Api>): number | undefined {
 
 export interface NewerModelSuggestion {
 	model: Model<Api>;
+	/** The full comparison, with both prices, for /doctor and the chosen-model warnings. */
 	text: string;
 	fix: string;
+	/** The short notice at session start and on a model switch: the model, whether it costs less, and the command. */
+	notice: string;
 }
 
 /**
@@ -91,6 +94,7 @@ export function newerModelSuggestion(
 		model: pick.model,
 		text: `${pick.model.id} is newer than ${current.id} and ${comparison} (${pricePair(pick.model)} vs ${pricePair(current)} per M tokens).`,
 		fix: `Switch with /model ${modelSpec(pick.model)}.`,
+		notice: `Newer model available: ${pick.model.id}${comparison === "costs less" ? ", and it costs less" : ""} · /model ${modelSpec(pick.model)}`,
 	};
 }
 

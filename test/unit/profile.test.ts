@@ -199,6 +199,23 @@ describe("resolveProfile", () => {
 		);
 	});
 
+	it("turns features off from the user's settings file, records why each is off, and skips what it cannot turn off", () => {
+		const resolved = resolveProfile({ ...empty, features: { ...empty.features, btw: false } }, { [envName("FEATURES_OFF")]: "footer" }, "/p", undefined, undefined, undefined, undefined, ["recap", "footer"]);
+		expect(resolved.features.has("recap")).toBe(false);
+		expect(resolved.settingsOff).toEqual(["recap", "footer"]);
+		// The first source that turned a feature off names it: the product, then the environment, then the settings file.
+		expect(resolved.featuresOffBy.get("btw")).toBe("product");
+		expect(resolved.featuresOffBy.get("footer")).toBe("environment");
+		expect(resolved.featuresOffBy.get("recap")).toBe("settings");
+		// A lasting file never stops the launch: a guard, a required feature or an unknown id is skipped and reported.
+		const skipped = resolveProfile(empty, {}, "/p", undefined, undefined, undefined, undefined, ["hooks", "ledger", "renamed-feature", "recap"]);
+		expect(skipped.features.has("hooks")).toBe(true);
+		expect(skipped.features.has("ledger")).toBe(true);
+		expect(skipped.features.has("recap")).toBe(false);
+		expect(skipped.settingsOff).toEqual(["recap"]);
+		expect(skipped.settingsOffIgnored).toEqual(['"hooks" guards tool calls', '"ledger" is part of the required core', 'unknown feature "renamed-feature"']);
+	});
+
 	it("resolves child extensions against the profile folder, after the base's", () => {
 		const dir = mkdtempSync(join(tmpdir(), "profile-child-"));
 		try {

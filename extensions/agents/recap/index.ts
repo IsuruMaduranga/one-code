@@ -46,7 +46,7 @@ import { releaseSideCall, runSideCall } from "../../lib/side-calls/side-call-run
 import { answerText, branchMessages, stripImageBlocks, toolStubs, withoutSystemMessages } from "../../lib/side-calls/side-call.ts";
 import { unrefTimers } from "../../lib/core/timer-ops.ts";
 import { dimMarkedLine } from "../../lib/ui/tui-render.ts";
-import { requireText } from "../../lib/profile/profile.ts";
+import { featureEnabled, requireText } from "../../lib/profile/profile.ts";
 import { recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { type BranchMark, FIVE_MINUTE_CACHE_MS, HINTED_RECAPS, ONE_HOUR_CACHE_MS, RECAP_DELAY_MS, recapDelayMs, recapSkip } from "./policy.ts";
 import { RecapScheduler } from "./scheduler.ts";
@@ -181,7 +181,7 @@ function recapExtension(pi: ExtensionAPI) {
 			}
 			const hinted = shown < HINTED_RECAPS;
 			shown++;
-			pi.appendEntry<RecapData>(ENTRY_TYPE, { content: hinted ? `${content} ${recapResultText.offHint(envName("FEATURES_OFF"))}` : content });
+			pi.appendEntry<RecapData>(ENTRY_TYPE, { content: hinted ? `${content} ${featureEnabled("config") ? recapResultText.offHint : recapResultText.offHintWithoutConfig(envName("FEATURES_OFF"))}` : content });
 		} catch {
 			// Best-effort: a failed recap shows nothing. Claude Code tries again on the
 			// next blur (here, the next idle period) up to three failures a turn.

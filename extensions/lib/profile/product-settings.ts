@@ -26,13 +26,11 @@ import { readJsonFile, writeJsonAtomic } from "../core/atomic-write.ts";
 import { findProjectRoot } from "../context/git.ts";
 import { projectSlug } from "../context/memory.ts";
 import { productStateDir, tryRealpath } from "./paths.ts";
+import { productSettingsPath } from "./settings-file.ts";
 
 export { SETTINGS_DISPLAY } from "./settings-display.ts";
 
-/** `~/.onecode/settings.json`: the product's user-scope settings (writable). */
-export function productSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(productStateDir(env, home), "settings.json");
-}
+export { productSettingsPath } from "./settings-file.ts";
 
 /**
  * The project a per-repo setting belongs to: the git repository root when
@@ -86,14 +84,24 @@ export function writeSettings(path: string, file: Record<string, unknown>): void
 
 /** User-only upgrade advice, enabled unless explicitly disabled in One Code's settings. */
 export function readSuggestNewerModels(home: string, env: NodeJS.ProcessEnv = process.env): boolean {
-	const file = readJsonFile<{ suggestNewerModels?: unknown }>(productSettingsPath(home, env));
+	return suggestNewerOf(readJsonFile<Record<string, unknown>>(productSettingsPath(home, env)));
+}
+
+/** A settings object's `suggestNewerModels`: on unless it is `false`. */
+export function suggestNewerOf(file: Record<string, unknown> | undefined): boolean {
 	return file?.suggestNewerModels !== false;
+}
+
+/** A settings object's `workflowSizeGuideline`, or undefined when it names no size. */
+export function workflowSizeOf(file: Record<string, unknown> | undefined): WorkflowSizeGuideline | undefined {
+	const size = file?.workflowSizeGuideline;
+	return WORKFLOW_SIZES.includes(size as WorkflowSizeGuideline) ? (size as WorkflowSizeGuideline) : undefined;
 }
 
 /** Claude Code's `workflowSizeGuideline` values: under 5, 10 or 50 agents, or no guideline. */
 export type WorkflowSizeGuideline = "small" | "medium" | "large" | "unrestricted";
 
-const WORKFLOW_SIZES: readonly WorkflowSizeGuideline[] = ["small", "medium", "large", "unrestricted"];
+export const WORKFLOW_SIZES: readonly WorkflowSizeGuideline[] = ["small", "medium", "large", "unrestricted"];
 
 export interface WorkflowSettings {
 	/** Whether the workflow tool is offered at all. */
@@ -125,7 +133,7 @@ export function readWorkflowSettings(cwd: string, home: string, env: NodeJS.Proc
 		if (!file || typeof file !== "object") continue;
 		if (typeof file.enableWorkflows === "boolean") enable = file.enableWorkflows;
 		if (file.disableWorkflows === true) disable = true;
-		if (WORKFLOW_SIZES.includes(file.workflowSizeGuideline as WorkflowSizeGuideline)) size = file.workflowSizeGuideline as WorkflowSizeGuideline;
+		size = workflowSizeOf(file as Record<string, unknown>) ?? size;
 	}
 	return { enabled: enable && !disable, sizeGuideline: size ?? "medium", sizeConfigured: size !== undefined };
 }

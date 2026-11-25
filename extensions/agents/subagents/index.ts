@@ -46,6 +46,7 @@ import {
 	type SubagentModelResolution,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelNotes,
+	userNotices,
 	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
@@ -110,7 +111,7 @@ import {
 import { persistIfLarge, sessionResultsDir, taskOutputPath } from "../../lib/request/persisted-output.ts";
 import { isOutputLink, linkOutputFile } from "./output-link.ts";
 import { sanitizeDisplayText } from "../../lib/ui/terminal-text.ts";
-import { ClickToggles, clickToExpand, elbowIndent, rowRenderers, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
+import { ClickToggles, clickToExpand, elbowIndent, rowRenderers, shownLine, toolRenderers, withResultDisplay, customMessageText, expandHintFor, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../../lib/ui/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -135,7 +136,7 @@ import { readStringsState, recordState } from "../../lib/request/ledger/state.ts
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { dockRowsReporter, trackDockRows } from "../../lib/ui/dock-rows.ts";
 import { cronWords } from "../../lib/agents/cron-text.ts";
-import { type AgentTools, type LaunchLine, type RunStatus, type SubagentRefusal, subagentResultText } from "../../lib/agents/subagent-text.ts";
+import { type AgentTools, type LaunchLine, type RunStatus, type SubagentRefusal, refusalShownLine, subagentResultText } from "../../lib/agents/subagent-text.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -300,7 +301,10 @@ function subagentsExtension(pi: ExtensionAPI) {
 	/** The profile's subagent words (fails closed: every Agent call reads them). */
 	const words = subagentWords();
 	/** A refused Agent call (the nested Agent tool's too). */
-	const refuseCall = (r: SubagentRefusal) => ({ content: [{ type: "text" as const, text: subagentResultText().refused(r) }], details: {}, isError: true });
+	const refuseCall = (r: SubagentRefusal) => {
+		const line = refusalShownLine(r);
+		return { content: [{ type: "text" as const, text: subagentResultText().refused(r) }], details: line ? shownLine(line, "error") : {}, isError: true };
+	};
 	/**
 	 * A launch that started nothing: `refusal` normally, but in an ending session
 	 * a retry cannot help, whichever step failed, so `lines` (what to show) say so.
@@ -744,7 +748,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 	};
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
 		const { available, configured, resolution, text } = modelMenu(ctx, sessionModel);
-		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 		// The user's own subagentModel setting is honoured, so say what it costs:
 		// a newer model in its line, or a model far weaker than the session's.
 		if (resolution.source === "default" && resolution.model) {
@@ -1752,7 +1756,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 					available,
 					requireImageInput: supportsImageInput(ctx.model),
 				});
-				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 				const modelNotes = subagentModelNotes(resolution);
 				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 
@@ -1785,18 +1789,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal, parentToolCallId: mainCallOf(parentRecord.taskId) })
 						: undefined;
 					if (!bridge || verdict?.block) {
-						return {
-							content: [{ type: "text" as const, text: subagentResultText().refused(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" }) }],
-							details: { agentRuns: [] as AgentRunRecord[] },
-							isError: true,
-						};
+						const refused = refuseCall(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" });
+						return { ...refused, details: { ...refused.details, agentRuns: [] as AgentRunRecord[] } };
 					}
 				} catch (error) {
-					return {
-						content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "nestedCheckFailed", osMessage: (error as Error).message }) }],
-						details: { agentRuns: [] as AgentRunRecord[] },
-						isError: true,
-					};
+					const refused = refuseCall({ kind: "nestedCheckFailed", osMessage: (error as Error).message });
+					return { ...refused, details: { ...refused.details, agentRuns: [] as AgentRunRecord[] } };
 				}
 
 				const { result } = await executeRun(
@@ -2503,7 +2501,7 @@ function subagentsExtension(pi: ExtensionAPI) {
 							}),
 						});
 					}
-					for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+					for (const notice of userNotices(resolution)) notifyModelOnce(ctx, notice);
 					for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
 					const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 					p.request.model = resolved;

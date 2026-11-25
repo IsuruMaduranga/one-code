@@ -52,9 +52,7 @@ import {
 	type ClassifierFallback,
 	type ClassifierNotice,
 	classifierCandidates,
-	describeCandidate,
 	isModelUnavailableError,
-	isSilentFallback,
 	replyText,
 } from "../../../lib/models/classifier-model.ts";
 import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
@@ -297,12 +295,11 @@ export function classifierChain(
 	return chain;
 }
 
-/** The candidate chain (minus anything already unusable this session), its notices and whether the chain's choice is announced at all. */
-function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[]; silent: boolean } {
-	const { candidates: all, notices, fallback } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
+/** The candidate chain (minus anything already unusable this session) and its notices. */
+function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
+	const { candidates: all, notices } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-	const silent = isSilentFallback(fallback);
-	if (usable.length > 0) return { candidates: usable, notices, silent };
+	if (usable.length > 0) return { candidates: usable, notices };
 	// If everything has been rejected, the session model is still worth one more
 	// attempt: a gate that stops asking has stopped gating. It has to be the
 	// session model specifically — the *last* chain entry is the cost-ranked pick,
@@ -311,7 +308,7 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	// (`refusalStop`).
 	const session = all.filter((entry) => entry.source === "session");
 	const retry = session.length > 0 ? session : all.slice(-1);
-	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices, silent };
+	return { candidates: retry.filter((entry) => !deps.state.refused.has(`${entry.model.provider}/${entry.model.id}`)), notices };
 }
 
 /**
@@ -343,16 +340,18 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
  * subagent run). See the module comment for the two-stage flow.
  */
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
-	const { candidates, notices, silent } = remainingCandidates(deps);
+	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
 		if (deps.state.refused.size > 0) return refusalStop(deps);
 		return noVerdict({ kind: "noModel" });
 	}
 
-	// Automatic-selection fallback explanations are surfaced once per distinct message.
-	// A newer-model hint about a chosen classifier is the session-start
-	// announcement's to make (it honours suggestNewerModels), not a gated call's.
-	for (const notice of notices) if (notice.choiceWarning !== "newer") notifyOnce(deps, notice.text, notice.text, notice.level, notice);
+	// Warnings about the chosen classifier are surfaced once per distinct message.
+	// Which model screens is never announced (a routine choice; /auto-mode
+	// config shows it), so a fallback's explanation is not either. A newer-model
+	// hint is the session-start announcement's to make (it honours
+	// suggestNewerModels), not a gated call's.
+	for (const notice of notices) if (!notice.fallbackReason && notice.choiceWarning !== "newer") notifyOnce(deps, notice.text, notice.text, notice.level, notice);
 
 	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
 	// that is refused with its size, never judged from a prefix.
@@ -577,11 +576,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			deps.state.timeoutStreak = 0;
 			// Pin on the first success, so the classifier cannot change under the
 			// session and a working model is not re-litigated per call.
-			if (!deps.state.pinned) {
-				deps.state.pinned = model;
-				// A choice the pairing table made on purpose (the session's own model) is not announced.
-				if (!silent) notifyOnce(deps, `using:${key}`, `Auto mode is screening calls with ${describeCandidate(candidate)}.`, "info");
-			}
+			deps.state.pinned ??= model;
 			if (debug) {
 				process.stderr.write(
 					`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}` +
@@ -627,12 +622,6 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				if (!reasoning && isReasoningMandatoryError(lastError)) {
 					const level = reasoningRetryLevel(model);
 					deps.state.forcedReasoning.set(key, level);
-					notifyOnce(
-						deps,
-						`forced-reasoning:${key}`,
-						`${key} cannot run with thinking disabled; the classifier now runs it at ${level} thinking.`,
-						"info",
-					);
 					queue.unshift(candidate);
 					continue;
 				}

@@ -1,46 +1,23 @@
 /**
- * lib/agents/agent-loader.ts withParentSessionId: a fork's runtime sends its
- * own Codex requests under the parent's session id (findings §75) and leaves
- * every other request (a side call's own key included) and member alone.
+ * lib/agents/agent-loader.ts codexRoutingId: a fork sends its requests under
+ * its parent's session id on Codex only (findings §75); every other provider,
+ * and a session with no parent, keeps its own id.
  */
 import { describe, expect, it } from "vitest";
-import { withParentSessionId } from "../../extensions/lib/agents/agent-loader.ts";
+import { codexRoutingId } from "../../extensions/lib/agents/agent-loader.ts";
 
-class FakeRuntime {
-	calls: Array<{ api: string; sessionId?: string }> = [];
-	cached = 0;
-	streamSimple(model: { api: string }, _context: unknown, options?: { sessionId?: string }) {
-		this.calls.push({ api: model.api, sessionId: options?.sessionId });
-		return "stream" as never;
-	}
-	remember() {
-		this.cached += 1;
-		return this.cached;
-	}
-}
-
-describe("withParentSessionId", () => {
-	it("puts the parent's session id on the fork's own Codex requests only", () => {
-		const shared = new FakeRuntime();
-		const fork = withParentSessionId(shared as never, "parent-session", () => "fork-session") as unknown as FakeRuntime;
-		fork.streamSimple({ api: "openai-codex-responses" }, {}, { sessionId: "fork-session" });
-		fork.streamSimple({ api: "openai-codex-responses" }, {}, { sessionId: "fork-session:reader" });
-		fork.streamSimple({ api: "anthropic-messages" }, {}, { sessionId: "fork-session" });
-		fork.streamSimple({ api: "openai-responses" }, {}, { sessionId: "fork-session" });
-		expect(shared.calls).toEqual([
-			{ api: "openai-codex-responses", sessionId: "parent-session" },
-			{ api: "openai-codex-responses", sessionId: "fork-session:reader" },
-			{ api: "anthropic-messages", sessionId: "fork-session" },
-			{ api: "openai-responses", sessionId: "fork-session" },
-		]);
+describe("codexRoutingId", () => {
+	it("is the parent's session id for a Codex fork", () => {
+		expect(codexRoutingId("openai-codex-responses", "parent-session")).toBe("parent-session");
 	});
 
-	it("reads and writes every other member on the shared runtime, each method bound once", () => {
-		const shared = new FakeRuntime();
-		const fork = withParentSessionId(shared as never, "parent-session", () => "fork-session") as unknown as FakeRuntime;
-		expect(fork.remember).toBe(fork.remember);
-		expect(fork.remember()).toBe(1);
-		expect(shared.cached).toBe(1);
-		expect(fork.cached).toBe(1);
+	it("leaves every other provider on the fork's own id", () => {
+		for (const api of ["anthropic-messages", "openai-responses", "openai-completions", "bedrock-converse-stream", undefined]) {
+			expect(codexRoutingId(api, "parent-session")).toBeUndefined();
+		}
+	});
+
+	it("is nothing for a session with no parent", () => {
+		expect(codexRoutingId("openai-codex-responses", undefined)).toBeUndefined();
 	});
 });

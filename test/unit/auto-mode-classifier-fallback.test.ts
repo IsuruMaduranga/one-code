@@ -105,7 +105,8 @@ describe("classify: pinning and fallback", () => {
 		expect((await classify(request, deps)).decision).toBe("allow");
 		expect(deps.state.pinned?.id).toBe(miniModel.id);
 		expect(completeMock.mock.calls[0]?.[0]).toBe(miniModel);
-		expect(notices.some((notice) => notice.includes("in the session's tier or above"))).toBe(true);
+		// Which model screens is a routine choice: never announced (/auto-mode config shows it).
+		expect(notices).toEqual([]);
 	});
 
 	it("announces nothing when the pairing table keeps the session as its own classifier", async () => {
@@ -118,12 +119,13 @@ describe("classify: pinning and fallback", () => {
 		expect(notices).toEqual([]);
 	});
 
-	it("announces once why the session screens itself when no cheaper model qualifies", async () => {
+	it("does not announce that the session screens itself when no cheaper model qualifies", async () => {
 		completeMock.mockResolvedValue(allowReply());
 		const { deps, notices } = makeDeps({ registry: { getAvailable: () => [sessionModel], streamSimple: registryStream(completeSimple), getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }) } as any });
 		await classify(request, deps);
 		await classify(request, deps);
-		expect(notices.filter((notice) => notice.includes("this session's model, because no cheaper"))).toHaveLength(1);
+		expect(deps.state.pinned).toBe(sessionModel);
+		expect(notices).toEqual([]);
 	});
 
 	it("falls back to the session when the cheaper model times out", async () => {
@@ -322,7 +324,7 @@ describe("classify: reasoning-mandatory fallback", () => {
 		expect(deps.state.pinned?.id).toBe("gpt-5-mini"); // retried in place, not stepped past
 		expect(deps.state.forcedReasoning.get("openai/gpt-5-mini")).toBe("minimal"); // learned + remembered
 		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(false); // a forced-reasoning 400 is not "unusable"
-		expect(notices.some((n) => /cannot run with thinking disabled/.test(n))).toBe(true);
+		expect(notices).toEqual([]); // the retry is the classifier's own business
 		// First attempt sent no reasoning (off); the retry sent minimal.
 		expect(completeMock.mock.calls[0]?.[2]?.reasoning).toBeUndefined();
 		expect(completeMock.mock.calls[1]?.[2]?.reasoning).toBe("minimal");

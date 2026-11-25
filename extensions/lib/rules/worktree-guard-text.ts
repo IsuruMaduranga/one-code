@@ -5,6 +5,7 @@
  * checkout. Each names the fix. worktree-guards.ts and the PowerShell guards
  * decide; the worktree tools and subagent worktree isolation show the words.
  */
+import { GUIDANCE } from "./refusal-lines.ts";
 import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
 
 /**
@@ -124,13 +125,13 @@ function refusal(r: WorktreeGuardRefusal): string {
 			const [problem, fix] = gitTarget(r.problem, r.worktreePath);
 			return (
 				`This session is isolated in the worktree ${r.worktreePath}, but ${problem}. ` +
-				`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`
+				`${GUIDANCE.worktreeGit} ${fix}`
 			);
 		}
 		case "stash":
 			return (
 				`Blocked: \`${r.command}\` — the git stash stack is shared between the main checkout and every worktree of this repository, and parallel sessions may push or pop entries concurrently; ${STASH_HAZARD[r.risk]}. ` +
-				"Prefer a temporary WIP commit on this worktree's branch to set work aside. If you must stash: " +
+				`${GUIDANCE.worktreeStash} If you must stash: ` +
 				'`git stash push -u -m "<unique-tag>"`, capture your entry\'s SHA with `git stash list --format=\'%H %gs\'`, ' +
 				"restore with `git stash apply <sha>` (not pop), and drop your entry only after re-finding it by tag."
 			);
@@ -138,7 +139,7 @@ function refusal(r: WorktreeGuardRefusal): string {
 			const what = r.inCommand ? `this command writes to ${r.target}, which` : r.target;
 			return (
 				`This agent is isolated in the worktree ${r.worktreePath}, but ${what} is in the shared checkout ${r.sharedRoot}. ` +
-				`Refusing the write — an isolated agent's changes belong in its own worktree. Write the corresponding path there instead: ${r.mapped}`
+				`${GUIDANCE.worktreeWrite} Write the corresponding path there instead: ${r.mapped}`
 			);
 		}
 	}

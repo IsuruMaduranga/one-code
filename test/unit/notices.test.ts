@@ -103,7 +103,7 @@ describe("lifecycle notices across extensions", () => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	it("joins permissions' classifier announcement and newer-model's suggestion into one info notice", async () => {
+	it("announces no classifier choice, so newer-model's suggestion is the one info notice", async () => {
 		const model = (id: string, price: number) => ({ provider: "openai-codex", id, name: id, contextWindow: 272_000, maxTokens: 8192, cost: { input: price, output: price * 4 } });
 		const old = model("gpt-5.6-sol", 2.5);
 		const newer = model("gpt-6-sol", 1);
@@ -123,7 +123,7 @@ describe("lifecycle notices across extensions", () => {
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
 		const infos = notify.mock.calls.filter(([, level]) => level === "info").map(([text]) => String(text));
 		expect(infos).toHaveLength(1);
-		expect(infos[0]).toMatch(/Auto mode (?:is screening|will screen) calls with/);
-		expect(infos[0]).toContain("gpt-6-sol is newer than gpt-5.6-sol");
+		expect(infos[0]).not.toMatch(/screen/);
+		expect(infos[0]).toBe("Newer model available: gpt-6-sol, and it costs less · /model openai-codex/gpt-6-sol");
 	});
 });

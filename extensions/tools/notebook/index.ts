@@ -12,7 +12,7 @@ import { StringEnum } from "../../lib/core/string-enum.ts";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { deferBaseTool } from "../../lib/request/deferred.ts";
-import { toolRenderers } from "../../lib/ui/tui-render.ts";
+import { shownLine, toolRenderers } from "../../lib/ui/tui-render.ts";
 import { applyEdit, cellRefs, type EditMode, type Notebook, notebookFailure, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { notebookResultText } from "./text.ts";
@@ -71,9 +71,12 @@ function notebookExtension(pi: ExtensionAPI) {
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {
+				const failure = notebookFailure(error);
+				// The cell errors list every cell id and how to address one; the user sees what was wrong.
+				const line = failure.kind === "noSuchCell" ? `Cell ${failure.cellId} not found` : failure.kind === "cellIdRequired" ? "No cell id given" : undefined;
 				return {
-					content: [{ type: "text", text: notebookResultText(view.live).failed({ failure: notebookFailure(error), ...(parsed ? { cells: cellRefs(parsed) } : {}) }) }],
-					details: {},
+					content: [{ type: "text", text: notebookResultText(view.live).failed({ failure, ...(parsed ? { cells: cellRefs(parsed) } : {}) }) }],
+					details: line ? shownLine(line, "error") : {},
 					isError: true,
 				};
 			}

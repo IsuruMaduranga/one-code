@@ -9,6 +9,7 @@ describe("dump-requests", () => {
 	const originalFetch = globalThis.fetch;
 	const originalWireDump = process.env.WIRE_DUMP;
 	const originalMeta = process.env.WIRE_DUMP_META;
+	const originalResponses = process.env.WIRE_RESPONSE_DUMP;
 	/** A pi stand-in that keeps its `before_provider_request` handlers, so a test can fire them. */
 	const fakePi = () => {
 		const hooks: Array<() => void> = [];
@@ -22,6 +23,8 @@ describe("dump-requests", () => {
 		else process.env.WIRE_DUMP = originalWireDump;
 		if (originalMeta === undefined) delete process.env.WIRE_DUMP_META;
 		else process.env.WIRE_DUMP_META = originalMeta;
+		if (originalResponses === undefined) delete process.env.WIRE_RESPONSE_DUMP;
+		else process.env.WIRE_RESPONSE_DUMP = originalResponses;
 		if (directory) rmSync(directory, { recursive: true, force: true });
 		directory = undefined;
 	});
@@ -48,6 +51,52 @@ describe("dump-requests", () => {
 
 		expect(sent).toHaveBeenCalledOnce();
 		expect(readFileSync(wire, "utf8")).toBe(`${request}\n`);
+	});
+
+	it("records a response's headers and completed usage while the provider reads the whole stream", async () => {
+		directory = mkdtempSync(join(process.cwd(), ".dump-requests-"));
+		const wire = join(directory, "wire.jsonl");
+		const responses = join(directory, "responses.jsonl");
+		process.env.WIRE_DUMP = wire;
+		process.env.WIRE_RESPONSE_DUMP = responses;
+		const usage = { input_tokens: 100, input_tokens_details: { cached_tokens: 64 }, attribution: { items: { msg_1: { cached_tokens: 64 } } } };
+		const stream = `data: {"type":"response.created"}\n\ndata: ${JSON.stringify({ type: "response.completed", response: { usage } })}\n\n`;
+		const headers = { "x-oai-request-id": "req-1", "x-codex-turn-state": "t".repeat(200), "content-type": "text/event-stream" };
+		globalThis.fetch = vi.fn(async () => new Response(stream, { status: 200, headers }));
+		dump(fakePi().pi);
+
+		const res = await globalThis.fetch("https://example.invalid/backend-api/codex/responses", { method: "POST", body: JSON.stringify({ input: [] }) });
+		expect(await res.text()).toBe(stream);
+		await vi.waitFor(() => expect(readFileSync(responses, "utf8")).not.toBe(""));
+		expect(JSON.parse(readFileSync(responses, "utf8"))).toEqual({
+			dump: wire,
+			line: 1,
+			pid: process.pid,
+			status: 200,
+			headers: { "x-oai-request-id": "req-1", "x-codex-turn-state": "<200 chars>" },
+			type: "response.completed",
+			usage,
+		});
+	});
+
+	it("records the completed event when the provider cancels the stream right after it", async () => {
+		directory = mkdtempSync(join(process.cwd(), ".dump-requests-"));
+		const responses = join(directory, "responses.jsonl");
+		process.env.WIRE_DUMP = join(directory, "wire.jsonl");
+		process.env.WIRE_RESPONSE_DUMP = responses;
+		const usage = { input_tokens: 10, input_tokens_details: { cached_tokens: 0 } };
+		const completed = new TextEncoder().encode(`data: ${JSON.stringify({ type: "response.completed", response: { usage } })}\n\n`);
+		// A server stream that has sent the completed event but not yet ended.
+		const body = new ReadableStream<Uint8Array>({ start: (controller) => controller.enqueue(completed) });
+		globalThis.fetch = vi.fn(async () => new Response(body));
+		dump(fakePi().pi);
+
+		const res = await globalThis.fetch("https://example.invalid/backend-api/codex/responses", { method: "POST", body: JSON.stringify({ input: [] }) });
+		const reader = res.body!.getReader();
+		await reader.read();
+		await reader.cancel();
+		await vi.waitFor(() => expect(readFileSync(responses, "utf8")).not.toBe(""));
+		expect(JSON.parse(readFileSync(responses, "utf8"))).toMatchObject({ line: 1, type: "response.completed", usage });
 	});
 
 	it("tags session requests in the meta file and wraps fetch once across a reload", async () => {

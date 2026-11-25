@@ -36,7 +36,7 @@ import { requireText } from "../../lib/profile/profile.ts";
 import type { EnterWorktreeFailure, RemoveBlocker } from "./text.ts";
 import type { WorktreeGuardRefusal } from "../../lib/rules/worktree-guard-text.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
-import { toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
+import { shownLine, toolRenderers, withResultDisplay } from "../../lib/ui/tui-render.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG, HARNESS_GIT_NO_HOOKS, repositoryWorktrees } from "../../lib/context/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../../lib/profile/sources.ts";
 import { readState, readStringsState, recordState } from "../../lib/request/ledger/state.ts";
@@ -65,6 +65,12 @@ interface WorktreeDetails {
 	exited?: { action: "keep" | "remove"; branch?: string; originalCwd: string };
 	/** Why the branch of an attached worktree could not be read, for the transcript row only. */
 	branchError?: string;
+}
+
+/** Why exit_worktree kept the worktree, for the transcript: what blocks removal, without the model's next steps. */
+function removeRefusedLine(blockers: readonly RemoveBlocker[]): string {
+	const what = blockers.map((b) => (b.kind === "uncommitted" ? "uncommitted changes" : b.kind === "commitsAhead" ? `${b.count} unmerged commit(s)` : "its changes could not be checked"));
+	return `Worktree not removed: ${[...new Set(what)].join(", ")}`;
 }
 
 /** Claude Code's enter_worktree row: the model reads where commands now run and how to return. */
@@ -371,7 +377,7 @@ function worktreeExtension(pi: ExtensionAPI) {
 				if (blockers.length > 0) {
 					return {
 						content: [{ type: "text", text: worktreeResultText.exit.removeRefused({ session: current, blockers }) }],
-						details: {} satisfies WorktreeDetails,
+						details: shownLine(removeRefusedLine(blockers), "error"),
 						isError: true,
 					};
 				}

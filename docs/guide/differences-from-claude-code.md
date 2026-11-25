@@ -47,7 +47,7 @@ so nothing surprises you.
 | Reasoning effort | Fixed per model. | A slider from `off` to `max`, plus `ultracode`. |
 | Session storage | `~/.claude`. | `~/.onecode` for One Code's state and the bundled app's pi state. `~/.claude` is read-only except for memory. |
 | Update command | `/upgrade`. | A daily check that shows an install-aware upgrade hint. |
-| Config editing | `/config`, `/hooks`, `/statusline`. | Settings files, plus `/doctor` to see what is in effect. |
+| Config editing | `/config`, `/hooks`, `/statusline`. | `/config` for One Code's own settings and features, settings files for the rest, and `/doctor` to see what is in effect. |
 
 ## Tools that are not provided
 
@@ -70,7 +70,7 @@ Claude Code commands with no One Code or pi counterpart: `/cost` (the
 footer shows cost instead), `/status`, `/vim`, `/terminal-setup`, `/bug`,
 `/help`, `/rewind`, `/hooks`, `/ide`, `/install-github-app`,
 `/statusline`, `/privacy-settings`, and `/upgrade`. pi's `/changelog` and
-`/settings` cover part of `/release-notes` and `/config`. `/review` is
+`/settings` cover part of `/release-notes`, and pi's settings (theme, editor) live in `/settings`, not `/config`. `/review` is
 available through the `commit-commands` plugin when installed.
 
 ## Skills that are not bundled

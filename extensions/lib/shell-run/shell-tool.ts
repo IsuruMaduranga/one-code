@@ -20,14 +20,14 @@ import { commandToEvaluate, trackOriginalCommands } from "../shell/original-comm
 import { persistedFilePreview, persistIfLarge, sessionResultsDir, taskOutputPath } from "../request/persisted-output.ts";
 import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellBlock, ShellEnd, ShellResultText, ShellSandboxText } from "./shell-text.ts";
-import { sandboxConfigured, sandboxedCommand } from "./sandbox.ts";
+import { sandboxConfigured, sandboxedCommand, sandboxRefusalLine } from "./sandbox.ts";
 import { COMMAND_HOST_MAX_LENGTH, COMMAND_HOSTS_MAX } from "./sandbox-settings.ts";
 import { bashParserReady } from "../shell/bash-parser.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { dropSpill, keepSpillReadable } from "./spill-file.ts";
 import { ForegroundRun } from "./foreground-run.ts";
 import { isKeyRelease, keyId } from "../ui/key-input.ts";
-import { ccWrapBuiltinRenderers, elbowIndent, linesComponent, withResultDisplay } from "../ui/tui-render.ts";
+import { ccWrapBuiltinRenderers, elbowIndent, linesComponent, shownLine, withResultDisplay } from "../ui/tui-render.ts";
 import { shellBlockedLine } from "../ui/result-summary-shell.ts";
 import { registerVariantTool } from "../profile/tool-variants.ts";
 import { shellResultText } from "./shell-text.ts";
@@ -274,7 +274,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				...(spec.sandboxed ? { line: () => spec.sandboxed!.line(params.command) } : {}),
 				id: toolCallId,
 			});
-			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: {} };
+			if ("refused" in sandboxed) return { content: [{ type: "text" as const, text: spec.sandboxText().refused(sandboxed.refused) }], isError: true, details: shownLine(sandboxRefusalLine(sandboxed.refused), "error") };
 			// A wrapped command of a tool whose shell is not bash is a bash line: bash runs it.
 			const viaBash = sandboxed.run ? spec.sandboxed : undefined;
 			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;

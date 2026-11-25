@@ -137,6 +137,9 @@ if [ -n "${CACHE_PROBE_WORK_DIR:-}" ]; then
 else
 	WORK="$(mktemp -d "${TMPDIR:-/tmp}/cache-probe.XXXXXX")"
 fi
+# Every phase that loads dump-requests.ts appends each response's headers and
+# usage here (on Codex, per-item cache attribution): a miss's evidence.
+export WIRE_RESPONSE_DUMP="$WORK/responses.jsonl"
 # A throwaway git project; on Codex it asks for SSE, which dump-requests.ts can
 # see, unless the second argument is "websocket" (Codex's default, which users run).
 probe_project() {
@@ -167,8 +170,9 @@ esac
 # dump the auto-mode phases load to record theirs.
 AUTH_DUMP=""
 PHASE_DUMP=()
-if [ -n "$EXPECT_AUTH" ]; then
-	AUTH_DUMP="$WORK/auth.jsonl"
+[ -n "$EXPECT_AUTH" ] && AUTH_DUMP="$WORK/auth.jsonl"
+# On Codex the phases load it too, so their responses are recorded.
+if [ -n "$EXPECT_AUTH" ] || [[ "$MODEL" == openai-codex/* ]]; then
 	PHASE_DUMP=(-e "$REPO/test/e2e/dump-requests.ts")
 fi
 
@@ -211,7 +215,7 @@ if [ "$FORK" = 1 ]; then
 	probe_project "$WORK/fork-project" websocket
 	(
 		cd "$WORK/fork-project"
-		WIRE_AUTH_DUMP="$AUTH_DUMP" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ${PHASE_DUMP[@]+"${PHASE_DUMP[@]}"} --model "$MODEL" --mode json --session-dir "$WORK/fork-sessions" -p 'Call the Agent tool exactly once, with subagent_type "fork" and this prompt: "Run echo fork-probe with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' > "$WORK/fork-events.jsonl" 2> "$WORK/fork-stderr.log"
+		WIRE_DUMP="$WORK/fork-wire.jsonl" WIRE_AUTH_DUMP="$AUTH_DUMP" node "$PI_BIN" ${REPO_ARGS[@]+"${REPO_ARGS[@]}"} ${PHASE_DUMP[@]+"${PHASE_DUMP[@]}"} --model "$MODEL" --mode json --session-dir "$WORK/fork-sessions" -p 'Call the Agent tool exactly once, with subagent_type "fork" and this prompt: "Run echo fork-probe with the bash tool, then reply with exactly the word done." After it returns, reply with exactly the word done.' > "$WORK/fork-events.jsonl" 2> "$WORK/fork-stderr.log"
 	) || echo "pi exited non-zero in the fork phase (see $WORK/fork-stderr.log)"
 	node "$REPO/test/e2e/cache-probe-fork.mjs" "$WORK/fork-sessions" --model "$MODEL" || status=1
 fi
@@ -229,5 +233,8 @@ if [ -n "$EXPECT_AUTH" ] && [ "$ONE_MODEL" = 1 ]; then
 elif [ -n "$EXPECT_AUTH" ]; then
 	echo "--- credential check (session, auto-mode, fork and late-tool phases)"
 	node "$REPO/test/e2e/cache-probe-auth.mjs" "$AUTH_DUMP" --auth "$EXPECT_AUTH" || status=1
+fi
+if [ "$status" != 0 ] && [ -s "$WIRE_RESPONSE_DUMP" ]; then
+	echo "responses (headers, usage, Codex per-item cache attribution): $WIRE_RESPONSE_DUMP"
 fi
 exit $status

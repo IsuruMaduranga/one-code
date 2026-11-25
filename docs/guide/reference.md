@@ -35,6 +35,7 @@ that explains it.
 | `/<plugin>:<command>` | Run a plugin command. | |
 | `/plugins` | Browse, install, and toggle plugins and marketplaces. | [Plugins](skills-plugins-and-mcp.md#plugins) |
 | `/mcp` | Manage MCP servers: status, reconnect, authenticate, enable, disable. | [MCP servers](skills-plugins-and-mcp.md#manage-servers) |
+| `/config` | Open the settings panel: turn optional features on or off, change One Code's settings, and change this project's external instruction import approval. | [The /config panel](configuration.md#the-config-panel) |
 | `/lsp` | Show language-server status. | [Language servers](configuration.md#language-server-diagnostics) |
 | `/permissions` | Open the permissions panel: approve calls auto mode denied, and manage rules, auto-mode rules, and workspace directories. | [Manage permissions in the panel](permissions-modes-and-auto-mode.md#manage-permissions-in-the-panel) |
 | `/add-dir [path]` | Add a workspace directory, for this session or remembered. | [Workspace directories](permissions-modes-and-auto-mode.md#workspace-directories) |
@@ -45,7 +46,6 @@ that explains it.
 | `/auto-mode defaults` | Show the built-in environment description. | |
 | `/auto-mode model [provider/model-id\|clear]` | Choose the classifier model, or go back to the automatic pick. | [The classifier model](permissions-modes-and-auto-mode.md#the-classifier-model) |
 | `/memory` | Open an instruction file or the memory folder, turn auto-memory on or off, or switch config sources. | [Memory](sessions-and-context.md#memory) |
-| `/config` | Change this project's external instruction import approval. | [External instruction imports](sessions-and-context.md#external-instruction-imports) |
 | `/artifacts` | Pick a saved artifact to open, save to `~/Downloads`, or delete, or open the gallery. | [Artifacts](tools.md#artifacts) |
 | `/tasks` | List background shells, running agents and the agents you've viewed; open or stop one. | [Talk to an agent](subagents-and-workflows.md#talk-to-an-agent) |
 | `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
@@ -191,7 +191,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `ONECODE_NO_BANNER=1` | Keep pi's header instead of the One Code banner. |
 | `ONECODE_NO_INPUT_MARKER=1` | Remove the `❯` prompt marker. |
 | `ONECODE_NO_ASSISTANT_MARKER=1` | Remove the `●` reply marker. |
-| `ONECODE_FEATURES_OFF=<id>[,<id>…]` | Turn optional features off for this run, by id, comma-separated. The rows below name the common ones. |
+| `ONECODE_FEATURES_OFF=<id>[,<id>…]` | Turn optional features off for this run, by id, comma-separated. The rows below name the common ones. For a lasting switch, use `/config` or `featuresOff` in `~/.onecode/settings.json`. |
 | `ONECODE_FEATURES_OFF=footer` | Keep pi's footer instead of One Code's status line. |
 | `ONECODE_FEATURES_OFF=turn-duration` | Remove the post-turn timing line. |
 | `ONECODE_FEATURES_OFF=recap` | Turn off the "while you were away" recap. |

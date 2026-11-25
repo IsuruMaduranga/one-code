@@ -8,6 +8,7 @@
  */
 import { type LiveTools, type ToolPassages, withoutOff } from "../profile/live-tools.ts";
 import { wordsInForce } from "../profile/live-words.ts";
+import { refusalLine } from "../rules/refusal-lines.ts";
 import { checkoutProgram } from "../rules/worktree-guard-text.ts";
 import type { CheckoutProgram } from "../shell/git-checkout-programs.ts";
 
@@ -195,6 +196,64 @@ function toolsClause(tools: AgentTools): string {
 	if (tools.kind === "listed") return ` (Tools: ${tools.tools.join(", ") || "none"})`;
 	if (tools.kind === "allExcept") return ` (Tools: All tools except ${tools.tools.join(", ")})`;
 	return tools.builtIn ? " (Tools: *)" : " (Tools: All tools)";
+}
+
+/**
+ * A refusal's transcript line, for a refusal whose text tells the model what
+ * to do next or lists a catalog: what went wrong, in a few words. Undefined
+ * where the text is already that (it is drawn as it is).
+ */
+export function refusalShownLine(refusal: SubagentRefusal): string | undefined {
+	switch (refusal.kind) {
+		case "hostNotReady":
+			return "Agent not started: the session is not ready yet";
+		case "nestedFork":
+			return "A fork is not available inside an agent";
+		case "nestedOptions":
+			return `Not available inside an agent: ${refusal.options.join(", ")}`;
+		case "nestedUnknownAgent":
+			return refusal.name ? `Unknown agent "${refusal.name}"` : "No agent type given";
+		case "unknownAgents":
+			return `Unknown agent: ${refusal.names.join(", ")}`;
+		case "taskRequired":
+			return "No task given";
+		case "forkOverrides":
+			return "A fork keeps the session's model and thinking";
+		case "forkNotPersisted":
+			return "Cannot fork: this session is not saved";
+		case "unknownModel":
+			// A model that exists but cannot run this call keeps its reason's first sentence; the rest is for the model.
+			return refusal.reason?.split(/(?<=\.)\s/)[0] ?? `Unknown model "${refusal.model}"`;
+		case "expensiveModel":
+			return refusal.gate.split("\n")[0];
+		case "nestedDenied":
+			return `Nested agent refused: ${refusalLine(refusal.reason)?.text ?? refusal.reason}`;
+		case "noneLaunched":
+			return `No agent started: ${refusal.lines.join("; ")}`;
+		case "sessionEnding":
+			return "No agent started: the session is ending";
+		case "mainIsNotRecipient":
+			return '"main" is only reachable from inside an agent';
+		case "noRun":
+			return `No agent run named "${refusal.to}"`;
+		case "stillRunning":
+			return `Agent ${refusal.name} is still running`;
+		case "forkNotResumable":
+			return `Agent ${refusal.name} cannot be resumed`;
+		case "onlyMain":
+			return 'Only "main" can be messaged from inside an agent';
+		case "messageRequired":
+			return "No message given";
+		// Already a short fact: drawn as it is.
+		case "worktreeNeedsGit":
+		case "nestedNoBridge":
+		case "nestedCheckFailed":
+		case "couldNotStart":
+		case "deliveryFailed":
+		case "noSession":
+		case "couldNotResume":
+			return undefined;
+	}
 }
 
 function refused(refusal: SubagentRefusal, product: SubagentClauses): string {

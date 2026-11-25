@@ -26,10 +26,12 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { isRelativeInside, tildify } from "./paths.ts";
+import { readFeaturesOffSetting } from "./settings-file.ts";
+import { SETTINGS_DISPLAY } from "./settings-display.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { processState } from "./process-state.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isGuardFeature, isProductExtensionFolder, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureOffRefusal, featureProblems, isFeatureId, isGuardFeature, isProductExtensionFolder, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
@@ -244,7 +246,16 @@ export interface ResolvedProfile {
 	sandboxOffIgnored?: readonly string[];
 	/** The user's own profile over this one, when the launch chose one (lib/profile/user-profile.ts). */
 	user?: UserProfile;
+	/** The features the user's settings file turns off (`featuresOff`, lib/profile/settings-file.ts), as read at launch. */
+	settingsOff: readonly string[];
+	/** Why each `featuresOff` id the settings file names was skipped (unknown, required, a guard, or a launch it would fail); absent when none was. */
+	settingsOffIgnored?: readonly string[];
+	/** Why each off feature is off, the first source that turned it off; /config hides what the product turns off. */
+	featuresOffBy: ReadonlyMap<FeatureId, FeatureOffSource>;
 }
+
+/** What turned a feature off: the product's profile, the environment's off-switch, the user's launch profile, or their settings file. */
+export type FeatureOffSource = "product" | "environment" | "user profile" | "settings";
 
 function envList(env: NodeJS.ProcessEnv, name: string): string[] {
 	return (env[name] ?? "")
@@ -338,30 +349,80 @@ function childExtensionProblems(entries: readonly string[], productDir: string, 
  * `productProfile` is the product profile's id it runs as (default: the
  * launch's, lib/profile/brand.mjs).
  */
-export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profileDir: string, extensionsRoot: string = PRODUCT_DIR, user?: UserProfile, launchTools?: PiToolFilter, productProfile: string | undefined = profileSelection.productProfile): ResolvedProfile {
+export function resolveProfile(
+	profile: Profile,
+	env: NodeJS.ProcessEnv,
+	profileDir: string,
+	extensionsRoot: string = PRODUCT_DIR,
+	user?: UserProfile,
+	launchTools?: PiToolFilter,
+	productProfile: string | undefined = profileSelection.productProfile,
+	settingsFileOff: readonly string[] = [],
+): ResolvedProfile {
+	const resolve = (off: readonly string[]) => resolveWith(profile, env, profileDir, extensionsRoot, user, launchTools, productProfile, off);
+	try {
+		return resolve(settingsFileOff);
+	} catch (error) {
+		// The settings file is never a reason not to start: a switch that conflicts with the rest
+		// (a feature or tool another one needs, a user profile's wording) is dropped and reported.
+		// Without it the launch fails for its own reasons, and says so.
+		if (settingsFileOff.length === 0) throw error;
+		const resolved = resolve([]);
+		const conflict = `${settingsFileOff.map((id) => `"${id}"`).join(", ")} (${error instanceof Error ? error.message : String(error)})`;
+		return { ...resolved, settingsOffIgnored: [...(resolved.settingsOffIgnored ?? []), conflict] };
+	}
+}
+
+function resolveWith(
+	profile: Profile,
+	env: NodeJS.ProcessEnv,
+	profileDir: string,
+	extensionsRoot: string,
+	user: UserProfile | undefined,
+	launchTools: PiToolFilter | undefined,
+	productProfile: string | undefined,
+	settingsFileOff: readonly string[],
+): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
+	// The settings file is lasting state /config writes: an id it cannot turn off
+	// (a feature renamed by a later release, a hand-edited guard) is skipped and
+	// reported (/config warns at session start), never a reason not to start.
+	const settingsOffIgnored = settingsFileOff.flatMap((id) => {
+		const refusal = featureOffRefusal(id);
+		return refusal ? [refusal] : [];
+	});
+	const settingsOff = settingsFileOff.filter((id) => featureOffRefusal(id) === undefined);
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
-	for (const id of [...envOff, ...(user?.featuresOff ?? [])]) featureMap[id] = false;
+	const featuresOffBy = new Map<FeatureId, FeatureOffSource>();
+	for (const [id, on] of Object.entries(profile.features)) if (on === false && isFeatureId(id)) featuresOffBy.set(id, "product");
+	// The user's off-switches, each named where a message points at it (the fix is the user's to make).
+	const userProfileName = user ? `the profile "${user.name}" (${tildify(user.dir, homedir())})` : "";
+	const userOff: ReadonlyArray<{ ids: readonly string[]; source: FeatureOffSource; sandboxIn: string; guardProblem?: (id: string) => string }> = [
+		{ ids: envOff, source: "environment", sandboxIn: envName("FEATURES_OFF"), guardProblem: (id) => `${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)` },
+		{ ids: user?.featuresOff ?? [], source: "user profile", sandboxIn: `the featuresOff of the profile "${user?.name}"`, guardProblem: (id) => `${userProfileName} cannot turn off "${id}": it guards tool calls` },
+		{ ids: settingsOff, source: "settings", sandboxIn: `the featuresOff of ${SETTINGS_DISPLAY}` },
+	];
+	for (const { ids, source } of userOff) {
+		for (const id of ids) {
+			featureMap[id] = false;
+			if (isFeatureId(id) && !featuresOffBy.has(id)) featuresOffBy.set(id, source);
+		}
+	}
 	// A locked sandbox (decisions/sandbox.md) stays on: the user's off-switches for it are ignored, and listed where the lock's other ignored settings are.
 	const sandboxOffIgnored: string[] = [];
 	if (profile.sandbox?.locked === true && profile.features.sandbox !== false && featureMap.sandbox === false) {
 		featureMap.sandbox = true;
-		if (envOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${envName("FEATURES_OFF")}`);
-		if (user?.featuresOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in the featuresOff of the profile "${user.name}"`);
+		for (const { ids, sandboxIn } of userOff) if (ids.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${sandboxIn}`);
+		featuresOffBy.delete("sandbox");
 	}
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
 	for (const name of [...envTools, ...(user?.toolsOff ?? [])]) tools.set(name, { ...tools.get(name), enabled: false });
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
 	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
 	const problems = featureProblems(featureMap);
-	if (user) {
-		// The user's own lists: name the profile, since the fix is theirs to make.
-		const where = `the profile "${user.name}" (${tildify(user.dir, homedir())})`;
-		for (const id of user.featuresOff.filter(isGuardFeature)) problems.push(`${where} cannot turn off "${id}": it guards tool calls`);
-		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
-	}
-	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
+	for (const { ids, guardProblem } of userOff) if (guardProblem) problems.push(...ids.filter(isGuardFeature).map(guardProblem));
+	if (user) problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${userProfileName}: ${problem}`));
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.
@@ -443,6 +504,9 @@ export function resolveProfile(profile: Profile, env: NodeJS.ProcessEnv, profile
 		...(profile.sandbox ? { sandbox: profile.sandbox } : {}),
 		...(sandboxOffIgnored.length > 0 ? { sandboxOffIgnored } : {}),
 		...(user ? { user } : {}),
+		settingsOff,
+		...(settingsOffIgnored.length > 0 ? { settingsOffIgnored } : {}),
+		featuresOffBy,
 	};
 }
 
@@ -468,7 +532,7 @@ function chosenUserProfile(): UserProfile | undefined {
  */
 export function profileKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
 	const user = activeProfile().user;
-	const off = [envName("FEATURES_OFF"), envName("TOOLS_OFF")].map((name) => envList(env, name).sort().join(","));
+	const off = [[...envList(env, envName("FEATURES_OFF")), ...activeProfile().settingsOff], envList(env, envName("TOOLS_OFF"))].map((ids) => [...ids].sort().join(","));
 	const parts = [activeProfile().productProfile ?? "", user ? `${user.name}:${user.hash}` : "", off.some(Boolean) ? `off:${off.join("|")}` : "", piToolFilterKey(activeProfile().launchTools) ?? ""];
 	return parts.some(Boolean) ? parts.join(":").replace(/:+$/, "") : undefined;
 }
@@ -515,7 +579,7 @@ let active: ResolvedProfile | undefined;
 
 /** The shipped profile, resolved against this process's environment and pi's tool flags on first use. Throws when it is invalid. */
 export function activeProfile(): ResolvedProfile {
-	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile(), launchToolFilter());
+	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile(), launchToolFilter(), profileSelection.productProfile, processState("profile:featuresOff", () => readFeaturesOffSetting(homedir())));
 	return active;
 }
 

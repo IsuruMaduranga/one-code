@@ -74,6 +74,7 @@ export const FEATURES = {
 	init: { entries: ["commands/init/index.ts"] },
 	clear: { entries: ["commands/clear/index.ts"] },
 	help: { entries: ["commands/help/index.ts"] },
+	config: { entries: ["commands/config/index.ts"] },
 	tasks: { entries: ["tools/tasks/index.ts"] },
 	"plan-mode": { entries: ["safety/plan-mode/index.ts"] },
 	notebook: { entries: ["tools/notebook/index.ts"] },
@@ -122,6 +123,17 @@ export const FEATURE_IDS = Object.keys(FEATURES) as FeatureId[];
 
 export function isFeatureId(value: string): value is FeatureId {
 	return Object.hasOwn(FEATURES, value);
+}
+
+/**
+ * Why a feature id cannot be switched off by the user's own settings file,
+ * or undefined when it can: unknown, part of the required core, or a guard.
+ */
+export function featureOffRefusal(id: string): string | undefined {
+	if (!isFeatureId(id)) return `unknown feature "${id}"`;
+	if ("required" in FEATURES[id]) return `"${id}" is part of the required core`;
+	if ("guard" in FEATURES[id]) return `"${id}" guards tool calls`;
+	return undefined;
 }
 
 /** A feature that guards tool calls (see the header). */

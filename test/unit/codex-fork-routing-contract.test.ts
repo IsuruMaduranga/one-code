@@ -1,18 +1,22 @@
 /**
  * The pi facts a Codex fork's cache depends on (findings §75), checked
  * offline so a pi bump that changes either fails here instead of at the live
- * cache matrix. `withParentSessionId` (lib/agents/agent-loader.ts) hands a
- * fork's runtime the parent's session id, and that works only while:
+ * cache matrix. `openChildSession` (lib/agents/agent-loader.ts) sets a Codex
+ * fork's `Agent.sessionId` to the parent's session id, and that works only
+ * while:
  *
- * 1. pi's SDK passes the session's id to `modelRuntime.streamSimple` as
- *    `options.sessionId` (the proxy matches on it and replaces it);
+ * 1. pi reads `Agent.sessionId` on every request and passes it to
+ *    `modelRuntime.streamSimple` as `options.sessionId`;
  * 2. pi-ai's Codex provider builds the request's routing from that value
  *    alone: the `session-id` and `x-client-request-id` headers and the body's
  *    `prompt_cache_key`, after any extension header.
  *
+ * The fork's session manager keeps its own id (asserted below), and our side
+ * calls key on that id (lib/side-calls), so only the agent's requests move.
+ *
  * When pi lets a session route under another id (the upstream request in
- * features/agent-wait/upstream-pi-provider-session-id.md), the proxy and
- * this test go.
+ * features/agent-wait/upstream-pi-provider-session-id.md), this test moves
+ * to that option.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +25,7 @@ import { createAssistantMessageEventStream, type AssistantMessage } from "@earen
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { openChildSession, withParentSessionId } from "../../extensions/lib/agents/agent-loader.ts";
+import { openChildSession } from "../../extensions/lib/agents/agent-loader.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "oc-codex-fork-contract-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -34,8 +38,8 @@ const codex = {
 
 const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
-describe("pi's SDK hands the session id to the model runtime", () => {
-	it("as options.sessionId, so a fork's runtime can put the parent's id there", async () => {
+describe("pi's SDK hands Agent.sessionId to the model runtime", () => {
+	it("as options.sessionId, so a Codex fork's requests carry the parent's id", async () => {
 		const runtime = await ModelRuntime.create({
 			credentials: { read: async () => undefined, list: async () => [], modify: async () => undefined, delete: async () => {} },
 			modelsPath: null,
@@ -59,10 +63,11 @@ describe("pi's SDK hands the session id to the model runtime", () => {
 				session: {
 					cwd: dir,
 					agentDir: dir,
-					modelRuntime: fork ? withParentSessionId(runtime, "parent-session", () => sessionManager.getSessionId()) : runtime,
+					modelRuntime: runtime,
 					model: codex as never,
 					sessionManager,
 				},
+				parentSessionId: fork ? "parent-session" : undefined,
 			});
 			try {
 				await session.prompt("hi");
@@ -74,8 +79,9 @@ describe("pi's SDK hands the session id to the model runtime", () => {
 
 		const own = await run(false);
 		expect(seen).toEqual([own]);
-		await run(true);
+		const forkOwn = await run(true);
 		expect(seen.at(-1)).toBe("parent-session");
+		expect(forkOwn).not.toBe("parent-session");
 	});
 });
 

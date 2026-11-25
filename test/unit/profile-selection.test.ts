@@ -283,6 +283,12 @@ describe("the profile resolved with a user's own over it", () => {
 		const worded = user({ toolWording: new Map([["read", { append: "x" }]]) });
 		expect(() => resolveProfile({ ...empty, features: { "tool-style": false } }, {}, "/p", "/p", worded)).toThrow(/words "read", whose description can change only while the "tool-style" feature is on/);
 		expect(resolveProfile(empty, {}, "/p", "/p", worded).user).toBe(worded);
+		// The settings file's switch never stops the launch: it is dropped, and the warning says why.
+		const fromSettings = resolveProfile(empty, {}, "/p", "/p", worded, undefined, undefined, ["tool-style", "recap"]);
+		expect(fromSettings.features.has("tool-style")).toBe(true);
+		expect(fromSettings.features.has("recap")).toBe(true);
+		expect(fromSettings.settingsOff).toEqual([]);
+		expect(fromSettings.settingsOffIgnored).toEqual([expect.stringMatching(/^"tool-style", "recap" \(Invalid profile: .*words "read"/)]);
 	});
 
 	it("registers a tool with the user's wording, and leaves the others as they are", () => {

@@ -47,6 +47,8 @@ describe("newerModelSuggestion", () => {
 		const suggestion = newerModelSuggestion([old, newer], old);
 		expect(suggestion?.model).toBe(newer);
 		expect(suggestion?.text).toBe("qwen/qwen3.8-27b is newer than qwen/qwen3.6-27b and costs about the same ($0.42/$3.00 vs $0.32/$3.20 per M tokens).");
+		// The notice the user sees unasked is short: the model and the command, no price table.
+		expect(suggestion?.notice).toMatch(/^Newer model available: qwen\/qwen3\.8-27b · \/model \S+$/);
 		expect(suggestion?.fix).toBe("Switch with /model openrouter/qwen/qwen3.8-27b.");
 	});
 	it.each([

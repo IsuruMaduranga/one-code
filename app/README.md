@@ -143,13 +143,13 @@ One Code builds that adaptation into the harness:
   endpoint change. One Code provides shared tool interfaces and selects
   supporting models from the provider's catalog, subject to capability
   requirements.
-- **Auto mode on any provider.** Claude Code's auto mode now sends each
-  tool call to the API server for a safety check, using a request field
-  the endpoint has to support. Claude Code keeps its local classifier as a
-  fallback only for a while ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)
-  give October 23, 2026), so an endpoint without that support can leave
-  auto mode unavailable. One Code runs its own two-stage classifier on a
-  model from your provider, so auto mode works wherever your models run.
+- **Auto mode on any provider.** Claude Code's auto mode sends each tool
+  call to the API server for a safety check, using a request field the
+  endpoint has to support. Its local classifier is only a transitional
+  fallback ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)),
+  so an endpoint without that support can leave auto mode unavailable.
+  One Code runs its own two-stage classifier on a model from your
+  provider, so auto mode works wherever your models run.
 - **An open harness you can change.** One Code's prompts, tools, and
   workflows are implemented as pi extensions. You can inspect them,
   change their behavior, and add your own.
@@ -199,7 +199,10 @@ tools share it.
 | Installed Claude Code plugins | Plugin agents, skills, commands, and MCP servers, namespaced by plugin. |
 
 Claude Code tool names such as `Read`, `Bash`, `Edit`, and `Task` work in
-permission rules and hook matchers.
+permission rules and hook matchers. Instructions meant for One Code alone go
+in `ONECODE.md`. If you'd rather keep One Code away from your Claude Code
+setup entirely, switch to independent mode in `/memory`: it reads
+`AGENTS.md` and its own `.onecode/` folders instead.
 
 Compatibility covers configuration and workflows. Features and skills that
 depend on Claude Code's hosted or desktop services are not included.
@@ -213,7 +216,10 @@ and [Skills, plugins, and MCP](https://github.com/IsuruMaduranga/one-code/blob/m
 
 Give an investigation its own context window and bring the results back to
 the main conversation. Subagents run in the background, accept follow-up
-messages, and can fork the conversation when they need its context.
+messages, and can fork the conversation when they need its context. A fork
+reads its parent's prompt cache, so it doesn't pay for the conversation
+twice. The model waits for a background agent's notification instead of
+polling it, and **ctrl+x** then **ctrl+k** stops every background agent.
 
 One Code includes three agent definitions: `general-purpose`, `explore`,
 and `plan`.
@@ -248,14 +254,19 @@ Press **ctrl+q**, or **alt+m** on Windows and WSL, to cycle through manual,
 accept-edits, plan, and auto modes. In plan mode, the agent investigates and
 writes a plan file before you approve implementation.
 
-Use `/permissions` to manage rules and approve calls auto mode blocked, and
-`/auto-mode` to configure the classifier.
+When a call needs your answer, a numbered dialog shows the command or path
+and why it asks, and each option is one keystroke. Use `/permissions` to
+manage rules and approve calls auto mode blocked, and `/auto-mode` to
+configure the classifier.
 
-The permission system provides application-level controls. For operating
-system isolation, run One Code inside a container. See
-[Permissions and modes](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/permissions-modes-and-auto-mode.md) for
-guarantees and known limitations, and [Hooks](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/hooks.md) for
-hook configuration.
+The permission gate decides whether a command runs. For an operating-system
+wall around the commands that do run, turn on the command sandbox with
+`/sandbox` (macOS, Linux, and WSL2). It limits what a shell command can write
+and which hosts it can reach, and your deny rules apply inside it. It's off
+until you turn it on. Native Windows has no sandbox, so use a container
+there. See [Permissions and modes](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/permissions-modes-and-auto-mode.md)
+for guarantees and known limitations, [The command sandbox](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/sandbox.md)
+for its settings, and [Hooks](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/hooks.md) for hook configuration.
 
 ## 🧰 Everyday tools
 
@@ -264,11 +275,13 @@ hook configuration.
 | Code and files | File reading, writing, and editing; shell commands; background processes; repository search; and notebook editing. |
 | Web | Search and fetch, using provider search or Brave, Tavily, and Exa fallbacks. |
 | Diagnostics | Language server diagnostics after edits. Install the relevant server on your `PATH`. |
-| Long sessions | Per-repository memory, a session scratchpad, and context compaction. |
-| Task tracking | A pinned progress widget, background monitors, and scheduled wake-ups. |
+| Long sessions | Per-repository memory, a session scratchpad, and context compaction. `/context` shows what fills the context window, and instruction files together never take more than half of it. |
+| Background work | **ctrl+b** sends a running command to the background. A pinned progress widget, background monitors, scheduled wake-ups, and `/loop`. |
+| Settings | `/config` turns optional features on or off and changes One Code's settings, saved in `~/.onecode/settings.json`. |
+| Notifications | A desktop notification when One Code waits for your answer or finishes while you're away (iTerm2, kitty, and Ghostty, or a channel you pick). |
 | Tool discovery | Tools loaded on demand to reduce prompt overhead. |
 | Artifacts | HTML pages the model writes (reports, dashboards, small tools), saved in `~/.onecode/artifacts/` with every version kept, and opened in your browser. |
-| Reasoning and appearance | `/effort` or **shift+tab** to set reasoning effort; `onecode` and `onecode-light` themes. |
+| Reasoning and appearance | `/effort` or **shift+tab** to set reasoning effort; `onecode` and `onecode-light` themes that follow your terminal's background. **?** on an empty prompt, or `/help`, lists the shortcuts. |
 | Customization | pi extensions, themes, and settings. |
 
 Bundled skills include `simplify`, `code-review`, `security-review`,
@@ -291,7 +304,8 @@ and environment variables.
 ## 💡 Platform and provider notes
 
 - **Provider coverage:** End-to-end testing focuses on Anthropic, OpenAI,
-  and OpenRouter. Other providers have less test coverage.
+  OpenAI Codex (a ChatGPT sign-in), and OpenRouter. Other providers have
+  less test coverage.
 - **Web search:** For providers without native search, set
   `BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY`. Without either key, One Code
   falls back to Exa's rate-limited keyless endpoint and labels those results.

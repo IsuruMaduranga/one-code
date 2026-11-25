@@ -15,18 +15,9 @@ export const externalIncludesTitle = (file: string): string => `Allow external $
 export const EXTERNAL_INCLUDES_YES = "Yes, allow external imports";
 export const EXTERNAL_INCLUDES_NO = "No, disable external imports";
 export const externalIncludesSetting = (file: string): string => `External ${file} includes`;
-/**
- * `/config` with nothing to show. Claude Code's /config is a full settings
- * panel and hides this row when there are no external includes; ours holds
- * only this row so far (decisions/tools.md), so the empty case names where
- * the other settings live instead of ending the command.
- */
-export const externalIncludesNone = (file: string): string =>
-	`No external ${file} includes in this project, so /config has nothing to change. Other settings: /settings (pi's settings), /model, /permissions, /memory.`;
-/** `/config` without a terminal to ask in. */
-export const externalIncludesNeedsUi = (file: string): string => `/config requires an interactive UI to change external ${file} include approval.`;
-/** The `/config` command's description. */
-export const externalIncludesCommand = (file: string): string => `Configure external ${file} includes for this project`;
+/** The /config row's description (commands/config). */
+export const externalIncludesRowDescription = (file: string): string =>
+	`Load files outside this project that its ${file} imports. Applies to the instructions loaded from now on.`;
 /** The answer could not be written. */
 export const externalIncludesNotSaved = (file: string, error: unknown): string => `Could not remember external ${file} include approval: ${String(error)}`;
 

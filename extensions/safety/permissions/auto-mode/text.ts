@@ -8,6 +8,7 @@
  * its stage instructions) and the `/auto-mode setup` drafting prompt
  * (`AutoModeSetupText`) are their own groups, below.
  */
+import { FLOOR_OPENING, GUIDANCE } from "../../../lib/rules/refusal-lines.ts";
 
 
 /** A classifier model that could not be used, and why. */
@@ -105,11 +106,11 @@ export const autoModeResultText = {
 	floorReason,
 	/** The block the model gets for a floor reason. The floor re-checks a rewrite, and the classifier still judges it. */
 	floorBlock: (target: FloorTarget): string => {
-		const opening = `Auto mode blocked this call without consulting the classifier: ${floorReason(target)}.`;
+		const opening = `${FLOOR_OPENING}${floorReason(target)}.`;
 		if (target.kind === "pattern") {
-			return `${opening} A command that may touch the gate's own configuration is never auto-approved. If this is a read-only search, rewrite it without the wildcard or negated pattern (for example \`grep -r --exclude-dir=node_modules\`); otherwise ask the user to run it themselves.`;
+			return `${opening} ${GUIDANCE.floorPattern} If this is a read-only search, rewrite it without the wildcard or negated pattern (for example \`grep -r --exclude-dir=node_modules\`); otherwise ask the user to run it themselves.`;
 		}
-		return `${opening} Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
+		return `${opening} ${GUIDANCE.floorWrite} Do not retry or route around this; ask the user to make the change themselves.`;
 	},
 };
 

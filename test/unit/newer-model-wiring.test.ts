@@ -56,7 +56,7 @@ describe("newer-model notices", () => {
 		await select(newer);
 		await select(old);
 		expect(notify).toHaveBeenCalledTimes(1);
-		expect(notify).toHaveBeenCalledWith("gpt-6-luna is newer than gpt-5.6-luna and costs about the same ($1.00/$3.00 vs $1.00/$3.00 per M tokens). Switch with /model openai/gpt-6-luna.", "info");
+		expect(notify).toHaveBeenCalledWith("Newer model available: gpt-6-luna · /model openai/gpt-6-luna", "info");
 		// Advice must not alter tools, prompts, messages, reminders, or persisted context.
 		expect([...fake.handlers.keys()]).toEqual(["session_start", "model_select"]);
 		expect(fake.tools.size).toBe(0);
@@ -78,7 +78,7 @@ describe("newer-model notices", () => {
 		getAvailable.mockReturnValue([old, newer, sol, newerSol]);
 		await select(sol);
 		expect(notify).toHaveBeenCalledTimes(2);
-		expect(notify.mock.calls[1][0]).toContain("gpt-6-sol is newer than gpt-5.6-sol");
+		expect(notify.mock.calls[1][0]).toContain("Newer model available: gpt-6-sol");
 	});
 	it("can show the same model in a different session but not again in the original one", async () => {
 		const { ctx, start } = mount();

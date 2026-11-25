@@ -217,7 +217,7 @@ describe("recap skips and output (Claude Code 2.1.330)", () => {
 		expect(await idle()).toBe(false);
 		await fake.fire("after_provider_response", { status: 200, headers: { "anthropic-ratelimit-unified-status": "allowed" } }, ctx);
 		expect(await idle()).toBe(true);
-		expect(fake.appendedEntries.at(-1)?.data).toEqual({ content: `You were building the parser. (turn off recaps with ${envName("FEATURES_OFF")}=recap)` });
+		expect(fake.appendedEntries.at(-1)?.data).toEqual({ content: "You were building the parser. (turn off recaps in /config)" });
 
 		// The recap is now the last entry: no second one until two more user turns.
 		expect(await idle()).toBe(false);

@@ -6,6 +6,7 @@
  * guards' refusals are in lib/rules/worktree-guard-text.ts: subagent
  * worktree isolation uses them too.
  */
+import { GUIDANCE } from "../../lib/rules/refusal-lines.ts";
 import type { DeferrableTool } from "../../lib/request/deferrable-tools.ts";
 import type { CheckoutProgram } from "../../lib/shell/git-checkout-programs.ts";
 import { checkoutProgram } from "../../lib/rules/worktree-guard-text.ts";
@@ -143,7 +144,7 @@ export const worktreeResultText: WorktreeResultText = {
 		"Relative paths and bash commands already run there. Use exit_worktree to leave when the user asks.",
 	missingOnRestore: (s) => `${left(s)} The worktree at ${s.path} no longer exists.`,
 	activeMissing: (s) =>
-		`The active worktree at ${s.path} no longer exists. Use exit_worktree with action: "keep" to return to ${s.originalCwd}, or enter_worktree with path to switch to an existing worktree. No tool has run in the original checkout.`,
+		`The active worktree at ${s.path} no longer exists. ${GUIDANCE.worktreeMissing} ${s.originalCwd}, or enter_worktree with path to switch to an existing worktree. No tool has run in the original checkout.`,
 	enter: {
 		failed: enterFailed,
 		switched: ({ session: s, branchError }) =>

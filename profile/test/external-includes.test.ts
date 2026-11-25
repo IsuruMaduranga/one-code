@@ -3,13 +3,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import instructionsExtension from "../../extensions/context/instructions/index.ts";
+import configExtension from "../../extensions/commands/config/index.ts";
 import systemReminderExtension from "../../extensions/request/system-reminder/index.ts";
 import hooksExtension from "../../extensions/safety/hooks/index.ts";
 import mcpExtension from "../../extensions/tools/mcp/index.ts";
 import { buildClaudeMdBlock } from "../../extensions/context/instructions/instructions.ts";
 import { discoverProductFiles, openInstructions } from "../../extensions/lib/context/instructions.ts";
 import { discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../claude-code/instructions.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesDialog, externalIncludesNone, externalIncludesTitle, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesDialog, externalIncludesSetting, externalIncludesTitle, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/context/external-includes.ts";
 import { resetConfigModeForTest } from "../claude-code/mode.ts";
 import { productProjectSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { forwardSlashes } from "../../extensions/lib/profile/paths.ts";
@@ -60,6 +61,7 @@ const start = async (choice: string | undefined, hasUI = true) => {
 	const ctx = createFakeCtx({ cwd, hasUI, mode: hasUI ? "rpc" : "print", ui: { select } });
 	systemReminderExtension(fake.pi as never);
 	instructionsExtension(fake.pi as never);
+	configExtension(fake.pi as never);
 	await fake.fire("session_start", {}, ctx);
 	await fake.fire("before_agent_start", {}, ctx);
 	return { fake, ctx, select, texts };
@@ -225,10 +227,11 @@ describe("external instruction include approval", () => {
 		expect(emitted).toEqual([]);
 	});
 
-	it("does not open config after a shutdown while waiting for startup consent", async () => {
+	it("leaves the external-includes row out of config after a shutdown while waiting for startup consent", async () => {
 		fixture();
 		const fake = createFakePi();
 		instructionsExtension(fake.pi as never);
+		configExtension(fake.pi as never);
 		const select = vi.fn(async (title: string): Promise<string | undefined> => title.startsWith(externalIncludesTitle("CLAUDE.md")) ? new Promise(() => {}) : undefined);
 		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
@@ -236,21 +239,24 @@ describe("external instruction include approval", () => {
 		await Promise.resolve();
 		await fake.fire("session_shutdown", {}, ctx);
 		await command;
-		expect(select).toHaveBeenCalledTimes(1);
+		// The startup dialog, then /config without the row: no second approval dialog.
+		expect(select.mock.calls.filter(([title]) => title.startsWith(externalIncludesTitle("CLAUDE.md")))).toHaveLength(1);
+		const shown = select.mock.calls.at(-1) as unknown as [string, string[]];
+		expect(shown[0]).toBe("Config");
+		expect(shown[1].some((option) => option.startsWith(externalIncludesSetting("CLAUDE.md")))).toBe(false);
 	});
 
-	it("config with no external includes names where the other settings live", async () => {
+	it("config shows no external-includes row when the project has no external imports", async () => {
 		write(join(cwd, "CLAUDE.md"), "Project instructions only.\n");
 		const fake = createFakePi();
 		instructionsExtension(fake.pi as never);
-		const select = vi.fn(async (): Promise<string | undefined> => undefined);
-		const notify = vi.fn();
-		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select, notify } });
+		configExtension(fake.pi as never);
+		const select = vi.fn(async (_title: string, _options: string[]): Promise<string | undefined> => undefined);
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
 		await fake.fire("session_start", {}, ctx);
 		await fake.commands.get("config")!.handler("", ctx as never);
-		expect(select).not.toHaveBeenCalled();
-		expect(notify).toHaveBeenCalledWith(externalIncludesNone("CLAUDE.md"), "info");
-		expect(externalIncludesNone("CLAUDE.md")).toContain("/settings");
+		expect(select).toHaveBeenCalledTimes(1);
+		expect(select.mock.calls[0][1].some((option) => option.startsWith(externalIncludesSetting("CLAUDE.md")))).toBe(false);
 	});
 
 	it("config can enable after a no without rewriting a sent prefix, and disable without a new approval", async () => {
@@ -261,7 +267,10 @@ describe("external instruction include approval", () => {
 		const first = await fake.fireOne("context", { messages }, ctx);
 		expect(JSON.stringify(first)).toContain(ref(join(root, "shared.md")));
 		expect(JSON.stringify(first)).not.toContain("APPROVED EXTERNAL INSTRUCTION");
-		select.mockImplementation(async (title, options) => title.startsWith(externalIncludesTitle("CLAUDE.md")) ? EXTERNAL_INCLUDES_YES : options[0]);
+		// /config: pick the external-includes row once, approve, then dismiss the panel.
+		const row = (options: string[]) => options.find((option) => option.startsWith(externalIncludesSetting("CLAUDE.md")));
+		let picks = 0;
+		select.mockImplementation(async (title, options) => (title.startsWith(externalIncludesTitle("CLAUDE.md")) ? EXTERNAL_INCLUDES_YES : picks++ === 0 ? row(options) : undefined));
 		await fake.commands.get("config")!.handler("", ctx as never);
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(true);
 		// The live block takes the approval: the next epoch's message 1 carries it.
@@ -276,8 +285,10 @@ describe("external instruction include approval", () => {
 		await fake.fire("tool_result", { toolName: "read", input: { path: "nested/file.ts" }, isError: false }, ctx);
 		expect(emitted.join("\n")).toContain("APPROVED EXTERNAL INSTRUCTION");
 		const calls = select.mock.calls.length;
+		picks = 0;
 		await fake.commands.get("config")!.handler("", ctx as never);
-		expect(select.mock.calls.length - calls).toBe(1);
+		// Turning it off asks nothing: the pick, then the dismissed panel.
+		expect(select.mock.calls.length - calls).toBe(2);
 		expect(readExternalIncludesApproval(cwd, home).approved).toBe(false);
 	});
 });

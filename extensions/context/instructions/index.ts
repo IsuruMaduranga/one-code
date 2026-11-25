@@ -42,8 +42,8 @@ import { resolveToolPath } from "../../lib/rules/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../../lib/agents/worktree-channel.ts";
 import { pathArgument } from "../../lib/shell/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../../lib/context/git.ts";
-import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesCommand, externalIncludesDialog, externalIncludesNeedsUi, externalIncludesNone, externalIncludesNotSaved, externalIncludesSetting, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../lib/context/external-includes.ts";
-import { registerLocalCommand } from "../../lib/ui/local-command.ts";
+import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES, externalIncludesDialog, externalIncludesNotSaved, externalIncludesRowDescription, externalIncludesSetting, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../lib/context/external-includes.ts";
+import { CONFIG_ROWS_CHANNEL, type ConfigRowsQuery, type ContributedConfigRow } from "../../lib/ui/config-rows.ts";
 import { consentDialog, installConsentDialogs, startupConsentReady } from "../../lib/consent/consent-dialogs.ts";
 import type { ToldFact } from "../../lib/request/ledger/records.ts";
 import { foldSession } from "../../lib/request/ledger/fold-memo.ts";
@@ -321,36 +321,42 @@ function instructionsExtension(pi: ExtensionAPI) {
 		saveApproval(ctx, choice === EXTERNAL_INCLUDES_YES);
 		refreshInstructions(ctx.cwd);
 	};
-	registerLocalCommand(pi, "config", {
-		description: externalIncludesCommand(instructionFile()),
-		reportsResult: true,
-		handler: async (_args, ctx) => {
-			if (!ctx.hasUI) {
-				const text = externalIncludesNeedsUi(instructionFile());
-				process.stderr.write(`${text}\n`);
-				return text;
-			}
-			const gen = sessionGeneration;
-			startupConsentReady(pi.events);
-			await approvalPending;
-			if (gen !== sessionGeneration || approvalAbort.signal.aborted) return;
-			const found = externalFound(ctx.cwd);
-			if (!found.length) {
-				const text = externalIncludesNone(instructionFile());
-				ctx.ui.notify(text, "info");
-				return text;
-			}
-			const row = `${externalIncludesSetting(instructionFile())}: ${includeExternal ? "true" : "false"}`;
-			const picked = await consentDialog(pi.events, () => ctx.ui.select("Config", [row], { signal: approvalAbort.signal }));
-			if (picked !== row || gen !== sessionGeneration || approvalAbort.signal.aborted) return;
-			if (includeExternal) {
-				saveApproval(ctx, false);
-				refreshInstructions(ctx.cwd);
-			} else await askApproval(ctx, found);
-			// As in Claude Code, this changes future loads, never retracts text or
-			// rewrites the frozen first-message block after a request was sent.
-			return `${externalIncludesSetting(instructionFile())}: ${includeExternal ? "true" : "false"}`;
-		},
+	// /config's external-includes row (commands/config), shown only while
+	// this project has external imports, as in Claude Code. Turning it on
+	// opens the approval dialog, so /config closes its panel first.
+	pi.events.on(CONFIG_ROWS_CHANNEL, (data) => {
+		const query = data as ConfigRowsQuery;
+		const ctx = query.ctx as ExtensionContext;
+		query.rows.push(
+			(async (): Promise<ContributedConfigRow | undefined> => {
+				if (!ctx.hasUI) return undefined;
+				const gen = sessionGeneration;
+				startupConsentReady(pi.events);
+				await approvalPending;
+				if (gen !== sessionGeneration || approvalAbort.signal.aborted) return undefined;
+				const found = externalFound(ctx.cwd);
+				if (!found.length) return undefined;
+				const label = externalIncludesSetting(instructionFile());
+				return {
+					id: "externalIncludes",
+					label,
+					description: externalIncludesRowDescription(instructionFile()),
+					currentValue: includeExternal ? "true" : "false",
+					values: ["true", "false"],
+					opensDialog: (value) => value === "true",
+					apply: async (value) => {
+						if (gen !== sessionGeneration || approvalAbort.signal.aborted) return undefined;
+						if (value === "false") {
+							saveApproval(ctx, false);
+							refreshInstructions(ctx.cwd);
+						} else await askApproval(ctx, found);
+						// As in Claude Code, this changes future loads, never retracts text or
+						// rewrites the frozen first-message block after a request was sent.
+						return includeExternal ? "true" : "false";
+					},
+				};
+			})(),
+		);
 	});
 	const drainApproval = async () => { startupConsentReady(pi.events); await approvalPending; };
 	pi.on("before_agent_start", async (_event, ctx) => {
