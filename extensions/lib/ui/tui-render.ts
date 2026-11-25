@@ -18,7 +18,7 @@
 import { isAbsolute, relative } from "node:path";
 import { framesToText, notificationBody, parseNotificationFrames } from "../notify/notifications.ts";
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
-import { sanitizeDisplayText } from "./terminal-text.ts";
+import { sanitizeDisplayText, sanitizeTitle } from "./terminal-text.ts";
 import { userDenialKind } from "../consent/user-denial.ts";
 import { refusalLine } from "../rules/refusal-lines.ts";
 export { notificationBody };
@@ -921,8 +921,9 @@ export function shownLine(text: string, color: ShortLine["color"] = "dim"): { sh
 /** The line a result's `details.shown` holds, or undefined when it holds none. */
 export function shownLineOf(details: unknown): ShortLine | undefined {
 	const shown = (details as { shown?: unknown } | undefined)?.shown as { text?: unknown; color?: unknown } | undefined;
-	if (!shown || typeof shown.text !== "string" || shown.text === "") return undefined;
-	return { text: shown.text, color: shown.color === "error" ? "error" : "dim" };
+	if (!shown || typeof shown.text !== "string" || shown.text.trim() === "") return undefined;
+	// One line, whatever the tool put in it (a launch error, a URL).
+	return { text: sanitizeTitle(shown.text), color: shown.color === "error" ? "error" : "dim" };
 }
 
 /** The result fields the summary and short-line hooks read. */

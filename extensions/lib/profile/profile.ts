@@ -31,7 +31,7 @@ import { SETTINGS_DISPLAY } from "./settings-display.ts";
 import { PACKAGE_ROOT } from "../core/package-root.ts";
 import { processState } from "./process-state.ts";
 import { shareModuleForTest, sharedModule } from "./shared-module.ts";
-import { enabledFeatures, type FeatureId, featureProblems, isFeatureId, isGuardFeature, isProductExtensionFolder, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
+import { enabledFeatures, type FeatureId, featureOffRefusal, featureProblems, isFeatureId, isGuardFeature, isProductExtensionFolder, PRODUCT_EXTENSIONS_DIR, TOOL_FEATURES, toolSetProblems } from "./features.ts";
 import type { LiveTools } from "./live-tools.ts";
 import type { Profile, ProfileText, ToolSwitch } from "./profile-contract.ts";
 import { type ProductProvider, providerProblems } from "./product-providers.ts";
@@ -248,6 +248,8 @@ export interface ResolvedProfile {
 	user?: UserProfile;
 	/** The features the user's settings file turns off (`featuresOff`, lib/profile/settings-file.ts), as read at launch. */
 	settingsOff: readonly string[];
+	/** Why each `featuresOff` id the settings file names was skipped (unknown, required or a guard); absent when none was. */
+	settingsOffIgnored?: readonly string[];
 	/** Why each off feature is off, the first source that turned it off; /config hides what the product turns off. */
 	featuresOffBy: ReadonlyMap<FeatureId, FeatureOffSource>;
 }
@@ -355,19 +357,27 @@ export function resolveProfile(
 	user?: UserProfile,
 	launchTools?: PiToolFilter,
 	productProfile: string | undefined = profileSelection.productProfile,
-	settingsOff: readonly string[] = [],
+	settingsFileOff: readonly string[] = [],
 ): ResolvedProfile {
 	const featureMap: Partial<Record<string, boolean>> = { ...profile.features };
+	// The settings file is lasting state /config writes: an id it cannot turn off
+	// (a feature renamed by a later release, a hand-edited guard) is skipped and
+	// reported (/config warns at session start), never a reason not to start.
+	const settingsOffIgnored = settingsFileOff.flatMap((id) => {
+		const refusal = featureOffRefusal(id);
+		return refusal ? [refusal] : [];
+	});
+	const settingsOff = settingsFileOff.filter((id) => featureOffRefusal(id) === undefined);
 	const envOff = envList(env, envName("FEATURES_OFF"));
 	const envTools = envList(env, envName("TOOLS_OFF"));
 	const featuresOffBy = new Map<FeatureId, FeatureOffSource>();
 	for (const [id, on] of Object.entries(profile.features)) if (on === false && isFeatureId(id)) featuresOffBy.set(id, "product");
 	// The user's off-switches, each named where a message points at it (the fix is the user's to make).
 	const userProfileName = user ? `the profile "${user.name}" (${tildify(user.dir, homedir())})` : "";
-	const userOff: ReadonlyArray<{ ids: readonly string[]; source: FeatureOffSource; sandboxIn: string; guardProblem: (id: string) => string }> = [
+	const userOff: ReadonlyArray<{ ids: readonly string[]; source: FeatureOffSource; sandboxIn: string; guardProblem?: (id: string) => string }> = [
 		{ ids: envOff, source: "environment", sandboxIn: envName("FEATURES_OFF"), guardProblem: (id) => `${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)` },
 		{ ids: user?.featuresOff ?? [], source: "user profile", sandboxIn: `the featuresOff of the profile "${user?.name}"`, guardProblem: (id) => `${userProfileName} cannot turn off "${id}": it guards tool calls` },
-		{ ids: settingsOff, source: "settings", sandboxIn: `the featuresOff of ${SETTINGS_DISPLAY}`, guardProblem: (id) => `"featuresOff" in ${SETTINGS_DISPLAY} cannot turn off "${id}": it guards tool calls (only a profile can)` },
+		{ ids: settingsOff, source: "settings", sandboxIn: `the featuresOff of ${SETTINGS_DISPLAY}` },
 	];
 	for (const { ids, source } of userOff) {
 		for (const id of ids) {
@@ -387,7 +397,7 @@ export function resolveProfile(
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
 	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
 	const problems = featureProblems(featureMap);
-	for (const { ids, guardProblem } of userOff) problems.push(...ids.filter(isGuardFeature).map(guardProblem));
+	for (const { ids, guardProblem } of userOff) if (guardProblem) problems.push(...ids.filter(isGuardFeature).map(guardProblem));
 	if (user) problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${userProfileName}: ${problem}`));
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
@@ -471,6 +481,7 @@ export function resolveProfile(
 		...(sandboxOffIgnored.length > 0 ? { sandboxOffIgnored } : {}),
 		...(user ? { user } : {}),
 		settingsOff,
+		...(settingsOffIgnored.length > 0 ? { settingsOffIgnored } : {}),
 		featuresOffBy,
 	};
 }

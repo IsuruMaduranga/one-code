@@ -352,7 +352,7 @@ function instructionsExtension(pi: ExtensionAPI) {
 						} else await askApproval(ctx, found);
 						// As in Claude Code, this changes future loads, never retracts text or
 						// rewrites the frozen first-message block after a request was sent.
-						return `${label}: ${includeExternal ? "true" : "false"}`;
+						return includeExternal ? "true" : "false";
 					},
 				};
 			})(),

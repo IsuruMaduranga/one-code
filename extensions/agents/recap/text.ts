@@ -10,10 +10,13 @@ export interface RecapResultText {
 	stubReason: string;
 	/** Added to a session's first recaps: where to turn them off (Claude Code's words; /config is commands/config). */
 	offHint: string;
+	/** The same, when the profile has no /config: the features-off variable `offVariable`. */
+	offHintWithoutConfig: (offVariable: string) => string;
 }
 
 /** The base's words of the group. */
 export const recapResultText: RecapResultText = {
 	stubReason: "Unavailable during this summary; answer in text.",
 	offHint: "(turn off recaps in /config)",
+	offHintWithoutConfig: (offVariable) => `(turn off recaps with ${offVariable}=recap)`,
 };

@@ -53,6 +53,13 @@ describe("refusalLine", () => {
 		expect(refusalLine(toolCallCorruptionText.corruptBlock({ reason: "Broken.", repeat: false }))).toEqual({ text: "OpenRouter tool-call corruption: Broken.", color: "error" });
 	});
 
+	it("leaves a failed command's output whole when it only quotes a refusal's phrase", () => {
+		const output = "FAIL test/unit/x.test.ts\n  expected 'Writes to the gate's own configuration are never auto-approved. Do not…' to match\n\nThis was not a judgement that the call is unsafe: …\n 1 failed";
+		expect(refusalLine(output)).toBeUndefined();
+		expect(refusalLine(`log line\n${refusalText({ kind: "classifierNoVerdict", reason: "R." })}\nmore output`)).toBeUndefined();
+		expect(refusalLine(`echo: ${toolCallCorruptionText.suspectBlock({ reason: "Cut off." })}`)).toBeDefined(); // ends like the refusal: still drawn short
+	});
+
 	it("leaves other text alone", () => {
 		expect(refusalLine("exit 1")).toBeUndefined();
 		expect(refusalLine(refusalText({ kind: "conflictingPaths", fields: ["a", "b"] }))).toBeUndefined();

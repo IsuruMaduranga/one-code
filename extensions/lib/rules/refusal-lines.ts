@@ -73,6 +73,9 @@ export const GUIDANCE = {
 	corruptCall: "Do not retry this call; switch models or exclude the upstream provider.",
 } as const;
 
+/** How the safety floor's refusal opens, before its reason (auto-mode/text.ts). */
+export const FLOOR_OPENING = "Auto mode blocked this call without consulting the classifier: ";
+
 /** Whether a tool result is auto mode's denial. */
 export function isClassifierDenial(text: string): boolean {
 	return text.startsWith(CLASSIFIER_DENIED);
@@ -91,7 +94,14 @@ const matches = (pattern: RegExp, line: (slot: string) => string): Recognizer =>
 	const found = pattern.exec(text);
 	return found ? line(found[1]) : undefined;
 };
-const before = (guidance: string): Recognizer => (text) => {
+/**
+ * The text before `guidance`, for a refusal that also opens with `start` or
+ * ends with `end`: a phrase alone could sit anywhere in a failed command's
+ * output (a test that prints these refusals), and that output must stay whole.
+ * refusal-lines.test.ts checks every anchor against the text modules' words.
+ */
+const before = (guidance: string, anchor: { start: string } | { end: string }): Recognizer => (text) => {
+	if ("start" in anchor ? !text.startsWith(anchor.start) : !text.endsWith(anchor.end)) return undefined;
 	const at = text.indexOf(guidance);
 	return at > 0 ? text.slice(0, at) : undefined;
 };
@@ -99,7 +109,8 @@ const before = (guidance: string): Recognizer => (text) => {
 /** Each refusal's recognizer and colour: dim for a refusal working as intended, an error's for a failure. In order. */
 const REFUSALS: ReadonlyArray<{ line: Recognizer; color: ShortLine["color"] }> = [
 	{ line: opensWith(CLASSIFIER_DENIED, CLASSIFIER_DENIED_LINE), color: "dim" },
-	{ line: before(CLASSIFIER_NOT_JUDGED), color: "error" },
+	{ line: before(CLASSIFIER_NOT_JUDGED, { end: "so they can re-run interactively or switch the session model." }), color: "error" },
+	{ line: before(CLASSIFIER_NOT_JUDGED, { end: "so they can re-run interactively or set another classifier model." }), color: "error" },
 	{ line: opensWith(REFUSAL_LEADS.nonInteractive, "Needs approval, but this session cannot ask for it"), color: "dim" },
 	{ line: opensWith(REFUSAL_LEADS.planMode, "Blocked in plan mode"), color: "dim" },
 	{ line: opensWith(REFUSAL_LEADS.toolOff, "Tool not available"), color: "dim" },
@@ -113,15 +124,15 @@ const REFUSALS: ReadonlyArray<{ line: Recognizer; color: ShortLine["color"] }> =
 	{ line: opensWith(REFUSAL_LEADS.childNoClassifier, "Denied: this agent cannot reach auto mode's classifier"), color: "dim" },
 	{ line: matches(templatePattern(ruleRefusalLead), (rule) => `Denied by permission rule ${rule}`), color: "dim" },
 	{ line: matches(templatePattern(childNeedsApprovalLead), () => "Needs approval, which an agent cannot ask for"), color: "dim" },
-	{ line: before(` ${GUIDANCE.floorPattern}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.floorWrite}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.worktreeGit}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.worktreeStash}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.worktreeWrite}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.worktreeMissing}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.secretPlaceholder}`), color: "dim" },
-	{ line: before(` ${GUIDANCE.suspectCall}`), color: "error" },
-	{ line: before(` ${GUIDANCE.corruptCall}`), color: "error" },
+	{ line: before(` ${GUIDANCE.floorPattern}`, { start: FLOOR_OPENING }), color: "dim" },
+	{ line: before(` ${GUIDANCE.floorWrite}`, { start: FLOOR_OPENING }), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeGit}`, { start: "This session is isolated in the worktree " }), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeStash}`, { start: "Blocked: `" }), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeWrite}`, { start: "This agent is isolated in the worktree " }), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeMissing}`, { start: "The active worktree at " }), color: "dim" },
+	{ line: before(` ${GUIDANCE.secretPlaceholder}`, { start: "This write contains a [secret] placeholder." }), color: "dim" },
+	{ line: before(` ${GUIDANCE.suspectCall}`, { end: "drop the trailing blank or the empty option." }), color: "error" },
+	{ line: before(` ${GUIDANCE.corruptCall}`, { start: "OpenRouter tool-call corruption: " }), color: "error" },
 ];
 
 /**

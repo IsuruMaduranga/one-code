@@ -23,7 +23,7 @@ export interface ConfigRow {
 export interface ContributedConfigRow extends ConfigRow {
 	/** True when setting `value` opens a dialog: the panel closes first, since a dialog takes the panel's place. */
 	opensDialog?: (value: string) => boolean;
-	/** Set `value`; resolves to the setting as it now is (`Label: value`), or undefined when nothing changed. */
+	/** Ask for `value`; resolves to the value now in force (the user may decline in a dialog), or undefined when the row is gone. */
 	apply: (value: string) => Promise<string | undefined>;
 }
 

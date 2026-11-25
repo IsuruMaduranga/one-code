@@ -59,9 +59,10 @@ The feature rows write a `featuresOff` list, the lasting form of
 { "featuresOff": ["recap", "turn-duration"] }
 ```
 
-It takes the same feature ids as the variable, and it can't turn off a
-feature that guards tool calls, such as `hooks`. When both turn features
-off, both lists apply.
+It takes the same feature ids as the variable. An id it can't turn off (a
+feature that guards tool calls, such as `hooks`, or a name that isn't a
+feature) is skipped, and One Code warns about it when a session starts.
+When both turn features off, both lists apply.
 
 ### Relocating directories
 

@@ -1789,18 +1789,12 @@ function subagentsExtension(pi: ExtensionAPI) {
 						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal, parentToolCallId: mainCallOf(parentRecord.taskId) })
 						: undefined;
 					if (!bridge || verdict?.block) {
-						return {
-							content: [{ type: "text" as const, text: subagentResultText().refused(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" }) }],
-							details: { agentRuns: [] as AgentRunRecord[] },
-							isError: true,
-						};
+						const refused = refuseCall(verdict?.block ? { kind: "nestedDenied", reason: verdict.reason } : { kind: "nestedNoBridge" });
+						return { ...refused, details: { ...refused.details, agentRuns: [] as AgentRunRecord[] } };
 					}
 				} catch (error) {
-					return {
-						content: [{ type: "text" as const, text: subagentResultText().refused({ kind: "nestedCheckFailed", osMessage: (error as Error).message }) }],
-						details: { agentRuns: [] as AgentRunRecord[] },
-						isError: true,
-					};
+					const refused = refuseCall({ kind: "nestedCheckFailed", osMessage: (error as Error).message });
+					return { ...refused, details: { ...refused.details, agentRuns: [] as AgentRunRecord[] } };
 				}
 
 				const { result } = await executeRun(

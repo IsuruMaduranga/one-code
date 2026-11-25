@@ -31,6 +31,14 @@ type Row = ConfigRow | ContributedConfigRow;
 const isContributed = (row: Row): row is ContributedConfigRow => "apply" in row;
 
 function configExtension(pi: ExtensionAPI) {
+	// featuresOff ids the profile skipped (lib/profile/profile.ts): said once per process, where the user can fix them.
+	let warnedSkipped = false;
+	pi.on("session_start", (_event, ctx) => {
+		const skipped = activeProfile().settingsOffIgnored;
+		if (warnedSkipped || !skipped?.length || !ctx.hasUI) return;
+		warnedSkipped = true;
+		ctx.ui.notify(`"featuresOff" in ${tildify(productSettingsPath(homedir()), homedir())} skips ${skipped.join(", ")}. Remove them, or change the features in /config.`, "warning");
+	});
 	registerLocalCommand(pi, "config", {
 		description: "Open the settings panel",
 		reportsResult: true,
@@ -72,13 +80,14 @@ function configExtension(pi: ExtensionAPI) {
 				changes.set(row.id, `${row.label}: ${value}`);
 				return undefined;
 			};
-			/** Apply a contributed row's change and record the setting as it now is. */
+			/** Apply a contributed row's change; record it only when the value in force changed. */
 			const applyContributed = async (row: ContributedConfigRow, value: string): Promise<string | undefined> => {
 				try {
+					const before = row.currentValue;
 					const now = await row.apply(value);
 					if (now !== undefined) {
-						changes.set(row.id, now);
-						row.currentValue = value;
+						row.currentValue = now;
+						if (now !== before) changes.set(row.id, `${row.label}: ${now}`);
 					}
 					return undefined;
 				} catch (error) {

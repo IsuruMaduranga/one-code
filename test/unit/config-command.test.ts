@@ -5,7 +5,7 @@ import configExtension from "../../extensions/commands/config/index.ts";
 import { decodeConfigKey, nextValue, renderConfig } from "../../extensions/commands/config/panel.ts";
 import { configRows, type ConfigView, withSetting } from "../../extensions/commands/config/rows.ts";
 import type { FeatureId } from "../../extensions/lib/profile/features.ts";
-import type { FeatureOffSource } from "../../extensions/lib/profile/profile.ts";
+import { activeProfile, type FeatureOffSource, setActiveProfileForTest } from "../../extensions/lib/profile/profile.ts";
 import { productSettingsPath, readFeaturesOffSetting } from "../../extensions/lib/profile/settings-file.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { CONFIG_ROWS_CHANNEL, type ConfigRowsQuery } from "../../extensions/lib/ui/config-rows.ts";
@@ -141,7 +141,7 @@ describe("/config", () => {
 					opensDialog: (value: string) => value === "true",
 					apply: async (value: string) => {
 						order.push(`apply ${value}`);
-						return `External CLAUDE.md includes: ${value}`;
+						return value;
 					},
 				}),
 			);
@@ -164,6 +164,44 @@ describe("/config", () => {
 		await result;
 		expect(order).toEqual(["closed", "apply true"]);
 		expect(reminders.some((r) => r.text === "<local-command-stdout>External CLAUDE.md includes: true</local-command-stdout>\n")).toBe(true);
+	});
+
+	it("keeps a contributed row's value when the user declines its dialog (RPC)", async () => {
+		const fake = createFakePi();
+		configExtension(fake.pi as never);
+		fake.events.on(CONFIG_ROWS_CHANNEL, (data) => {
+			(data as ConfigRowsQuery).rows.push(
+				Promise.resolve({ id: "externalIncludes", label: "External CLAUDE.md includes", description: "", currentValue: "false", values: ["true", "false"], apply: async () => "false" }),
+			);
+		});
+		const reminders: Array<{ text?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { text?: string }));
+		let picks = 0;
+		const shown: string[][] = [];
+		const select = vi.fn(async (_title: string, options: string[]) => {
+			shown.push(options);
+			return picks++ === 0 ? options.find((option) => option.startsWith("External")) : undefined;
+		});
+		await fake.commands.get("config")?.handler("", createFakeCtx({ mode: "rpc", hasUI: true, ui: { select } }));
+		expect(shown[1]).toContain("External CLAUDE.md includes: false");
+		expect(reminders.some((r) => r.text === "<local-command-stdout>No settings changed</local-command-stdout>\n")).toBe(true);
+	});
+
+	it("warns once at session start about featuresOff ids the profile skipped", async () => {
+		const before = activeProfile();
+		setActiveProfileForTest({ ...before, settingsOffIgnored: ['unknown feature "renamed"'] });
+		try {
+			const fake = createFakePi();
+			configExtension(fake.pi as never);
+			const ctx = createFakeCtx({ mode: "tui", hasUI: true });
+			await fake.fire("session_start", { reason: "startup" }, ctx);
+			await fake.fire("session_start", { reason: "new" }, ctx);
+			const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
+			expect(notify).toHaveBeenCalledTimes(1);
+			expect(notify).toHaveBeenCalledWith(expect.stringContaining('skips unknown feature "renamed"'), "warning");
+		} finally {
+			setActiveProfileForTest(before);
+		}
 	});
 
 	it("names a settings file it cannot read and changes nothing", async () => {
