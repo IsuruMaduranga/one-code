@@ -6,7 +6,7 @@
 
 import { keyId } from "../../lib/ui/key-input.ts";
 import { cutPlainText, padPlainText, panelTopRule, visibleWidth, wrapHints, wrapProse } from "../../lib/ui/tui-render.ts";
-import type { ConfigRow } from "./rows.ts";
+import type { ConfigRow } from "../../lib/ui/config-rows.ts";
 
 export interface ConfigPaint {
 	fg: (color: string, text: string) => string;
@@ -39,7 +39,7 @@ export function nextValue(row: ConfigRow): string {
 	return row.values[(at + 1) % row.values.length];
 }
 
-export const CONFIG_HINTS = "↑↓ to move · Enter/Space to change · Esc to close";
+const CONFIG_HINTS = "↑↓ to move · Enter/Space to change · Esc to close";
 
 /** The panel's lines, cut to `width`. `saved` names the settings file; `notice` is the last save's problem, if any. */
 export function renderConfig(input: { rows: readonly ConfigRow[]; cursor: number; width: number; saved: string; notice?: string }, paint: ConfigPaint): string[] {

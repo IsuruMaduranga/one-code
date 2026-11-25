@@ -1,6 +1,6 @@
 /**
- * /config's rows (pure): the settings a user changes from the panel, what
- * each shows, and how a change rewrites One Code's user settings file
+ * /config's own rows (pure): the settings a user changes from the panel,
+ * what each shows, and how a change rewrites One Code's user settings file
  * (`~/.onecode/settings.json`, lib/profile/product-settings.ts).
  *
  * A feature row writes `featuresOff`, which the profile reads once per
@@ -11,21 +11,15 @@
  * changes inside a session.
  */
 
+import { envName } from "../../lib/profile/brand.mjs";
 import type { FeatureId } from "../../lib/profile/features.ts";
 import type { FeatureOffSource } from "../../lib/profile/profile.ts";
-import { WORKFLOW_SIZES, type WorkflowSizeGuideline } from "../../lib/profile/product-settings.ts";
-
-/** A row as pi-tui's settings list takes it (`SettingItem`). */
-export interface ConfigRow {
-	id: string;
-	label: string;
-	description: string;
-	currentValue: string;
-	values: string[];
-}
+import { suggestNewerOf, WORKFLOW_SIZES, type WorkflowSizeGuideline, workflowSizeOf } from "../../lib/profile/product-settings.ts";
+import { featuresOffOf } from "../../lib/profile/settings-file.ts";
+import type { ConfigRow } from "../../lib/ui/config-rows.ts";
 
 /** The optional features a user switches, in the panel's order. */
-export const FEATURE_ROWS: ReadonlyArray<{ id: FeatureId; label: string; description: string }> = [
+const FEATURE_ROWS: ReadonlyArray<{ id: FeatureId; label: string; description: string }> = [
 	{ id: "recap", label: "Session recap", description: "Recap the session when you come back to it after a break." },
 	{ id: "session-title", label: "Session titles", description: "Name each session from its first prompt." },
 	{ id: "turn-duration", label: "Turn duration", description: "Show how long each turn took." },
@@ -35,13 +29,13 @@ export const FEATURE_ROWS: ReadonlyArray<{ id: FeatureId; label: string; descrip
 ];
 
 const FEATURE_PREFIX = "feature:";
-export const SUGGEST_NEWER_ID = "suggestNewerModels";
-export const WORKFLOW_SIZE_ID = "workflowSizeGuideline";
+const SUGGEST_NEWER_ID = "suggestNewerModels";
+const WORKFLOW_SIZE_ID = "workflowSizeGuideline";
 
 const RESTART = "Applies the next time you start a session.";
 const NEXT_SESSION = "Applies to the next session.";
 
-/** What the panel reads: the settings file's values and why each feature is off for this run. */
+/** What the panel reads: the settings file and why each feature is off for this run. */
 export interface ConfigView {
 	/** The settings file as read. */
 	file: Record<string, unknown>;
@@ -49,11 +43,7 @@ export interface ConfigView {
 	offBy: ReadonlyMap<FeatureId, FeatureOffSource>;
 	/** Whether the workflow tool exists in this run, so its size row means something. */
 	workflows: boolean;
-	/** The environment variable that turns features off (`ONECODE_FEATURES_OFF`), for the note on a row it turns off. */
-	offVariable: string;
 }
-
-const featuresOffOf = (file: Record<string, unknown>): string[] => (Array.isArray(file.featuresOff) ? file.featuresOff.filter((id): id is string => typeof id === "string") : []);
 
 const onOff = (on: boolean) => (on ? "true" : "false");
 
@@ -64,23 +54,22 @@ export function configRows(view: ConfigView): ConfigRow[] {
 	for (const row of FEATURE_ROWS) {
 		const source = view.offBy.get(row.id);
 		if (source === "product") continue;
-		const elsewhere = source === "environment" ? ` It is off for this run: ${view.offVariable} turns it off.` : source === "user profile" ? " It is off for this run: your launch profile turns it off." : "";
+		const elsewhere = source === "environment" ? ` It is off for this run: ${envName("FEATURES_OFF")} turns it off.` : source === "user profile" ? " It is off for this run: your launch profile turns it off." : "";
 		rows.push({ id: `${FEATURE_PREFIX}${row.id}`, label: row.label, description: `${row.description} ${RESTART}${elsewhere}`, currentValue: onOff(!off.has(row.id)), values: ["true", "false"] });
 	}
 	rows.push({
 		id: SUGGEST_NEWER_ID,
 		label: "Suggest newer models",
 		description: `Tell you when a newer or cheaper model of the same line is available. ${NEXT_SESSION}`,
-		currentValue: onOff(view.file.suggestNewerModels !== false),
+		currentValue: onOff(suggestNewerOf(view.file)),
 		values: ["true", "false"],
 	});
 	if (view.workflows) {
-		const size = WORKFLOW_SIZES.includes(view.file.workflowSizeGuideline as WorkflowSizeGuideline) ? (view.file.workflowSizeGuideline as string) : "medium";
 		rows.push({
 			id: WORKFLOW_SIZE_ID,
 			label: "Workflow size",
 			description: `How many agents a workflow should start: small (under 5), medium (under 10), large (under 50) or unrestricted. ${NEXT_SESSION}`,
-			currentValue: size,
+			currentValue: workflowSizeOf(view.file) ?? "medium",
 			values: [...WORKFLOW_SIZES],
 		});
 	}
@@ -103,9 +92,4 @@ export function withSetting(file: Record<string, unknown>, id: string, value: st
 	}
 	if (id === WORKFLOW_SIZE_ID && WORKFLOW_SIZES.includes(value as WorkflowSizeGuideline)) return { ...file, workflowSizeGuideline: value };
 	return undefined;
-}
-
-/** A change as one line, for the command's result: `Session recap: false`. */
-export function changeLine(rows: readonly ConfigRow[], id: string, value: string): string {
-	return `${rows.find((row) => row.id === id)?.label ?? id}: ${value}`;
 }

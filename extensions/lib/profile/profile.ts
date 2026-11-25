@@ -362,12 +362,14 @@ export function resolveProfile(
 	const envTools = envList(env, envName("TOOLS_OFF"));
 	const featuresOffBy = new Map<FeatureId, FeatureOffSource>();
 	for (const [id, on] of Object.entries(profile.features)) if (on === false && isFeatureId(id)) featuresOffBy.set(id, "product");
-	const userOff: Array<[readonly string[], FeatureOffSource]> = [
-		[envOff, "environment"],
-		[user?.featuresOff ?? [], "user profile"],
-		[settingsOff, "settings"],
+	// The user's off-switches, each named where a message points at it (the fix is the user's to make).
+	const userProfileName = user ? `the profile "${user.name}" (${tildify(user.dir, homedir())})` : "";
+	const userOff: ReadonlyArray<{ ids: readonly string[]; source: FeatureOffSource; sandboxIn: string; guardProblem: (id: string) => string }> = [
+		{ ids: envOff, source: "environment", sandboxIn: envName("FEATURES_OFF"), guardProblem: (id) => `${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)` },
+		{ ids: user?.featuresOff ?? [], source: "user profile", sandboxIn: `the featuresOff of the profile "${user?.name}"`, guardProblem: (id) => `${userProfileName} cannot turn off "${id}": it guards tool calls` },
+		{ ids: settingsOff, source: "settings", sandboxIn: `the featuresOff of ${SETTINGS_DISPLAY}`, guardProblem: (id) => `"featuresOff" in ${SETTINGS_DISPLAY} cannot turn off "${id}": it guards tool calls (only a profile can)` },
 	];
-	for (const [ids, source] of userOff) {
+	for (const { ids, source } of userOff) {
 		for (const id of ids) {
 			featureMap[id] = false;
 			if (isFeatureId(id) && !featuresOffBy.has(id)) featuresOffBy.set(id, source);
@@ -377,9 +379,7 @@ export function resolveProfile(
 	const sandboxOffIgnored: string[] = [];
 	if (profile.sandbox?.locked === true && profile.features.sandbox !== false && featureMap.sandbox === false) {
 		featureMap.sandbox = true;
-		if (envOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${envName("FEATURES_OFF")}`);
-		if (user?.featuresOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in the featuresOff of the profile "${user.name}"`);
-		if (settingsOff.includes("sandbox")) sandboxOffIgnored.push(`sandbox in the featuresOff of ${SETTINGS_DISPLAY}`);
+		for (const { ids, sandboxIn } of userOff) if (ids.includes("sandbox")) sandboxOffIgnored.push(`sandbox in ${sandboxIn}`);
 		featuresOffBy.delete("sandbox");
 	}
 	const tools = new Map<string, ToolSwitch>(Object.entries(profile.tools));
@@ -387,14 +387,8 @@ export function resolveProfile(
 	for (const name of user?.toolsDeferred ?? []) tools.set(name, { ...tools.get(name), deferred: true });
 	for (const name of user?.toolsEager ?? []) tools.set(name, { ...tools.get(name), deferred: false });
 	const problems = featureProblems(featureMap);
-	if (user) {
-		// The user's own lists: name the profile, since the fix is theirs to make.
-		const where = `the profile "${user.name}" (${tildify(user.dir, homedir())})`;
-		for (const id of user.featuresOff.filter(isGuardFeature)) problems.push(`${where} cannot turn off "${id}": it guards tool calls`);
-		problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${where}: ${problem}`));
-	}
-	for (const id of envOff.filter(isGuardFeature)) problems.push(`${envName("FEATURES_OFF")} cannot turn off "${id}": it guards tool calls (only a profile can)`);
-	for (const id of settingsOff.filter(isGuardFeature)) problems.push(`"featuresOff" in ${SETTINGS_DISPLAY} cannot turn off "${id}": it guards tool calls (only a profile can)`);
+	for (const { ids, guardProblem } of userOff) problems.push(...ids.filter(isGuardFeature).map(guardProblem));
+	if (user) problems.push(...misspelledTools([...user.toolsOff, ...user.toolsDeferred, ...user.toolsEager, ...user.toolWording.keys()]).map((problem) => `${userProfileName}: ${problem}`));
 	for (const field of Object.keys(profile)) if (!(field in PROFILE_FIELDS)) problems.push(`unknown profile field "${field}"`);
 	problems.push(...misspelledTools(Object.keys(profile.tools)));
 	// The user's own list: name the variable, since the fix is theirs to make.

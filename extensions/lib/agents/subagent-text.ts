@@ -243,7 +243,14 @@ export function refusalShownLine(refusal: SubagentRefusal): string | undefined {
 			return 'Only "main" can be messaged from inside an agent';
 		case "messageRequired":
 			return "No message given";
-		default:
+		// Already a short fact: drawn as it is.
+		case "worktreeNeedsGit":
+		case "nestedNoBridge":
+		case "nestedCheckFailed":
+		case "couldNotStart":
+		case "deliveryFailed":
+		case "noSession":
+		case "couldNotResume":
 			return undefined;
 	}
 }

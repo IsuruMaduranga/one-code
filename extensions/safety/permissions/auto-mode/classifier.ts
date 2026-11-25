@@ -576,9 +576,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			deps.state.timeoutStreak = 0;
 			// Pin on the first success, so the classifier cannot change under the
 			// session and a working model is not re-litigated per call.
-			if (!deps.state.pinned) {
-				deps.state.pinned = model;
-			}
+			deps.state.pinned ??= model;
 			if (debug) {
 				process.stderr.write(
 					`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}` +

@@ -5,7 +5,7 @@
  * OpenRouter delivers a call whose arguments look cut off or broken.
  */
 
-import { GUIDANCE_STARTS } from "../../lib/rules/refusal-lines.ts";
+import { GUIDANCE } from "../../lib/rules/refusal-lines.ts";
 
 /** What is wrong with a call's raw arguments. */
 export type ArgumentDamage =
@@ -41,9 +41,9 @@ function damage(d: ArgumentDamage): string {
 
 export const toolCallCorruptionText: ToolCallCorruptionText = {
 	damage,
-	suspectBlock: ({ reason }) => `${reason}${GUIDANCE_STARTS.suspectCall} if it really ends there, drop the trailing blank or the empty option.`,
+	suspectBlock: ({ reason }) => `${reason} ${GUIDANCE.suspectCall} if it really ends there, drop the trailing blank or the empty option.`,
 	corruptBlock: ({ reason, repeat }) =>
-		`OpenRouter tool-call corruption: ${reason}${repeat ? " An earlier command in this run came through cut the same way." : ""}${GUIDANCE_STARTS.corruptCall}`,
+		`OpenRouter tool-call corruption: ${reason}${repeat ? " An earlier command in this run came through cut the same way." : ""} ${GUIDANCE.corruptCall}`,
 	runawayRepeat: ({ tool, unit, chars }) =>
 		`The model kept repeating "${unit.trim()}" in a ${tool} call's arguments for over ${chars.toLocaleString("en-US")} characters without finishing the call, so the turn was stopped.`,
 };

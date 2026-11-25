@@ -1,7 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import configExtension from "../../extensions/commands/config/index.ts";
 import { decodeConfigKey, nextValue, renderConfig } from "../../extensions/commands/config/panel.ts";
 import { configRows, type ConfigView, withSetting } from "../../extensions/commands/config/rows.ts";
@@ -10,11 +9,32 @@ import type { FeatureOffSource } from "../../extensions/lib/profile/profile.ts";
 import { productSettingsPath, readFeaturesOffSetting } from "../../extensions/lib/profile/settings-file.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/request/reminders.ts";
 import { CONFIG_ROWS_CHANNEL, type ConfigRowsQuery } from "../../extensions/lib/ui/config-rows.ts";
+import { envName } from "../../extensions/lib/profile/brand.mjs";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
-import { stubHome } from "./helpers/home.ts";
+import { plainTheme } from "./helpers/plain-theme.ts";
+import { tempHome } from "./helpers/temp-home.ts";
 
-const view = (file: Record<string, unknown>, offBy: Array<[FeatureId, FeatureOffSource]> = [], workflows = true): ConfigView => ({ file, offBy: new Map(offBy), workflows, offVariable: "ONECODE_FEATURES_OFF" });
-const plain = { fg: (_color: string, text: string) => text, bold: (text: string) => text };
+const view = (file: Record<string, unknown>, offBy: Array<[FeatureId, FeatureOffSource]> = [], workflows = true): ConfigView => ({ file, offBy: new Map(offBy), workflows });
+
+type Panel = { render(width: number): string[]; handleInput(data: string): void };
+/** A TUI context whose `ui.custom` hands the panel to `onPanel`; `onClose` runs when the panel closes. */
+function panelCtx(onPanel: (panel: Panel) => void, onClose?: () => void) {
+	return createFakeCtx({
+		mode: "tui",
+		hasUI: true,
+		ui: {
+			custom: (make: (...args: unknown[]) => Panel) =>
+				new Promise<void>((resolve) => {
+					onPanel(
+						make({ requestRender: () => {} }, {}, {}, () => {
+							onClose?.();
+							resolve();
+						}),
+					);
+				}),
+		},
+	});
+}
 
 describe("/config rows", () => {
 	it("shows each feature's value from the settings file and hides what the product turns off", () => {
@@ -28,7 +48,7 @@ describe("/config rows", () => {
 
 	it("says when the environment turns a feature off for this run, and drops the workflow row without workflows", () => {
 		const rows = configRows(view({}, [["recap", "environment"]], false));
-		expect(rows.find((row) => row.id === "feature:recap")?.description).toContain("ONECODE_FEATURES_OFF turns it off");
+		expect(rows.find((row) => row.id === "feature:recap")?.description).toContain(`${envName("FEATURES_OFF")} turns it off`);
 		expect(rows.some((row) => row.id === "workflowSizeGuideline")).toBe(false);
 	});
 
@@ -57,23 +77,18 @@ describe("/config panel", () => {
 
 	it("draws the rows, the hints and the selected row's description", () => {
 		const rows = configRows(view({}));
-		const lines = renderConfig({ rows, cursor: 0, width: 100, saved: "~/.onecode/settings.json" }, plain);
+		const lines = renderConfig({ rows, cursor: 0, width: 100, saved: "~/.onecode/settings.json" }, plainTheme);
 		expect(lines).toContain(" ↑↓ to move · Enter/Space to change · Esc to close");
 		expect(lines.some((line) => line.startsWith("❯ Session recap") && line.endsWith("true"))).toBe(true);
 		expect(lines.some((line) => line.includes("Recap the session when you come back"))).toBe(true);
-		for (const line of renderConfig({ rows, cursor: 2, width: 30, saved: "~/.onecode/settings.json", notice: "Could not save" }, plain)) expect(line.length).toBeLessThanOrEqual(30);
+		for (const line of renderConfig({ rows, cursor: 2, width: 30, saved: "~/.onecode/settings.json", notice: "Could not save" }, plainTheme)) expect(line.length).toBeLessThanOrEqual(30);
 	});
 });
 
 describe("/config", () => {
 	let home: string;
 	beforeEach(() => {
-		home = mkdtempSync(join(tmpdir(), "config-command-"));
-		stubHome(home);
-	});
-	afterEach(() => {
-		vi.unstubAllEnvs();
-		rmSync(home, { recursive: true, force: true });
+		home = tempHome("config-command-").home;
 	});
 
 	const settingsFile = () => productSettingsPath(home);
@@ -96,16 +111,9 @@ describe("/config", () => {
 		configExtension(fake.pi as never);
 		const reminders: Array<{ text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { text?: string }));
-		let panel: { render(width: number): string[]; handleInput(data: string): void } | undefined;
-		const ctx = createFakeCtx({
-			mode: "tui",
-			hasUI: true,
-			ui: {
-				custom: (make: (...args: unknown[]) => typeof panel) =>
-					new Promise<void>((resolve) => {
-						panel = make({ requestRender: () => {} }, {}, {}, resolve);
-					}),
-			},
+		let panel: Panel | undefined;
+		const ctx = panelCtx((made) => {
+			panel = made;
 		});
 		const result = fake.commands.get("config")?.handler("", ctx);
 		await vi.waitFor(() => expect(panel).toBeDefined());
@@ -140,20 +148,13 @@ describe("/config", () => {
 		});
 		const reminders: Array<{ text?: string }> = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { text?: string }));
-		let panel: { render(width: number): string[]; handleInput(data: string): void } | undefined;
-		const ctx = createFakeCtx({
-			mode: "tui",
-			hasUI: true,
-			ui: {
-				custom: (make: (...args: unknown[]) => typeof panel) =>
-					new Promise<void>((resolve) => {
-						panel = make({ requestRender: () => {} }, {}, {}, () => {
-							order.push("closed");
-							resolve();
-						});
-					}),
+		let panel: Panel | undefined;
+		const ctx = panelCtx(
+			(made) => {
+				panel = made;
 			},
-		});
+			() => order.push("closed"),
+		);
 		const result = fake.commands.get("config")?.handler("", ctx);
 		await vi.waitFor(() => expect(panel).toBeDefined());
 		const rows = panel?.render(100) ?? [];

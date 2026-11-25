@@ -7,7 +7,7 @@
  * the preview's length are the base's.
  */
 
-import { GUIDANCE_STARTS } from "../rules/refusal-lines.ts";
+import { GUIDANCE } from "../rules/refusal-lines.ts";
 
 interface ToolResultsText {
 	/** A tool that returned nothing; `tool` is its display name (Bash, Grep). */
@@ -49,5 +49,5 @@ export const toolResultsText: ToolResultsText = {
 		return `${REJECTED} ${next}\n\n${MEMORY_NOTE}`;
 	},
 	secretPlaceholderWrite:
-		`This write contains a [secret] placeholder.${GUIDANCE_STARTS.secretPlaceholder} writing the placeholder would replace that value. Change the file with an edit that leaves the secret's line untouched, or ask the user to make the change.`,
+		`This write contains a [secret] placeholder. ${GUIDANCE.secretPlaceholder} writing the placeholder would replace that value. Change the file with an edit that leaves the secret's line untouched, or ask the user to make the change.`,
 };

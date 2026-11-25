@@ -902,7 +902,7 @@ export interface CcWrapOptions<TArgs = any> {
 	errorLine?: (result: ResultView, args: TArgs | undefined, cwd: string | undefined) => ShortLine | undefined;
 }
 
-/** A short transcript line and its colour token (an error's, or a dim note). */
+/** A short transcript line and its colour token (an error's, or a dim note): a tool's own row, or a refusal's (lib/rules/refusal-lines.ts). */
 export interface ShortLine {
 	text: string;
 	color: "error" | "dim";

@@ -15,20 +15,20 @@
 
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { envName } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import { tildify } from "../../lib/profile/paths.ts";
 import { activeProfile, toolLive } from "../../lib/profile/profile.ts";
 import { productSettingsPath, readSettingsForWrite, writeSettings } from "../../lib/profile/product-settings.ts";
-import { CONFIG_ROWS_CHANNEL, type ConfigRowsQuery, type ContributedConfigRow } from "../../lib/ui/config-rows.ts";
+import { CONFIG_ROWS_CHANNEL, type ConfigRow, type ConfigRowsQuery, type ContributedConfigRow } from "../../lib/ui/config-rows.ts";
 import { registerLocalCommand } from "../../lib/ui/local-command.ts";
 import { panelUi } from "../../lib/ui/panel-focus.ts";
 import { linesComponent, safeThemeBold, safeThemePaint } from "../../lib/ui/tui-render.ts";
 import { decodeConfigKey, nextValue, renderConfig } from "./panel.ts";
-import { type ConfigRow, changeLine, configRows, withSetting } from "./rows.ts";
+import { configRows, withSetting } from "./rows.ts";
 
-/** A row on the panel: one of /config's own, or one another extension added. */
-type Row = ConfigRow & { contributed?: ContributedConfigRow };
+/** A row on the panel: one of /config's own, or one another extension added (it has `apply`). */
+type Row = ConfigRow | ContributedConfigRow;
+const isContributed = (row: Row): row is ContributedConfigRow => "apply" in row;
 
 function configExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "config", {
@@ -53,10 +53,7 @@ function configExtension(pi: ExtensionAPI) {
 			const query: ConfigRowsQuery = { ctx, rows: [] };
 			pi.events.emit(CONFIG_ROWS_CHANNEL, query);
 			const contributed = (await Promise.all(query.rows.map((row) => row.catch(() => undefined)))).filter((row): row is ContributedConfigRow => row !== undefined);
-			const rows: Row[] = [
-				...configRows({ file: first.file, offBy: activeProfile().featuresOffBy, workflows: toolLive("workflow"), offVariable: envName("FEATURES_OFF") }),
-				...contributed.map((row) => ({ id: row.id, label: row.label, description: row.description, currentValue: row.currentValue, values: row.values, contributed: row })),
-			];
+			const rows: Row[] = [...configRows({ file: first.file, offBy: activeProfile().featuresOffBy, workflows: toolLive("workflow") }), ...contributed];
 			if (!ctx.hasUI) return rows.map((row) => `${row.label}: ${row.currentValue}`).join("\n");
 
 			const changes = new Map<string, string>();
@@ -72,13 +69,13 @@ function configExtension(pi: ExtensionAPI) {
 					return `Could not save ${saved}: ${(error as Error).message}`;
 				}
 				row.currentValue = value;
-				changes.set(row.id, changeLine(rows, row.id, value));
+				changes.set(row.id, `${row.label}: ${value}`);
 				return undefined;
 			};
 			/** Apply a contributed row's change and record the setting as it now is. */
-			const applyContributed = async (row: Row & { contributed: ContributedConfigRow }, value: string): Promise<string | undefined> => {
+			const applyContributed = async (row: ContributedConfigRow, value: string): Promise<string | undefined> => {
 				try {
-					const now = await row.contributed.apply(value);
+					const now = await row.apply(value);
 					if (now !== undefined) {
 						changes.set(row.id, now);
 						row.currentValue = value;
@@ -98,12 +95,11 @@ function configExtension(pi: ExtensionAPI) {
 }
 
 type Save = (row: Row, value: string) => string | undefined;
-type ApplyContributed = (row: Row & { contributed: ContributedConfigRow }, value: string) => Promise<string | undefined>;
-const isContributed = (row: Row): row is Row & { contributed: ContributedConfigRow } => row.contributed !== undefined;
+type ApplyContributed = (row: ContributedConfigRow, value: string) => Promise<string | undefined>;
 
 /** The TUI panel. A contributed row whose change opens a dialog closes the panel and applies after it. */
 async function runPanel(pi: ExtensionAPI, ctx: ExtensionCommandContext, rows: Row[], saved: string, save: Save, applyContributed: ApplyContributed): Promise<void> {
-	let deferred: { row: Row & { contributed: ContributedConfigRow }; value: string } | undefined;
+	let deferred: { row: ContributedConfigRow; value: string } | undefined;
 	await panelUi(pi.events, ctx.ui).custom<void>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 		let cursor = 0;
@@ -126,7 +122,7 @@ async function runPanel(pi: ExtensionAPI, ctx: ExtensionCommandContext, rows: Ro
 					const row = rows[cursor];
 					const value = nextValue(row);
 					if (!isContributed(row)) notice = save(row, value);
-					else if (row.contributed.opensDialog?.(value)) {
+					else if (row.opensDialog?.(value)) {
 						deferred = { row, value };
 						return done(undefined);
 					} else {

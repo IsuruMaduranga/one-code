@@ -11,6 +11,9 @@
  * the line. The model always reads the whole text.
  */
 
+import type { ShortLine } from "../ui/tui-render.ts";
+import { sanitizeTitle } from "../ui/terminal-text.ts";
+
 /** The first sentence of auto mode's denial. */
 export const CLASSIFIER_DENIED = "Permission for this action was denied by the auto-mode approval classifier.";
 
@@ -38,86 +41,97 @@ export const REFUSAL_LEADS = {
 	childNoClassifier: "Auto mode's classifier is only reachable through the parent session, which this agent has no link to",
 } as const;
 
-const LEAD_LINES: Record<keyof typeof REFUSAL_LEADS, string> = {
-	nonInteractive: "Needs approval, but this session cannot ask for it",
-	planMode: "Blocked in plan mode",
-	toolOff: "Tool not available",
-	secretFile: "Blocked: the file holds secrets",
-	dontAsk: "Denied in dontAsk mode",
-	protectedPath: "Blocked: protected path",
-	outsideWorkingDir: "Denied in dontAsk mode: outside the working directory",
-	outsideReadsBlocked: "Blocked: outside the working directories",
-	userBlockedOutsideReads: "Blocked: outside the working directories",
-	unansweredResume: "Denied: the approval prompt went unanswered",
-	childNoClassifier: "Denied: this agent cannot reach auto mode's classifier",
-};
-
 /** A deny rule's refusal; the rule as the settings spell it goes between the quotes. */
 export const ruleRefusalLead = (rule: string) => `This tool call is denied by the permission rule "${rule}" in the user's settings.`;
-const RULE_LEAD = /^This tool call is denied by the permission rule "(.*)" in the user's settings\./;
 
 /** A child's call that needs the user's approval; `where` is empty or " outside the working directory". */
 export const childNeedsApprovalLead = (where: string) => `This action${where} needs interactive approval, which is not available inside an in-process agent.`;
-const CHILD_NEEDS_APPROVAL_LEAD = /^This action( outside the working directory)? needs interactive approval, which is not available inside an in-process agent\./;
 
 /**
  * Where the model's guidance begins in a refusal whose opening is already
- * the fact the user needs. The transcript shows the text before it.
+ * the fact the user needs; each follows a space in the text. The transcript
+ * shows the text before it.
  */
-export const GUIDANCE_STARTS = {
+export const GUIDANCE = {
 	/** The safety floor's refusal of a wildcard or negated pattern (auto-mode/text.ts). */
-	floorPattern: " A command that may touch the gate's own configuration is never auto-approved.",
+	floorPattern: "A command that may touch the gate's own configuration is never auto-approved.",
 	/** The safety floor's refusal of a write (auto-mode/text.ts). */
-	floorWrite: " Writes to the gate's own configuration are never auto-approved.",
+	floorWrite: "Writes to the gate's own configuration are never auto-approved.",
 	/** A worktree-isolated session's git command (worktree-guard-text.ts). */
-	worktreeGit: " Refusing to run it — a worktree-isolated session's git operations must target its own worktree.",
+	worktreeGit: "Refusing to run it — a worktree-isolated session's git operations must target its own worktree.",
 	/** A risky `git stash` in a worktree (worktree-guard-text.ts). */
-	worktreeStash: " Prefer a temporary WIP commit on this worktree's branch to set work aside.",
+	worktreeStash: "Prefer a temporary WIP commit on this worktree's branch to set work aside.",
 	/** An isolated agent's write to the shared checkout (worktree-guard-text.ts). */
-	worktreeWrite: " Refusing the write — an isolated agent's changes belong in its own worktree.",
-	/** A call while the active worktree is gone (safety/worktree/text.ts). */
-	worktreeMissing: ' Use exit_worktree with action: "keep" to return to ',
-	/** A write that carries a secret placeholder (tool-results-text.ts). */
-	secretPlaceholder: " It stands for a real value the file holds, which you were not shown;",
-	/** A call whose arguments look cut off (tool-call-corruption/text.ts). */
-	suspectCall: " It was not run. Send the complete command again;",
+	worktreeWrite: "Refusing the write — an isolated agent's changes belong in its own worktree.",
+	/** A call while the active worktree is gone, before the original directory (safety/worktree/text.ts). */
+	worktreeMissing: 'Use exit_worktree with action: "keep" to return to',
+	/** A write that carries a secret placeholder, before the rest of its sentence (tool-results-text.ts). */
+	secretPlaceholder: "It stands for a real value the file holds, which you were not shown;",
+	/** A call whose arguments look cut off, before the rest of its sentence (tool-call-corruption/text.ts). */
+	suspectCall: "It was not run. Send the complete command again;",
 	/** A call whose arguments came through corrupt (tool-call-corruption/text.ts). */
-	corruptCall: " Do not retry this call; switch models or exclude the upstream provider.",
+	corruptCall: "Do not retry this call; switch models or exclude the upstream provider.",
 } as const;
-
-/** A short transcript line and its colour token: a dim note for a refusal working as intended, an error's for a failure. */
-export interface RefusalLine {
-	text: string;
-	color: "error" | "dim";
-}
 
 /** Whether a tool result is auto mode's denial. */
 export function isClassifierDenial(text: string): boolean {
 	return text.startsWith(CLASSIFIER_DENIED);
 }
 
+/** A template's text as a pattern that matches any value in its slot, captured. */
+function templatePattern(template: (slot: string) => string): RegExp {
+	const SLOT = "\u0000";
+	const escaped = template(SLOT).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	return new RegExp(`^${escaped.replace(SLOT, "(.*)")}`);
+}
+
+type Recognizer = (text: string) => string | undefined;
+const opensWith = (lead: string, line: string): Recognizer => (text) => (text.startsWith(lead) ? line : undefined);
+const matches = (pattern: RegExp, line: (slot: string) => string): Recognizer => (text) => {
+	const found = pattern.exec(text);
+	return found ? line(found[1]) : undefined;
+};
+const before = (guidance: string): Recognizer => (text) => {
+	const at = text.indexOf(guidance);
+	return at > 0 ? text.slice(0, at) : undefined;
+};
+
+/** Each refusal's recognizer and colour: dim for a refusal working as intended, an error's for a failure. In order. */
+const REFUSALS: ReadonlyArray<{ line: Recognizer; color: ShortLine["color"] }> = [
+	{ line: opensWith(CLASSIFIER_DENIED, CLASSIFIER_DENIED_LINE), color: "dim" },
+	{ line: before(CLASSIFIER_NOT_JUDGED), color: "error" },
+	{ line: opensWith(REFUSAL_LEADS.nonInteractive, "Needs approval, but this session cannot ask for it"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.planMode, "Blocked in plan mode"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.toolOff, "Tool not available"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.secretFile, "Blocked: the file holds secrets"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.dontAsk, "Denied in dontAsk mode"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.protectedPath, "Blocked: protected path"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.outsideWorkingDir, "Denied in dontAsk mode: outside the working directory"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.outsideReadsBlocked, "Blocked: outside the working directories"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.userBlockedOutsideReads, "Blocked: outside the working directories"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.unansweredResume, "Denied: the approval prompt went unanswered"), color: "dim" },
+	{ line: opensWith(REFUSAL_LEADS.childNoClassifier, "Denied: this agent cannot reach auto mode's classifier"), color: "dim" },
+	{ line: matches(templatePattern(ruleRefusalLead), (rule) => `Denied by permission rule ${rule}`), color: "dim" },
+	{ line: matches(templatePattern(childNeedsApprovalLead), () => "Needs approval, which an agent cannot ask for"), color: "dim" },
+	{ line: before(` ${GUIDANCE.floorPattern}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.floorWrite}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeGit}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeStash}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeWrite}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.worktreeMissing}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.secretPlaceholder}`), color: "dim" },
+	{ line: before(` ${GUIDANCE.suspectCall}`), color: "error" },
+	{ line: before(` ${GUIDANCE.corruptCall}`), color: "error" },
+];
+
 /**
  * The transcript line for a harness refusal, or undefined when the text is
- * not one. Only the fact is kept: a short line for the permission gate's
- * fixed refusals, the text before the model's guidance for the others.
- * Whitespace runs fold to one space, so the line stays one line.
+ * not one: the first recognizer that knows it, folded to one line.
  */
-export function refusalLine(text: string): RefusalLine | undefined {
-	if (isClassifierDenial(text)) return { text: CLASSIFIER_DENIED_LINE, color: "dim" };
-	const notJudged = text.indexOf(CLASSIFIER_NOT_JUDGED);
-	if (notJudged > 0) return { text: oneLine(text.slice(0, notJudged)), color: "error" };
-	for (const [kind, lead] of Object.entries(REFUSAL_LEADS) as Array<[keyof typeof REFUSAL_LEADS, string]>) {
-		if (text.startsWith(lead)) return { text: LEAD_LINES[kind], color: "dim" };
-	}
-	const rule = RULE_LEAD.exec(text);
-	if (rule) return { text: `Denied by permission rule ${rule[1]}`, color: "dim" };
-	if (CHILD_NEEDS_APPROVAL_LEAD.test(text)) return { text: "Needs approval, which an agent cannot ask for", color: "dim" };
-	for (const start of Object.values(GUIDANCE_STARTS)) {
-		const at = text.indexOf(start);
-		const failed = start === GUIDANCE_STARTS.suspectCall || start === GUIDANCE_STARTS.corruptCall;
-		if (at > 0) return { text: oneLine(text.slice(0, at)), color: failed ? "error" : "dim" };
+export function refusalLine(text: string): ShortLine | undefined {
+	for (const { line, color } of REFUSALS) {
+		const shown = line(text);
+		if (shown !== undefined) return { text: sanitizeTitle(shown), color };
 	}
 	return undefined;
 }
-
-const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();

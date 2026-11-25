@@ -67,13 +67,13 @@ interface WorktreeDetails {
 	branchError?: string;
 }
 
-/** Claude Code's enter_worktree row: the model reads where commands now run and how to return. */
 /** Why exit_worktree kept the worktree, for the transcript: what blocks removal, without the model's next steps. */
 function removeRefusedLine(blockers: readonly RemoveBlocker[]): string {
 	const what = blockers.map((b) => (b.kind === "uncommitted" ? "uncommitted changes" : b.kind === "commitsAhead" ? `${b.count} unmerged commit(s)` : "its changes could not be checked"));
 	return `Worktree not removed: ${[...new Set(what)].join(", ")}`;
 }
 
+/** Claude Code's enter_worktree row: the model reads where commands now run and how to return. */
 function enteredDisplay(details: WorktreeDetails | undefined): string | undefined {
 	const state = details?.worktreeState;
 	if (!state) return undefined;

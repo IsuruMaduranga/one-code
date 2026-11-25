@@ -10,13 +10,17 @@ import { brandedId } from "../profile/brand.mjs";
 
 export const CONFIG_ROWS_CHANNEL = brandedId("config-rows");
 
-/** A row an extension adds to the panel. */
-export interface ContributedConfigRow {
+/** A row of the /config panel: what it shows, and the values Enter cycles through. */
+export interface ConfigRow {
 	id: string;
 	label: string;
 	description: string;
 	currentValue: string;
 	values: string[];
+}
+
+/** A row an extension adds to the panel. */
+export interface ContributedConfigRow extends ConfigRow {
 	/** True when setting `value` opens a dialog: the panel closes first, since a dialog takes the panel's place. */
 	opensDialog?: (value: string) => boolean;
 	/** Set `value`; resolves to the setting as it now is (`Label: value`), or undefined when nothing changed. */

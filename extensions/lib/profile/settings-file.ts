@@ -21,7 +21,12 @@ export function productSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * files: what a cloned repository ships must not change the session.
  */
 export function readFeaturesOffSetting(home: string, env: NodeJS.ProcessEnv = process.env): string[] {
-	const file = readJsonFile<{ featuresOff?: unknown }>(productSettingsPath(home, env));
-	const value = file && typeof file === "object" ? file.featuresOff : undefined;
+	const file = readJsonFile<unknown>(productSettingsPath(home, env));
+	return file && typeof file === "object" ? featuresOffOf(file as Record<string, unknown>) : [];
+}
+
+/** A settings object's `featuresOff`: its names, trimmed, without empty ones; none when it is not a list. */
+export function featuresOffOf(file: Record<string, unknown>): string[] {
+	const value = file.featuresOff;
 	return Array.isArray(value) ? value.filter((id): id is string => typeof id === "string" && id.trim() !== "").map((id) => id.trim()) : [];
 }
