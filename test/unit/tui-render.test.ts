@@ -471,8 +471,11 @@ describe("a call the user rejected", () => {
 		const bash = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });
 		const ctx = { args: {}, isError: true, cwd: "/w", state: {} };
 		const denial = rejection(refusalText({ kind: "classifierDenied", reason: "PII Data Handling" }));
-		expect(bash.renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
-		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+		const collapsed = { ...opts, expanded: false };
+		expect(bash.renderResult(denial, collapsed, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+		expect(toolRenderers("Web Fetch").renderResult(denial, collapsed, plainTheme, ctx).render(120)).toEqual(["  ⎿  Denied by auto mode classifier"]);
+		// ctrl+o shows the whole text the model read.
+		expect(toolRenderers("Web Fetch").renderResult(denial, opts, plainTheme, ctx).render(400).join("\n")).toContain("PII Data Handling");
 	});
 
 	it("draws a classifier that gave no verdict or timed out as its reason only, not the model's guidance", async () => {
@@ -488,8 +491,9 @@ describe("a call the user rejected", () => {
 			["classifierTimedOut", timedOut],
 		] as const) {
 			const result = rejection(refusalText({ kind, reason }));
-			expect(bash.renderResult(result, opts, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
-			expect(toolRenderers("Web Fetch").renderResult(result, opts, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+			const collapsed = { ...opts, expanded: false };
+			expect(bash.renderResult(result, collapsed, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
+			expect(toolRenderers("Web Fetch").renderResult(result, collapsed, plainTheme, ctx).render(200)).toEqual([`  ⎿  ${reason}`]);
 		}
 	});
 
@@ -771,6 +775,11 @@ describe("the tools' shown lines", () => {
 		const { refusalText } = await import("../../extensions/lib/rules/permission-text.ts");
 		expect(refusalShownLine({ kind: "sessionEnding", lines: ["x"] })).toBe("No agent started: the session is ending");
 		expect(refusalShownLine({ kind: "noRun", to: "reviewer", known: [] })).toBe('No agent run named "reviewer"');
+		expect(refusalShownLine({ kind: "unknownModel", model: "nope", menu: "" })).toBe('Unknown model "nope"');
+		// A model that exists but cannot run the call keeps its reason, not "unknown".
+		expect(refusalShownLine({ kind: "unknownModel", model: "m", reason: "Requested subagent model m is text-only, but this session works with images. Pick an image-capable model.", menu: "" })).toBe(
+			"Requested subagent model m is text-only, but this session works with images.",
+		);
 		expect(refusalShownLine({ kind: "nestedDenied", reason: refusalText({ kind: "planMode" }) })).toBe("Nested agent refused: Blocked in plan mode");
 		expect(refusalShownLine({ kind: "expensiveModel", gate: "opus is expensive.\nmore", menu: "" })).toBe("opus is expensive.");
 		// A refusal that is already a short fact keeps its words.

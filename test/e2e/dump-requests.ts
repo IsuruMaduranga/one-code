@@ -60,7 +60,7 @@ function jsonRequestBody(raw: unknown, headers: RequestInit["headers"] | undefin
 }
 
 /** A Responses API event that ends a response. */
-const TERMINAL = /"type":"(response\.(completed|failed|incomplete)|error)"/;
+const TERMINAL = /"type"\s*:\s*"(response\.(completed|failed|incomplete)|error)"/;
 
 /** Marks an installed wrapper, so a `/reload` (a second factory run) does not wrap it again. */
 const WRAPPED = Symbol.for("one-code.dump-requests");
@@ -95,7 +95,7 @@ export default function dump(pi: ExtensionAPI) {
 		const last = text.split("\n").find((l) => TERMINAL.test(l));
 		let event: { type?: string; response?: { usage?: unknown; error?: unknown }; error?: unknown } | undefined;
 		try {
-			event = last ? JSON.parse(last.replace(/^data: /, "")) : undefined;
+			event = last ? JSON.parse(last.replace(/^data: ?/, "")) : undefined;
 		} catch {
 			// a cut-off stream: keep the headers
 		}

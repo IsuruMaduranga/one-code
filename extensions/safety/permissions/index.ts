@@ -838,6 +838,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 			}
 		}
 		const resolvedPaths = actionResolvedPaths(normalizeToolName(toolName), subject, opts?.powershellParse, { cwd, home, roots: [cwd, ...workspaceDirs] });
+		const pinnedBefore = classifierState.pinned;
 		const verdict = await classify(
 			{
 				toolName,
@@ -861,13 +862,14 @@ function permissionsExtension(pi: ExtensionAPI) {
 				onModelUnusable: onClassifierModelUnusable,
 				onNotice: (message, level) => {
 					ctx.ui.notify(message, level);
-					// The badge names the classifier, so it has to repaint when the first
-					// call settles which model that is.
-					badgeCtx ??= ctx;
-					applyBadge();
 				},
 			},
 		);
+		// The badge names the classifier, so it repaints when a call settles which model that is.
+		if (classifierState.pinned !== pinnedBefore) {
+			badgeCtx ??= ctx;
+			applyBadge();
+		}
 		logDecision(ctx, {
 			tool: toolName,
 			subject,

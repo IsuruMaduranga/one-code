@@ -222,7 +222,8 @@ export function refusalShownLine(refusal: SubagentRefusal): string | undefined {
 		case "forkNotPersisted":
 			return "Cannot fork: this session is not saved";
 		case "unknownModel":
-			return `Unknown model "${refusal.model}"`;
+			// A model that exists but cannot run this call keeps its reason's first sentence; the rest is for the model.
+			return refusal.reason?.split(/(?<=\.)\s/)[0] ?? `Unknown model "${refusal.model}"`;
 		case "expensiveModel":
 			return refusal.gate.split("\n")[0];
 		case "nestedDenied":

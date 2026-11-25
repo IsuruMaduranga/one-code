@@ -38,8 +38,13 @@ describe("refusalLine", () => {
 	});
 
 	it("keeps the fact before the guidance of the other guards' refusals", () => {
-		expect(refusalLine(autoModeResultText.floorBlock({ kind: "pattern", pattern: "*" } as never))?.text).toMatch(/^Auto mode blocked this call without consulting the classifier: .*\.$/);
-		expect(refusalLine(autoModeResultText.floorBlock({ kind: "path", path: "/p" } as never))?.text).toMatch(/^Auto mode blocked this call without consulting the classifier: .*\.$/);
+		for (const target of [
+			{ kind: "pattern", token: "*" },
+			{ kind: "control", token: "/p/.claude/settings.json" },
+			{ kind: "catalog", token: "/p/models.json" },
+		] as const) {
+			expect(refusalLine(autoModeResultText.floorBlock(target))?.text, target.kind).toBe(`Auto mode blocked this call without consulting the classifier: ${autoModeResultText.floorReason(target)}.`);
+		}
 		expect(refusalLine(worktreeGuardText.refusal({ kind: "gitTarget", worktreePath: "/wt", problem: { kind: "tooComplex" } } as never))?.text).toBe(
 			"This session is isolated in the worktree /wt, but this command is too complex to verify that its git operations stay inside the worktree.",
 		);

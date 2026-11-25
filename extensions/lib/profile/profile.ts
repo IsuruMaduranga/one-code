@@ -555,7 +555,7 @@ let active: ResolvedProfile | undefined;
 
 /** The shipped profile, resolved against this process's environment and pi's tool flags on first use. Throws when it is invalid. */
 export function activeProfile(): ResolvedProfile {
-	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile(), launchToolFilter(), profileSelection.productProfile, readFeaturesOffSetting(homedir()));
+	active ??= resolveProfile(shippedProfile(), process.env, PROFILE_DIR, PRODUCT_DIR, chosenUserProfile(), launchToolFilter(), profileSelection.productProfile, processState("profile:featuresOff", () => readFeaturesOffSetting(homedir())));
 	return active;
 }
 

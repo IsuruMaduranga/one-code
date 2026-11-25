@@ -636,13 +636,15 @@ export function rejectionLine(
 	theme: ThemeLike,
 	result: { content?: Array<{ type: string; text?: string }> },
 	isError: boolean,
+	expanded: boolean,
 	file?: { op: RejectedFileOp; path: string | undefined },
 ): string | undefined {
 	if (!isError) return undefined;
 	const text = textContent(result);
-	// A harness refusal: the model reads what happened and what to do next; the user sees what happened.
+	// A harness refusal: the model reads what happened and what to do next; the user sees what happened,
+	// and ctrl+o shows the whole text (decisions/tui.md).
 	const refusal = refusalLine(text);
-	if (refusal) return `  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`;
+	if (refusal) return expanded ? undefined : `  ⎿  ${theme.fg(refusal.color, sanitizeDisplayText(refusal.text))}`;
 	const kind = userDenialKind(text);
 	if (!kind) return undefined;
 	if (kind === "stop" && file?.path) return `  ⎿  ${rejectedFileHead(theme, file.op, file.path)}`;
@@ -741,7 +743,7 @@ export function toolRenderers<TArgs = any, TDetails = any>(
 			context: { args?: TArgs; isError: boolean },
 		) {
 			const stripped = stripReminderBlocks(result);
-			const rejected = rejectionLine(theme, stripped, context.isError);
+			const rejected = rejectionLine(theme, stripped, context.isError, options.expanded);
 			if (rejected) return linesComponent(() => [rejected]);
 			const shown = options.expanded ? undefined : shownLineOf(result.details);
 			if (shown) return linesComponent(() => elbowIndent([theme.fg(shown.color, sanitizeDisplayText(shown.text))]));
@@ -1096,7 +1098,7 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			const state = context.state as { ccCallBody?: CallBody; ccInnerCall?: TuiComponent };
 			state.ccCallBody = "keep";
 			const path = rawTitle(context.args);
-			const rejected = rejectionLine(theme, result, context.isError, opts.rejectedAs && {
+			const rejected = rejectionLine(theme, result, context.isError, options.expanded, opts.rejectedAs && {
 				op: opts.rejectedAs,
 				path: path ? displayToolPath(path, context.cwd) : undefined,
 			});
