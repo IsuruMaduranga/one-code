@@ -70,6 +70,7 @@
 			"extensions/commands/init/index.ts",
 			"extensions/commands/clear/index.ts",
 			"extensions/commands/help/index.ts",
+			"extensions/commands/config/index.ts",
 			"extensions/tools/tasks/index.ts",
 			"extensions/safety/plan-mode/index.ts",
 			"extensions/tools/notebook/index.ts",

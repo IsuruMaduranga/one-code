@@ -199,6 +199,18 @@ describe("resolveProfile", () => {
 		);
 	});
 
+	it("turns features off from the user's settings file, records why each is off, and keeps a guard on", () => {
+		const resolved = resolveProfile({ ...empty, features: { ...empty.features, btw: false } }, { [envName("FEATURES_OFF")]: "footer" }, "/p", undefined, undefined, undefined, undefined, ["recap", "footer"]);
+		expect(resolved.features.has("recap")).toBe(false);
+		expect(resolved.settingsOff).toEqual(["recap", "footer"]);
+		// The first source that turned a feature off names it: the product, then the environment, then the settings file.
+		expect(resolved.featuresOffBy.get("btw")).toBe("product");
+		expect(resolved.featuresOffBy.get("footer")).toBe("environment");
+		expect(resolved.featuresOffBy.get("recap")).toBe("settings");
+		expect(() => resolveProfile(empty, {}, "/p", undefined, undefined, undefined, undefined, ["hooks"])).toThrow(/"featuresOff" in .* cannot turn off "hooks": it guards tool calls/);
+		expect(() => resolveProfile(empty, {}, "/p", undefined, undefined, undefined, undefined, ["ledger"])).toThrow(/"ledger" is part of the required core/);
+	});
+
 	it("resolves child extensions against the profile folder, after the base's", () => {
 		const dir = mkdtempSync(join(tmpdir(), "profile-child-"));
 		try {

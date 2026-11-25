@@ -26,13 +26,11 @@ import { readJsonFile, writeJsonAtomic } from "../core/atomic-write.ts";
 import { findProjectRoot } from "../context/git.ts";
 import { projectSlug } from "../context/memory.ts";
 import { productStateDir, tryRealpath } from "./paths.ts";
+import { productSettingsPath } from "./settings-file.ts";
 
 export { SETTINGS_DISPLAY } from "./settings-display.ts";
 
-/** `~/.onecode/settings.json`: the product's user-scope settings (writable). */
-export function productSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(productStateDir(env, home), "settings.json");
-}
+export { productSettingsPath } from "./settings-file.ts";
 
 /**
  * The project a per-repo setting belongs to: the git repository root when
@@ -93,7 +91,7 @@ export function readSuggestNewerModels(home: string, env: NodeJS.ProcessEnv = pr
 /** Claude Code's `workflowSizeGuideline` values: under 5, 10 or 50 agents, or no guideline. */
 export type WorkflowSizeGuideline = "small" | "medium" | "large" | "unrestricted";
 
-const WORKFLOW_SIZES: readonly WorkflowSizeGuideline[] = ["small", "medium", "large", "unrestricted"];
+export const WORKFLOW_SIZES: readonly WorkflowSizeGuideline[] = ["small", "medium", "large", "unrestricted"];
 
 export interface WorkflowSettings {
 	/** Whether the workflow tool is offered at all. */

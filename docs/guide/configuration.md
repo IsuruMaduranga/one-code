@@ -30,9 +30,38 @@ Code's two files instead.
 The per-repository slug is derived from the repository root, so worktrees
 and subdirectories of one repository share one file.
 
-Commands such as `/allow`, `/subagent`, `/auto-mode model`, and the `/mcp`
-panel write to One Code's files. Both One Code files are written
+Commands such as `/config`, `/allow`, `/subagent`, `/auto-mode model`, and
+the `/mcp` panel write to One Code's files. Both One Code files are written
 atomically; a malformed file is reported rather than overwritten.
+
+### The /config panel
+
+`/config` opens One Code's settings panel. Move with the arrow keys, press
+Enter or Space to change the selected row, and press Esc to close. Each
+change is saved to `~/.onecode/settings.json` the moment you make it.
+
+| Row | What it controls | Takes effect |
+|---|---|---|
+| Session recap | The "while you were away" recap. | Next start |
+| Session titles | The automatic session title. | Next start |
+| Turn duration | The timing line after each turn. | Next start |
+| Status line | One Code's status line; off brings back pi's footer. | Next start |
+| Desktop notifications | Notifications when a prompt waits for you or a turn finishes while you're away. | Next start |
+| Compact idle sessions | Compacting an idle session before its prompt cache expires. | Next start |
+| Suggest newer models | The tip when a newer or cheaper model of the same line exists. | Next session |
+| Workflow size | How many agents a workflow should start (`small`, `medium`, `large`, `unrestricted`). Shown when workflows are on. | Next session |
+| External CLAUDE.md includes | Whether this project's instruction files may import files from outside it. Shown when the project has such imports; turning it on asks first. See [External instruction imports](sessions-and-context.md#external-instruction-imports). | Future instruction loads |
+
+The feature rows write a `featuresOff` list, the lasting form of
+`ONECODE_FEATURES_OFF`. You can edit it by hand too:
+
+```json
+{ "featuresOff": ["recap", "turn-duration"] }
+```
+
+It takes the same feature ids as the variable, and it can't turn off a
+feature that guards tool calls, such as `hooks`. When both turn features
+off, both lists apply.
 
 ### Relocating directories
 

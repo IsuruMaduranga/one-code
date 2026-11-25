@@ -31,7 +31,7 @@
  */
 
 import { knobValue } from "../../lib/profile/knobs.ts";
-import { brandedId, envName } from "../../lib/profile/brand.mjs";
+import { brandedId } from "../../lib/profile/brand.mjs";
 import { feature } from "../../lib/profile/feature.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -181,7 +181,7 @@ function recapExtension(pi: ExtensionAPI) {
 			}
 			const hinted = shown < HINTED_RECAPS;
 			shown++;
-			pi.appendEntry<RecapData>(ENTRY_TYPE, { content: hinted ? `${content} ${recapResultText.offHint(envName("FEATURES_OFF"))}` : content });
+			pi.appendEntry<RecapData>(ENTRY_TYPE, { content: hinted ? `${content} ${recapResultText.offHint}` : content });
 		} catch {
 			// Best-effort: a failed recap shows nothing. Claude Code tries again on the
 			// next blur (here, the next idle period) up to three failures a turn.
