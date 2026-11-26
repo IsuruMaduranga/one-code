@@ -78,12 +78,13 @@ describe("spliceRequest on a pi 1.4.0 record", () => {
 
 	it("adds nothing on the next request, whose record declares the tool", () => {
 		const second = recordedRequest(spliceRequest(base, tail2(), api), identity);
-		const tail3 = { ...body, input: [toolsItem([...startingTools, webFetch]), prompt, { type: "message", role: "assistant", content: [] }] };
+		// pi 1.4.0 puts the effort's configuration_update before every reply and at the end of the list.
+		const tail3 = { ...body, input: [toolsItem([...startingTools, webFetch]), prompt, configuration, { type: "message", role: "assistant", content: [] }, configuration] };
 		const out = spliceRequest(second, tail3, api);
 		expect(declarations(out).filter((name) => name === "web_fetch")).toHaveLength(1);
-		// The second record up to its append point (its trailing configuration_update dropped), then only the new assistant turn.
+		// The second record up to its append point (its trailing configuration_update dropped), then only the new assistant turn with its items.
 		expect(second.list.at(-1)).toEqual(configuration);
-		expect(input(out)).toEqual([...second.list.slice(0, -1), input(tail3).at(-1)]);
+		expect(input(out)).toEqual([...second.list.slice(0, -1), ...input(tail3).slice(-3)]);
 	});
 
 	it("declares a tool again when its input schema changed", () => {

@@ -265,6 +265,8 @@ describe("renderReminders: a `!` run's record", () => {
 			record("echo oops; exit 3", "oops\n", 0, { exitCode: 3 }),
 			record("sleep 9", "", 0, { cancelled: true, exitCode: undefined }),
 			record("yes", "y\n", 0, { truncated: true, fullOutputPath: "/tmp/pi-bash.log" }),
+			record("yes", "y\n", 0, { truncated: true, fullOutputError: "ENOSPC: no space left on device" }),
+			record("yes", "y\n", 0, { truncated: true }),
 		];
 		for (const r of records) expect(pi.convertToLlm([r])[0].content).toEqual([{ type: "text", text: bashRecordText(r) }]);
 	});

@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-23T08:11:02.727Z",
+	"fetchedAt": "2026-11-26T14:48:08.340Z",
 	"source": "https://openrouter.ai/api/v1/models",
 	"payload": {
 		"data": [
@@ -721,7 +721,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000434",
+					"prompt": "0.000000047",
 					"completion": "0.0000003"
 				}
 			},
@@ -745,8 +745,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000002156",
-					"completion": "0.0000006468"
+					"prompt": "0.00000044",
+					"completion": "0.00000132"
 				}
 			},
 			{
@@ -757,8 +757,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000009",
-					"completion": "0.0000015"
+					"prompt": "0.000000855302",
+					"completion": "0.0000015228"
 				}
 			},
 			{
@@ -769,8 +769,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000132",
-					"completion": "0.00000396"
+					"prompt": "0.000000111",
+					"completion": "0.00000444"
 				}
 			},
 			{
@@ -781,8 +781,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000498",
-					"completion": "0.0000001992"
+					"prompt": "0.0000000507",
+					"completion": "0.0000002028"
 				}
 			},
 			{
@@ -793,8 +793,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000003",
-					"completion": "0.0000012"
+					"prompt": "0.00000015",
+					"completion": "0.0000006"
 				}
 			},
 			{
@@ -819,18 +819,6 @@
 				"pricing": {
 					"prompt": "0.00000005",
 					"completion": "0.00000015"
-				}
-			},
-			{
-				"id": "dots-studio/dots-3-note-preview:free",
-				"created": 1786680361,
-				"hugging_face_id": "dots-studio/dots3-note-prev",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0",
-					"completion": "0"
 				}
 			},
 			{
@@ -1347,7 +1335,7 @@
 				],
 				"pricing": {
 					"prompt": "0.00000008",
-					"completion": "0.00000016"
+					"completion": "0.00000045"
 				}
 			},
 			{
@@ -1500,8 +1488,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000006",
-					"completion": "0.00000018"
+					"prompt": "0.000000075",
+					"completion": "0.000000225"
 				}
 			},
 			{
@@ -1609,8 +1597,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000002",
-					"completion": "0.00000004"
+					"prompt": "0.00000005",
+					"completion": "0.00000008"
 				}
 			},
 			{
@@ -1797,8 +1785,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000027",
-					"completion": "0.00000095"
+					"prompt": "0.0000003",
+					"completion": "0.0000012"
 				}
 			},
 			{
@@ -1861,6 +1849,17 @@
 				}
 			},
 			{
+				"id": "mistralai/codestral-2508:batch",
+				"created": 1754079630,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000015",
+					"completion": "0.00000045"
+				}
+			},
+			{
 				"id": "mistralai/devstral-2512",
 				"created": 1765285419,
 				"hugging_face_id": "mistralai/Devstral-2-123B-Instruct-2512",
@@ -1909,6 +1908,18 @@
 				}
 			},
 			{
+				"id": "mistralai/ministral-8b-2512:batch",
+				"created": 1764681654,
+				"hugging_face_id": "mistralai/Ministral-3-8B-Instruct-2512",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000000075",
+					"completion": "0.000000075"
+				}
+			},
+			{
 				"id": "mistralai/mistral-large",
 				"created": 1708905600,
 				"supported_parameters": [
@@ -1944,6 +1955,18 @@
 				}
 			},
 			{
+				"id": "mistralai/mistral-large-2512:batch",
+				"created": 1764624472,
+				"hugging_face_id": "mistralai/Mistral-Large-3-675B-Instruct-2512",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000025",
+					"completion": "0.00000075"
+				}
+			},
+			{
 				"id": "mistralai/mistral-large-4-0",
 				"created": 1791294122,
 				"hugging_face_id": "mistralai/Mistral-Large-4-1T-A52B",
@@ -1953,17 +1976,6 @@
 				"pricing": {
 					"prompt": "0.0000007",
 					"completion": "0.0000021"
-				}
-			},
-			{
-				"id": "mistralai/mistral-medium-3",
-				"created": 1746627341,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000044",
-					"completion": "0.0000022"
 				}
 			},
 			{
@@ -1988,17 +2000,6 @@
 				"pricing": {
 					"prompt": "0.00000075",
 					"completion": "0.00000375"
-				}
-			},
-			{
-				"id": "mistralai/mistral-medium-3.1",
-				"created": 1755095639,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000044",
-					"completion": "0.0000022"
 				}
 			},
 			{
@@ -2043,6 +2044,18 @@
 				"pricing": {
 					"prompt": "0.00000015",
 					"completion": "0.0000006"
+				}
+			},
+			{
+				"id": "mistralai/mistral-small-2603:batch",
+				"created": 1773695685,
+				"hugging_face_id": "mistralai/Mistral-Small-4-119B-2603",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.000000075",
+					"completion": "0.0000003"
 				}
 			},
 			{
@@ -2129,30 +2142,6 @@
 				"pricing": {
 					"prompt": "0.00000057",
 					"completion": "0.0000023"
-				}
-			},
-			{
-				"id": "moonshotai/kimi-k2-0905",
-				"created": 1757021147,
-				"hugging_face_id": "moonshotai/Kimi-K2-Instruct-0905",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000006",
-					"completion": "0.0000025"
-				}
-			},
-			{
-				"id": "moonshotai/kimi-k2-thinking",
-				"created": 1762440622,
-				"hugging_face_id": "moonshotai/Kimi-K2-Thinking",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000006",
-					"completion": "0.0000025"
 				}
 			},
 			{
@@ -4088,8 +4077,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000045",
-					"completion": "0.000003"
+					"prompt": "0.0000005",
+					"completion": "0.0000036"
 				}
 			},
 			{
@@ -4100,7 +4089,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000017",
+					"prompt": "0.0000001",
 					"completion": "0.00000025"
 				}
 			},
@@ -4157,8 +4146,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000005",
-					"completion": "0.0000007"
+					"prompt": "0.0000001",
+					"completion": "0.00000089"
 				}
 			},
 			{
@@ -4247,8 +4236,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.000000035",
-					"completion": "0.0000015"
+					"prompt": "0.00000006",
+					"completion": "0.00000196"
 				}
 			},
 			{
@@ -4362,7 +4351,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000025",
+					"prompt": "0.0000003",
 					"completion": "0.000001"
 				}
 			},
@@ -4555,8 +4544,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000014",
-					"completion": "0.00000058"
+					"prompt": "0.000000132",
+					"completion": "0.000000528"
 				}
 			},
 			{
@@ -4683,6 +4672,15 @@
 				}
 			},
 			{
+				"id": "tngtech/deepseek-r1t2-chimera",
+				"created": 1751986985,
+				"hugging_face_id": "tngtech/DeepSeek-TNG-R1T2-Chimera",
+				"pricing": {
+					"prompt": "0.000001",
+					"completion": "0.000002625"
+				}
+			},
+			{
 				"id": "typesafe/jev-router",
 				"created": 1790363560,
 				"supported_parameters": [
@@ -4691,39 +4689,6 @@
 				"pricing": {
 					"prompt": "-1",
 					"completion": "-1"
-				}
-			},
-			{
-				"id": "unbiased/pareto-26.10",
-				"created": 1792073620,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000008",
-					"completion": "0.0000032"
-				}
-			},
-			{
-				"id": "unbiased/pareto-26.10-preview",
-				"created": 1790863623,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000008",
-					"completion": "0.0000032"
-				}
-			},
-			{
-				"id": "unbiased/pareto-26.9",
-				"created": 1791930537,
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000025",
-					"completion": "0.0000075"
 				}
 			},
 			{
@@ -4736,6 +4701,17 @@
 				}
 			},
 			{
+				"id": "upstage/solar-mini-4-5",
+				"created": 1795562304,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000001",
+					"completion": "0.00000004"
+				}
+			},
+			{
 				"id": "upstage/solar-mini4",
 				"created": 1790160358,
 				"supported_parameters": [
@@ -4744,6 +4720,17 @@
 				"pricing": {
 					"prompt": "0.00000005",
 					"completion": "0.0000002"
+				}
+			},
+			{
+				"id": "upstage/solar-pro-4-contributor",
+				"created": 1795562304,
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.00000009",
+					"completion": "0.00000036"
 				}
 			},
 			{
@@ -4862,30 +4849,6 @@
 				}
 			},
 			{
-				"id": "xiaomi/mimo-v2.5",
-				"created": 1776874269,
-				"hugging_face_id": "XiaomiMiMo/MiMo-V2.5",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.0000004",
-					"completion": "0.000002"
-				}
-			},
-			{
-				"id": "xiaomi/mimo-v2.5-pro",
-				"created": 1776874273,
-				"hugging_face_id": "XiaomiMiMo/MiMo-V2.5-Pro",
-				"supported_parameters": [
-					"tools"
-				],
-				"pricing": {
-					"prompt": "0.00000048",
-					"completion": "0.0000018"
-				}
-			},
-			{
 				"id": "xiaomi/mimo-v2.6-flash",
 				"created": 1790021264,
 				"hugging_face_id": "XiaomiMiMo/MiMo-V2.6-Flash-RL",
@@ -4895,6 +4858,18 @@
 				"pricing": {
 					"prompt": "0.00000014",
 					"completion": "0.00000028"
+				}
+			},
+			{
+				"id": "xiaomi/mimo-v2.6-flash-mopd",
+				"created": 1795456634,
+				"hugging_face_id": "XiaomiMiMo/MiMo-V2.6-Flash-MOPD",
+				"supported_parameters": [
+					"tools"
+				],
+				"pricing": {
+					"prompt": "0.0000005",
+					"completion": "0.000001"
 				}
 			},
 			{
@@ -4940,8 +4915,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.00000013",
-					"completion": "0.00000085"
+					"prompt": "0.0000002",
+					"completion": "0.0000011"
 				}
 			},
 			{
@@ -5083,8 +5058,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000399",
-					"completion": "0.0000000784"
+					"prompt": "0.00000015",
+					"completion": "0.0000005"
 				}
 			},
 			{
@@ -5217,8 +5192,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000001188",
-					"completion": "0.000005"
+					"prompt": "0.000000111",
+					"completion": "0.00000444"
 				}
 			},
 			{
@@ -5228,7 +5203,7 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000434",
+					"prompt": "0.000000047",
 					"completion": "0.0000003"
 				}
 			},
@@ -5323,12 +5298,9 @@
 			{
 				"id": "~unbiased/pareto-latest",
 				"created": 1791933050,
-				"supported_parameters": [
-					"tools"
-				],
 				"pricing": {
-					"prompt": "0.0000008",
-					"completion": "0.0000032"
+					"prompt": "-1",
+					"completion": "-1"
 				}
 			},
 			{
@@ -5349,8 +5321,8 @@
 					"tools"
 				],
 				"pricing": {
-					"prompt": "0.0000000399",
-					"completion": "0.0000000784"
+					"prompt": "0.0000000356",
+					"completion": "0.0000000815"
 				}
 			},
 			{

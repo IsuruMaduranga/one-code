@@ -56,6 +56,7 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { deferBaseTool, registryNameOnWire } from "../../lib/request/deferred.ts";
 import { LEDGER_EPOCH_BODY_CHANNEL, LEDGER_PLAN_CHANNEL, type LedgerEpochBody, type RequestPlan } from "../../lib/request/ledger/plan.ts";
 import { listKey } from "../../lib/request/ledger/wire.ts";
+import { sessionIdentity } from "../../lib/request/anthropic-auth.ts";
 import { type AffinityModel, affinityHeaders, captureDeclarations, captureMatches, forkOutputRoom, forkRequestPayload, forkBaselineNames, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, uncoveredMessages } from "../../lib/side-calls/request-replay.ts";
 import { RESPONSES_SESSION_HEADER } from "../../lib/side-calls/running-pi-ai.ts";
 import { subagentResultText } from "../../lib/agents/subagent-text.ts";
@@ -142,6 +143,8 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		let ledgerTook = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */
 		let baseline: Set<string> | undefined;
+		/** Whether the fork's model sets its effort with items (its identity's effortMarkers), read when the context step shapes a request. */
+		let effortItems = false;
 
 		// One mechanism shapes a fork's request. The fork's own ledger does when
 		// it extends a recorded request (its `context` hook, which runs first,
@@ -157,7 +160,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 		});
 		const splice = (payload: Record<string, unknown>): Record<string, unknown> => {
 			baseline ??= forkBaselineNames(payload, capture.api);
-			return forkRequestPayload(capture, payload, baseline);
+			return forkRequestPayload(capture, payload, baseline, effortItems);
 		};
 		pi.events.on(LEDGER_EPOCH_BODY_CHANNEL, (data) => {
 			// `shaped` is set only for a request whose model the capture matches.
@@ -193,6 +196,7 @@ export function forkCacheExtension(capture: RequestCapture, parentTools: readonl
 			const room = forkOutputRoom(capture, tail.filter((message) => message.role !== "system"));
 			if (room !== undefined && room < MIN_REPLAY_OUTPUT_TOKENS) return undefined;
 			shaped = true;
+			effortItems = sessionIdentity(pi, ctx.model)?.effortMarkers === true;
 			return { messages: tail as typeof event.messages };
 		});
 

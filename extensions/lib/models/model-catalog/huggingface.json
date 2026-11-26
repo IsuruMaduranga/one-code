@@ -1,5 +1,5 @@
 {
-	"fetchedAt": "2026-11-23T08:11:02.727Z",
+	"fetchedAt": "2026-11-26T14:48:08.340Z",
 	"source": "https://huggingface.co/api/models/",
 	"payload": {
 		"ByteDance-Seed/UI-TARS-1.5-7B": 8292166656,
@@ -71,6 +71,7 @@
 		"Undi95/ReMM-SLERP-L2-13B": null,
 		"XiaomiMiMo/MiMo-V2.5": 310775040000,
 		"XiaomiMiMo/MiMo-V2.5-Pro": 1023182841600,
+		"XiaomiMiMo/MiMo-V2.6-Flash-MOPD": 310756322688,
 		"XiaomiMiMo/MiMo-V2.6-Flash-RL": 310756322688,
 		"XiaomiMiMo/MiMo-V2.6-Pro-RL": 1024216603392,
 		"XingChen-AGI/Xing4.0-29B-A4B": 31215031088,
@@ -186,6 +187,7 @@
 		"thinkingmachines/Inkling-2-Mini": 26388646440,
 		"thinkingmachines/Inkling-2-Small": 594050672720,
 		"thinkingmachines/Inkling-Small": 265956439090,
+		"tngtech/DeepSeek-TNG-R1T2-Chimera": 684489845504,
 		"zai-org/GLM-4.5": 358337791296,
 		"zai-org/GLM-4.5-Air": 110468824832,
 		"zai-org/GLM-4.5V": 107710933120,

@@ -246,6 +246,52 @@ export function isTrailer(element: unknown, api: string): boolean {
 	return false;
 }
 
+/** The reasoning effort a Responses body (its top level) or `configuration_update` item sets, or undefined. */
+export function effortOf(element: unknown): string | undefined {
+	return isPlainObject(element) && isPlainObject(element.reasoning) && typeof element.reasoning.effort === "string" ? element.reasoning.effort : undefined;
+}
+
+/** The effort of the last `configuration_update` in `list` before `end`, or undefined when there is none. */
+function lastItemEffort(list: readonly unknown[], end: number): string | undefined {
+	for (let i = end - 1; i >= 0; i--) {
+		const element = list[i];
+		if (isPlainObject(element) && element.type === "configuration_update" && effortOf(element) !== undefined) return effortOf(element);
+	}
+	return undefined;
+}
+
+/** A Responses item the model produced: an assistant message, its reasoning, or a call (not a client-side tool load pi renders from a system message). */
+function isReplyItem(element: unknown): boolean {
+	if (!isPlainObject(element)) return false;
+	if (element.type === "tool_search_call" && element.execution === "client") return false;
+	return element.role === "assistant" || element.type === "reasoning" || (typeof element.type === "string" && element.type.endsWith("_call"));
+}
+
+/**
+ * pi's rendering of a tail put behind a recorded list (the ledger's splice,
+ * a fork's request), with the effort it rendered the tail at said where pi
+ * would say it rendering the whole list (findings §110). Codex sends the
+ * first effort pi renders as the top-level `reasoning.effort` and an item
+ * only where the effort changes, so rendering only the tail moved the top
+ * level after a thinking-level change and the conversation missed the cache.
+ * The record's top level stays (`underRecordedHead`, a fork's capture); when
+ * the effort in effect at the record's append point `end` differs from the
+ * one pi rendered the tail's start at, a `configuration_update` goes before
+ * the tail's first reply, or at its end when it has none. Only for a model on
+ * effort items (`effortItems`, the request identity's `effortMarkers`); a
+ * tail whose first item precedes its first reply sets its own start.
+ */
+export function withTailEffort(record: { list: readonly unknown[]; end: number; head: WirePayload; effortItems: boolean }, live: WirePayload, tail: readonly unknown[], api: string): readonly unknown[] {
+	const recordedTop = effortOf(record.head);
+	const liveTop = effortOf(live);
+	if (!record.effortItems || !api.endsWith("-responses") || recordedTop === undefined || liveTop === undefined) return tail;
+	const firstReply = tail.findIndex(isReplyItem);
+	const before = firstReply === -1 ? tail.length : firstReply;
+	if (tail.slice(0, before).some((element) => isTrailer(element, api))) return tail;
+	if ((lastItemEffort(record.list, record.end) ?? recordedTop) === liveTop) return tail;
+	return [...tail.slice(0, before), { type: "configuration_update", reasoning: { effort: liveTop } }, ...tail.slice(before)];
+}
+
 /** A tool's name in any API's declaration shape, or undefined for a nameless entry (a Bedrock `cachePoint`). */
 export function toolName(tool: unknown): string | undefined {
 	if (!isPlainObject(tool)) return undefined;
@@ -310,7 +356,7 @@ function inputSchemaOf(tool: unknown): unknown {
 }
 
 /** Root keywords pi's converter copies on some versions and APIs and drops on others, and a deferred declaration built here leaves out. */
-const ROOT_KEYWORDS = ["additionalProperties", "$defs", "definitions"] as const;
+const ROOT_KEYWORDS = ["additionalProperties", "$schema", "$defs", "definitions"] as const;
 
 /** A declaration's `strict` flag, wherever its API keeps it; absent reads as false. */
 function strictOf(tool: unknown): boolean {
@@ -320,11 +366,11 @@ function strictOf(tool: unknown): boolean {
 
 /**
  * Whether two declarations of one tool take the same input, as the merge
- * compares them. A root `additionalProperties`, `$defs` or `definitions` that
- * only one side carries is not a difference: pi 1.6 began sending the first
- * on Anthropic and pi 1.5.1 the other two (earlier versions dropped them),
- * and a deferred declaration built here has none, so a declaration recorded
- * without one differs from pi's live one in that keyword alone. That is not
+ * compares them. A root keyword in `ROOT_KEYWORDS` that only one side
+ * carries is not a difference: pi copies them on some versions and APIs and
+ * not on others, and a deferred declaration built here has none, so a
+ * declaration recorded without one differs from pi's live one in that
+ * keyword alone. That is not
  * a changed tool: the recorded bytes stay, and pi validates a call against
  * the tool's own schema either way. When both sides carry the keyword it is
  * compared like the rest. A changed `strict` flag is a difference: a strict
@@ -550,7 +596,8 @@ export function spliceRequest(base: RecordedRequest, payload: WirePayload, api: 
 	const list = payloadList(payload, api);
 	const tail = list.slice(preludeLength(list, api, payload));
 	const at = appendPoint(base.list, api);
-	const out = underRecordedHead(base, payload, api, [...structuredClone(base.list.slice(0, at)), ...tail]);
+	const ownTail = withTailEffort({ list: base.list, end: at, head: base.head, effortItems: base.identity.effortMarkers === true }, payload, tail, api);
+	const out = underRecordedHead(base, payload, api, [...structuredClone(base.list.slice(0, at)), ...ownTail]);
 	return api.endsWith("-responses") && !Array.isArray(base.head.tools) ? withLiveDeclarations(out, payload, api, base, at) : out;
 }
 
@@ -574,7 +621,11 @@ function underRecordedHead(base: RecordedRequest, payload: WirePayload, api: str
 			live = withoutTools;
 		}
 	}
-	return { ...withRecordedHead(live, base.head, api, loadedInList(base.list)), [listKey(api)]: list };
+	const out = { ...withRecordedHead(live, base.head, api, loadedInList(base.list)), [listKey(api)]: list };
+	// A model on effort items keeps the record's top-level effort: pi takes it from the tail it renders (withTailEffort).
+	const recordedTop = effortOf(base.head);
+	if (base.identity.effortMarkers === true && api.endsWith("-responses") && recordedTop !== undefined && isPlainObject(out.reasoning)) out.reasoning = { ...out.reasoning, effort: recordedTop };
+	return out;
 }
 
 /** Every declaration a list's own items make (`additional_tools`, `tool_search_output`), by name in list order; a later one replaces an earlier one, as the API reads them. */
