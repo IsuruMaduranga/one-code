@@ -137,12 +137,8 @@ export function childHistoryCursor(startedBy: string | undefined, inFlight: read
  * assistant message (pi persists the whole tool-call batch before executing it).
  * A bridged child uses `throughToolCallId` to include its parent's running call.
  */
-export function classifierHistory(branch: readonly unknown[], options: HistoryCursor = {}): {
-	transcript: TranscriptEntry[];
-	userMessages: string[];
-} {
+export function classifierHistory(branch: readonly unknown[], options: HistoryCursor = {}): { transcript: TranscriptEntry[] } {
 	const transcript: TranscriptEntry[] = [];
-	const userMessages: string[] = [];
 	const boundary = latestCompaction(branch);
 	if (boundary) {
 		const summary = record(branch[boundary.index]).summary;
@@ -173,10 +169,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 			// turns never gain intent authority on resume and expanded skill text
 			// is not credited as typed.
 			const userText = userWords(provenance, entry, message, messageText(message.content));
-			if (userText?.trim()) {
-				transcript.push({ kind: "user", text: userText.trim() });
-				userMessages.push(userText.trim());
-			}
+			if (userText?.trim()) transcript.push({ kind: "user", text: userText.trim() });
 		} else if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const rawBlock of message.content) {
 				const block = record(rawBlock);
@@ -204,5 +197,5 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 			}
 		}
 	}
-	return { transcript, userMessages };
+	return { transcript };
 }

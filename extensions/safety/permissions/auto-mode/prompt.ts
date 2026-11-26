@@ -12,7 +12,7 @@
  */
 
 import { buildRuleset, classifierText, instructionsFraming, renderSessionContext, type RuleExtras } from "./classifier-prompt.ts";
-import { buildCategoryIndex, groundCategory, normalizeName, type RuleIndex } from "./rules.ts";
+import { buildCategoryIndex, groundCategory, type RuleIndex } from "./rules.ts";
 import { clip, transcriptBlocks, type TranscriptEntry } from "./transcript.ts";
 import { autoModeResultText } from "./text.ts";
 
@@ -23,12 +23,6 @@ export interface ClassifyRequest {
 	 * caller appends the call being judged before handing it here.
 	 */
 	transcript: TranscriptEntry[];
-	/**
-	 * The user's own messages still in active context, for intent verification.
-	 * Kept separately from tool inputs and model-generated compaction summaries:
-	 * neither can manufacture a quote attributed to the user.
-	 */
-	userMessages: string[];
 	/** The user's CLAUDE.md, wrapped in the (untrusted) framing block. */
 	claudeMd?: string;
 	/** Session identity for the Session Context block. */
@@ -48,8 +42,8 @@ export interface ClassifyVerdict {
 	/** Shown to the user and the model: the grounded rule name, never a paraphrase. */
 	reason: string;
 	/** Derived from the grounded category's section, not a field the model chose. */
-	tier?: "hard_deny" | "soft_deny" | "allow" | "intent" | "unmatched" | "timeout";
-	/** The grounded rule name (or a sentinel like `intent-unverified`). */
+	tier?: "hard_deny" | "soft_deny" | "allow" | "unmatched" | "timeout";
+	/** The grounded rule name (or a sentinel like `unverified-clear`). */
 	ruleId?: string;
 	/** The model's own wording, kept for diagnosis and shown attributed to it. */
 	raw?: string;
@@ -85,13 +79,13 @@ export function stage1User(userPrefix: string): string {
 }
 
 /**
- * The stage-2 user message: shared prefix + full-eval final + the profile's
- * intent addendum, plus its denial addendum when the transcript holds a rule
- * denial (a permission rule outranks the user's stated intent).
+ * The stage-2 user message: shared prefix + full-eval final, plus the
+ * profile's denial addendum when the transcript holds a rule denial (a
+ * permission rule outranks the user's stated intent).
  */
 export function stage2User(userPrefix: string, afterRuleDenial = false): string {
 	const text = classifierText();
-	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${text.stage2IntentAddendum}${afterRuleDenial ? text.stage2DenialAddendum : ""}`;
+	return `${userPrefix}\n\n${text.stage2Final.trimStart()}${afterRuleDenial ? text.stage2DenialAddendum : ""}`;
 }
 
 /**
@@ -131,72 +125,15 @@ export const STAGE1_RETRY_MAX_TOKENS = 1024;
 export const STAGE2_MAX_TOKENS = 4096;
 export const STAGE2_RETRY_MAX_TOKENS = 8192;
 
-/** A quote shorter than this proves nothing — a stray word matches any transcript. */
-const INTENT_MIN_CHARS = 8;
-
 /**
- * Strip what a model adds around a verbatim quote without changing its words:
- * wrapping quotation marks (straight, typographic, backticks, any nesting —
- * the runs are greedy), sentence punctuation left outside the closing quote
- * (`"…".`), and leading or trailing ellipses marking a truncated quote. Then
- * normalizeName folds case, whitespace runs and trailing sentence punctuation.
- * Exported for tests.
+ * Parse a completed stage-2 reply and ground it. severity < 50 ⇒ allow, on the
+ * classifier's judgment as in Claude Code; severity ≥ 50 ⇒ block, with the tier
+ * derived from the grounded category rather than from anything the model
+ * asserted. An unparseable severity, or a block citing a category that is not a
+ * real rule, is still a block but tagged so it cannot borrow a real HARD rule's
+ * authority.
  */
-export function normalizeQuote(value: string): string {
-	const text = value
-		.replace(/^[\s"'`\u201c\u201d\u2018\u2019\u00ab\u00bb]+/, "")
-		.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s.,:;]+$/, "")
-		.replace(/^(\u2026|\.{3,})\s*/, "")
-		.replace(/\s*(\u2026|\.{3,})$/, "");
-	return normalizeName(text);
-}
-
-/**
- * Whether the classifier's `<intent>` quote is really the user's words. The
- * whole quote (after normalizeQuote) must be a substring of one user message;
- * failing that, a multi-line quote passes when every line of at least
- * INTENT_MIN_CHARS is itself a substring — a model quoting two sentences from
- * one message often joins them with a newline the original never had. Live
- * probes (2026-09-05, Haiku twice) returned `<intent>"…"</intent>` for a quote
- * that was verbatim; the bare substring test rejected it and a legitimate allow
- * became a soft block — the failure the auto-mode entry says gets auto mode
- * switched off. Still one-directional: nothing here can turn a block into an
- * allow that the words themselves do not support.
- */
-export function intentQuoted(intent: string, userMessages: string[]): boolean {
-	const messages = userMessages.map((message) => normalizeName(message));
-	const whole = normalizeQuote(intent);
-	if (whole.length >= INTENT_MIN_CHARS && messages.some((message) => message.includes(whole))) return true;
-	const lines = intent
-		.split(/\r?\n/)
-		.map((line) => normalizeQuote(line))
-		.filter((line) => line.length > 0);
-	if (lines.length < 2 || lines.some((line) => line.length < INTENT_MIN_CHARS)) return false;
-	// Every line must come from the SAME message, IN ORDER: two authorizations
-	// from different turns stitched together are not one statement of intent,
-	// and neither is a later clause pasted in front of an earlier one ("edit
-	// config.yaml" + "touch secrets.yaml" lifted out of "under no circumstances
-	// touch secrets.yaml" must not verify because each is a substring somewhere).
-	return messages.some((message) => {
-		let cursor = 0;
-		for (const line of lines) {
-			const at = message.indexOf(line, cursor);
-			if (at < 0) return false;
-			cursor = at + line.length;
-		}
-		return true;
-	});
-}
-
-/**
- * Parse a completed stage-2 reply and ground it. severity < 50 ⇒ allow (with the
- * one-directional intent-quote check when the model credits user intent);
- * severity ≥ 50 ⇒ block, with the tier derived from the grounded category rather
- * than from anything the model asserted. An unparseable severity, or a block
- * citing a category that is not a real rule, is still a block but tagged so it
- * cannot borrow a real HARD rule's authority.
- */
-export function parseStage2(text: string, index: RuleIndex, userMessages: string[] = []): ClassifyVerdict {
+export function parseStage2(text: string, index: RuleIndex): ClassifyVerdict {
 	const severity = parseSeverity(text);
 	const raw = clip(text.replace(/\s+/g, " ").trim(), 300) || undefined;
 	if (severity === null) {
@@ -210,27 +147,8 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 	}
 
 	if (severity < SEVERITY_THRESHOLD) {
-		const intent = parseTag(text, "intent");
-		if (intent) {
-			// An allow resting on user intent is the one claim worth checking: it is
-			// what a prompt injection most wants to manufacture and what the model is
-			// most prone to stretch. Verified against the user's own active messages,
-			// never against a model-generated account of what the user requested.
-			if (!intentQuoted(intent, userMessages)) {
-				return {
-					decision: "block",
-					reason: autoModeResultText.classifierBlock({ kind: "intentUnverified" }),
-					tier: "soft_deny",
-					ruleId: "intent-unverified",
-					// The full quote, not a clip: the mismatch class is only diagnosable
-					// from the exact text the model produced (2026-09-05 H4).
-					raw: intent,
-				};
-			}
-			return { decision: "allow", reason: "", tier: "intent" };
-		}
-		// A plain clear. The cited category (an ALLOW exception, usually) is kept
-		// as the ruleId for the log; a clear citing nothing is what the caller tags
+		// The cited category (an ALLOW exception, usually) is kept as the ruleId
+		// for the log; a clear citing nothing is what the caller tags
 		// `unverified-clear` when stage 1 had flagged the call.
 		const cited = parseTag(text, "category");
 		return { decision: "allow", reason: "", tier: "allow", ...(cited ? { ruleId: clip(cited, 80) } : {}) };

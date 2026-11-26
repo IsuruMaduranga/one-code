@@ -19,6 +19,7 @@ import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { userTurns } from "./helpers/classify-request.ts";
 
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
@@ -135,7 +136,7 @@ describe("hand-back review transcript", () => {
 		await fake.fireOne("tool_result", { toolCallId: "agent-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, ctx);
 		const request = vi.mocked(classify).mock.calls.at(-1)![0] as ClassifyRequest;
 		expect(request.transcript.at(-1)).toEqual({ kind: "hand-back", report: "Removed build/.\nAll clean." });
-		expect(request.userMessages.join("\n")).not.toContain("All clean.");
+		expect(userTurns(request.transcript).join("\n")).not.toContain("All clean.");
 	});
 
 	it("still reviews a payload from an emitter that sends no report", async () => {

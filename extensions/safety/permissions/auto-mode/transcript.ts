@@ -36,7 +36,7 @@ export { ccToolName };
  */
 export type TranscriptEntry =
 	| { kind: "user"; text: string }
-	/** Model-generated context, not the user's own words for intent verification. */
+	/** Model-generated context, not the user's own words. */
 	| { kind: "summary"; text: string }
 	| { kind: "tool"; tool: string; input: Record<string, unknown> }
 	| { kind: "denied"; tool: string; subject: string; rule: string }
@@ -59,8 +59,7 @@ export type TranscriptEntry =
 	 * `{"user":…}` hand-back line. The ruleset judges "the final entry",
 	 * and its SUBAGENT HAND-BACK rule names this entry as that action, so the
 	 * model reviews the run and its report rather than the child's last call.
-	 * Never the user's words: it never enters `userMessages`, so an intent
-	 * quote taken from it fails verification.
+	 * Never the user's words: the profile's note says so in the entry itself.
 	 */
 	| { kind: "hand-back"; report: string };
 

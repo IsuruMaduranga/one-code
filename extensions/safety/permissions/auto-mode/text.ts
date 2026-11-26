@@ -34,8 +34,6 @@ export type ClassifierBlock =
 	| { kind: "noUsableModel"; lastError: string }
 	/** The reply carried no severity. */
 	| { kind: "noSeverity" }
-	/** A clear resting on the user's intent that quotes no words of the user's. */
-	| { kind: "intentUnverified" }
 	/** A block naming a rule the ruleset does not have (`category` absent: it named none). */
 	| { kind: "unmatchedRule"; category?: string };
 
@@ -76,8 +74,6 @@ function classifierBlock(block: ClassifierBlock): string {
 			return `No usable auto-mode classifier model (last error: ${block.lastError}).`;
 		case "noSeverity":
 			return "The approval classifier's reply carried no severity, so the verdict could not be read.";
-		case "intentUnverified":
-			return "The classifier cleared this as something the user asked for, but could not point to the user's own words asking for it.";
 		case "unmatchedRule":
 			return block.category
 				? `The approval classifier blocked this as "${block.category}", which is not a rule that could be matched.`
@@ -125,7 +121,7 @@ export const autoModeResultText = {
  * the rule lists sit under the headings `## HARD BLOCK`, `## SOFT BLOCK` and
  * `## ALLOW (exceptions)`, each rule a top-level `- Name: …` bullet
  * (rules.ts, which maps a cited block to its rule); and the stage finals ask
- * for the reply tags prompt.ts parses (`<severity>`, `<category>`, `<intent>`).
+ * for the reply tags prompt.ts parses (`<severity>`, `<category>`).
  */
 export interface ClassifierRuleset {
 	rulesetHead: string;
@@ -149,9 +145,7 @@ export interface ClassifierRuleset {
 export interface ClassifierText extends ClassifierRuleset {
 	/** Whose ruleset it is, as a possessive, for the two notes that tell the user the built-in rules are fixed: "Claude Code's". Absent: the notes name no one. */
 	rulesetOwner?: string;
-	/** Always after `stage2Final`: a block cleared on the user's intent must quote the user, which the base checks against the transcript. */
-	stage2IntentAddendum: string;
-	/** After it, when the transcript holds a permission-rule denial: a rule outranks the user's stated intent. */
+	/** After `stage2Final`, when the transcript holds a permission-rule denial: a rule outranks the user's stated intent. */
 	stage2DenialAddendum: string;
 	/** The note that opens a finished subagent's review entry; the base appends the report in `<subagent_hand_back>` (transcript.ts). */
 	handBackReview: string;

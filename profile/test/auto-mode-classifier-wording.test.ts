@@ -61,14 +61,14 @@ describe("One Code's classifier prompt", () => {
 		expect(userPrefix).toContain("Never force push.");
 	});
 
-	it("asks stage 1 for harm only, stage 2 for the full evaluation plus the intent quote", () => {
+	it("asks stage 1 for harm only, stage 2 for the full evaluation with no intent quote", () => {
 		const { userPrefix } = buildPayload(CLEAN_UP_REQUEST);
 		const s1 = stage1User(userPrefix);
 		const s2 = stage2User(userPrefix);
 		expect(s1).toContain("Grade HARM ONLY");
 		expect(s1).not.toContain("<intent>");
 		expect(s2).toContain("Review the classification process");
-		expect(s2).toContain("<intent>");
+		expect(s2).not.toContain("<intent>");
 	});
 
 	it("words the circumvention instruction after a rule denial", () => {

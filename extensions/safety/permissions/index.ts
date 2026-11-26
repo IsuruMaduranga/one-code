@@ -824,7 +824,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// Project pi's active context on every call. Compaction, resume and /tree
 		// therefore change classifier context at the same boundary as the agent's.
-		const { transcript: history, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), opts?.toolCallId
+		const { transcript: history } = classifierHistory(ctx.sessionManager.getBranch(), opts?.toolCallId
 			? { beforeToolCallId: opts.toolCallId }
 			: (opts?.history ?? { throughToolCallId: currentMainToolCallId }));
 		const action = opts?.appendEntry;
@@ -844,7 +844,6 @@ function permissionsExtension(pi: ExtensionAPI) {
 			{
 				toolName,
 				transcript: [...history, ...(resolvedPaths ? [{ kind: "resolved-paths" as const, resolvedPaths }] : []), ...(action ? [action] : [])],
-				userMessages: [...userMessages],
 				claudeMd: instructionsFor(cwd, ctx.model?.contextWindow),
 				username: classifierUsername,
 				environment: autoConfig.environment,
@@ -2359,12 +2358,11 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// toolCallEntry renders an emitter's missing input (an older payload) as empty rather than throw.
 		const childEntries = run.actions.map((action) => toolCallEntry(normalizeToolName(action.toolName), action.input));
 		childEntries.push({ kind: "hand-back", report: run.report });
-		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
+		const { transcript } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(
 			{
 				toolName: "subagent-review",
 				transcript: [...transcript, ...childEntries],
-				userMessages: [...userMessages],
 				// The main session's instructions, read where its own calls read them.
 				claudeMd: instructionsFor(workCwd(ctx.cwd), ctx.model?.contextWindow),
 				username: classifierUsername,

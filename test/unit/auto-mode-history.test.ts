@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, writtenArguments } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import { userTurns } from "./helpers/classify-request.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 
@@ -19,7 +20,7 @@ describe("active classifier history", () => {
 			{ type: "custom", customType: CLASSIFIER_TOOL_META, data: { toolCallId: "r", gitStatus: { clean: true } } },
 		]);
 		expect(history.transcript).toEqual([{ kind: "summary", text: "Earlier work was summarized." }]);
-		expect(history.userMessages).toEqual([]);
+		expect(userTurns(history.transcript)).toEqual([]);
 	});
 
 	it("uses only the latest summary and retains its kept tail before later entries", () => {
@@ -34,7 +35,7 @@ describe("active classifier history", () => {
 			{ kind: "tool", tool: "bash", input: { command: "printf x > probe.txt" } },
 			{ kind: "summary", text: "Another branch's work, not user authorization." },
 		]);
-		expect(history.userMessages).toEqual([]);
+		expect(userTurns(history.transcript)).toEqual([]);
 	});
 });
 

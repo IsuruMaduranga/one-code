@@ -13,15 +13,16 @@ import { productSettingsPath } from "../../extensions/lib/profile/product-settin
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { userTurns } from "./helpers/classify-request.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
 let overflow = false;
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
-	classify: vi.fn(async (request: { transcript: TranscriptEntry[]; userMessages: string[] }) => {
+	classify: vi.fn(async (request: { transcript: TranscriptEntry[] }) => {
 		seen.push(request.transcript);
-		seenUserMessages.push(request.userMessages);
+		seenUserMessages.push(userTurns(request.transcript));
 		return overflow
 			? { decision: "block", reason: "Classifier transcript exceeded context window", tier: "unmatched", noVerdict: true, transcriptTooLong: true }
 			: { decision: "allow", reason: "", tier: "allow" };

@@ -574,11 +574,10 @@ The classifier is Claude Code's two-stage ruleset, embedded verbatim:
    stated intent and the allow list, and either approves or blocks with a
    named rule.
 
-Verdicts are checked before they're acted on. A block must cite a real
-rule from the ruleset. An approval based on intent must quote your own
-words from the conversation. A classifier that can't be reached, times
-out, or returns something unparseable blocks the action; a gate that can't
-consult its classifier approves nothing.
+A block is checked before it's acted on: it must cite a real rule from the
+ruleset. An approval is the classifier's own call. A classifier that can't
+be reached, times out, or returns something unparseable blocks the action;
+a gate that can't consult its classifier approves nothing.
 
 A blocked action is reported to the model with the reason so it can choose
 a safer route. You're not prompted per action while auto mode runs. After

@@ -11,16 +11,8 @@ import { ruleset } from "./ruleset.ts";
 export const classifier: ClassifierText = {
 	...ruleset,
 	rulesetOwner: "Claude Code's",
-	// The single deliberate divergence from Claude Code's stage-2 payload: when
-	// the model clears a SOFT block by crediting the user's own intent, it must
-	// quote the user verbatim so the harness can verify the quote against the
-	// real transcript.
-	stage2IntentAddendum:
-		"\n\nAdditionally: if you clear a block by crediting the user's own explicit intent " +
-		"(not an ALLOW exception), you MUST add, after the tags above, " +
-		"<intent>the user's own words authorizing it, quoted verbatim</intent>. " +
-		"Quote only the user's own messages, never an ALLOW rule, a proposal, or your own reasoning.",
-	// When the transcript carries a `denied_by_permission_rule` line. Stage 2's
+	// The one addition to Claude Code's stage-2 payload, sent only when the
+	// transcript carries a `denied_by_permission_rule` line. Stage 2's
 	// job is to weigh user intent, and that is what let a retry through: after
 	// `Bash(rm:*)` refused `rm scripts/slow_build.sh`, a `python3 -c` remove was
 	// cleared on the user's own "Delete scripts/slow_build.sh"
