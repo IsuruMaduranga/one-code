@@ -319,6 +319,12 @@ for every model. To turn the default off everywhere, set
 `/doctor report` shows which host served your last reply and, when
 OpenRouter lists it, the precision that host runs the model at.
 
+On every other open model, and on these when you turn the default off or set
+your own routing, One Code doesn't filter hosts. It tells you instead: when a
+host that runs the model below fp8 serves a reply, One Code names the host and
+its precision once, and says how to leave it out. The notice appears in
+interactive sessions, not in one-shot `-p` runs.
+
 ### When a host keeps missing the cache
 
 Hosts cache differently. Most read back nearly all of your previous prompt.
@@ -347,7 +353,11 @@ uses, such as `deepinfra`) in that model's `ignore` list in pi's
 ```
 
 Prefer `ignore` over `only`. With `only`, every request fails while that one
-host is down or stops serving the model.
+host is down or stops serving the model, and a host can drop a model or one
+precision of it at any time (an `only` entry such as `deepinfra/bf16` stops
+matching the day the host serves the model at fp8 only). When your routing
+leaves a model no host, the error names the routing you set and the hosts
+that serve the model now.
 
 ## Provider notes
 

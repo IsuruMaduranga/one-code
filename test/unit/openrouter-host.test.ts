@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { endpointsListingUrl, fetchEndpointQuantizations, quantizationsByHost, servedHostLabel } from "../../extensions/lib/request/openrouter-host.ts";
+import { endpointsListingUrl, fetchEndpointQuantizations, quantizationsByHost, reducedPrecisionNotice, servedHostLabel } from "../../extensions/lib/request/openrouter-host.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/commands/doctor/models.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { tempHome } from "./helpers/temp-home.ts";
@@ -55,6 +55,23 @@ describe("the endpoints listing", () => {
 		expect(servedHostLabel({ model: "m", host: "Wafer", quantizations: ["mxfp4", "fp8"] })).toBe("Wafer (mxfp4 or fp8)");
 		expect(servedHostLabel({ model: "m", host: "Cloudflare", quantizations: ["unknown"] })).toBe("Cloudflare (precision not declared)");
 		expect(servedHostLabel({ model: "m", host: "Modal" })).toBe("Modal");
+	});
+});
+
+describe("the reduced-precision notice", () => {
+	it("names a host whose every endpoint of the model runs at a reduced precision", () => {
+		const notice = reducedPrecisionNotice({ model: "openrouter/z-ai/glm-5.3", host: "Nebius", quantizations: ["fp4"] });
+		expect(notice).toContain("served openrouter/z-ai/glm-5.3 from Nebius, which runs it at fp4");
+		expect(notice).toContain("compat.openRouterRouting for this model in pi's models.json");
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["int4", "fp6"] })).toContain("runs it at int4 or fp6");
+		// A label beyond OpenRouter's documented ones is a reduced precision too.
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["mxfp4"] })).toContain("runs it at mxfp4");
+	});
+
+	it("says nothing for a host at fp8 or above, one that declares none, one with a higher-precision endpoint too, or one not in the listing", () => {
+		for (const quantizations of [["fp8"], ["bf16"], ["unknown"], ["fp4", "fp8"], [], undefined]) {
+			expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations }), String(quantizations)).toBeUndefined();
+		}
 	});
 });
 

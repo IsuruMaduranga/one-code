@@ -446,6 +446,66 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
+	it("explains a refusal the user's own routing caused, with the hosts that serve the model now", async () => {
+		const pinned = createFakeCtx({ model: { ...model, api: "openai-completions", compat: { openRouterRouting: { only: ["deepinfra/bf16"], allow_fallbacks: false } } }, mode: "tui", hasUI: true, modelRegistry: { getApiKeyAndHeaders: getAuth } }) as typeof ctx;
+		const refusal = '404: {"message":"No allowed providers are available for the selected model.","code":404,"metadata":{"available_providers":["chutes","deepinfra"]}}';
+		await fake.fire("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: refusal, content: [] } }, pinned);
+		expect(pinned.ui.notify).toHaveBeenCalledTimes(1);
+		expect(pinned.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/your routing allows \(only: deepinfra\/bf16\)\. Hosts that serve it now: chutes, deepinfra\./), "error");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	describe("a host at reduced precision", () => {
+		const chat = { ...model, api: "openai-completions" };
+		const listing = { data: { endpoints: [{ provider_name: "Nebius", quantization: "fp4" }, { provider_name: "DeepInfra", quantization: "fp8" }] } };
+		const usage = { input: 100, output: 5, cacheRead: 0, cacheWrite: 0 };
+		const reply = async (on: typeof ctx, host: string) => {
+			await fake.fire("message_start", { message: { role: "assistant" } }, on);
+			await fake.fire("provider_stream_event", { type: "provider_stream_event", provider: "openrouter", api: "openai-completions", model: chat.id, data: { id: "gen-1", provider: host } }, on);
+			await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-1", stopReason: "stop", usage, content: [] } }, on);
+			await flush();
+		};
+		const session = (mode: string) => createFakeCtx({ model: chat, mode, hasUI: true, modelRegistry: { getApiKeyAndHeaders: getAuth } }) as typeof ctx;
+
+		beforeEach(() => {
+			fetchMock.mockImplementation(async () => ({ ok: true, status: 200, json: async () => listing }));
+		});
+
+		it("is named once, from one read of the model's endpoints listing without a key", async () => {
+			const tui = session("tui");
+			await reply(tui, "Nebius");
+			await reply(tui, "Nebius");
+			expect(tui.ui.notify).toHaveBeenCalledTimes(1);
+			expect(tui.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/served openrouter\/z-ai\/glm-5\.3 from Nebius, which runs it at fp4/), "warning");
+			// Another host of the same model reads the listing already fetched, and one at fp8 is not named.
+			await reply(tui, "DeepInfra");
+			expect(tui.ui.notify).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/models/z-ai/glm-5.3/endpoints", expect.not.objectContaining({ headers: expect.anything() }));
+			expect(getAuth).not.toHaveBeenCalled();
+		});
+
+		it("is not looked up in a one-shot run, or for a model pi sends no routing for", async () => {
+			await reply(session("print"), "Nebius");
+			await reply(ctx, "Nebius");
+			expect(fetchMock).not.toHaveBeenCalled();
+		});
+
+		it("stays unnamed when the listing cannot be read, and after the session ends", async () => {
+			fetchMock.mockImplementation(async () => ({ ok: false, status: 500, body: { cancel: async () => {} } }));
+			const tui = session("tui");
+			await reply(tui, "Nebius");
+			expect(tui.ui.notify).not.toHaveBeenCalled();
+			let release: (value: unknown) => void = () => {};
+			fetchMock.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+			await reply(tui, "DeepInfra");
+			await fake.fire("session_shutdown", {}, tui);
+			release({ ok: true, status: 200, json: async () => ({ data: { endpoints: [{ provider_name: "DeepInfra", quantization: "fp4" }] } }) });
+			await flush();
+			expect(tui.ui.notify).not.toHaveBeenCalled();
+		});
+	});
+
 	const cut = '{ "command": "grep -rn "\t, "timeout": 120000 }';
 
 	it("hands a command that looks cut off back to the model without stopping the turn", async () => {
