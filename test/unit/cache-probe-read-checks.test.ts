@@ -60,12 +60,12 @@ describe("cache-probe fork check", () => {
 	const usage = (input: number, cacheRead: number) => ({ input, output: 5, cacheRead, cacheWrite: 0 });
 	const entry = (at: number, message: object) => ({ type: "message", timestamp: new Date(at).toISOString(), message: { role: "assistant", ...message } });
 	const spawn = entry(1000, { stopReason: "toolUse", usage: usage(18700, 0), content: [{ type: "toolCall", name: "Agent" }] });
-	const probe = (parentAfter: object[], forkRead = 18688) => {
+	const probe = (parentAfter: object[], forkRead = 18688, forkBefore: object[] = []) => {
 		const sessions = join(dir, "sessions");
 		const task = join(sessions, "session-1", "subagents", "task-1");
 		mkdirSync(task, { recursive: true });
 		writeFileSync(join(sessions, "main.jsonl"), asJsonl([spawn, ...parentAfter]));
-		writeFileSync(join(task, "fork.jsonl"), asJsonl([spawn, entry(2000, { stopReason: "stop", usage: usage(300, forkRead), content: [] })]));
+		writeFileSync(join(task, "fork.jsonl"), asJsonl([spawn, ...forkBefore, entry(2000, { stopReason: "stop", usage: usage(300, forkRead), content: [] })]));
 		return node("test/e2e/cache-probe-fork.mjs", [sessions, "--model", "openai-codex/probe-model"]);
 	};
 
@@ -89,6 +89,12 @@ describe("cache-probe fork check", () => {
 			entry(3500, { stopReason: "stop", usage: usage(400, 18688), content: [] }),
 		]);
 		expect(result.out).toContain("PASS  fork: the parent's next request after the fork read 18688");
+		expect(result.status).toBe(0);
+	});
+
+	it("skips an errored first reply of the fork and checks its retry", () => {
+		const result = probe([entry(3000, { stopReason: "stop", usage: usage(400, 18688), content: [] })], 18688, [entry(1500, { stopReason: "error", usage: usage(0, 0), content: [] })]);
+		expect(result.out).toContain("PASS  fork: the fork's first request read 18688");
 		expect(result.status).toBe(0);
 	});
 

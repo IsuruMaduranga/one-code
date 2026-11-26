@@ -128,7 +128,6 @@ const implicitCache = usages.every((u) => (u.cacheWrite ?? 0) === 0);
 /** The serving host of each reply on OpenRouter (cache-hosts.mjs); undefined elsewhere. */
 const hosts = await lookupHosts(responses.map((m) => m.responseId));
 const hostOf = (i) => hosts.get(responses[i]?.responseId);
-/** The cached tokens request `i` must read, from what request `i - 1` sent, allowing the block of the host that served request `i`. */
 /**
  * The last request before `i` that got an answer. An errored request reports
  * no usage and pi-ai retries it, so its retry is held to the request before it.
@@ -138,6 +137,7 @@ const answeredBefore = (i) => {
 	while (j > 0 && isErrored(j)) j--;
 	return j;
 };
+/** The cached tokens request `i` must read, from what the last answered request before it sent, allowing the block of the host that served request `i`. */
 const readFloor = (i) => {
 	const prev = usages[answeredBefore(i)];
 	const block = allowance(hostOf(i), usages[i].cacheRead ?? 0);
@@ -282,16 +282,13 @@ if (usages.length !== requests.length) {
 console.log("request  input  cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < usages.length; i++) {
 	const u = usages[i];
-	const checked = i > 0 && !isErrored(i);
-	const expected = checked ? String(readFloor(i)) : isErrored(i) ? "errored" : "-";
+	const need = i > 0 && !isErrored(i) ? readFloor(i) : undefined;
+	const expected = need !== undefined ? String(need) : isErrored(i) ? "errored" : "-";
 	console.log(
 		`${String(i + 1).padStart(7)}  ${String(u.input ?? 0).padStart(5)}  ${String(u.cacheRead ?? 0).padStart(9)}  ${String(u.cacheWrite ?? 0).padStart(10)}  ${expected.padStart(10)}${hostNote(hostOf(i))}`,
 	);
-	if (checked) {
-		const need = readFloor(i);
-		if ((u.cacheRead ?? 0) < need) {
-			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${answeredBefore(i) + 1} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)${hostNote(hostOf(i))}`);
-		}
+	if (need !== undefined && (u.cacheRead ?? 0) < need) {
+		failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${answeredBefore(i) + 1} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)${hostNote(hostOf(i))}`);
 	}
 }
 

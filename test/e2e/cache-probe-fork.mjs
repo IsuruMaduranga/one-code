@@ -16,10 +16,10 @@
  * timestamped after that call (the fork's file opens with copies of the
  * parent's entries). The fork must read the parent's whole prompt, less one
  * implicit-cache block (`DEFAULT_BLOCK`, as the other probes allow), and so
- * must the parent's own next request after the fork. On
- * OpenAI's models with explicit breakpoints that holds only because the
- * context message after the first user message carries one (findings §95):
- * without it the parent's first request caches only up to the user message.
+ * must the parent's own next request after the fork. On OpenAI's models with
+ * explicit breakpoints that holds only because the context message after the
+ * first user message carries one (findings §95): without it the parent's
+ * first request caches only up to the user message.
  * A miss is a FAIL, except on OpenRouter, which can route either request to
  * another upstream host than the parent's: a WARN there.
  */
@@ -47,7 +47,11 @@ function jsonlIn(folder) {
 	}
 }
 
-/** Every assistant message of a session file, in order, with its entry timestamp. */
+/**
+ * Every answered assistant message of a session file, in order, with its entry
+ * timestamp. An errored reply reports no usage and pi-ai retries it, so every
+ * check reads the retry.
+ */
 function assistants(file) {
 	const out = [];
 	for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -59,7 +63,7 @@ function assistants(file) {
 			continue;
 		}
 		const message = entry.message;
-		if (message?.role !== "assistant" || !message.usage) continue;
+		if (message?.role !== "assistant" || !message.usage || message.stopReason === "error") continue;
 		out.push({ at: Date.parse(entry.timestamp ?? "") || message.timestamp || 0, message });
 	}
 	return out;
@@ -111,9 +115,8 @@ function check(who, usage) {
 	}
 }
 check("the fork's first request", forkReplies[0].message.usage);
-// The parent's own next request extends the same prompt, so it reads it too. An
-// errored reply reports no usage and pi-ai retries it, so the first answered one counts.
-const next = assistants(mainFile).find(({ at, message }) => at > spawn.at && message.stopReason !== "error");
+// The parent's own next request extends the same prompt, so it reads it too.
+const next = assistants(mainFile).find(({ at }) => at > spawn.at);
 if (next) check("the parent's next request after the fork", next.message.usage);
 else {
 	console.log("FAIL  fork: the parent sent no answered request after the fork");
