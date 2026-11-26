@@ -129,8 +129,17 @@ const implicitCache = usages.every((u) => (u.cacheWrite ?? 0) === 0);
 const hosts = await lookupHosts(responses.map((m) => m.responseId));
 const hostOf = (i) => hosts.get(responses[i]?.responseId);
 /** The cached tokens request `i` must read, from what request `i - 1` sent, allowing the block of the host that served request `i`. */
+/**
+ * The last request before `i` that got an answer. An errored request reports
+ * no usage and pi-ai retries it, so its retry is held to the request before it.
+ */
+const answeredBefore = (i) => {
+	let j = i - 1;
+	while (j > 0 && isErrored(j)) j--;
+	return j;
+};
 const readFloor = (i) => {
-	const prev = usages[i - 1];
+	const prev = usages[answeredBefore(i)];
 	const block = allowance(hostOf(i), usages[i].cacheRead ?? 0);
 	return implicitCache ? (prev.input ?? 0) + (prev.cacheRead ?? 0) - block - slack : (prev.cacheRead ?? 0) + (prev.cacheWrite ?? 0) - slack;
 };
@@ -265,7 +274,7 @@ if (prompt) {
 
 if (skipped > 0) console.log(`(${skipped} side-call request${skipped === 1 ? "" : "s"} skipped)`);
 const erroredCount = requests.filter((_, i) => isErrored(i)).length;
-if (erroredCount > 0) console.log(`(${erroredCount} errored request${erroredCount === 1 ? "" : "s"} left out of the head check)`);
+if (erroredCount > 0) console.log(`(${erroredCount} errored request${erroredCount === 1 ? "" : "s"} left out of the head and read checks)`);
 if (usages.length !== requests.length) {
 	warnings.push(`${requests.length} requests dumped but ${usages.length} assistant usages seen (retry or a request that did not complete?)`);
 }
@@ -273,14 +282,15 @@ if (usages.length !== requests.length) {
 console.log("request  input  cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < usages.length; i++) {
 	const u = usages[i];
-	const expected = i === 0 ? "-" : String(readFloor(i));
+	const checked = i > 0 && !isErrored(i);
+	const expected = checked ? String(readFloor(i)) : isErrored(i) ? "errored" : "-";
 	console.log(
 		`${String(i + 1).padStart(7)}  ${String(u.input ?? 0).padStart(5)}  ${String(u.cacheRead ?? 0).padStart(9)}  ${String(u.cacheWrite ?? 0).padStart(10)}  ${expected.padStart(10)}${hostNote(hostOf(i))}`,
 	);
-	if (i > 0) {
+	if (checked) {
 		const need = readFloor(i);
 		if ((u.cacheRead ?? 0) < need) {
-			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${i} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)${hostNote(hostOf(i))}`);
+			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${answeredBefore(i) + 1} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)${hostNote(hostOf(i))}`);
 		}
 	}
 }
