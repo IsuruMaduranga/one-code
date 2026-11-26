@@ -115,6 +115,15 @@ export interface HistoryCursor {
 }
 
 /**
+ * The question dialog's tool, and what opens the user line that carries its
+ * answer. A tool result is otherwise never shown to the classifier; this one
+ * is the harness's own report of what the user chose in the dialog, so it is
+ * the user's word on the question asked. Claude Code sends the same line.
+ */
+const QUESTION_TOOL = "ask_user_question";
+export const QUESTION_ANSWER_PREFIX = "[User answered AskUserQuestion]:   ";
+
+/**
  * The most of an agent message a transcript carries as the referent for the
  * user's reply: its last characters, where the proposal or the question is.
  * Claude Code clips the same text at the same place.
@@ -169,6 +178,11 @@ export function childHistoryCursor(startedBy: string | undefined, inFlight: read
  * calls between the two keep it; any other user-role message drops it, since
  * the reply may answer that message. The entry is appended with the reply, so
  * the transcript still only grows.
+ *
+ * The question dialog's answer is the one tool result projected: a user line
+ * at the result's own place on the branch (after every call of that batch, so
+ * a later call's transcript extends an earlier one's), matched to its call by
+ * id and left out when the tool errored (no dialog was shown).
  */
 export function classifierHistory(branch: readonly unknown[], options: HistoryCursor & { priorProse?: boolean } = {}): { transcript: TranscriptEntry[] } {
 	const transcript: TranscriptEntry[] = [];
@@ -190,6 +204,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 	}
 	let reachedPending = false;
 	let prose: string | undefined;
+	const questionCalls = new Set<string>();
 	for (const entry of active) {
 		if (reachedPending) break;
 		if (entry.type === "branch_summary" && typeof entry.summary === "string") {
@@ -217,6 +232,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 					reachedPending = true;
 					break;
 				}
+				if (block.name === QUESTION_TOOL && typeof block.id === "string") questionCalls.add(block.id);
 				const tool = toolCallEntry(block.name, block.arguments);
 				if (!isHistoricalRead(tool)) {
 					for (const fact of facts.get(block.id) ?? []) if (fact.gitStatus) transcript.push({ kind: "meta", gitStatus: fact.gitStatus });
@@ -234,6 +250,10 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 					break;
 				}
 			}
+		} else if (message.role === "toolResult") {
+			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true) continue;
+			const answer = messageText(message.content);
+			if (answer.trim()) transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
 		}
 	}
 	return { transcript };

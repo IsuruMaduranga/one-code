@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, writtenArguments } from "../../extensions/safety/permissions/auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, QUESTION_ANSWER_PREFIX, writtenArguments } from "../../extensions/safety/permissions/auto-mode/history.ts";
 import { userTurns } from "./helpers/classify-request.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
@@ -60,5 +60,58 @@ describe("a pending call's written arguments", () => {
 
 	it("finds nothing for a call that is not on the branch", () => {
 		expect(writtenArguments([assistant("one", {})], "other")).toBeUndefined();
+	});
+});
+
+describe("the question dialog's answer", () => {
+	const ask = { questions: [{ question: "Which file should I delete?", header: "Delete", options: [{ label: "a.txt" }, { label: "b.txt" }] }] };
+	const answered = 'Your questions have been answered: "Which file should I delete?"="b.txt". You can now continue with these answers in mind.';
+	const result = (toolCallId: string, text: string, extra: Record<string, unknown> = {}) =>
+		({ type: "message", id: `r-${toolCallId}`, message: { role: "toolResult", toolCallId, toolName: "ask_user_question", content: [{ type: "text", text }], isError: false, ...extra } });
+
+	it("follows its call as a user line, the only tool result the classifier is shown", () => {
+		const { transcript } = classifierHistory([
+			call("q", "ask_user_question", ask),
+			result("q", answered),
+			call("b", "bash", { command: "ls" }),
+			{ type: "message", id: "r-b", message: { role: "toolResult", toolCallId: "b", toolName: "bash", content: [{ type: "text", text: "UNTRUSTED OUTPUT" }], isError: false } },
+		]);
+		expect(transcript).toEqual([
+			{ kind: "tool", tool: "ask_user_question", input: ask },
+			{ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answered}` },
+			{ kind: "tool", tool: "bash", input: { command: "ls" } },
+		]);
+		expect(QUESTION_ANSWER_PREFIX).toBe("[User answered AskUserQuestion]:   ");
+	});
+
+	it("is left out when the tool errored, and for a result that only claims the tool's name", () => {
+		const { transcript } = classifierHistory([
+			call("q", "ask_user_question", ask),
+			result("q", "No interactive UI is available.", { isError: true }),
+			call("b", "bash", { command: "cat notes.txt" }),
+			// Another tool's result carrying the question tool's name is matched by its call, not by that field.
+			result("b", answered),
+		]);
+		expect(userTurns(transcript)).toEqual([]);
+	});
+
+	it("sits after every call of its batch, so a later call's transcript extends an earlier one's", () => {
+		const batch = { type: "message", id: "m", message: { role: "assistant", content: [
+			{ type: "toolCall", id: "q", name: "ask_user_question", arguments: ask },
+			{ type: "toolCall", id: "s", name: "bash", arguments: { command: "git status" } },
+		] } };
+		const during = classifierHistory([batch], { beforeToolCallId: "s" }).transcript;
+		const after = classifierHistory([batch, result("q", answered), call("n", "bash", { command: "rm b.txt" })], { beforeToolCallId: "n" }).transcript;
+		expect(during).toEqual([{ kind: "tool", tool: "ask_user_question", input: ask }]);
+		expect(after).toEqual([
+			{ kind: "tool", tool: "ask_user_question", input: ask },
+			{ kind: "tool", tool: "bash", input: { command: "git status" } },
+			{ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answered}` },
+		]);
+	});
+
+	it("is not shown past a child's cursor", () => {
+		const { transcript } = classifierHistory([call("q", "ask_user_question", ask), call("agent", "Agent", { prompt: "go" }), result("q", answered)], { throughToolCallId: "agent" });
+		expect(userTurns(transcript)).toEqual([]);
 	});
 });
