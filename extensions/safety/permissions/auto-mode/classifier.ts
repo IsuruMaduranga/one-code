@@ -563,9 +563,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					verdict = parseStage2(s2, index);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without citing any
-					// rule. CC allows here (severity rules),
-					// so this stays an allow — but tagged, so the decision log and debug
-					// trace show a clear that rests on nothing checkable (review P11).
+					// rule. CC allows here (severity rules), so this stays an allow, but
+					// tagged, so the decision log and debug trace show a clear that rests
+					// on nothing checkable (review P11).
 					if (verdict.decision === "allow" && verdict.tier === "allow" && !verdict.ruleId) {
 						verdict = { ...verdict, ruleId: "unverified-clear" };
 					}

@@ -8,7 +8,7 @@ const call = (id: string, name: string, args: Record<string, unknown>) => ({ typ
 // Claude Code serializes the supplied history, not a 60 KB suffix.
 describe("classifier creation history", () => {
 	it.each(["read", "grep", "find", "lsp_diagnostics", "tool_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"])("omits historical %s calls from the session history", (tool) => {
-		const { transcript } = classifierHistory([call("r", tool, { path: "OLD_READ_MARKER", query: "lookup" }), call("b", "bash", { command: "rm probe.*" })]);
+		const transcript = classifierHistory([call("r", tool, { path: "OLD_READ_MARKER", query: "lookup" }), call("b", "bash", { command: "rm probe.*" })]);
 		expect(renderTranscript(transcript)).not.toContain("OLD_READ_MARKER");
 		expect(renderTranscript(transcript)).toContain("rm probe.*");
 	});
@@ -22,7 +22,7 @@ describe("classifier creation history", () => {
 	});
 
 	it("retains a historical remote-host read rather than hiding its destination", () => {
-		const { transcript } = classifierHistory([
+		const transcript = classifierHistory([
 			call("r", "read", { path: "/secret", _host: "other-machine" }),
 			call("b", "bash", { command: "echo done" }),
 		]);

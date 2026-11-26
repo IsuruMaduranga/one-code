@@ -124,6 +124,17 @@ const QUESTION_TOOL = "ask_user_question";
 export const QUESTION_ANSWER_PREFIX = "[User answered AskUserQuestion]:   ";
 
 /**
+ * Whether the question tool's result reports answers the user submitted, read
+ * from the result's details (the tool's own record, which the model cannot
+ * write). A dialog the user cancelled or turned into a chat is not an answer:
+ * its text lists unsubmitted selections or the model's own questions.
+ */
+function submittedAnswers(details: unknown): boolean {
+	const { answers, cancelled, declined } = record(details);
+	return Array.isArray(answers) && answers.length > 0 && cancelled !== true && declined !== true;
+}
+
+/**
  * The most of an agent message a transcript carries as the referent for the
  * user's reply: its last characters, where the proposal or the question is.
  * Claude Code clips the same text at the same place.
@@ -131,17 +142,14 @@ export const QUESTION_ANSWER_PREFIX = "[User answered AskUserQuestion]:   ";
 export const PRIOR_PROSE_CHARS = 2000;
 
 /**
- * An assistant message's prose as the user saw it: its text blocks joined by a
- * line break (thinking and tool calls left out), nothing for an errored reply
- * or one that is only whitespace, clipped to its last PRIOR_PROSE_CHARS without
- * splitting a surrogate pair.
+ * An assistant message's prose as the user saw it: its text blocks (thinking
+ * and tool calls left out), nothing for an errored reply or one that is only
+ * whitespace, clipped to its last PRIOR_PROSE_CHARS without splitting a
+ * surrogate pair.
  */
-function priorProse(message: Record<string, any>): string | undefined {
-	if (message.stopReason === "error" || !Array.isArray(message.content)) return undefined;
-	const text = message.content.flatMap((block: unknown) => {
-		const { type, text: body } = record(block);
-		return type === "text" && typeof body === "string" ? [body] : [];
-	}).join("\n");
+function shownProse(message: Record<string, any>): string | undefined {
+	if (message.stopReason === "error") return undefined;
+	const text = messageText(message.content);
 	if (!text.trim()) return undefined;
 	if (text.length <= PRIOR_PROSE_CHARS) return text;
 	const tail = text.slice(-PRIOR_PROSE_CHARS);
@@ -182,9 +190,10 @@ export function childHistoryCursor(startedBy: string | undefined, inFlight: read
  * The question dialog's answer is the one tool result projected: a user line
  * at the result's own place on the branch (after every call of that batch, so
  * a later call's transcript extends an earlier one's), matched to its call by
- * id and left out when the tool errored (no dialog was shown).
+ * id and left out when the tool errored (no dialog was shown) or the user
+ * cancelled the dialog or chose to chat instead.
  */
-export function classifierHistory(branch: readonly unknown[], options: HistoryCursor & { priorProse?: boolean } = {}): { transcript: TranscriptEntry[] } {
+export function classifierHistory(branch: readonly unknown[], options: HistoryCursor & { priorProse?: boolean } = {}): TranscriptEntry[] {
 	const transcript: TranscriptEntry[] = [];
 	const boundary = latestCompaction(branch);
 	if (boundary) {
@@ -224,7 +233,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 			}
 			prose = undefined;
 		} else if (message.role === "assistant" && Array.isArray(message.content)) {
-			if (options.priorProse) prose = priorProse(message) ?? prose;
+			if (options.priorProse) prose = shownProse(message) ?? prose;
 			for (const rawBlock of message.content) {
 				const block = record(rawBlock);
 				if (block.type !== "toolCall" || typeof block.name !== "string") continue;
@@ -251,10 +260,10 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 				}
 			}
 		} else if (message.role === "toolResult") {
-			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true) continue;
+			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true || !submittedAnswers(message.details)) continue;
 			const answer = messageText(message.content);
 			if (answer.trim()) transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
 		}
 	}
-	return { transcript };
+	return transcript;
 }

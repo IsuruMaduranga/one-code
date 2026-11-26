@@ -824,12 +824,13 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// Project pi's active context on every call. Compaction, resume and /tree
 		// therefore change classifier context at the same boundary as the agent's.
-		// The main session's own calls also carry the agent's prose before each
-		// typed reply; a child reads the main session without it.
-		const { transcript: history } = classifierHistory(ctx.sessionManager.getBranch(), {
-			...(opts?.toolCallId ? { beforeToolCallId: opts.toolCallId } : (opts?.history ?? { throughToolCallId: currentMainToolCallId })),
-			priorProse: opts?.history === undefined,
-		});
+		// The main session's own call (it names its tool call) also carries the
+		// agent's prose before each typed reply; a child reads the main session
+		// without it.
+		const history = classifierHistory(
+			ctx.sessionManager.getBranch(),
+			opts?.toolCallId ? { beforeToolCallId: opts.toolCallId, priorProse: true } : (opts?.history ?? { throughToolCallId: currentMainToolCallId }),
+		);
 		const action = opts?.appendEntry;
 		const shell = normalizeToolName(toolName) === "powershell" ? "powershell" : isShellTool(normalizeToolName(toolName)) || normalizeToolName(toolName) === "monitor" ? "bash" : undefined;
 		if (shell && subject && wantsGitStatusMeta(shell, subject)) {
@@ -2361,7 +2362,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		// toolCallEntry renders an emitter's missing input (an older payload) as empty rather than throw.
 		const childEntries = run.actions.map((action) => toolCallEntry(normalizeToolName(action.toolName), action.input));
 		childEntries.push({ kind: "hand-back", report: run.report });
-		const { transcript } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
+		const transcript = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(
 			{
 				toolName: "subagent-review",

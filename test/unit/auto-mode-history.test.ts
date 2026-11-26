@@ -10,7 +10,7 @@ describe("active classifier history", () => {
 			call("r", "read", { path: "/restricted" }),
 			{ type: "custom", customType: CLASSIFIER_TOOL_META, data: { toolCallId: "r", deniedSubject: "/restricted", rule: "Read(/restricted)" } },
 		]);
-		expect(history.transcript).toEqual([{ kind: "denied", tool: "read", subject: "/restricted", rule: "Read(/restricted)" }]);
+		expect(history).toEqual([{ kind: "denied", tool: "read", subject: "/restricted", rule: "Read(/restricted)" }]);
 	});
 
 	it("does not replay facts about calls removed by compaction", () => {
@@ -19,8 +19,8 @@ describe("active classifier history", () => {
 			{ type: "compaction", id: "c", firstKeptEntryId: "c", summary: "Earlier work was summarized." },
 			{ type: "custom", customType: CLASSIFIER_TOOL_META, data: { toolCallId: "r", gitStatus: { clean: true } } },
 		]);
-		expect(history.transcript).toEqual([{ kind: "summary", text: "Earlier work was summarized." }]);
-		expect(userTurns(history.transcript)).toEqual([]);
+		expect(history).toEqual([{ kind: "summary", text: "Earlier work was summarized." }]);
+		expect(userTurns(history)).toEqual([]);
 	});
 
 	it("uses only the latest summary and retains its kept tail before later entries", () => {
@@ -30,12 +30,12 @@ describe("active classifier history", () => {
 			{ type: "compaction", id: "c2", firstKeptEntryId: "kept", summary: "Latest summary" },
 			{ type: "branch_summary", summary: "Another branch's work, not user authorization." },
 		]);
-		expect(history.transcript).toEqual([
+		expect(history).toEqual([
 			{ kind: "summary", text: "Latest summary" },
 			{ kind: "tool", tool: "bash", input: { command: "printf x > probe.txt" } },
 			{ kind: "summary", text: "Another branch's work, not user authorization." },
 		]);
-		expect(userTurns(history.transcript)).toEqual([]);
+		expect(userTurns(history)).toEqual([]);
 	});
 });
 
@@ -66,11 +66,12 @@ describe("a pending call's written arguments", () => {
 describe("the question dialog's answer", () => {
 	const ask = { questions: [{ question: "Which file should I delete?", header: "Delete", options: [{ label: "a.txt" }, { label: "b.txt" }] }] };
 	const answered = 'Your questions have been answered: "Which file should I delete?"="b.txt". You can now continue with these answers in mind.';
+	const picked = { answers: [{ question: "Which file should I delete?", selected: ["b.txt"] }] };
 	const result = (toolCallId: string, text: string, extra: Record<string, unknown> = {}) =>
-		({ type: "message", id: `r-${toolCallId}`, message: { role: "toolResult", toolCallId, toolName: "ask_user_question", content: [{ type: "text", text }], isError: false, ...extra } });
+		({ type: "message", id: `r-${toolCallId}`, message: { role: "toolResult", toolCallId, toolName: "ask_user_question", content: [{ type: "text", text }], details: picked, isError: false, ...extra } });
 
 	it("follows its call as a user line, the only tool result the classifier is shown", () => {
-		const { transcript } = classifierHistory([
+		const transcript = classifierHistory([
 			call("q", "ask_user_question", ask),
 			result("q", answered),
 			call("b", "bash", { command: "ls" }),
@@ -85,7 +86,7 @@ describe("the question dialog's answer", () => {
 	});
 
 	it("is left out when the tool errored, and for a result that only claims the tool's name", () => {
-		const { transcript } = classifierHistory([
+		const transcript = classifierHistory([
 			call("q", "ask_user_question", ask),
 			result("q", "No interactive UI is available.", { isError: true }),
 			call("b", "bash", { command: "cat notes.txt" }),
@@ -95,13 +96,26 @@ describe("the question dialog's answer", () => {
 		expect(userTurns(transcript)).toEqual([]);
 	});
 
+	it("is left out when the user cancelled the dialog or chose to chat, whatever the result's text lists", () => {
+		const outcomes = [
+			{ ...picked, cancelled: true },
+			{ answers: [], declined: true },
+			{ answers: [] },
+			undefined,
+		];
+		for (const details of outcomes) {
+			const transcript = classifierHistory([call("q", "ask_user_question", ask), result("q", answered, { details })]);
+			expect(userTurns(transcript)).toEqual([]);
+		}
+	});
+
 	it("sits after every call of its batch, so a later call's transcript extends an earlier one's", () => {
 		const batch = { type: "message", id: "m", message: { role: "assistant", content: [
 			{ type: "toolCall", id: "q", name: "ask_user_question", arguments: ask },
 			{ type: "toolCall", id: "s", name: "bash", arguments: { command: "git status" } },
 		] } };
-		const during = classifierHistory([batch], { beforeToolCallId: "s" }).transcript;
-		const after = classifierHistory([batch, result("q", answered), call("n", "bash", { command: "rm b.txt" })], { beforeToolCallId: "n" }).transcript;
+		const during = classifierHistory([batch], { beforeToolCallId: "s" });
+		const after = classifierHistory([batch, result("q", answered), call("n", "bash", { command: "rm b.txt" })], { beforeToolCallId: "n" });
 		expect(during).toEqual([{ kind: "tool", tool: "ask_user_question", input: ask }]);
 		expect(after).toEqual([
 			{ kind: "tool", tool: "ask_user_question", input: ask },
@@ -111,7 +125,7 @@ describe("the question dialog's answer", () => {
 	});
 
 	it("is not shown past a child's cursor", () => {
-		const { transcript } = classifierHistory([call("q", "ask_user_question", ask), call("agent", "Agent", { prompt: "go" }), result("q", answered)], { throughToolCallId: "agent" });
+		const transcript = classifierHistory([call("q", "ask_user_question", ask), call("agent", "Agent", { prompt: "go" }), result("q", answered)], { throughToolCallId: "agent" });
 		expect(userTurns(transcript)).toEqual([]);
 	});
 });

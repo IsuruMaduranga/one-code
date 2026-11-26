@@ -134,7 +134,7 @@ describe("skill and plugin permission provenance", () => {
 		const transformed = results.find((result) => result?.action === "transform");
 		expect(transformed?.text).toContain(withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		await persistUser(transformed!.text);
-		expect(userTurns(classifierHistory(branch).transcript)).toEqual([]);
+		expect(userTurns(classifierHistory(branch))).toEqual([]);
 		await fake.fire("session_start", { reason: "resume" }, ctx);
 		expect((await pushAttempt())?.block).toBe(true);
 		expect(userTurns(vi.mocked(classify).mock.calls.at(-1)![0].transcript)).toEqual([]);

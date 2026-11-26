@@ -21,7 +21,7 @@ const user = (text: string, typed = true) => {
 const said = (...content: unknown[]) => ({ type: "message", id: `a${++seq}`, message: { role: "assistant", content } });
 const text = (body: string) => ({ type: "text", text: body });
 const bash = (command: string) => ({ type: "toolCall", id: `c${++seq}`, name: "bash", arguments: { command } });
-const project = (branch: unknown[], priorProse = true) => classifierHistory(branch, { priorProse }).transcript;
+const project = (branch: unknown[], priorProse = true) => classifierHistory(branch, { priorProse });
 
 describe("the agent's prose before a typed reply", () => {
 	it("sits directly above the reply it was answered by, only when asked for", () => {
