@@ -84,3 +84,18 @@ describe("cache-probe-classifier on history breakpoints", () => {
 		expect(status).toBe(0);
 	});
 });
+
+describe("cache-probe-classifier's transcript check", () => {
+	const history = '\n{"user":"Clean up."}\n{"Agent":{"prompt":"Clean up."}}\n';
+
+	it("accepts a subagent's next call that carries neither its earlier action nor that action's metadata lines", () => {
+		const withMeta = `${history}{"meta":{"gitStatus":"dirty"}}\n{"meta":{"resolvedPaths":[]}}\n{"Bash":"rm -rf scratch"}\n`;
+		const next = `${history}{"Bash":"ls"}\n`;
+		expect(probe([row(withMeta, 0, 0), row(next, 0, 0)]).out).not.toContain("does not extend");
+	});
+
+	it("still fails a call whose history before the action changed", () => {
+		const changed = history.replace("Clean up.", "Clean everything.");
+		expect(probe([row(`${history}{"Bash":"rm -rf scratch"}\n`, 0, 0), row(`${changed}{"Bash":"ls"}\n`, 0, 0)]).out).toContain("transcript of call 2 does not extend call 1's");
+	});
+});
