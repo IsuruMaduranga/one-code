@@ -22,7 +22,7 @@
  * profile declares per vendor (lib/request/openrouter-routing-defaults.ts).
  * `*_CACHE_MARKS=0` turns all marks off, to compare a run with and without
  * them; `*_OPENROUTER_CACHE_MARKS=0` turns off only the OpenRouter ones;
- * `*_OPENROUTER_IGNORE_HOSTS=0` turns off the skipped hosts;
+ * `*_OPENROUTER_IGNORE_HOSTS=1` turns on the skipped hosts (off by default);
  * `*_OPENROUTER_ROUTING_DEFAULTS=0` turns off the profile's routing defaults.
  */
 

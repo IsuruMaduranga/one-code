@@ -59,18 +59,20 @@ describe("the endpoints listing", () => {
 });
 
 describe("the reduced-precision notice", () => {
-	it("names a host whose every endpoint of the model runs at a reduced precision", () => {
-		const notice = reducedPrecisionNotice({ model: "openrouter/z-ai/glm-5.3", host: "Nebius", quantizations: ["fp4"] });
-		expect(notice).toContain("served openrouter/z-ai/glm-5.3 from Nebius, which runs it at fp4");
-		expect(notice).toContain("compat.openRouterRouting for this model in pi's models.json");
-		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["int4", "fp6"] })).toContain("runs it at int4 or fp6");
+	const file = "~/.pi/agent/models.json";
+
+	it("names a host whose every endpoint of the model runs at a reduced precision, and how to avoid it", () => {
+		expect(reducedPrecisionNotice({ model: "openrouter/z-ai/glm-5.3", host: "Nebius", quantizations: ["fp4"] }, file)).toBe(
+			'Nebius is running openrouter/z-ai/glm-5.3 at reduced precision (fp4), which can make the model weaker. To avoid this host, add "Nebius" to the model\'s ignore list in ~/.pi/agent/models.json, or to the ignored providers in your OpenRouter account settings.',
+		);
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["int4", "fp6"] }, file)).toContain("(int4 or fp6)");
 		// A label beyond OpenRouter's documented ones is a reduced precision too.
-		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["mxfp4"] })).toContain("runs it at mxfp4");
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["mxfp4"] }, file)).toContain("(mxfp4)");
 	});
 
 	it("says nothing for a host at fp8 or above, one that declares none, one with a higher-precision endpoint too, or one not in the listing", () => {
 		for (const quantizations of [["fp8"], ["bf16"], ["unknown"], ["fp4", "fp8"], [], undefined]) {
-			expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations }), String(quantizations)).toBeUndefined();
+			expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations }, file), String(quantizations)).toBeUndefined();
 		}
 	});
 });

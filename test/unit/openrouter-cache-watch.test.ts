@@ -34,12 +34,12 @@ describe("openrouter cache watch", () => {
 		for (const prompt of [100_000, 10_000, 7_000, 4_000]) expect(watch.observe(reply(prompt, prompt))).toBeUndefined();
 	});
 
-	it("says what the misses cost and how to skip the host", () => {
-		const notice = cacheMissNotice({ model: "openrouter/qwen/qwen3.8-27b", host: "Cold Host", misses: 3, missedTokens: 63_000 }, 0.2);
+	it("says what the misses cost and how to avoid the host", () => {
+		const notice = cacheMissNotice({ model: "openrouter/qwen/qwen3.8-27b", host: "Cold Host", misses: 3, missedTokens: 63_000 }, "~/.pi/agent/models.json", 0.2);
 		expect(notice).toBe(
-			"OpenRouter's host Cold Host missed the prompt cache on the last 3 replies of openrouter/qwen/qwen3.8-27b (63,000 tokens sent again at the full input price, about $0.01 more). To skip it, add Cold Host to the ignored providers in your OpenRouter account settings, or ignore it for this model with compat.openRouterRouting in pi's models.json.",
+			'Cold Host missed the prompt cache on the last 3 replies of openrouter/qwen/qwen3.8-27b (63,000 tokens sent again at the full input price, about $0.01 more). To avoid this host, add "Cold Host" to the model\'s ignore list in ~/.pi/agent/models.json, or to the ignored providers in your OpenRouter account settings.',
 		);
-		expect(cacheMissNotice({ model: "m", host: "H", misses: 3, missedTokens: 20_000 }, 0.2)).toContain("about $0.0040 more");
-		expect(cacheMissNotice({ model: "m", host: "H", misses: 3, missedTokens: 5_000 })).not.toContain("$");
+		expect(cacheMissNotice({ model: "m", host: "H", misses: 3, missedTokens: 20_000 }, "f", 0.2)).toContain("about $0.0040 more");
+		expect(cacheMissNotice({ model: "m", host: "H", misses: 3, missedTokens: 5_000 }, "f")).not.toContain("$");
 	});
 });

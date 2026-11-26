@@ -1,6 +1,8 @@
 /**
- * OpenRouter hosts One Code asks OpenRouter to skip because they defeat the
- * prompt cache, as a list that is easy to shrink when a host fixes its cache.
+ * OpenRouter hosts measured defeating the prompt cache, which OpenRouter is
+ * asked to skip when the user turns this on. Off by default: no host is left
+ * out unless the user asks, and a host that keeps missing the cache is named
+ * to them at run time instead (openrouter-cache-watch.ts).
  *
  * OpenRouter keeps a session on the host that served its first request
  * (`x-session-id`, which pi-ai sends), so one host that reuses little keeps a
@@ -30,7 +32,7 @@
  * routing: a host the user names in `order` or `only` is not ignored, and an
  * `ignore` list the user set keeps its entries, ours appended.
  *
- * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=0` turns it off. Pure: no pi imports.
+ * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=1` turns it on. Pure: no pi imports.
  */
 
 import { knobValue } from "../profile/knobs.ts";
@@ -51,7 +53,7 @@ export interface IgnoredHost {
 }
 
 /**
- * The hosts skipped today. OpenInference: measured on
+ * The hosts skipped when the list is on. OpenInference: measured on
  * deepseek/deepseek-v4.1-flash-1017. Of the catalog's OpenRouter models it
  * serves deepseek-v4.1-flash (36 other hosts, each with a cache-read price),
  * deepseek-v4.1-flash-1017 (47) and z-ai/glm-5.3-flash (41), checked on
@@ -65,12 +67,12 @@ export function hostsFor(modelId: string, hosts: readonly IgnoredHost[] = CACHE_
 	return hosts.filter((host) => host.vendors.includes(vendor));
 }
 
-/** The knob that turns the list off (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=0`). */
+/** The knob that turns the list on (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=1`). */
 export const OPENROUTER_IGNORE_HOSTS_KNOB = "OPENROUTER_IGNORE_HOSTS";
 
-/** Whether the list applies in `vars` (the process environment by default). */
+/** Whether the list applies in `vars` (the process environment by default): only when the user turned it on. */
 export function openRouterIgnoreHostsEnabled(vars: Readonly<Record<string, unknown>> = process.env): boolean {
-	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) !== "0";
+	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "1";
 }
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);

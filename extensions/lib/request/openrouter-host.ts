@@ -20,10 +20,9 @@
  *
  * The same listing tells the user, once per host and model, that a reply came
  * from a host at reduced precision (`reducedPrecisionNotice`, shown by the
- * `tool-call-corruption` extension). A profile's quantization floor keeps such
- * hosts out for the vendors it lists; this covers every other open-weight
- * model, and a model whose floor the user turned off or replaced, without
- * filtering anything: a notice can never leave a model with no host.
+ * `tool-call-corruption` extension). Nothing is filtered: which hosts serve a
+ * model is the user's choice, and a notice can never leave a model with no
+ * host.
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -100,17 +99,22 @@ export function servedHostLabel(served: ServedHost): string {
 const KEPT_PRECISIONS: ReadonlySet<string> = new Set(["fp8", "bf16", "fp16", "fp32"]);
 
 /**
+ * How to stop using a host, the sentence the OpenRouter notices end on.
+ * `modelsFile` is pi's models file as the user would type it
+ * (`~/.pi/agent/models.json` under plain pi).
+ */
+export function avoidHostAdvice(host: string, modelsFile: string): string {
+	return `To avoid this host, add "${host}" to the model's ignore list in ${modelsFile}, or to the ignored providers in your OpenRouter account settings.`;
+}
+
+/**
  * What to tell the user when a reply was served at reduced precision, or
  * undefined. Only when every endpoint the listing gives the host for this
  * model is at a reduced precision: a host with endpoints at several does not
  * say which one served, and a host that declares none says nothing.
  */
-export function reducedPrecisionNotice(served: ServedHost): string | undefined {
+export function reducedPrecisionNotice(served: ServedHost, modelsFile: string): string | undefined {
 	const listed = served.quantizations ?? [];
 	if (listed.length === 0 || listed.some((quantization) => quantization === "unknown" || KEPT_PRECISIONS.has(quantization))) return undefined;
-	return (
-		`OpenRouter served ${served.model} from ${served.host}, which runs it at ${listed.join(" or ")}: reduced precision, which can make the model weaker. ` +
-		`To keep to hosts at a higher precision, set compat.openRouterRouting for this model in pi's models.json: ` +
-		`list the precisions you accept in "quantizations" (fp8, bf16, fp16, fp32 and unknown leave out the reduced ones), or put this host in "ignore".`
-	);
+	return `${served.host} is running ${served.model} at reduced precision (${listed.join(" or ")}), which can make the model weaker. ${avoidHostAdvice(served.host, modelsFile)}`;
 }

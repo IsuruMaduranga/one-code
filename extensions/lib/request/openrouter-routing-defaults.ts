@@ -89,36 +89,51 @@ function availableHosts(errorMessage: string): string[] {
 	}
 }
 
-/** The user's routing fields that can leave a model no host, as `only: deepinfra/bf16; ignore: wafer`. */
-function hostChoices(routing: OpenRouterRouting | undefined): string {
-	return ["only", "order", "quantizations", "ignore"]
-		.flatMap((field) => {
-			const list = routing?.[field];
-			return Array.isArray(list) && list.length > 0 ? [`${field}: ${list.join(", ")}`] : [];
-		})
-		.join("; ");
+/** The routing lists that can leave a model no host. */
+const HOST_LISTS = ["only", "order", "quantizations", "ignore"] as const;
+
+/** The entries of the user's host lists, and those lists as `only: deepinfra/bf16; ignore: wafer`. */
+function hostChoices(routing: OpenRouterRouting | undefined): { entries: string[]; summary: string } {
+	const lists = HOST_LISTS.flatMap((field) => {
+		const list = routing?.[field];
+		const entries = Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
+		return entries.length > 0 ? [{ field, entries }] : [];
+	});
+	return { entries: lists.flatMap((list) => list.entries), summary: lists.map((list) => `${list.field}: ${list.entries.join(", ")}`).join("; ") };
+}
+
+/** The most hosts the hint names before it counts the rest. */
+const NAMED_HOSTS = 5;
+
+/** `hosts` as a short phrase: the ones the user's own lists name first (still serving, under another entry), then the first of the rest, then a count. */
+function hostsPhrase(hosts: readonly string[], chosen: readonly string[]): string {
+	const bases = new Set(chosen.map((entry) => entry.trim().toLowerCase().split("/")[0]));
+	const ordered = [...hosts.filter((host) => bases.has(host.toLowerCase())), ...hosts.filter((host) => !bases.has(host.toLowerCase()))];
+	const rest = ordered.length - NAMED_HOSTS;
+	return rest > 0 ? `${ordered.slice(0, NAMED_HOSTS).join(", ")} and ${rest} more` : ordered.join(", ");
 }
 
 /**
  * What to tell the user when `model`'s request failed with `errorMessage`
  * because its routing left it no host. When the floor from `table` was
- * applied: the cause, the off switch and the models.json override. When the
+ * applied: the cause, the off switch and the models file override. When the
  * user's own routing chose (an `only` that names an endpoint the host has
- * since dropped, for one): that routing, and the hosts OpenRouter says serve
- * the model now. Undefined for any other error, and when neither applies
- * (an account setting, say).
+ * since dropped, for one): that routing, a few of the hosts OpenRouter says
+ * serve the model now, and the file to edit (`modelsFile`, as shown to the
+ * user). Undefined for any other error, and when neither applies (an account
+ * setting, say).
  */
-export function routingFailureHint<M extends CacheMarksModel>(model: M, errorMessage: string | undefined, table: ReadonlyMap<string, OpenRouterRoutingDefault>): string | undefined {
+export function routingFailureHint<M extends CacheMarksModel>(model: M, errorMessage: string | undefined, table: ReadonlyMap<string, OpenRouterRoutingDefault>, modelsFile: string): string | undefined {
 	if (!errorMessage || !NO_ALLOWED_PROVIDERS.test(errorMessage)) return undefined;
 	const floored = withOpenRouterRoutingDefaults(model, table);
 	if (floored !== model) {
 		const quantizations = ((floored.compat as { openRouterRouting: { quantizations: string[] } }).openRouterRouting.quantizations).join(", ");
-		return `OpenRouter has no host that serves ${model.id} at the precisions ${brand.name} asks for (${quantizations}). Set ${envName(OPENROUTER_ROUTING_DEFAULTS_KNOB)}=0 to drop that floor, or set your own compat.openRouterRouting for this model in pi's models.json (quantizations, only or order), which replaces it.`;
+		return `OpenRouter has no host that serves ${model.id} at the precisions ${brand.name} asks for (${quantizations}). Set ${envName(OPENROUTER_ROUTING_DEFAULTS_KNOB)}=0 to drop that floor, or set your own routing for this model in ${modelsFile} (quantizations, only or order), which replaces it.`;
 	}
 	if (!isOpenRouterChatModel(model)) return undefined;
 	const chosen = hostChoices((model.compat as { openRouterRouting?: OpenRouterRouting } | undefined)?.openRouterRouting);
-	if (!chosen) return undefined;
+	if (!chosen.summary) return undefined;
 	const hosts = availableHosts(errorMessage);
-	const serving = hosts.length > 0 ? ` Hosts that serve it now: ${hosts.join(", ")}.` : "";
-	return `OpenRouter has no host for ${model.id} that your routing allows (${chosen}).${serving} Change compat.openRouterRouting for this model in pi's models.json: a host can drop a model or a precision at any time, and then a list that names it leaves every request with no host.`;
+	const available = hosts.length > 0 ? ` Available now: ${hostsPhrase(hosts, chosen.entries)}.` : "";
+	return `Your routing settings for ${model.id} (${chosen.summary}) leave OpenRouter no host to use.${available} To fix it, edit this model's entry in ${modelsFile}.`;
 }

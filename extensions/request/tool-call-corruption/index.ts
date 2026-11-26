@@ -5,8 +5,11 @@
  * With the host and each reply's usage it also names a host that keeps missing the prompt cache (lib/request/openrouter-cache-watch.ts),
  * and a host that runs the model at reduced precision (lib/request/openrouter-host.ts).
  */
+import os from "node:os";
+import { join } from "node:path";
 import { feature } from "../../lib/profile/feature.ts";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { tildify } from "../../lib/profile/paths.ts";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
@@ -69,6 +72,8 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	// generation is never recorded, so the lookup cannot name it after a stop.
 	let streamProvider: string | undefined;
 	let cacheWatch = createCacheWatch();
+	/** pi's models file as the notices show it: where the user sets a model's hosts. */
+	const modelsFile = () => tildify(join(getAgentDir(), "models.json"), os.homedir());
 	// Each model's endpoints listing, read once, and the hosts already checked against it.
 	const precisionListings = new Map<string, Map<string, string[]>>();
 	const precisionChecked = new Set<string>();
@@ -122,7 +127,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 				const auth = await registry.getApiKeyAndHeaders(model);
 				return auth.ok ? { apiKey: auth.apiKey, baseUrl: auth.baseUrl ?? model.baseUrl } : undefined;
 			}, controller.signal);
-			if (alive() && !controller.signal.aborted) notifyOrPrint(output, toolCallCorruptionNotice(model.id, provider, failure), "error");
+			if (alive() && !controller.signal.aborted) notifyOrPrint(output, toolCallCorruptionNotice(model.id, provider, modelsFile(), failure), "error");
 		}).finally(() => pending.delete(controller));
 		pending.set(controller, notice);
 	};
@@ -149,8 +154,9 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 
 	/**
 	 * Name a host that runs the model at reduced precision, once per host and
-	 * model. The listing is one public request per model, off the turn's path:
-	 * a listing that cannot be read leaves the host unnamed.
+	 * model. The listing is one public request per model, off the turn's path
+	 * (five seconds at most): a listing that cannot be read leaves the host
+	 * unnamed.
 	 */
 	const checkPrecision = (ctx: ExtensionContext, host: string) => {
 		const model = ctx.model!;
@@ -164,7 +170,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			const listing = precisionListings.get(name) ?? await fetchEndpointQuantizations(model.baseUrl, model.id, controller.signal);
 			if (!listing || !alive() || controller.signal.aborted) return;
 			precisionListings.set(name, listing);
-			const notice = reducedPrecisionNotice({ model: name, host, quantizations: listing.get(host.toLowerCase()) });
+			const notice = reducedPrecisionNotice({ model: name, host, quantizations: listing.get(host.toLowerCase()) }, modelsFile());
 			if (notice) notifyOrPrint(output, notice, "warning");
 		})()
 			.catch(() => {})
@@ -270,7 +276,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			const last = event.message.stopReason === "length" ? event.message.content.at(-1) : undefined;
 			if (last?.type === "toolCall") flagged.delete(last.id);
 			// Routing that left the model no host (the profile's floor, or the user's own pin) fails every request with OpenRouter's bare refusal: say why, once per reply.
-			const routingHint = announce && event.message.stopReason === "error" ? routingFailureHint(ctx.model!, event.message.errorMessage, activeOpenRouterRouting()) : undefined;
+			const routingHint = announce && event.message.stopReason === "error" ? routingFailureHint(ctx.model!, event.message.errorMessage, activeOpenRouterRouting(), modelsFile()) : undefined;
 			if (routingHint) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, routingHint, "error");
 			// The main session's host, for /doctor (lib/request/openrouter-host.ts); a child has its own bus and no report.
 			if (announce && (streamProvider || responseId)) {
@@ -282,9 +288,9 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			if (announce && streamProvider && usage && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
 				const model = ctx.model!;
 				const streak = cacheWatch.observe({ model: `${model.provider}/${model.id}`, host: streamProvider, input: usage.input, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite });
-				if (streak) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, cacheMissNotice(streak, (model.cost?.input ?? 0) - (model.cost?.cacheRead ?? 0)), "warning");
-				// A host at reduced precision: name it once. Only in a session that outlives the turn, so a one-shot run never waits on the listing.
-				if (sessionOutlivesTurn(ctx.mode) && isOpenRouterChatModel(model)) checkPrecision(ctx, streamProvider);
+				if (streak) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, cacheMissNotice(streak, modelsFile(), (model.cost?.input ?? 0) - (model.cost?.cacheRead ?? 0)), "warning");
+				// A host at reduced precision: name it once. A one-shot run waits for the lookup when it ends (agent_end).
+				if (isOpenRouterChatModel(model)) checkPrecision(ctx, streamProvider);
 			}
 		}
 	});

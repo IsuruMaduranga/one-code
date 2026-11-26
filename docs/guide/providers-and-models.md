@@ -288,57 +288,31 @@ so. Web fetch works on every provider; it never depends on a search API.
 
 ## OpenRouter hosts and precision
 
-OpenRouter serves an open model through many hosting companies, and some of
-the cheapest run it at reduced precision (fp4), which can make the model
-weaker. On DeepSeek and Qwen models, One Code asks OpenRouter to use only
-hosts that run the model at fp8, bf16, fp16 or fp32, or that don't state a
-precision. Hosts at fp4, fp6, int4 or int8 are left out. Your session still
-stays with the host that served its first request, so the prompt cache keeps
-working. Claude models on OpenRouter aren't affected. If no host is left for a
-model, the error you see says so and names the ways around it below.
+OpenRouter serves an open model through many hosting companies, and it picks
+one for you, the cheapest first. One Code doesn't remove any host from that
+pick. Which hosts serve your model is your choice. What One Code does is tell
+you when a host is worth leaving out:
 
-Your own routing wins. If you set `quantizations`, `only` or `order` for a
-model in pi's `models.json`, One Code adds nothing to that model's requests:
+- **Reduced precision.** Some of the cheapest hosts run a model below fp8
+  (fp4, for example), which can make it weaker. When such a host serves a
+  reply, One Code names it and its precision, once per host and model.
+- **Cache misses.** Most hosts read back nearly all of your previous prompt.
+  A few read almost none of it, so every request pays the full input price.
+  When the host serving your session misses the cache on three replies in a
+  row, One Code names it once, with the tokens it sent again and, when the
+  model's prices are known, what that cost.
+- **Damaged tool calls.** When a host sends a tool call that is cut off or
+  garbled, or stops sending data, One Code blocks the call, stops the turn
+  and names the host.
 
-```json
-{
-  "providers": {
-    "openrouter": {
-      "modelOverrides": {
-        "qwen/qwen3.8-27b": { "compat": { "openRouterRouting": { "only": ["deepinfra"] } } }
-      }
-    }
-  }
-}
-```
+`/doctor report` also shows which host served your last reply and, when
+OpenRouter lists it, the precision that host runs the model at. The precision
+notice doesn't apply to Claude models on OpenRouter.
 
-A `compat.openRouterRouting` set on the `openrouter` provider itself counts
-for every model. To turn the default off everywhere, set
-`ONECODE_OPENROUTER_ROUTING_DEFAULTS=0`.
+### Leave a host out
 
-`/doctor report` shows which host served your last reply and, when
-OpenRouter lists it, the precision that host runs the model at.
-
-On every other open model, and on these when you turn the default off or set
-your own routing, One Code doesn't filter hosts. It tells you instead: when a
-host that runs the model below fp8 serves a reply, One Code names the host and
-its precision once, and says how to leave it out. The notice appears in
-interactive sessions, not in one-shot `-p` runs.
-
-### When a host keeps missing the cache
-
-Hosts cache differently. Most read back nearly all of your previous prompt.
-Some read a few hundred tokens short, which costs next to nothing. A few read
-almost none of it, so every request pays the full input price. When the host
-serving your session misses the cache on three replies in a row, One Code
-names it once, with the tokens it sent again and, when the model's prices
-are known, what that cost.
-
-To stop using that host, add it to the ignored providers in your OpenRouter
-account settings, which covers every request on your account. To skip it
-for one model only, put its slug (the lowercase name OpenRouter's routing
-uses, such as `deepinfra`) in that model's `ignore` list in pi's
-`models.json`:
+Each notice names the host and the file to edit. To leave a host out for one
+model, put it in that model's `ignore` list in pi's `models.json`:
 
 ```json
 {
@@ -352,12 +326,38 @@ uses, such as `deepinfra`) in that model's `ignore` list in pi's
 }
 ```
 
-Prefer `ignore` over `only`. With `only`, every request fails while that one
-host is down or stops serving the model, and a host can drop a model or one
-precision of it at any time (an `only` entry such as `deepinfra/bf16` stops
-matching the day the host serves the model at fp8 only). When your routing
-leaves a model no host, the error names the routing you set and the hosts
-that serve the model now.
+To leave it out of every request on your account, add it to the ignored
+providers in your OpenRouter account settings.
+
+### Accept only some precisions
+
+To keep every reduced-precision host out without naming them, list the
+precisions you accept. `unknown` keeps the hosts that don't state one; without
+it, a model whose only hosts state none fails every request. Set on the
+`openrouter` provider, the routing counts for every model:
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "compat": { "openRouterRouting": { "quantizations": ["fp8", "bf16", "fp16", "fp32", "unknown"] } }
+    }
+  }
+}
+```
+
+### If you pin one host
+
+Prefer `ignore` or `quantizations` over `only`. With `only`, every request
+fails while that one host is down or stops serving the model, and a host can
+drop a model or one precision of it at any time (an `only` entry such as
+`deepinfra/bf16` stops matching the day the host serves the model at fp8
+only). When your routing leaves a model no host, the error names the routing
+you set, a few of the hosts that serve the model now, and the file to edit.
+
+One Code also keeps a short list of hosts it measured missing the cache.
+It's off by default. Set `ONECODE_OPENROUTER_IGNORE_HOSTS=1` to have One Code
+ask OpenRouter to skip them.
 
 ## Provider notes
 
