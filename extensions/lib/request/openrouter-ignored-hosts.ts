@@ -1,8 +1,13 @@
 /**
  * OpenRouter hosts measured defeating the prompt cache, which OpenRouter is
- * asked to skip when the user turns this on. Off by default: no host is left
- * out unless the user asks, and a host that keeps missing the cache is named
- * to them at run time instead (openrouter-cache-watch.ts).
+ * asked to skip. By default only side calls with their own OpenRouter session
+ * skip them (the classifier, the reader, /btw, recap, the session title,
+ * setup: `withSideCallIgnoredHosts`): nothing names a host to the user for
+ * those, and a side call's cache miss is never an accepted cost. The main
+ * session leaves no host out unless the user asks, and a host that keeps
+ * missing its cache is named to them at run time instead
+ * (openrouter-cache-watch.ts). Compaction and the replayed forks send under
+ * the main session's id, so they stay on its host.
  *
  * OpenRouter keeps a session on the host that served its first request
  * (`x-session-id`, which pi-ai sends), so one host that reuses little keeps a
@@ -32,7 +37,8 @@
  * routing: a host the user names in `order` or `only` is not ignored, and an
  * `ignore` list the user set keeps its entries, ours appended.
  *
- * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=1` turns it on. Pure: no pi imports.
+ * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=1` turns it on for the main session too, `=0`
+ * turns it off everywhere. Pure: no pi imports.
  */
 
 import { knobValue } from "../profile/knobs.ts";
@@ -67,10 +73,10 @@ export function hostsFor(modelId: string, hosts: readonly IgnoredHost[] = CACHE_
 	return hosts.filter((host) => host.vendors.includes(vendor));
 }
 
-/** The knob that turns the list on (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=1`). */
+/** The knob for the list: `=1` adds the main session, `=0` turns it off for side calls too. */
 export const OPENROUTER_IGNORE_HOSTS_KNOB = "OPENROUTER_IGNORE_HOSTS";
 
-/** Whether the list applies in `vars` (the process environment by default): only when the user turned it on. */
+/** Whether the main session's requests skip the hosts in `vars` (the process environment by default): only when the user turned it on. */
 export function openRouterIgnoreHostsEnabled(vars: Readonly<Record<string, unknown>> = process.env): boolean {
 	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "1";
 }
@@ -99,4 +105,13 @@ export function withOpenRouterIgnoredHosts<M extends CacheMarksModel>(model: M):
 		const hosts = hostsFor(model.id);
 		return hosts.length === 0 ? routing : withIgnoredHosts(routing, hosts);
 	});
+}
+
+/**
+ * `model` as a side call with its own OpenRouter session sends it: the hosts
+ * in its vendor's scope skipped, unless the user turned the list off
+ * (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=0`).
+ */
+export function withSideCallIgnoredHosts<M extends CacheMarksModel>(model: M, vars: Readonly<Record<string, unknown>> = process.env): M {
+	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "0" ? model : withOpenRouterIgnoredHosts(model);
 }

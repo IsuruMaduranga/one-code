@@ -356,8 +356,11 @@ only). When your routing leaves a model no host, the error names the routing
 you set, a few of the hosts that serve the model now, and the file to edit.
 
 One Code also keeps a short list of hosts it measured missing the cache.
-It's off by default. Set `ONECODE_OPENROUTER_IGNORE_HOSTS=1` to have One Code
-ask OpenRouter to skip them.
+Its background calls (the auto-mode classifier, the web page reader, `/btw`,
+recaps and session titles) skip them by default: each picks its own host, and
+nothing would tell you if that host kept missing the cache. Your own session
+doesn't skip them. Set `ONECODE_OPENROUTER_IGNORE_HOSTS=1` to skip them there
+too, or `=0` to skip them nowhere.
 
 ## Provider notes
 

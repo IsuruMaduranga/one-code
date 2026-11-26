@@ -27,6 +27,7 @@ import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeThreadless, type SideCallReply } from "../../../lib/request/anthropic-stream.ts";
+import { withSideCallIgnoredHosts } from "../../../lib/request/openrouter-ignored-hosts.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
@@ -434,7 +435,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
 			return completeThreadless(
 				deps.registry,
-				model,
+				// Its own OpenRouter session picks its own host, which no notice names: skip the hosts measured missing the cache.
+				withSideCallIgnoredHosts(model),
 				{ systemPrompt: system, messages: [{ role: "user", content: userText, timestamp: Date.now() }] },
 				{
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
