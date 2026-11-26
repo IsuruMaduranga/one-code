@@ -94,6 +94,22 @@ describe("classifier history in the permissions gate", () => {
 		expect(seen.at(-1)?.[0]).toEqual({ kind: "user", text: "Investigate the RPC behavior." });
 	});
 
+	it("shows the main session's own call the agent's prose before the reply that answered it", async () => {
+		branch = [
+			...typed("ask", "Tidy the release."),
+			{ type: "message", id: "plan", message: { role: "assistant", content: [{ type: "text", text: "I will delete the v0 tag. OK?" }] } },
+			...typed("reply", "go ahead"),
+		];
+		await fake.fire("session_start", { reason: "resume" }, ctx);
+		await call("bash", { command: "git push origin :refs/tags/v0" });
+		expect(seen.at(-1)).toEqual([
+			{ kind: "user", text: "Tidy the release." },
+			{ kind: "assistant", text: "I will delete the v0 tag. OK?" },
+			{ kind: "user", text: "go ahead" },
+			{ kind: "tool", tool: "bash", input: { command: "git push origin :refs/tags/v0" } },
+		]);
+	});
+
 	it("rebuilds summary then kept and later entries after compaction, with active intent only", async () => {
 		await input("Old authorization no longer in context");
 		await call("write", { path: "old.txt", content: "old" });

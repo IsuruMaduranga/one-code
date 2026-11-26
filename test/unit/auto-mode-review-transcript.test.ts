@@ -109,6 +109,7 @@ describe("hand-back review transcript", () => {
 		await mainBatch();
 		await fake.fire("turn_end", {}, ctx);
 		branch.push(
+			{ type: "message", id: "m-prose", message: { role: "assistant", content: [{ type: "text", text: "MAIN-AGENT-PROSE: shall I tidy the build directory too?" }] } },
 			...typed("u2", LATER_REQUEST, 2),
 			{ type: "message", id: "m2", message: { role: "assistant", content: [call("bash-3", "bash", { command: "echo first" }), call("bash-4", "bash", { command: "echo NOT-YET-RUN" })] } },
 		);
@@ -120,6 +121,8 @@ describe("hand-back review transcript", () => {
 		expect(lastTranscript()).toContain(SIBLING);
 		expect(lastTranscript()).toContain(LATER_REQUEST);
 		expect(lastTranscript()).not.toContain("NOT-YET-RUN");
+		// The main agent's prose before a reply is the main session's referent only.
+		expect(lastTranscript()).not.toContain("MAIN-AGENT-PROSE");
 	});
 
 	it("reviews a foreground run against the session through its own spawning call", async () => {

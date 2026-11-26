@@ -115,6 +115,32 @@ export interface HistoryCursor {
 }
 
 /**
+ * The most of an agent message a transcript carries as the referent for the
+ * user's reply: its last characters, where the proposal or the question is.
+ * Claude Code clips the same text at the same place.
+ */
+export const PRIOR_PROSE_CHARS = 2000;
+
+/**
+ * An assistant message's prose as the user saw it: its text blocks joined by a
+ * line break (thinking and tool calls left out), nothing for an errored reply
+ * or one that is only whitespace, clipped to its last PRIOR_PROSE_CHARS without
+ * splitting a surrogate pair.
+ */
+function priorProse(message: Record<string, any>): string | undefined {
+	if (message.stopReason === "error" || !Array.isArray(message.content)) return undefined;
+	const text = message.content.flatMap((block: unknown) => {
+		const { type, text: body } = record(block);
+		return type === "text" && typeof body === "string" ? [body] : [];
+	}).join("\n");
+	if (!text.trim()) return undefined;
+	if (text.length <= PRIOR_PROSE_CHARS) return text;
+	const tail = text.slice(-PRIOR_PROSE_CHARS);
+	const first = tail.charCodeAt(0);
+	return first >= 0xdc00 && first <= 0xdfff ? tail.slice(1) : tail;
+}
+
+/**
  * Where a subagent's view of the main session ends, for its own gated calls
  * and its hand-back review. pi persists the main turn's whole tool-call batch
  * before any of it runs, so a later call in that batch is not yet context.
@@ -136,8 +162,15 @@ export function childHistoryCursor(startedBy: string | undefined, inFlight: read
  * `beforeToolCallId` excludes the pending call and later calls from the same
  * assistant message (pi persists the whole tool-call batch before executing it).
  * A bridged child uses `throughToolCallId` to include its parent's running call.
+ *
+ * `priorProse` (the main session's own calls only) adds the agent's last prose
+ * before each typed user message, directly above it: a reply such as "go
+ * ahead" names nothing, and the ruleset reads it against that proposal. Tool
+ * calls between the two keep it; any other user-role message drops it, since
+ * the reply may answer that message. The entry is appended with the reply, so
+ * the transcript still only grows.
  */
-export function classifierHistory(branch: readonly unknown[], options: HistoryCursor = {}): { transcript: TranscriptEntry[] } {
+export function classifierHistory(branch: readonly unknown[], options: HistoryCursor & { priorProse?: boolean } = {}): { transcript: TranscriptEntry[] } {
 	const transcript: TranscriptEntry[] = [];
 	const boundary = latestCompaction(branch);
 	if (boundary) {
@@ -156,6 +189,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 		facts.set(data.toolCallId, list);
 	}
 	let reachedPending = false;
+	let prose: string | undefined;
 	for (const entry of active) {
 		if (reachedPending) break;
 		if (entry.type === "branch_summary" && typeof entry.summary === "string") {
@@ -169,8 +203,13 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 			// turns never gain intent authority on resume and expanded skill text
 			// is not credited as typed.
 			const userText = userWords(provenance, entry, message, messageText(message.content));
-			if (userText?.trim()) transcript.push({ kind: "user", text: userText.trim() });
+			if (userText?.trim()) {
+				if (prose !== undefined) transcript.push({ kind: "assistant", text: prose });
+				transcript.push({ kind: "user", text: userText.trim() });
+			}
+			prose = undefined;
 		} else if (message.role === "assistant" && Array.isArray(message.content)) {
+			if (options.priorProse) prose = priorProse(message) ?? prose;
 			for (const rawBlock of message.content) {
 				const block = record(rawBlock);
 				if (block.type !== "toolCall" || typeof block.name !== "string") continue;

@@ -574,6 +574,12 @@ The classifier is Claude Code's two-stage ruleset, embedded verbatim:
    stated intent and the allow list, and either approves or blocks with a
    named rule.
 
+The classifier reads what you typed, the agent's tool calls, and the agent's
+last message before each of your replies (its last 2,000 characters), so a
+short "go ahead" is read against the plan you were answering. It doesn't read
+tool output or the rest of the agent's text, so neither a file the agent read
+nor the agent's own reasoning can talk it into an approval.
+
 A block is checked before it's acted on: it must cite a real rule from the
 ruleset. An approval is the classifier's own call. A classifier that can't
 be reached, times out, or returns something unparseable blocks the action;

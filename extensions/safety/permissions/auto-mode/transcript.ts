@@ -36,6 +36,13 @@ export { ccToolName };
  */
 export type TranscriptEntry =
 	| { kind: "user"; text: string }
+	/**
+	 * The agent's prose the user saw before their next message, rendered as an
+	 * `{"assistant":…}` line directly above that message: the referent for a
+	 * short "yes" or "go ahead" (the ruleset's Path B). Model-authored, never
+	 * the user's words; history.ts decides which prose qualifies and bounds it.
+	 */
+	| { kind: "assistant"; text: string }
 	/** Model-generated context, not the user's own words. */
 	| { kind: "summary"; text: string }
 	| { kind: "tool"; tool: string; input: Record<string, unknown> }
@@ -121,6 +128,7 @@ function handBackReport(report: string): string {
  */
 function renderEntry(entry: TranscriptEntry): string {
 	if (entry.kind === "user") return JSON.stringify({ user: entry.text });
+	if (entry.kind === "assistant") return JSON.stringify({ assistant: entry.text });
 	if (entry.kind === "hand-back") {
 		return JSON.stringify({ user: `${classifierText().handBackReview}\n\n<subagent_hand_back>\n${handBackReport(entry.report)}\n</subagent_hand_back>` });
 	}

@@ -824,9 +824,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// Project pi's active context on every call. Compaction, resume and /tree
 		// therefore change classifier context at the same boundary as the agent's.
-		const { transcript: history } = classifierHistory(ctx.sessionManager.getBranch(), opts?.toolCallId
-			? { beforeToolCallId: opts.toolCallId }
-			: (opts?.history ?? { throughToolCallId: currentMainToolCallId }));
+		// The main session's own calls also carry the agent's prose before each
+		// typed reply; a child reads the main session without it.
+		const { transcript: history } = classifierHistory(ctx.sessionManager.getBranch(), {
+			...(opts?.toolCallId ? { beforeToolCallId: opts.toolCallId } : (opts?.history ?? { throughToolCallId: currentMainToolCallId })),
+			priorProse: opts?.history === undefined,
+		});
 		const action = opts?.appendEntry;
 		const shell = normalizeToolName(toolName) === "powershell" ? "powershell" : isShellTool(normalizeToolName(toolName)) || normalizeToolName(toolName) === "monitor" ? "bash" : undefined;
 		if (shell && subject && wantsGitStatusMeta(shell, subject)) {
