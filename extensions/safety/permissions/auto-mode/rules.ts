@@ -46,7 +46,7 @@ export function normalizeName(value: string): string {
 	return value
 		.toLowerCase()
 		.replace(/[/\-\u2010-\u2015]/g, " ")
-		.replace(/[^\p{L}\p{N}\s]/gu, "")
+		.replace(/[^\p{L}\p{M}\p{N}\s]/gu, "")
 		.replace(/\s+/g, " ")
 		.trim();
 }
@@ -133,5 +133,7 @@ export function builtinRuleCounts(ruleset: string): { hard_deny: number; soft_de
 /** Look up a category the classifier emitted. undefined ⇒ not a known BLOCK rule. */
 export function groundCategory(index: RuleIndex, category: string | undefined): IndexedRule | undefined {
 	if (!category) return undefined;
-	return index.byName.get(normalizeName(category));
+	// A category of punctuation alone names no rule.
+	const key = normalizeName(category);
+	return key ? index.byName.get(key) : undefined;
 }

@@ -81,6 +81,11 @@ describe("buildCategoryIndex / groundCategory", () => {
 		]) {
 			expect(groundCategory(punctuated, cited)?.name, cited).toBe(name);
 		}
+		// Punctuation alone names no rule, even when a rule's own name is only punctuation,
+		// and two names that differ in a combining mark stay two rules.
+		const odd = buildCategoryIndex(["## HARD BLOCK", "- >>>: never pipe to prod", "## SOFT BLOCK", "- की: one", "- कि: two", "## ALLOW (exceptions)"].join("\n"));
+		expect(groundCategory(odd, "—")).toBeUndefined();
+		expect(groundCategory(odd, "कि")?.name).toBe("कि");
 	});
 
 	it("returns undefined for a name that is not a real rule", () => {
