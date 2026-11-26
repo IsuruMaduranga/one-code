@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getModels } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { activeOpenRouterRouting, openRouterRoutingDefaultsEnabled, routingFloorFailureHint, withOpenRouterRoutingDefaults, withRoutingDefaults } from "../../extensions/lib/request/openrouter-routing-defaults.ts";
+import { activeOpenRouterRouting, openRouterRoutingDefaultsEnabled, routingFailureHint, withOpenRouterRoutingDefaults, withRoutingDefaults } from "../../extensions/lib/request/openrouter-routing-defaults.ts";
 import { type OpenRouterRoutingDefault, openRouterRoutingProblems } from "../../extensions/lib/profile/openrouter-routing.ts";
 import { adjustsOpenRouter, openRouterAdjust } from "../../extensions/request/cache-marks/openrouter-adjust.ts";
 import { openRouterRegistration } from "../../extensions/lib/request/anthropic-stream.ts";
@@ -11,6 +11,7 @@ import { profile as shippedProfile } from "./helpers/default-profile.ts";
 import { envName } from "../../extensions/lib/profile/brand.mjs";
 
 const FLOOR = ["fp8", "bf16", "fp16", "fp32", "unknown"];
+const FILE = "~/.pi/agent/models.json";
 const table = new Map<string, OpenRouterRoutingDefault>([["deepseek", { quantizations: FLOOR }]]);
 const model = (id: string, compat: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({ id, api: "openai-completions", provider: "openrouter", compat, ...extra });
 
@@ -114,24 +115,46 @@ describe("openRouterAdjust", () => {
 	});
 });
 
-describe("routingFloorFailureHint", () => {
+describe("routingFailureHint", () => {
 	const refusal = '404 {"error":{"message":"No allowed providers are available for the selected model.","code":404}}';
 
 	it("names the cause, the off switch and the models.json override when the floor left the model no host", () => {
-		const hint = routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, table);
+		const hint = routingFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, table, FILE);
 		expect(hint).toContain("no host that serves deepseek/deepseek-v4.1-flash at the precisions");
 		expect(hint).toContain("(fp8, bf16, fp16, fp32, unknown)");
 		expect(hint).toContain(`${envName("OPENROUTER_ROUTING_DEFAULTS")}=0`);
-		expect(hint).toContain("compat.openRouterRouting for this model in pi's models.json");
+		expect(hint).toContain("set your own routing for this model in ~/.pi/agent/models.json");
 	});
 
 	it("says nothing for another error, or for a model the floor did not reach", () => {
-		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), "429 rate limited", table)).toBeUndefined();
-		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), undefined, table)).toBeUndefined();
-		expect(routingFloorFailureHint(model("z-ai/glm-5.3"), refusal, table)).toBeUndefined();
-		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash", { openRouterRouting: { only: ["relace"] } }), refusal, table)).toBeUndefined();
-		expect(routingFloorFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, new Map())).toBeUndefined();
-		expect(routingFloorFailureHint(model("anthropic/claude-haiku-4.5", {}, { api: "anthropic-messages" }), refusal, new Map([["anthropic", { quantizations: FLOOR }]]))).toBeUndefined();
+		expect(routingFailureHint(model("deepseek/deepseek-v4.1-flash"), "429 rate limited", table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("deepseek/deepseek-v4.1-flash"), undefined, table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("z-ai/glm-5.3"), refusal, table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("deepseek/deepseek-v4.1-flash"), refusal, new Map(), FILE)).toBeUndefined();
+		expect(routingFailureHint(model("anthropic/claude-haiku-4.5", {}, { api: "anthropic-messages" }), refusal, new Map([["anthropic", { quantizations: FLOOR }]]), FILE)).toBeUndefined();
+	});
+
+	it("names the user's own routing, a few of the hosts that serve the model now, and the file to edit", () => {
+		const hosts = ["darkbloom", "chutes", "near-ai", "ionstream", "modal", "wafer", "deepinfra", "cerebras"];
+		const pinned = `404: {"message":"No allowed providers are available for the selected model.","code":404,"metadata":{"available_providers":${JSON.stringify(hosts)},"requested_providers":["deepinfra/bf16"]}}`;
+		const hint = routingFailureHint(model("qwen/qwen3.8-27b", { openRouterRouting: { only: ["deepinfra/bf16"], allow_fallbacks: false } }), pinned, new Map([["qwen", { quantizations: FLOOR }]]), FILE);
+		// The host the user named is still there under another entry, so it comes first; the rest are counted.
+		expect(hint).toBe(
+			"Your routing settings for qwen/qwen3.8-27b (only: deepinfra/bf16) leave OpenRouter no host to use. Available now: deepinfra, darkbloom, chutes, near-ai, ionstream and 3 more. To fix it, edit this model's entry in ~/.pi/agent/models.json.",
+		);
+		// Every list that can empty the hosts is named; a refusal that lists no hosts names none.
+		const several = routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { quantizations: ["fp32"], ignore: ["wafer", "modal"], sort: "price" } }), refusal, table, FILE);
+		expect(several).toBe("Your routing settings for z-ai/glm-5.3 (quantizations: fp32; ignore: wafer, modal) leave OpenRouter no host to use. To fix it, edit this model's entry in ~/.pi/agent/models.json.");
+		// A short list is given whole.
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { only: ["wafer/fp4"] } }), '404 No allowed providers "available_providers":["modal","wafer"]', table, FILE)).toContain("Available now: wafer, modal.");
+		// An `order` limits the hosts only without fallbacks, and a host the user ignores is not put first.
+		const listing = '404 No allowed providers "available_providers":["modal","wafer","chutes"]';
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { order: ["wafer"] } }), listing, table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { order: ["wafer"], allow_fallbacks: false } }), listing, table, FILE)).toContain("(order: wafer) leave OpenRouter no host to use. Available now: wafer, modal, chutes.");
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { ignore: ["chutes"] } }), listing, table, FILE)).toContain("Available now: modal, wafer, chutes.");
+		// Routing that chooses no host (a sort, an empty list) is not the cause, and nor is a model pi sends no routing for.
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { sort: "price", only: [] } }), refusal, table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("anthropic/claude-haiku-4.5", { openRouterRouting: { only: ["anthropic"] } }, { api: "anthropic-messages" }), refusal, table, FILE)).toBeUndefined();
 	});
 
 	it("reads no table while the switch is off", () => {

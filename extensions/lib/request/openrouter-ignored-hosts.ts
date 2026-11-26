@@ -1,6 +1,13 @@
 /**
- * OpenRouter hosts One Code asks OpenRouter to skip because they defeat the
- * prompt cache, as a list that is easy to shrink when a host fixes its cache.
+ * OpenRouter hosts measured defeating the prompt cache, which OpenRouter is
+ * asked to skip. By default only side calls with their own OpenRouter session
+ * skip them (the classifier, the reader, /btw, recap, the session title,
+ * setup: `withSideCallIgnoredHosts`): nothing names a host to the user for
+ * those, and a side call's cache miss is never an accepted cost. The main
+ * session leaves no host out unless the user asks, and a host that keeps
+ * missing its cache is named to them at run time instead
+ * (openrouter-cache-watch.ts). Compaction and the replayed forks send under
+ * the main session's id, so they stay on its host.
  *
  * OpenRouter keeps a session on the host that served its first request
  * (`x-session-id`, which pi-ai sends), so one host that reuses little keeps a
@@ -30,12 +37,13 @@
  * routing: a host the user names in `order` or `only` is not ignored, and an
  * `ignore` list the user set keeps its entries, ours appended.
  *
- * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=0` turns it off. Pure: no pi imports.
+ * `<envPrefix>_OPENROUTER_IGNORE_HOSTS=1` turns it on for the main session too, `=0`
+ * turns it off everywhere. Pure: no pi imports.
  */
 
 import { knobValue } from "../profile/knobs.ts";
 import type { CacheMarksModel } from "./openrouter-cache-marks.ts";
-import { modelVendor, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
+import { modelVendor, type OpenRouterRouting, routingEntries, routingEntryHost, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
 /**
  * A host that defeats the prompt cache: OpenRouter's slug (what
@@ -51,7 +59,7 @@ export interface IgnoredHost {
 }
 
 /**
- * The hosts skipped today. OpenInference: measured on
+ * The hosts skipped when the list is on. OpenInference: measured on
  * deepseek/deepseek-v4.1-flash-1017. Of the catalog's OpenRouter models it
  * serves deepseek-v4.1-flash (36 other hosts, each with a cache-read price),
  * deepseek-v4.1-flash-1017 (47) and z-ai/glm-5.3-flash (41), checked on
@@ -65,19 +73,17 @@ export function hostsFor(modelId: string, hosts: readonly IgnoredHost[] = CACHE_
 	return hosts.filter((host) => host.vendors.includes(vendor));
 }
 
-/** The knob that turns the list off (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=0`). */
+/** The knob for the list: `=1` adds the main session, `=0` turns it off for side calls too. */
 export const OPENROUTER_IGNORE_HOSTS_KNOB = "OPENROUTER_IGNORE_HOSTS";
 
-/** Whether the list applies in `vars` (the process environment by default). */
+/** Whether the main session's requests skip the hosts in `vars` (the process environment by default): only when the user turned it on. */
 export function openRouterIgnoreHostsEnabled(vars: Readonly<Record<string, unknown>> = process.env): boolean {
-	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) !== "0";
+	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "1";
 }
-
-const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
 
 /** Whether a routing entry names `host`: its slug or display name, with or without a variant (`open-inference/fp4`), in any case. */
 function names(entry: string, host: IgnoredHost): boolean {
-	const base = entry.trim().toLowerCase().split("/")[0];
+	const base = routingEntryHost(entry);
 	return base === host.slug || base === host.name.toLowerCase();
 }
 
@@ -87,7 +93,7 @@ function names(entry: string, host: IgnoredHost): boolean {
  * Returns `routing` itself when nothing is added.
  */
 export function withIgnoredHosts(routing: OpenRouterRouting | undefined, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): OpenRouterRouting | undefined {
-	const named = [...strings(routing?.order), ...strings(routing?.only), ...strings(routing?.ignore)];
+	const named = [...routingEntries(routing?.order), ...routingEntries(routing?.only), ...routingEntries(routing?.ignore)];
 	const added = hosts.filter((host) => !named.some((entry) => names(entry, host))).map((host) => host.slug);
 	if (added.length === 0) return routing;
 	return { ...routing, ignore: [...(Array.isArray(routing?.ignore) ? (routing.ignore as unknown[]) : []), ...added] };
@@ -99,4 +105,13 @@ export function withOpenRouterIgnoredHosts<M extends CacheMarksModel>(model: M):
 		const hosts = hostsFor(model.id);
 		return hosts.length === 0 ? routing : withIgnoredHosts(routing, hosts);
 	});
+}
+
+/**
+ * `model` as a side call with its own OpenRouter session sends it: the hosts
+ * in its vendor's scope skipped, unless the user turned the list off
+ * (`<envPrefix>_OPENROUTER_IGNORE_HOSTS=0`).
+ */
+export function withSideCallIgnoredHosts<M extends CacheMarksModel>(model: M, vars: Readonly<Record<string, unknown>> = process.env): M {
+	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "0" ? model : withOpenRouterIgnoredHosts(model);
 }

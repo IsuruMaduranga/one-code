@@ -59,7 +59,6 @@ const request = {
 		{ kind: "user" as const, text: "run the tests" },
 		{ kind: "tool" as const, tool: "bash", input: { command: "npm test" } },
 	],
-	userMessages: ["run the tests"],
 	username: "tester",
 	environment: config.environment,
 };

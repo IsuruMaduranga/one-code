@@ -1,5 +1,6 @@
 /**
- * Which OpenRouter host served the main session's last reply, for /doctor.
+ * Which OpenRouter host served the main session's last reply, for /doctor,
+ * and the notice for a host that runs the model at reduced precision.
  *
  * OpenRouter names the serving host in the `provider` field of every streamed
  * chunk. The `tool-call-corruption` extension already reads it there (pi's
@@ -16,6 +17,12 @@
  * quantization, so the listing's entries for that host are what can be told.
  * A host with endpoints at several precisions lists them all. Pure apart from
  * the one fetch.
+ *
+ * The same listing tells the user, once per host and model, that a reply came
+ * from a host at reduced precision (`reducedPrecisionNotice`, shown by the
+ * `tool-call-corruption` extension). Nothing is filtered: which hosts serve a
+ * model is the user's choice, and a notice can never leave a model with no
+ * host.
  */
 
 import { brandedId } from "../profile/brand.mjs";
@@ -82,4 +89,33 @@ export interface ServedHost {
 export function servedHostLabel(served: ServedHost): string {
 	const precisions = (served.quantizations ?? []).map((q) => (q === "unknown" ? "precision not declared" : q));
 	return precisions.length > 0 ? `${served.host} (${precisions.join(" or ")})` : served.host;
+}
+
+/**
+ * The precisions that are not a reduced copy of a model's weights, and
+ * `unknown` (an endpoint that declares none is not called reduced). Any other
+ * declared precision counts as reduced: OpenRouter's own int4, int8, fp4 and
+ * fp6, and the labels a listing carries beyond those (`mxfp4`).
+ */
+const NOT_REDUCED: ReadonlySet<string> = new Set(["fp8", "bf16", "fp16", "fp32", "unknown"]);
+
+/**
+ * How to stop using a host, the sentence the OpenRouter notices end on.
+ * `modelsFile` is pi's models file as the user would type it
+ * (`~/.pi/agent/models.json` under plain pi).
+ */
+export function avoidHostAdvice(host: string, modelsFile: string): string {
+	return `To avoid this host, add "${host}" to the model's ignore list in ${modelsFile}, or to the ignored providers in your OpenRouter account settings.`;
+}
+
+/**
+ * What to tell the user when a reply was served at reduced precision, or
+ * undefined. Only when every endpoint the listing gives the host for this
+ * model is at a reduced precision: a host with endpoints at several does not
+ * say which one served, and a host that declares none says nothing.
+ */
+export function reducedPrecisionNotice(served: ServedHost, modelsFile: string): string | undefined {
+	const listed = served.quantizations ?? [];
+	if (listed.length === 0 || listed.some((quantization) => NOT_REDUCED.has(quantization))) return undefined;
+	return `${served.host} is running ${served.model} at reduced precision (${listed.join(" or ")}), which can make the model weaker. ${avoidHostAdvice(served.host, modelsFile)}`;
 }

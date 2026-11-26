@@ -77,11 +77,11 @@ describe("withOpenRouterIgnoredHosts", () => {
 });
 
 describe("openRouterIgnoreHostsEnabled", () => {
-	it("is on by default and off only with its own switch at 0", () => {
+	it("is off by default, so no host is left out unless the user asks, and on only with its own switch at 1", () => {
 		const own = envName("OPENROUTER_IGNORE_HOSTS");
-		expect(openRouterIgnoreHostsEnabled({})).toBe(true);
-		expect(openRouterIgnoreHostsEnabled({ [own]: "1" })).toBe(true);
-		expect(openRouterIgnoreHostsEnabled({ [envName("CACHE_MARKS")]: "0" })).toBe(true);
+		expect(openRouterIgnoreHostsEnabled({})).toBe(false);
 		expect(openRouterIgnoreHostsEnabled({ [own]: "0" })).toBe(false);
+		expect(openRouterIgnoreHostsEnabled({ [envName("CACHE_MARKS")]: "1" })).toBe(false);
+		expect(openRouterIgnoreHostsEnabled({ [own]: "1" })).toBe(true);
 	});
 });

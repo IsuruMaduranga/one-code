@@ -19,6 +19,7 @@ import permissionsExtension from "../../extensions/safety/permissions/index.ts";
 import { type PermissionBridge, SUBAGENT_GATE_CHANNEL } from "../../extensions/lib/agents/subagent-gate.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { brand, envName } from "../../extensions/lib/profile/brand.mjs";
+import { userTurns } from "./helpers/classify-request.ts";
 
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
@@ -108,6 +109,7 @@ describe("hand-back review transcript", () => {
 		await mainBatch();
 		await fake.fire("turn_end", {}, ctx);
 		branch.push(
+			{ type: "message", id: "m-prose", message: { role: "assistant", content: [{ type: "text", text: "MAIN-AGENT-PROSE: shall I tidy the build directory too?" }] } },
 			...typed("u2", LATER_REQUEST, 2),
 			{ type: "message", id: "m2", message: { role: "assistant", content: [call("bash-3", "bash", { command: "echo first" }), call("bash-4", "bash", { command: "echo NOT-YET-RUN" })] } },
 		);
@@ -119,6 +121,9 @@ describe("hand-back review transcript", () => {
 		expect(lastTranscript()).toContain(SIBLING);
 		expect(lastTranscript()).toContain(LATER_REQUEST);
 		expect(lastTranscript()).not.toContain("NOT-YET-RUN");
+		// The main agent's prose before a reply is in the child's view as it is in the main
+		// session's, so the child's request extends the prompt the main session's calls cached.
+		expect(lastTranscript()).toContain("MAIN-AGENT-PROSE");
 	});
 
 	it("reviews a foreground run against the session through its own spawning call", async () => {
@@ -135,7 +140,7 @@ describe("hand-back review transcript", () => {
 		await fake.fireOne("tool_result", { toolCallId: "agent-1", toolName: "Agent", content: [{ type: "text", text: "report" }] }, ctx);
 		const request = vi.mocked(classify).mock.calls.at(-1)![0] as ClassifyRequest;
 		expect(request.transcript.at(-1)).toEqual({ kind: "hand-back", report: "Removed build/.\nAll clean." });
-		expect(request.userMessages.join("\n")).not.toContain("All clean.");
+		expect(userTurns(request.transcript).join("\n")).not.toContain("All clean.");
 	});
 
 	it("still reviews a payload from an emitter that sends no report", async () => {

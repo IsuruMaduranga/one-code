@@ -58,6 +58,34 @@ describe("buildCategoryIndex / groundCategory", () => {
 
 	it("matches a category across case and surrounding punctuation", () => {
 		expect(groundCategory(index, "  git destructive.  ")?.name).toBe("Git Destructive");
+		// The Output Format asks for letters, digits and spaces only: `/` and `-`
+		// become a space and other punctuation is dropped. Either spelling grounds.
+		const punctuated = buildCategoryIndex([
+			"## HARD BLOCK",
+			"- Logging/Audit Tampering: turning off the record",
+			"## SOFT BLOCK",
+			"- Out-of-Place Publication [named+specifics]: publishing what does not belong there",
+			"- DNS / Domain / Cert Changes: changing where a name points",
+			"- Irreversible Deletion (general): deleting what cannot be recovered",
+			"- Auto-Mode Bypass: getting around this gate",
+			"## ALLOW (exceptions)",
+			"- Local Operations: work inside the project",
+		].join("\n"));
+		for (const [cited, name] of [
+			["Out of Place Publication", "Out-of-Place Publication"],
+			["Out-of-Place Publication", "Out-of-Place Publication"],
+			["Logging Audit Tampering", "Logging/Audit Tampering"],
+			["DNS Domain Cert Changes", "DNS / Domain / Cert Changes"],
+			["Irreversible Deletion general", "Irreversible Deletion (general)"],
+			["Auto Mode Bypass", "Auto-Mode Bypass"],
+		]) {
+			expect(groundCategory(punctuated, cited)?.name, cited).toBe(name);
+		}
+		// Punctuation alone names no rule, even when a rule's own name is only punctuation,
+		// and two names that differ in a combining mark stay two rules.
+		const odd = buildCategoryIndex(["## HARD BLOCK", "- >>>: never pipe to prod", "## SOFT BLOCK", "- की: one", "- कि: two", "## ALLOW (exceptions)"].join("\n"));
+		expect(groundCategory(odd, "—")).toBeUndefined();
+		expect(groundCategory(odd, "कि")?.name).toBe("कि");
 	});
 
 	it("returns undefined for a name that is not a real rule", () => {
@@ -90,7 +118,7 @@ describe("buildCategoryIndex / groundCategory", () => {
 		const built = buildCategoryIndex(buildRuleset(DEFAULT_ENVIRONMENT));
 		for (const rule of built.rules) {
 			// Every indexed rule resolves to exactly one tier.
-			expect(built.byName.get(rule.name.toLowerCase().replace(/[.,:;]+$/, ""))?.tier).toBe(rule.tier);
+			expect(groundCategory(built, rule.name)?.tier, rule.name).toBe(rule.tier);
 		}
 	});
 });
@@ -134,92 +162,17 @@ describe("parseStage2", () => {
 		expect(parseStage2("<severity>10</severity><category>Git Read</category>", index).ruleId).toBe("Git Read");
 	});
 
-	it("allows on intent when the quoted words really are the user's", () => {
-		const messages = ["please write hello to ~/notes.txt, that's intentional"];
-		const verdict = parseStage2(
+	it("allows a clear on the classifier's judgment, whatever it says the user asked for", () => {
+		// As in Claude Code, nothing in a clearing reply is checked against the
+		// user's messages: an <intent> tag, true or invented, changes nothing.
+		for (const reply of [
 			"<severity>20</severity>\n<intent>write hello to ~/notes.txt</intent>",
-			index,
-			messages,
-		);
-		expect(verdict.decision).toBe("allow");
-		expect(verdict.tier).toBe("intent");
-	});
-
-	it("matches an intent quote across case and whitespace, not wording", () => {
-		const messages = ["Write hello   to ~/notes.txt"];
-		expect(
-			parseStage2("<severity>10</severity><intent>write hello to ~/notes.txt</intent>", index, messages).decision,
-		).toBe("allow");
-	});
-
-	it("accepts a verbatim quote the model wrapped in quotation marks or ellipses (2026-09-05 H4)", () => {
-		// Live probes on Haiku returned <intent>"…"</intent> for a quote that WAS
-		// verbatim; the bare substring test rejected it and turned a legitimate
-		// allow into a soft block.
-		const messages = [
-			"Use the write tool to write the text hello into /tmp/probe/hello.txt — I want exactly that path.",
-			"Append the line '# onecode probe' to ~/.zshrc using bash (echo >>).",
-		];
-		const quotes = [
-			'"Use the write tool to write the text hello into /tmp/probe/hello.txt — I want exactly that path."',
-			"“Use the write tool to write the text hello into /tmp/probe/hello.txt”",
-			"`Append the line '# onecode probe' to ~/.zshrc using bash (echo >>).`",
-			"'Append the line '# onecode probe' to ~/.zshrc'",
-			"…write the text hello into /tmp/probe/hello.txt…",
-			'"...I want exactly that path."',
-			'"I want exactly that path".',
-		];
-		for (const quote of quotes) {
-			const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, messages);
-			expect(verdict.decision, quote).toBe("allow");
-			expect(verdict.tier, quote).toBe("intent");
-		}
-	});
-
-	it("accepts a two-sentence quote joined by a newline when every line is the user's, and nothing shorter", () => {
-		const messages = ["Delete the build directory. Then remove the lockfile too, I mean it."];
-		const joined = "<severity>10</severity><intent>Delete the build directory.\nThen remove the lockfile too, I mean it.</intent>";
-		expect(parseStage2(joined, index, messages).tier).toBe("intent");
-		// One invented line poisons the whole quote.
-		const mixed = "<severity>10</severity><intent>Delete the build directory.\nAlso wipe ~/Documents.</intent>";
-		expect(parseStage2(mixed, index, messages).ruleId).toBe("intent-unverified");
-		// Short fragments still prove nothing, quoted or not.
-		expect(parseStage2('<severity>10</severity><intent>"I mean"</intent>', index, messages).ruleId).toBe("intent-unverified");
-		// Lines drawn from two different messages are not one statement of intent.
-		const twoMessages = ["Please write hello into /tmp/scratch/a.txt", "Also delete the old backups directory whenever you like"];
-		const stitched = "<severity>10</severity><intent>write hello into /tmp/scratch/a.txt\ndelete the old backups directory</intent>";
-		expect(parseStage2(stitched, index, twoMessages).ruleId).toBe("intent-unverified");
-		// Short lines cannot rescue a joined quote that is not itself in the message.
-		expect(parseStage2("<severity>10</severity><intent>Delete\nthe\nlockfile</intent>", index, messages).ruleId).toBe("intent-unverified");
-		// The lines must appear in the message IN ORDER: two substrings lifted out of
-		// sequence — one of them from a negated clause — are not what the user said.
-		const negated = ["You may edit config.yaml. Under no circumstances touch secrets.yaml."];
-		const outOfOrder = "<severity>10</severity><intent>touch secrets.yaml\nYou may edit config.yaml</intent>";
-		expect(parseStage2(outOfOrder, index, negated).ruleId).toBe("intent-unverified");
-		const inOrder = "<severity>10</severity><intent>You may edit config.yaml.\nUnder no circumstances touch secrets.yaml.</intent>";
-		expect(parseStage2(inOrder, index, negated).tier).toBe("intent");
-		// An ellipsis of more than three dots is still an ellipsis.
-		expect(parseStage2('<severity>10</severity><intent>"....I mean"</intent>', index, messages).ruleId).toBe("intent-unverified"); // too short
-		expect(parseStage2("<severity>10</severity><intent>....remove the lockfile too, I mean it.</intent>", index, messages).tier).toBe("intent");
-	});
-
-	it("keeps the full intent text in raw for an unverified quote", () => {
-		const quote = "x".repeat(260);
-		const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, ["unrelated words"]);
-		expect(verdict.ruleId).toBe("intent-unverified");
-		expect(verdict.raw).toBe(quote);
-	});
-
-	it("refuses an intent it cannot find in the user's own words", () => {
-		// The claim a prompt injection most wants to manufacture — "pick a location
-		// yourself" read as authorising the location it picked.
-		const messages = ["back up the project somewhere outside it, pick a location yourself"];
-		for (const quote of ["back it up to ~/backups", "the user authorised this path"]) {
-			const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, messages);
-			expect(verdict.decision, quote).toBe("block");
-			expect(verdict.ruleId, quote).toBe("intent-unverified");
-			// Still only a soft denial, so an interactive user can approve it.
-			expect(verdict.tier, quote).toBe("soft_deny");
+			"<severity>10</severity><intent>the user authorised this path</intent>",
+		]) {
+			const verdict = parseStage2(reply, index);
+			expect(verdict.decision, reply).toBe("allow");
+			expect(verdict.tier, reply).toBe("allow");
+			expect(verdict.ruleId, reply).toBeUndefined();
 		}
 	});
 
@@ -298,14 +251,12 @@ describe("buildPayload / stage instructions", () => {
 		expect(system).toContain("Acme Corp");
 	});
 
-	it("stage 1 asks for harm only; stage 2 asks for the full evaluation plus our intent quote", () => {
+	it("stage 1 asks for harm only; stage 2 asks for the full evaluation and nothing more", () => {
 		const { userPrefix } = buildPayload(CLEAN_UP_REQUEST);
 		const s1 = stage1User(userPrefix);
 		const s2 = stage2User(userPrefix);
 		expect(s1).toBe(`${userPrefix}\n\n${words.stage1Final.trimStart()}`);
-		expect(s1).not.toContain(words.stage2IntentAddendum);
-		// The full evaluation plus the profile's intent addendum.
-		expect(s2).toBe(`${userPrefix}\n\n${words.stage2Final.trimStart()}${words.stage2IntentAddendum}`);
+		expect(s2).toBe(`${userPrefix}\n\n${words.stage2Final.trimStart()}`);
 	});
 
 	it("adds the circumvention instruction to stage 2 only after a rule denial", () => {

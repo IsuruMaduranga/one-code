@@ -6,9 +6,9 @@
  * cache at different grains (working-docs/findings/93-openrouter-hosts-and-the-prompt-cache.md):
  * most read nearly all of the previous prompt, some read up to about a
  * thousand tokens short (rounding, worth nothing to act on), and a few read
- * almost none of it, so every request pays the full input price. One Code
- * skips the hosts it measured doing that (openrouter-ignored-hosts.ts); this
- * catches the rest at run time.
+ * almost none of it, so every request pays the full input price. No host is
+ * left out by default (openrouter-ignored-hosts.ts is the user's to turn on);
+ * this names such a host at run time, and the user decides.
  *
  * Each main-session reply on OpenRouter is compared with the one before it on
  * the same model and host: a reply whose cache read falls short of the
@@ -20,6 +20,8 @@
  *
  * Pure: no pi imports.
  */
+
+import { avoidHostAdvice } from "./openrouter-host.ts";
 
 /** A shortfall under this many tokens is a host's rounding, never a miss. */
 export const MIN_MISS = 2048;
@@ -75,14 +77,13 @@ export function createCacheWatch(): CacheWatch {
 	};
 }
 
-/** The notice for a streak; `pricePerMillion` is the model's input price less its cache-read price, when known. */
-export function cacheMissNotice(streak: CacheMissStreak, pricePerMillion?: number): string {
+/** The notice for a streak; `modelsFile` is pi's models file as shown to the user, `pricePerMillion` the model's input price less its cache-read price, when known. */
+export function cacheMissNotice(streak: CacheMissStreak, modelsFile: string, pricePerMillion?: number): string {
 	const extra = pricePerMillion && pricePerMillion > 0 ? (streak.missedTokens * pricePerMillion) / 1_000_000 : 0;
 	const cost = extra > 0 ? `, about $${extra < 0.01 ? extra.toFixed(4) : extra.toFixed(2)} more` : "";
 	return (
-		`OpenRouter's host ${streak.host} missed the prompt cache on the last ${streak.misses} replies of ${streak.model} ` +
+		`${streak.host} missed the prompt cache on the last ${streak.misses} replies of ${streak.model} ` +
 		`(${streak.missedTokens.toLocaleString("en-US")} tokens sent again at the full input price${cost}). ` +
-		`To skip it, add ${streak.host} to the ignored providers in your OpenRouter account settings, ` +
-		`or ignore it for this model with compat.openRouterRouting in pi's models.json.`
+		avoidHostAdvice(streak.host, modelsFile)
 	);
 }

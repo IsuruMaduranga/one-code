@@ -15,12 +15,13 @@
  * Agent; the fork's first reply is the first assistant entry in the fork's file
  * timestamped after that call (the fork's file opens with copies of the
  * parent's entries). The fork must read the parent's whole prompt, less one
- * implicit-cache block (`DEFAULT_BLOCK`, as the other probes allow). On
- * OpenAI's models with explicit breakpoints that holds only because the
- * context message after the first user message carries one (findings §95):
- * without it the parent's first request caches only up to the user message.
- * A miss is a FAIL, except on OpenRouter, which can route the fork to another
- * upstream host than the parent's: a WARN there.
+ * implicit-cache block (`DEFAULT_BLOCK`, as the other probes allow), and so
+ * must the parent's own next request after the fork. On OpenAI's models with
+ * explicit breakpoints that holds only because the context message after the
+ * first user message carries one (findings §95): without it the parent's
+ * first request caches only up to the user message.
+ * A miss is a FAIL, except on OpenRouter, which can route either request to
+ * another upstream host than the parent's: a WARN there.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -46,7 +47,11 @@ function jsonlIn(folder) {
 	}
 }
 
-/** Every assistant message of a session file, in order, with its entry timestamp. */
+/**
+ * Every answered assistant message of a session file, in order, with its entry
+ * timestamp. An errored reply reports no usage and pi-ai retries it, so every
+ * check reads the retry.
+ */
 function assistants(file) {
 	const out = [];
 	for (const line of readFileSync(file, "utf8").split("\n")) {
@@ -58,7 +63,7 @@ function assistants(file) {
 			continue;
 		}
 		const message = entry.message;
-		if (message?.role !== "assistant" || !message.usage) continue;
+		if (message?.role !== "assistant" || !message.usage || message.stopReason === "error") continue;
 		out.push({ at: Date.parse(entry.timestamp ?? "") || message.timestamp || 0, message });
 	}
 	return out;
@@ -95,15 +100,26 @@ if (forkReplies.length === 0) fail("no fork reply after the Agent call (the fork
 
 const parent = spawn.message.usage;
 const parentPrompt = prompt(parent);
-const first = forkReplies[0].message.usage;
-const read = first.cacheRead ?? 0;
-const line = `fork's first request read ${read} of the parent's ${parentPrompt}-token prompt (parent wrote ${parent.cacheWrite ?? 0}; fork prompt ${prompt(first)}, wrote ${first.cacheWrite ?? 0})`;
-if (read >= parentPrompt - DEFAULT_BLOCK) {
-	console.log(`PASS  fork: ${line}`);
-	process.exit(0);
+const floor = parentPrompt - DEFAULT_BLOCK;
+const routed = model.startsWith("openrouter/");
+let failed = false;
+/** One read check against the parent's prompt: PASS, or a WARN on OpenRouter (it may route to another host), or a FAIL. */
+function check(who, usage) {
+	const read = usage.cacheRead ?? 0;
+	const line = `${who} read ${read} of the parent's ${parentPrompt}-token prompt (parent wrote ${parent.cacheWrite ?? 0}; its own prompt ${prompt(usage)}, wrote ${usage.cacheWrite ?? 0})`;
+	if (read >= floor) console.log(`PASS  fork: ${line}`);
+	else if (routed) console.log(`WARN  fork: ${line}; OpenRouter may have routed it to another host`);
+	else {
+		console.log(`FAIL  fork: ${line}`);
+		failed = true;
+	}
 }
-if (model.startsWith("openrouter/")) {
-	console.log(`WARN  fork: ${line}; OpenRouter may have routed the fork to another host`);
-	process.exit(0);
+check("the fork's first request", forkReplies[0].message.usage);
+// The parent's own next request extends the same prompt, so it reads it too.
+const next = assistants(mainFile).find(({ at }) => at > spawn.at);
+if (next) check("the parent's next request after the fork", next.message.usage);
+else {
+	console.log("FAIL  fork: the parent sent no answered request after the fork");
+	failed = true;
 }
-fail(line);
+process.exit(failed ? 1 : 0);

@@ -1,15 +1,19 @@
 /**
  * Reject damaged OpenRouter streams before tool execution, without changing the request prefix.
  * It also publishes the host that served each main-session reply, which it reads from the stream anyway, for /doctor,
- * and explains a main-session refusal caused by the profile's quantization floor (lib/request/openrouter-routing-defaults.ts).
- * With the host and each reply's usage it also names a host that keeps missing the prompt cache (lib/request/openrouter-cache-watch.ts).
+ * and explains a main-session refusal caused by the profile's quantization floor or the user's own routing (lib/request/openrouter-routing-defaults.ts).
+ * With the host and each reply's usage it also names a host that keeps missing the prompt cache (lib/request/openrouter-cache-watch.ts),
+ * and a host that runs the model at reduced precision (lib/request/openrouter-host.ts).
  */
+import os from "node:os";
+import { join } from "node:path";
 import { feature } from "../../lib/profile/feature.ts";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { tildify } from "../../lib/profile/paths.ts";
+import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
-import { isOpenRouter, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
+import { isOpenRouter, RETRY_ADVICE, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
 import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import {
@@ -24,9 +28,10 @@ import {
 } from "./tool-call-corruption.ts";
 import { withKeepAlive } from "../../lib/core/keep-alive.ts";
 import { repeatLimit, type RepeatTail, trailingRepeat } from "./repeat.ts";
-import { OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent } from "../../lib/request/openrouter-host.ts";
+import { fetchEndpointQuantizations, OPENROUTER_HOST_CHANNEL, type OpenRouterHostEvent, reducedPrecisionNotice } from "../../lib/request/openrouter-host.ts";
+import { isOpenRouterChatModel } from "../../lib/request/openrouter-cache-marks.ts";
 import { cacheMissNotice, createCacheWatch } from "../../lib/request/openrouter-cache-watch.ts";
-import { activeOpenRouterRouting, routingFloorFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
+import { activeOpenRouterRouting, routingFailureHint } from "../../lib/request/openrouter-routing-defaults.ts";
 import { toolCallCorruptionText } from "./text.ts";
 
 // Silence allowed inside an OpenRouter stream. Every raw chunk restarts the
@@ -67,6 +72,11 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 	// generation is never recorded, so the lookup cannot name it after a stop.
 	let streamProvider: string | undefined;
 	let cacheWatch = createCacheWatch();
+	/** pi's models file as the notices show it: where the user sets a model's hosts. */
+	const modelsFile = () => tildify(join(getAgentDir(), "models.json"), os.homedir());
+	// Each model's endpoints listing, read once, and the hosts already checked against it.
+	const precisionListings = new Map<string, Map<string, string[]>>();
+	const precisionChecked = new Set<string>();
 	let stopped = false;
 	// A suspect call goes back to the model once per run; the next one is corrupt.
 	let suspectReturned = false;
@@ -117,7 +127,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 				const auth = await registry.getApiKeyAndHeaders(model);
 				return auth.ok ? { apiKey: auth.apiKey, baseUrl: auth.baseUrl ?? model.baseUrl } : undefined;
 			}, controller.signal);
-			if (alive() && !controller.signal.aborted) notifyOrPrint(output, toolCallCorruptionNotice(model.id, provider, failure), "error");
+			if (alive() && !controller.signal.aborted) notifyOrPrint(output, toolCallCorruptionNotice(model.id, provider, modelsFile(), failure), "error");
 		}).finally(() => pending.delete(controller));
 		pending.set(controller, notice);
 	};
@@ -142,10 +152,38 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		idleTimer.unref?.();
 	};
 
+	/**
+	 * Name a host that runs the model at reduced precision, once per host and
+	 * model. The listing is one public request per model, off the turn's path
+	 * (five seconds at most): a listing that cannot be read leaves the host
+	 * unnamed.
+	 */
+	const checkPrecision = (ctx: ExtensionContext, host: string) => {
+		const model = ctx.model!;
+		const name = `${model.provider}/${model.id}`;
+		const key = `${name}\n${host}`;
+		if (precisionChecked.has(key)) return;
+		precisionChecked.add(key);
+		const output = { hasUI: ctx.hasUI, ui: ctx.ui };
+		const controller = new AbortController();
+		const lookup = withKeepAlive(async () => {
+			const listing = precisionListings.get(name) ?? await fetchEndpointQuantizations(model.baseUrl, model.id, controller.signal);
+			if (!listing || !alive() || controller.signal.aborted) return;
+			precisionListings.set(name, listing);
+			const notice = reducedPrecisionNotice({ model: name, host, quantizations: listing.get(host.toLowerCase()) }, modelsFile());
+			if (notice) notifyOrPrint(output, notice, "warning");
+		})
+			.catch(() => {})
+			.finally(() => pending.delete(controller));
+		pending.set(controller, lookup);
+	};
+
 	pi.on("session_start", () => {
 		cancelLookups();
 		resetRun();
 		cacheWatch = createCacheWatch();
+		precisionListings.clear();
+		precisionChecked.clear();
 	});
 	pi.on("session_shutdown", () => {
 		cancelLookups();
@@ -172,7 +210,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		clearIdle();
 		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 		ctx.abort();
-		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} Send the request again, or switch models if it repeats.`, "error");
+		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} ${RETRY_ADVICE}`, "error");
 	};
 
 	pi.on("message_update", (event, ctx) => {
@@ -237,9 +275,9 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			// before it was judged whole and stays blocked.
 			const last = event.message.stopReason === "length" ? event.message.content.at(-1) : undefined;
 			if (last?.type === "toolCall") flagged.delete(last.id);
-			// A floor that left the model no host fails every request with OpenRouter's bare refusal: say why, once per reply.
-			const floorHint = announce && event.message.stopReason === "error" ? routingFloorFailureHint(ctx.model!, event.message.errorMessage, activeOpenRouterRouting()) : undefined;
-			if (floorHint) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, floorHint, "error");
+			// Routing that left the model no host (the profile's floor, or the user's own pin) fails every request with OpenRouter's bare refusal: say why, once per reply.
+			const routingHint = announce && event.message.stopReason === "error" ? routingFailureHint(ctx.model!, event.message.errorMessage, activeOpenRouterRouting(), modelsFile()) : undefined;
+			if (routingHint) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, routingHint, "error");
 			// The main session's host, for /doctor (lib/request/openrouter-host.ts); a child has its own bus and no report.
 			if (announce && (streamProvider || responseId)) {
 				const model = ctx.model!;
@@ -250,7 +288,9 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 			if (announce && streamProvider && usage && event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
 				const model = ctx.model!;
 				const streak = cacheWatch.observe({ model: `${model.provider}/${model.id}`, host: streamProvider, input: usage.input, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite });
-				if (streak) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, cacheMissNotice(streak, (model.cost?.input ?? 0) - (model.cost?.cacheRead ?? 0)), "warning");
+				if (streak) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, cacheMissNotice(streak, modelsFile(), (model.cost?.input ?? 0) - (model.cost?.cacheRead ?? 0)), "warning");
+				// A host at reduced precision: name it once. A one-shot run waits for the lookup when it ends (agent_end).
+				if (isOpenRouterChatModel(model)) checkPrecision(ctx, streamProvider);
 			}
 		}
 	});

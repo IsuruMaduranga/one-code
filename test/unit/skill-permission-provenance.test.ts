@@ -14,6 +14,7 @@ import { stubHome } from "./helpers/home.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
 import { productSettingsPath } from "../../extensions/lib/profile/product-settings.ts";
 import { withBaseDir } from "../../extensions/lib/plugins/skill-invoke.ts";
+import { userTurns } from "./helpers/classify-request.ts";
 
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
@@ -106,7 +107,7 @@ describe("skill and plugin permission provenance", () => {
 		if (deny) expect(classify).not.toHaveBeenCalled();
 		else {
 			expect(classify).toHaveBeenCalledOnce();
-			expect(vi.mocked(classify).mock.calls[0][0].userMessages).toEqual([]);
+			expect(userTurns(vi.mocked(classify).mock.calls[0][0].transcript)).toEqual([]);
 			expect(JSON.stringify(vi.mocked(classify).mock.calls[0][0].transcript)).not.toContain(BODY);
 		}
 	});
@@ -133,10 +134,10 @@ describe("skill and plugin permission provenance", () => {
 		const transformed = results.find((result) => result?.action === "transform");
 		expect(transformed?.text).toContain(withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		await persistUser(transformed!.text);
-		expect(classifierHistory(branch).userMessages).toEqual([]);
+		expect(userTurns(classifierHistory(branch))).toEqual([]);
 		await fake.fire("session_start", { reason: "resume" }, ctx);
 		expect((await pushAttempt())?.block).toBe(true);
-		expect(vi.mocked(classify).mock.calls.at(-1)![0].userMessages).toEqual([]);
+		expect(userTurns(vi.mocked(classify).mock.calls.at(-1)![0].transcript)).toEqual([]);
 	});
 
 	it("does not credit a later skill's hidden custom message", async () => {
@@ -147,7 +148,7 @@ describe("skill and plugin permission provenance", () => {
 		expect(messageText(delivered.content)).toContain(withBaseDir({ dir: skillDir, text: `${BODY}\n\nARGUMENTS: staging` }));
 		branch.push({ type: "message", id: "skill-custom", message: { role: "custom", ...delivered } });
 		expect((await pushAttempt())?.block).toBe(true);
-		expect(vi.mocked(classify).mock.calls.at(-1)![0].userMessages).toEqual([]);
+		expect(userTurns(vi.mocked(classify).mock.calls.at(-1)![0].transcript)).toEqual([]);
 	});
 
 	it("does not credit a plugin command's extension-generated user message", async () => {
@@ -160,6 +161,6 @@ describe("skill and plugin permission provenance", () => {
 		await persistUser(content);
 		await fake.fire("session_start", { reason: "resume" }, ctx);
 		expect((await pushAttempt())?.block).toBe(true);
-		expect(vi.mocked(classify).mock.calls.at(-1)![0].userMessages).toEqual([]);
+		expect(userTurns(vi.mocked(classify).mock.calls.at(-1)![0].transcript)).toEqual([]);
 	});
 });

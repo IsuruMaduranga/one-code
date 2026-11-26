@@ -74,6 +74,16 @@ export function isOpenRouterChatModel(model: CacheMarksModel): boolean {
 /** The OpenRouter routing on a model's compat (pi-ai sends it as the request's `provider` object). */
 export type OpenRouterRouting = Record<string, unknown>;
 
+/** The strings of a routing list (`only`, `order`, `ignore`, or a refusal's host list); none when it is not an array. */
+export function routingEntries(list: unknown): string[] {
+	return Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+/** The host a routing entry names, lowercased and without its variant: `open-inference/fp4` names `open-inference`. */
+export function routingEntryHost(entry: string): string {
+	return entry.trim().toLowerCase().split("/")[0];
+}
+
 /**
  * `model` with its `compat.openRouterRouting` replaced by what `change` makes
  * of it, as a copy; the model itself when it is not an OpenRouter Chat

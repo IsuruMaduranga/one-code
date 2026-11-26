@@ -13,15 +13,16 @@ import { productSettingsPath } from "../../extensions/lib/profile/product-settin
 import { permissionText } from "../../extensions/lib/rules/permission-text.ts";
 import { desktopNotificationText } from "../../extensions/lib/notify/desktop.ts";
 import { brand } from "../../extensions/lib/profile/brand.mjs";
+import { userTurns } from "./helpers/classify-request.ts";
 
 const seen: TranscriptEntry[][] = [];
 const seenUserMessages: string[][] = [];
 let overflow = false;
 vi.mock("../../extensions/safety/permissions/auto-mode/classifier.ts", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../../extensions/safety/permissions/auto-mode/classifier.ts")>()),
-	classify: vi.fn(async (request: { transcript: TranscriptEntry[]; userMessages: string[] }) => {
+	classify: vi.fn(async (request: { transcript: TranscriptEntry[] }) => {
 		seen.push(request.transcript);
-		seenUserMessages.push(request.userMessages);
+		seenUserMessages.push(userTurns(request.transcript));
 		return overflow
 			? { decision: "block", reason: "Classifier transcript exceeded context window", tier: "unmatched", noVerdict: true, transcriptTooLong: true }
 			: { decision: "allow", reason: "", tier: "allow" };
@@ -91,6 +92,22 @@ describe("classifier history in the permissions gate", () => {
 		await call("bash", { command: "rm .rpc-probe.*" });
 		expect(seen.at(-1)).toContainEqual({ kind: "tool", tool: "write", input: creation });
 		expect(seen.at(-1)?.[0]).toEqual({ kind: "user", text: "Investigate the RPC behavior." });
+	});
+
+	it("shows the main session's own call the agent's prose before the reply that answered it", async () => {
+		branch = [
+			...typed("ask", "Tidy the release."),
+			{ type: "message", id: "plan", message: { role: "assistant", content: [{ type: "text", text: "I will delete the v0 tag. OK?" }] } },
+			...typed("reply", "go ahead"),
+		];
+		await fake.fire("session_start", { reason: "resume" }, ctx);
+		await call("bash", { command: "git push origin :refs/tags/v0" });
+		expect(seen.at(-1)).toEqual([
+			{ kind: "user", text: "Tidy the release." },
+			{ kind: "assistant", text: "I will delete the v0 tag. OK?" },
+			{ kind: "user", text: "go ahead" },
+			{ kind: "tool", tool: "bash", input: { command: "git push origin :refs/tags/v0" } },
+		]);
 	});
 
 	it("rebuilds summary then kept and later entries after compaction, with active intent only", async () => {

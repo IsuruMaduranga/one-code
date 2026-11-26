@@ -117,9 +117,12 @@ function askUserExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// The sentence is recorded beside the answers: the auto-mode classifier is shown
+			// a submitted answer from this record, never from the result's content.
+			const answerText = askUserResultText.answered(outcome.answers);
 			return {
-				content: [{ type: "text", text: askUserResultText.answered(outcome.answers) }],
-				details: { answers: outcome.answers },
+				content: [{ type: "text", text: answerText }],
+				details: { answers: outcome.answers, answerText },
 			};
 		},
 	});

@@ -23,7 +23,6 @@ const base: ClassifyRequest = {
 	toolName: "bash",
 	username: "tester",
 	environment: config.environment,
-	userMessages: ["Investigate the RPC behavior."],
 	transcript: [
 		{ kind: "user", text: "Investigate the RPC behavior." },
 		{ kind: "tool", tool: "bash", input: { command: "cp seed probe" } },

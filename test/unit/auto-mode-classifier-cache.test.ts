@@ -25,7 +25,6 @@ const request: ClassifyRequest = {
 		{ kind: "user", text: "Check the public sites." },
 		{ kind: "tool", tool: "bash", input: { command: "curl -sI https://example.com" } },
 	],
-	userMessages: ["Check the public sites."],
 	claudeMd: "# Instructions\nKeep secrets local.",
 	username: "tester",
 	environment: config.environment,

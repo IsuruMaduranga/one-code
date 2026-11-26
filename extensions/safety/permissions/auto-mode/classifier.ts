@@ -4,7 +4,7 @@
  * Claude Code's two-stage formula, reproduced (working-docs/decisions/auto-mode.md, P4):
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
- *   <category> (+ our verified <intent>). Both stages share one system prompt and
+ *   <category>. Both stages share one system prompt and
  *   transcript byte-for-byte. Where the request carries explicit breakpoints
  *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
  *   Bedrock Converse, and OpenAI Responses on a model that takes explicit
@@ -27,6 +27,7 @@ import { knobValue } from "../../../lib/profile/knobs.ts";
 import { appendFileSync } from "node:fs";
 import { cleanupSessionResources, isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeThreadless, type SideCallReply } from "../../../lib/request/anthropic-stream.ts";
+import { withSideCallIgnoredHosts } from "../../../lib/request/openrouter-ignored-hosts.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { costRatioText, isNotablyCostlier } from "../../../lib/models/model-choice-warnings.ts";
 import { modeCycleKey } from "../../../lib/ui/keys.ts";
@@ -434,7 +435,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
 			return completeThreadless(
 				deps.registry,
-				model,
+				// Its own OpenRouter session picks its own host, which no notice names: skip the hosts measured missing the cache.
+				withSideCallIgnoredHosts(model),
 				{ systemPrompt: system, messages: [{ role: "user", content: userText, timestamp: Date.now() }] },
 				{
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
@@ -544,7 +546,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// A finished run has no harm floor to short-circuit: go straight to the
 				// full stage-2 evaluation of the transcript's hand-back entry (transcript.ts).
 				const text = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
-				verdict = parseStage2(text, index, request.userMessages);
+				verdict = parseStage2(text, index);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
 				// STAGE 1: harm only, at its small budget; a reply that overruns it
@@ -560,12 +562,12 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
 					const s2 = await call(stage2User(userPrefix, afterRuleDenial), STAGE2_MAX_TOKENS, STAGE2_RETRY_MAX_TOKENS, 2);
-					verdict = parseStage2(s2, index, request.userMessages);
+					verdict = parseStage2(s2, index);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
-					// Stage 1 flagged the call and stage 2 cleared it without quoting the
-					// user's intent or citing any rule. CC allows here (severity rules),
-					// so this stays an allow — but tagged, so the decision log and debug
-					// trace show a clear that rests on nothing checkable (review P11).
+					// Stage 1 flagged the call and stage 2 cleared it without citing any
+					// rule. CC allows here (severity rules), so this stays an allow, but
+					// tagged, so the decision log and debug trace show a clear that rests
+					// on nothing checkable (review P11).
 					if (verdict.decision === "allow" && verdict.tier === "allow" && !verdict.ruleId) {
 						verdict = { ...verdict, ruleId: "unverified-clear" };
 					}
@@ -581,10 +583,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				process.stderr.write(
 					`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}` +
 						`${verdict.ruleId ? ` (${verdict.ruleId})` : ""} [${stageInfo}]\n` +
-						// An unverified intent quote is printed whole: the next mismatch class
-						// (2026-09-05 H4 was wrapping quotation marks) is only visible in the
-						// exact text the model produced.
-						(verdict.raw ? `  raw: ${verdict.ruleId === "intent-unverified" ? verdict.raw : verdict.raw.slice(0, 300)}\n` : ""),
+						(verdict.raw ? `  raw: ${verdict.raw.slice(0, 300)}\n` : ""),
 				);
 			}
 			return verdict;

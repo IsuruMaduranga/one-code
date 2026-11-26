@@ -315,7 +315,6 @@ export const permissions: NonNullable<ProfileText["permissions"]> = {
 };
 
 export const classifier: NonNullable<ProfileText["classifier"]> = {
-	stage2IntentAddendum: "[classifier.stage2IntentAddendum]",
 	stage2DenialAddendum: "[classifier.stage2DenialAddendum]",
 	handBackReview: "[classifier.handBackReview]",
 	resolvedPathsNote: "[classifier.resolvedPathsNote]",

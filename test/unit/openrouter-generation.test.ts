@@ -155,19 +155,15 @@ describe("OpenRouter recognition and user notice", () => {
 		{ provider: "custom", baseUrl: "https://notopenrouter.ai" },
 	])("does not activate for %j", (model) => expect(isOpenRouter(model)).toBe(false));
 
-	it("includes a model-scoped routing fix and a model-switch alternative", () => {
-		const notice = toolCallCorruptionNotice("z-ai/glm-5.3", "Morph");
-		expect(notice).toContain("Morph is corrupting tool calls for z-ai/glm-5.3");
-		expect(notice).toContain('compat.openRouterRouting.ignore');
-		expect(notice).toContain('"ignore": ["Morph"]');
-		expect(notice).toContain("models.json");
-		expect(notice).toContain("switch models");
+	it("names the host, how to avoid it in the user's models file, and a model switch", () => {
+		const notice = toolCallCorruptionNotice("z-ai/glm-5.3", "Morph", "~/.pi/agent/models.json");
+		expect(notice).toBe('Morph is damaging tool calls for z-ai/glm-5.3. The call was blocked and the turn stopped. To avoid this host, add "Morph" to the model\'s ignore list in ~/.pi/agent/models.json, or to the ignored providers in your OpenRouter account settings. Or switch models.');
+		expect(toolCallCorruptionNotice("z-ai/glm-5.3", "Morph", "f", { stalledSeconds: 90 })).toContain("Morph stopped sending data for z-ai/glm-5.3 (no data for 90 s). The turn was stopped.");
 	});
 
-	it("does not guess the provider name when attribution fails", () => {
-		const notice = toolCallCorruptionNotice("z-ai/glm-5.3", undefined);
-		expect(notice).toContain("could not be identified");
-		expect(notice).toContain('"ignore": ["PROVIDER_NAME"]');
-		expect(notice).not.toContain("Morph");
+	it("does not guess the host's name when it could not be identified", () => {
+		const notice = toolCallCorruptionNotice("z-ai/glm-5.3", undefined, "~/.pi/agent/models.json");
+		expect(notice).toBe("An OpenRouter host is damaging tool calls for z-ai/glm-5.3; it could not be identified. The call was blocked and the turn stopped. Send the request again, or switch models if it repeats.");
+		expect(notice).not.toContain("ignore list");
 	});
 });

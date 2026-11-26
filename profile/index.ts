@@ -46,9 +46,6 @@ import { webSearch } from "./text/web-search/index.ts";
 import { workflowText } from "./text/workflow/index.ts";
 import { worktree } from "./text/worktree/index.ts";
 
-/** The precisions OpenRouter may serve these vendors' models at: fp8, bf16, fp16 and fp32, plus "unknown" for endpoints that declare none; fp4, fp6, int4 and int8 endpoints are left out. */
-const OPENROUTER_QUANTIZATION_FLOOR = ["fp8", "bf16", "fp16", "fp32", "unknown"];
-
 export const profile: Profile = {
 	features: {},
 	// Search goes through the shell on every tier: pi's grep, find and ls are off (decisions/tools.md).
@@ -58,12 +55,9 @@ export const profile: Profile = {
 	childExtensions: [],
 	// Smaller models think less by default: weak models at medium overthink far more than at low. Frontier keeps pi's level.
 	defaultThinkingLevels: { workhorse: "medium", cheap: "low", tiny: "low" },
-	// The floor on the vendors measured: one host per session and the same cache reads with it, and
-	// every catalog model of theirs keeps a host (findings §93, 2026-11-17).
-	openRouterRouting: {
-		deepseek: { quantizations: OPENROUTER_QUANTIZATION_FLOOR },
-		qwen: { quantizations: OPENROUTER_QUANTIZATION_FLOOR },
-	},
+	// No `openRouterRouting`: which OpenRouter hosts serve a model is the user's choice. A host at
+	// reduced precision, one that misses the cache and one that damages tool calls are named to the
+	// user instead (extensions/request/tool-call-corruption).
 	text: ({ live }) => ({
 		systemPrompt: systemPromptText(live),
 		notebook,

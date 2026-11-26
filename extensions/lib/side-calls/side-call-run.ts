@@ -21,6 +21,7 @@
 import { type Api, type Context, cleanupSessionResources, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeThreadless, type SideCallRegistry, type SideCallReply } from "../request/anthropic-stream.ts";
 import { withReasoningFallback } from "../models/model-policy.ts";
+import { withSideCallIgnoredHosts } from "../request/openrouter-ignored-hosts.ts";
 import { SIDE_CALL_KINDS, type SideCallLogContext, logSideCallUsage } from "./side-call-usage.ts";
 
 /** A payload hook that places cache breakpoints, and the APIs whose payload shape it handles. */
@@ -82,7 +83,9 @@ export function releaseSideCall(sessionId: string, kind: SideCallKind): void {
 
 /** Run the side call and return the final reply; a provider or credential failure is in its `stopReason` (a credential one also in `credentialError`). */
 export async function runSideCall(run: SideCallRun): Promise<SideCallReply> {
-	const { kind, model, context } = run;
+	const { kind, context } = run;
+	// Its own OpenRouter session picks its own host, which no notice names: skip the hosts measured missing the cache.
+	const model = withSideCallIgnoredHosts(run.model);
 	const sessionId = sideCallKey(run.sessionId, kind);
 	const onPayload = run.cache?.apis.has(model.api) ? run.cache.place : undefined;
 	return withReasoningFallback(

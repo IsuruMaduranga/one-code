@@ -364,12 +364,23 @@ export function resolveProfile(
 		return resolve(settingsFileOff);
 	} catch (error) {
 		// The settings file is never a reason not to start: a switch that conflicts with the rest
-		// (a feature or tool another one needs, a user profile's wording) is dropped and reported.
-		// Without it the launch fails for its own reasons, and says so.
+		// (a feature or tool another one needs, a user profile's wording) is dropped and reported
+		// with its own reason, and the others stay off. Each switch is kept when the profile still
+		// resolves with it, in the file's order. With none kept the launch fails for its own
+		// reasons, and says so.
 		if (settingsFileOff.length === 0) throw error;
-		const resolved = resolve([]);
-		const conflict = `${settingsFileOff.map((id) => `"${id}"`).join(", ")} (${error instanceof Error ? error.message : String(error)})`;
-		return { ...resolved, settingsOffIgnored: [...(resolved.settingsOffIgnored ?? []), conflict] };
+		const kept: string[] = [];
+		const dropped: string[] = [];
+		for (const id of settingsFileOff) {
+			try {
+				resolve([...kept, id]);
+				kept.push(id);
+			} catch (own) {
+				dropped.push(`"${id}" (${own instanceof Error ? own.message : String(own)})`);
+			}
+		}
+		const resolved = resolve(kept);
+		return { ...resolved, settingsOffIgnored: [...(resolved.settingsOffIgnored ?? []), ...dropped] };
 	}
 }
 

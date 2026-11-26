@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { endpointsListingUrl, fetchEndpointQuantizations, quantizationsByHost, servedHostLabel } from "../../extensions/lib/request/openrouter-host.ts";
+import { endpointsListingUrl, fetchEndpointQuantizations, quantizationsByHost, reducedPrecisionNotice, servedHostLabel } from "../../extensions/lib/request/openrouter-host.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/commands/doctor/models.ts";
 import { pinCatalog } from "./catalog-fixture.ts";
 import { tempHome } from "./helpers/temp-home.ts";
@@ -55,6 +55,25 @@ describe("the endpoints listing", () => {
 		expect(servedHostLabel({ model: "m", host: "Wafer", quantizations: ["mxfp4", "fp8"] })).toBe("Wafer (mxfp4 or fp8)");
 		expect(servedHostLabel({ model: "m", host: "Cloudflare", quantizations: ["unknown"] })).toBe("Cloudflare (precision not declared)");
 		expect(servedHostLabel({ model: "m", host: "Modal" })).toBe("Modal");
+	});
+});
+
+describe("the reduced-precision notice", () => {
+	const file = "~/.pi/agent/models.json";
+
+	it("names a host whose every endpoint of the model runs at a reduced precision, and how to avoid it", () => {
+		expect(reducedPrecisionNotice({ model: "openrouter/z-ai/glm-5.3", host: "Nebius", quantizations: ["fp4"] }, file)).toBe(
+			'Nebius is running openrouter/z-ai/glm-5.3 at reduced precision (fp4), which can make the model weaker. To avoid this host, add "Nebius" to the model\'s ignore list in ~/.pi/agent/models.json, or to the ignored providers in your OpenRouter account settings.',
+		);
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["int4", "fp6"] }, file)).toContain("(int4 or fp6)");
+		// A label beyond OpenRouter's documented ones is a reduced precision too.
+		expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations: ["mxfp4"] }, file)).toContain("(mxfp4)");
+	});
+
+	it("says nothing for a host at fp8 or above, one that declares none, one with a higher-precision endpoint too, or one not in the listing", () => {
+		for (const quantizations of [["fp8"], ["bf16"], ["unknown"], ["fp4", "fp8"], [], undefined]) {
+			expect(reducedPrecisionNotice({ model: "m", host: "H", quantizations }, file), String(quantizations)).toBeUndefined();
+		}
 	});
 });
 
