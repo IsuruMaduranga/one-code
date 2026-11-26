@@ -118,7 +118,11 @@ for (let i = 0; i < calls.length; i++) {
 	let need;
 	if (prev) {
 		if (cur.system !== prev.system) failures.push(`system prompt changed between classifier calls ${i} and ${i + 1}`);
-		const prevTranscript = prev.user.slice(0, Math.max(0, prev.user.indexOf("</transcript>")));
+		// Without its last line, the action that call judged: a subagent's next
+		// call shows the main session's transcript and its own new action only, so
+		// its earlier action is not carried forward (a main-session call carries it).
+		const prevFull = prev.user.slice(0, Math.max(0, prev.user.indexOf("</transcript>")));
+		const prevTranscript = prevFull.slice(0, prevFull.lastIndexOf("\n", prevFull.length - 2) + 1);
 		if (prevTranscript && !cur.user.startsWith(prevTranscript)) {
 			const at = firstDiff(prevTranscript, cur.user);
 			failures.push(`transcript of call ${i + 1} does not extend call ${i}'s (first difference at char ${at}: …${JSON.stringify(prevTranscript.slice(at, at + 60))})`);
