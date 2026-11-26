@@ -13,7 +13,7 @@ import { type ExtensionAPI, type ExtensionContext, getAgentDir } from "@earendil
 import { notifyOrPrint } from "../../lib/notify/headless-output.ts";
 import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../../lib/notify/interrupt.ts";
 import { sessionOutlivesTurn } from "../../lib/notify/notifications.ts";
-import { isOpenRouter, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
+import { isOpenRouter, RETRY_ADVICE, toolCallCorruptionNotice, type UpstreamFailure } from "./openrouter-generation.ts";
 import { openRouterProviderName } from "../../lib/request/openrouter-generation.ts";
 import { sessionAlive } from "../../lib/notify/session-lifecycle.ts";
 import {
@@ -210,7 +210,7 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		clearIdle();
 		pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 		ctx.abort();
-		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} Send the request again, or switch models if it repeats.`, "error");
+		if (announce) notifyOrPrint({ hasUI: ctx.hasUI, ui: ctx.ui }, `${reason} ${RETRY_ADVICE}`, "error");
 	};
 
 	pi.on("message_update", (event, ctx) => {

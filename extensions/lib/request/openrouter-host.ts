@@ -92,11 +92,12 @@ export function servedHostLabel(served: ServedHost): string {
 }
 
 /**
- * The precisions that are not a reduced copy of a model's weights. Any other
+ * The precisions that are not a reduced copy of a model's weights, and
+ * `unknown` (an endpoint that declares none is not called reduced). Any other
  * declared precision counts as reduced: OpenRouter's own int4, int8, fp4 and
  * fp6, and the labels a listing carries beyond those (`mxfp4`).
  */
-const KEPT_PRECISIONS: ReadonlySet<string> = new Set(["fp8", "bf16", "fp16", "fp32"]);
+const NOT_REDUCED: ReadonlySet<string> = new Set(["fp8", "bf16", "fp16", "fp32", "unknown"]);
 
 /**
  * How to stop using a host, the sentence the OpenRouter notices end on.
@@ -115,6 +116,6 @@ export function avoidHostAdvice(host: string, modelsFile: string): string {
  */
 export function reducedPrecisionNotice(served: ServedHost, modelsFile: string): string | undefined {
 	const listed = served.quantizations ?? [];
-	if (listed.length === 0 || listed.some((quantization) => quantization === "unknown" || KEPT_PRECISIONS.has(quantization))) return undefined;
+	if (listed.length === 0 || listed.some((quantization) => NOT_REDUCED.has(quantization))) return undefined;
 	return `${served.host} is running ${served.model} at reduced precision (${listed.join(" or ")}), which can make the model weaker. ${avoidHostAdvice(served.host, modelsFile)}`;
 }

@@ -37,7 +37,7 @@
 
 import { knobValue } from "../profile/knobs.ts";
 import type { CacheMarksModel } from "./openrouter-cache-marks.ts";
-import { modelVendor, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
+import { modelVendor, type OpenRouterRouting, routingEntries, routingEntryHost, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
 /**
  * A host that defeats the prompt cache: OpenRouter's slug (what
@@ -75,11 +75,9 @@ export function openRouterIgnoreHostsEnabled(vars: Readonly<Record<string, unkno
 	return knobValue(OPENROUTER_IGNORE_HOSTS_KNOB, vars) === "1";
 }
 
-const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
-
 /** Whether a routing entry names `host`: its slug or display name, with or without a variant (`open-inference/fp4`), in any case. */
 function names(entry: string, host: IgnoredHost): boolean {
-	const base = entry.trim().toLowerCase().split("/")[0];
+	const base = routingEntryHost(entry);
 	return base === host.slug || base === host.name.toLowerCase();
 }
 
@@ -89,7 +87,7 @@ function names(entry: string, host: IgnoredHost): boolean {
  * Returns `routing` itself when nothing is added.
  */
 export function withIgnoredHosts(routing: OpenRouterRouting | undefined, hosts: readonly IgnoredHost[] = CACHE_DEFEATING_HOSTS): OpenRouterRouting | undefined {
-	const named = [...strings(routing?.order), ...strings(routing?.only), ...strings(routing?.ignore)];
+	const named = [...routingEntries(routing?.order), ...routingEntries(routing?.only), ...routingEntries(routing?.ignore)];
 	const added = hosts.filter((host) => !named.some((entry) => names(entry, host))).map((host) => host.slug);
 	if (added.length === 0) return routing;
 	return { ...routing, ignore: [...(Array.isArray(routing?.ignore) ? (routing.ignore as unknown[]) : []), ...added] };

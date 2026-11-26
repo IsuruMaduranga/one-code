@@ -37,7 +37,7 @@ import { knobValue } from "../profile/knobs.ts";
 import type { OpenRouterRoutingDefault } from "../profile/openrouter-routing.ts";
 import { brand, envName } from "../profile/brand.mjs";
 import { activeProfile } from "../profile/profile.ts";
-import { type CacheMarksModel, isOpenRouterChatModel, type OpenRouterRouting, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
+import { type CacheMarksModel, isOpenRouterChatModel, type OpenRouterRouting, routingEntries, routingEntryHost, withOpenRouterRouting } from "./openrouter-cache-marks.ts";
 
 /** The knob that turns the defaults off (`<envPrefix>_OPENROUTER_ROUTING_DEFAULTS=0`). */
 export const OPENROUTER_ROUTING_DEFAULTS_KNOB = "OPENROUTER_ROUTING_DEFAULTS";
@@ -82,8 +82,7 @@ function availableHosts(errorMessage: string): string[] {
 	const listed = /"available_providers"\s*:\s*(\[[^\]]*\])/.exec(errorMessage)?.[1];
 	if (!listed) return [];
 	try {
-		const hosts: unknown = JSON.parse(listed);
-		return Array.isArray(hosts) ? hosts.filter((host): host is string => typeof host === "string") : [];
+		return routingEntries(JSON.parse(listed));
 	} catch {
 		return [];
 	}
@@ -95,8 +94,7 @@ const HOST_LISTS = ["only", "order", "quantizations", "ignore"] as const;
 /** The entries of the user's host lists, and those lists as `only: deepinfra/bf16; ignore: wafer`. */
 function hostChoices(routing: OpenRouterRouting | undefined): { entries: string[]; summary: string } {
 	const lists = HOST_LISTS.flatMap((field) => {
-		const list = routing?.[field];
-		const entries = Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
+		const entries = routingEntries(routing?.[field]);
 		return entries.length > 0 ? [{ field, entries }] : [];
 	});
 	return { entries: lists.flatMap((list) => list.entries), summary: lists.map((list) => `${list.field}: ${list.entries.join(", ")}`).join("; ") };
@@ -107,7 +105,7 @@ const NAMED_HOSTS = 5;
 
 /** `hosts` as a short phrase: the ones the user's own lists name first (still serving, under another entry), then the first of the rest, then a count. */
 function hostsPhrase(hosts: readonly string[], chosen: readonly string[]): string {
-	const bases = new Set(chosen.map((entry) => entry.trim().toLowerCase().split("/")[0]));
+	const bases = new Set(chosen.map(routingEntryHost));
 	const ordered = [...hosts.filter((host) => bases.has(host.toLowerCase())), ...hosts.filter((host) => !bases.has(host.toLowerCase()))];
 	const rest = ordered.length - NAMED_HOSTS;
 	return rest > 0 ? `${ordered.slice(0, NAMED_HOSTS).join(", ")} and ${rest} more` : ordered.join(", ");

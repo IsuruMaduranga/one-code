@@ -22,7 +22,10 @@ export function isOpenRouter(model: { provider: string; baseUrl?: string } | und
 }
 
 /** How the upstream provider failed: a blocked call, a call cut off mid-stream, or a stream gone silent. */
-export type UpstreamFailure = "blocked-call" | "corrupt-stream" | { stalledSeconds: number };
+/** What a stopped turn's notice ends on when there is no host to name. */
+export const RETRY_ADVICE = "Send the request again, or switch models if it repeats.";
+
+export type UpstreamFailure ="blocked-call" | "corrupt-stream" | { stalledSeconds: number };
 
 /** The notice for a host that failed; `modelsFile` is pi's models file as shown to the user. */
 export function toolCallCorruptionNotice(modelId: string, providerName: string | undefined, modelsFile: string, failure: UpstreamFailure = "blocked-call"): string {
@@ -30,6 +33,6 @@ export function toolCallCorruptionNotice(modelId: string, providerName: string |
 	const what = stalled ? `stopped sending data for ${modelId} (no data for ${failure.stalledSeconds} s)` : `is damaging tool calls for ${modelId}`;
 	const provider = providerName ? `${providerName} ${what}.` : `An OpenRouter host ${what}; it could not be identified.`;
 	const outcome = failure === "blocked-call" ? "The call was blocked and the turn stopped." : stalled ? "The turn was stopped." : "The reply was cut off and the turn stopped.";
-	const next = providerName ? `${avoidHostAdvice(providerName, modelsFile)} Or switch models.` : "Send the request again, or switch models if it repeats.";
+	const next = providerName ? `${avoidHostAdvice(providerName, modelsFile)} Or switch models.` : RETRY_ADVICE;
 	return `${provider} ${outcome} ${next}`;
 }
