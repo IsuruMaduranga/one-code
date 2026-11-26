@@ -286,7 +286,10 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 		} else if (message.role === "toolResult") {
 			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true) continue;
 			const answer = submittedAnswer(message.details);
-			if (answer !== undefined) transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
+			if (answer === undefined) continue;
+			transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
+			// The answer is a user turn: a later reply may answer what followed it, not the prose before it.
+			prose = undefined;
 		} else {
 			// A `!` command's output and the like: user-role text of its own.
 			prose = undefined;

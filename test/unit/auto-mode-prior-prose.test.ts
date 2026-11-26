@@ -85,6 +85,20 @@ describe("the agent's prose before a typed reply", () => {
 		}
 	});
 
+	it("is dropped by a submitted dialog answer, and kept across a dialog with no answer", () => {
+		const ask = { questions: [{ question: "Which tag?", options: [{ label: "v0" }, { label: "v1" }] }] };
+		const dialog = (id: string, details: unknown) => [
+			said(text("I will delete a tag. Which one?"), { type: "toolCall", id, name: "ask_user_question", arguments: ask }),
+			{ type: "message", id: `r-${id}`, message: { role: "toolResult", toolCallId: id, toolName: "ask_user_question", content: [{ type: "text", text: "v0" }], details, isError: false } },
+			said(bash("git tag -l")),
+		];
+		const answered = project([...user("Tidy the release."), ...dialog("q1", { answerText: "v0" }), ...user("yes")]);
+		expect(answered.filter((line) => line.kind === "assistant")).toEqual([]);
+		expect(answered.at(-1)).toEqual({ kind: "user", text: "yes" });
+		const cancelled = project([...user("Tidy the release."), ...dialog("q2", {}), ...user("yes")]);
+		expect(cancelled.filter((line) => line.kind === "assistant")).toEqual([{ kind: "assistant", text: "I will delete a tag. Which one?" }]);
+	});
+
 	it("is never emitted without a reply after it", () => {
 		const branch = [...user("Tidy the release."), said(text("Deleting the tag now."), bash("git tag -d v0"))];
 		expect(project(branch).some((entry) => entry.kind === "assistant")).toBe(false);
