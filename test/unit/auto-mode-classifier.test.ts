@@ -58,6 +58,29 @@ describe("buildCategoryIndex / groundCategory", () => {
 
 	it("matches a category across case and surrounding punctuation", () => {
 		expect(groundCategory(index, "  git destructive.  ")?.name).toBe("Git Destructive");
+		// The Output Format asks for letters, digits and spaces only: `/` and `-`
+		// become a space and other punctuation is dropped. Either spelling grounds.
+		const punctuated = buildCategoryIndex([
+			"## HARD BLOCK",
+			"- Logging/Audit Tampering: turning off the record",
+			"## SOFT BLOCK",
+			"- Out-of-Place Publication [named+specifics]: publishing what does not belong there",
+			"- DNS / Domain / Cert Changes: changing where a name points",
+			"- Irreversible Deletion (general): deleting what cannot be recovered",
+			"- Auto-Mode Bypass: getting around this gate",
+			"## ALLOW (exceptions)",
+			"- Local Operations: work inside the project",
+		].join("\n"));
+		for (const [cited, name] of [
+			["Out of Place Publication", "Out-of-Place Publication"],
+			["Out-of-Place Publication", "Out-of-Place Publication"],
+			["Logging Audit Tampering", "Logging/Audit Tampering"],
+			["DNS Domain Cert Changes", "DNS / Domain / Cert Changes"],
+			["Irreversible Deletion general", "Irreversible Deletion (general)"],
+			["Auto Mode Bypass", "Auto-Mode Bypass"],
+		]) {
+			expect(groundCategory(punctuated, cited)?.name, cited).toBe(name);
+		}
 	});
 
 	it("returns undefined for a name that is not a real rule", () => {
@@ -90,7 +113,7 @@ describe("buildCategoryIndex / groundCategory", () => {
 		const built = buildCategoryIndex(buildRuleset(DEFAULT_ENVIRONMENT));
 		for (const rule of built.rules) {
 			// Every indexed rule resolves to exactly one tier.
-			expect(built.byName.get(rule.name.toLowerCase().replace(/[.,:;]+$/, ""))?.tier).toBe(rule.tier);
+			expect(groundCategory(built, rule.name)?.tier, rule.name).toBe(rule.tier);
 		}
 	});
 });

@@ -35,13 +35,20 @@ const HARD_HEADING = "## HARD BLOCK";
 const SOFT_HEADING = "## SOFT BLOCK";
 const ALLOW_HEADING = "## ALLOW (exceptions)";
 
-/** Compare names ignoring case, surrounding punctuation, and whitespace runs. */
+/**
+ * A name as its letters, digits and single spaces, lowercased. The ruleset's
+ * Output Format asks for a category spelled that way (`/` and `-` become a
+ * space, other punctuation is dropped), so "Out of Place Publication" must
+ * find the rule named "Out-of-Place Publication", and "Logging Audit
+ * Tampering" the rule "Logging/Audit Tampering".
+ */
 export function normalizeName(value: string): string {
 	return value
-		.trim()
 		.toLowerCase()
+		.replace(/[/\-\u2010-\u2015]/g, " ")
+		.replace(/[^\p{L}\p{N}\s]/gu, "")
 		.replace(/\s+/g, " ")
-		.replace(/[.,:;]+$/, "");
+		.trim();
 }
 
 /**

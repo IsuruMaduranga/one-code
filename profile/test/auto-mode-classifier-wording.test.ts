@@ -35,6 +35,12 @@ describe("One Code's ruleset", () => {
 		expect(soft.reason).toContain("Irreversible Local Destruction");
 	});
 
+	it("grounds a rule whose name has punctuation, spelled as the output format asks", () => {
+		const cited = parseStage2("<severity>80</severity><category>Out of Place Publication</category>", index);
+		expect(cited.tier).toBe("soft_deny");
+		expect(cited.reason).toBe("Out-of-Place Publication");
+	});
+
 	it("says an invented category is not a rule", () => {
 		expect(autoModeResultText.classifierBlock({ kind: "unmatchedRule", category: "Made Up Danger" })).toContain("not a rule");
 	});
