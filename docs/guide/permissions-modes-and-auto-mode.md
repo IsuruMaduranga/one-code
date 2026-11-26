@@ -576,7 +576,7 @@ The classifier is Claude Code's two-stage ruleset, embedded verbatim:
 
 The classifier reads what you typed, what you picked in a question dialog,
 the agent's tool calls, and the agent's last message before each of your
-replies (its last 2,000 characters), so a short "go ahead" is read against
+replies (its last 8,000 characters), so a short "go ahead" is read against
 the plan you were answering. A message you send while the agent is still
 working isn't read as a reply to what the agent says afterwards, and a
 question dialog you cancel counts as no answer. It doesn't read other tool

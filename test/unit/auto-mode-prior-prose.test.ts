@@ -102,7 +102,8 @@ describe("the agent's prose before a typed reply", () => {
 	});
 
 	it("keeps the last characters of a long message, without splitting a surrogate pair", () => {
-		const long = `${"a".repeat(5000)} Shall I delete the v0 tag?`;
+		expect(PRIOR_PROSE_CHARS).toBe(8000);
+		const long = `${"a".repeat(PRIOR_PROSE_CHARS + 3000)} Shall I delete the v0 tag?`;
 		const kept = project([...user("Tidy."), said(text(long)), ...user("yes")])[1];
 		expect(kept).toEqual({ kind: "assistant", text: long.slice(-PRIOR_PROSE_CHARS) });
 		// The cut falls inside "😀" (two code units): the stray half is dropped.

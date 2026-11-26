@@ -148,9 +148,12 @@ function submittedAnswer(details: unknown): string | undefined {
 /**
  * The most of an agent message a transcript carries as the referent for the
  * user's reply: its last characters, where the proposal or the question is.
- * Claude Code clips the same text at the same place.
+ * Claude Code keeps the last 2,000; a plan the user approves with a short
+ * reply is often longer than that (two in three of the messages measured,
+ * the longest about 6,400 characters), and a plan cut off above the step it
+ * proposes cannot be affirmed.
  */
-export const PRIOR_PROSE_CHARS = 2000;
+export const PRIOR_PROSE_CHARS = 8000;
 
 /**
  * An assistant message's prose as the user saw it: its text blocks (thinking
