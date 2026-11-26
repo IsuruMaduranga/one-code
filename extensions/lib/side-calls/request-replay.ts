@@ -24,7 +24,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { settleSystemMessages } from "../request/ledger/layout.ts";
 import { isPlainObject } from "../core/plain-object.ts";
 import { compareVersions } from "../app/pi-version.ts";
-import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, preludeLength, responsesDeclarations, stripMarkers, toolName, toolsItemFor } from "../request/ledger/wire.ts";
+import { appendPoint, isToolsItem, leadingToolsItem, listKey, loadedInList, preludeLength, responsesDeclarations, stripMarkers, toolName, toolsItemFor, withTailEffort } from "../request/ledger/wire.ts";
 import { estimateMessageTokens } from "../models/pi-ai-estimate.ts";
 
 /** The compaction extension publishes a RequestCapture here, or undefined when none is valid. */
@@ -359,7 +359,7 @@ export const MAX_CACHE_MARKERS = 4;
  * - Cache markers: the parent's stay where the parent wrote its entry, the
  *   tail's mark the fork's own entry, and the earliest are dropped past four.
  */
-export function forkRequestPayload(capture: RequestCapture, child: Record<string, unknown>, baseline: ReadonlySet<string>): Record<string, unknown> {
+export function forkRequestPayload(capture: RequestCapture, child: Record<string, unknown>, baseline: ReadonlySet<string>, effortItems = false): Record<string, unknown> {
 	const key = listKey(capture.api);
 	const base = capture.payload[key] as unknown[];
 	const childList = Array.isArray(child[key]) ? (child[key] as WireMessage[]) : [];
@@ -382,7 +382,11 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	// top-level array.
 	const parentItem = leadingToolsItem(capture.payload.tools, base);
 	const ownTail = gained.length > 0 && parentItem ? [toolsItemFor(gained, parentItem) as WireMessage, ...tail] : tail;
-	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? settleSystemMessages(appendTurns(base, ownTail), capture.api, base.length) : [...base, ...ownTail] };
+	// A fork can think at another level than its parent (`effortItems`: the model takes effort items, its identity's effortMarkers).
+	const out: Record<string, unknown> = {
+		...capture.payload,
+		[key]: capture.api === "anthropic-messages" ? settleSystemMessages(appendTurns(base, ownTail), capture.api, base.length) : [...base, ...withTailEffort({ list: base, end: base.length, head: capture.payload, effortItems }, child, ownTail, capture.api)],
+	};
 	// A capture that declares no tools at its head takes the child's own,
 	// wherever the child declared them.
 	const parentTools = capture.payload.tools;
