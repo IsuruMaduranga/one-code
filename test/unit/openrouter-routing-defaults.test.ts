@@ -147,6 +147,11 @@ describe("routingFailureHint", () => {
 		expect(several).toBe("Your routing settings for z-ai/glm-5.3 (quantizations: fp32; ignore: wafer, modal) leave OpenRouter no host to use. To fix it, edit this model's entry in ~/.pi/agent/models.json.");
 		// A short list is given whole.
 		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { only: ["wafer/fp4"] } }), '404 No allowed providers "available_providers":["modal","wafer"]', table, FILE)).toContain("Available now: wafer, modal.");
+		// An `order` limits the hosts only without fallbacks, and a host the user ignores is not put first.
+		const listing = '404 No allowed providers "available_providers":["modal","wafer","chutes"]';
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { order: ["wafer"] } }), listing, table, FILE)).toBeUndefined();
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { order: ["wafer"], allow_fallbacks: false } }), listing, table, FILE)).toContain("(order: wafer) leave OpenRouter no host to use. Available now: wafer, modal, chutes.");
+		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { ignore: ["chutes"] } }), listing, table, FILE)).toContain("Available now: modal, wafer, chutes.");
 		// Routing that chooses no host (a sort, an empty list) is not the cause, and nor is a model pi sends no routing for.
 		expect(routingFailureHint(model("z-ai/glm-5.3", { openRouterRouting: { sort: "price", only: [] } }), refusal, table, FILE)).toBeUndefined();
 		expect(routingFailureHint(model("anthropic/claude-haiku-4.5", { openRouterRouting: { only: ["anthropic"] } }, { api: "anthropic-messages" }), refusal, table, FILE)).toBeUndefined();

@@ -166,13 +166,13 @@ export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announ
 		precisionChecked.add(key);
 		const output = { hasUI: ctx.hasUI, ui: ctx.ui };
 		const controller = new AbortController();
-		const lookup = (async () => {
+		const lookup = withKeepAlive(async () => {
 			const listing = precisionListings.get(name) ?? await fetchEndpointQuantizations(model.baseUrl, model.id, controller.signal);
 			if (!listing || !alive() || controller.signal.aborted) return;
 			precisionListings.set(name, listing);
 			const notice = reducedPrecisionNotice({ model: name, host, quantizations: listing.get(host.toLowerCase()) }, modelsFile());
 			if (notice) notifyOrPrint(output, notice, "warning");
-		})()
+		})
 			.catch(() => {})
 			.finally(() => pending.delete(controller));
 		pending.set(controller, lookup);

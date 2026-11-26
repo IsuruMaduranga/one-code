@@ -91,21 +91,26 @@ function availableHosts(errorMessage: string): string[] {
 /** The routing lists that can leave a model no host. */
 const HOST_LISTS = ["only", "order", "quantizations", "ignore"] as const;
 
-/** The entries of the user's host lists, and those lists as `only: deepinfra/bf16; ignore: wafer`. */
-function hostChoices(routing: OpenRouterRouting | undefined): { entries: string[]; summary: string } {
+/**
+ * The hosts the user's lists ask for (`only`, `order`), and the lists that can
+ * leave no host as `only: deepinfra/bf16; ignore: wafer`. An `order` limits the
+ * hosts only with `allow_fallbacks: false`.
+ */
+function hostChoices(routing: OpenRouterRouting | undefined): { wanted: string[]; summary: string } {
 	const lists = HOST_LISTS.flatMap((field) => {
-		const entries = routingEntries(routing?.[field]);
+		const entries = field === "order" && routing?.allow_fallbacks !== false ? [] : routingEntries(routing?.[field]);
 		return entries.length > 0 ? [{ field, entries }] : [];
 	});
-	return { entries: lists.flatMap((list) => list.entries), summary: lists.map((list) => `${list.field}: ${list.entries.join(", ")}`).join("; ") };
+	const wanted = lists.filter((list) => list.field === "only" || list.field === "order").flatMap((list) => list.entries);
+	return { wanted, summary: lists.map((list) => `${list.field}: ${list.entries.join(", ")}`).join("; ") };
 }
 
 /** The most hosts the hint names before it counts the rest. */
 const NAMED_HOSTS = 5;
 
-/** `hosts` as a short phrase: the ones the user's own lists name first (still serving, under another entry), then the first of the rest, then a count. */
-function hostsPhrase(hosts: readonly string[], chosen: readonly string[]): string {
-	const bases = new Set(chosen.map(routingEntryHost));
+/** `hosts` as a short phrase: the ones the user asked for first (still serving, under another entry), then the first of the rest, then a count. */
+function hostsPhrase(hosts: readonly string[], wanted: readonly string[]): string {
+	const bases = new Set(wanted.map(routingEntryHost));
 	const ordered = [...hosts.filter((host) => bases.has(host.toLowerCase())), ...hosts.filter((host) => !bases.has(host.toLowerCase()))];
 	const rest = ordered.length - NAMED_HOSTS;
 	return rest > 0 ? `${ordered.slice(0, NAMED_HOSTS).join(", ")} and ${rest} more` : ordered.join(", ");
@@ -132,6 +137,6 @@ export function routingFailureHint<M extends CacheMarksModel>(model: M, errorMes
 	const chosen = hostChoices((model.compat as { openRouterRouting?: OpenRouterRouting } | undefined)?.openRouterRouting);
 	if (!chosen.summary) return undefined;
 	const hosts = availableHosts(errorMessage);
-	const available = hosts.length > 0 ? ` Available now: ${hostsPhrase(hosts, chosen.entries)}.` : "";
+	const available = hosts.length > 0 ? ` Available now: ${hostsPhrase(hosts, chosen.wanted)}.` : "";
 	return `Your routing settings for ${model.id} (${chosen.summary}) leave OpenRouter no host to use.${available} To fix it, edit this model's entry in ${modelsFile}.`;
 }

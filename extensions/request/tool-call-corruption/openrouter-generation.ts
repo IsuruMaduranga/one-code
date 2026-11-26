@@ -21,11 +21,11 @@ export function isOpenRouter(model: { provider: string; baseUrl?: string } | und
 	return result;
 }
 
-/** How the upstream provider failed: a blocked call, a call cut off mid-stream, or a stream gone silent. */
 /** What a stopped turn's notice ends on when there is no host to name. */
 export const RETRY_ADVICE = "Send the request again, or switch models if it repeats.";
 
-export type UpstreamFailure ="blocked-call" | "corrupt-stream" | { stalledSeconds: number };
+/** How the upstream provider failed: a blocked call, a call cut off mid-stream, or a stream gone silent. */
+export type UpstreamFailure = "blocked-call" | "corrupt-stream" | { stalledSeconds: number };
 
 /** The notice for a host that failed; `modelsFile` is pi's models file as shown to the user. */
 export function toolCallCorruptionNotice(modelId: string, providerName: string | undefined, modelsFile: string, failure: UpstreamFailure = "blocked-call"): string {
