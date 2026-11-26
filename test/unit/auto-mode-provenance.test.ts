@@ -87,6 +87,11 @@ describe("user-input provenance", () => {
 			await fake.fire("message_end", { message: { role: "user", content: "Ship it.", timestamp: 7 } }, ctx);
 			const entry = fake.appendedEntries.find((e) => e.customType === CLASSIFIER_USER_INPUT);
 			expect(entry?.data).toEqual({ timestamp: 7, messageDigest: userMessageDigest("Ship it."), userText: "Ship it." });
+			// A message submitted while the agent works is marked, so it is never read as a reply to the agent's later message.
+			await fake.fire("input", { text: "yes, go ahead", source: "interactive", streamingBehavior: "followUp" }, ctx);
+			await fake.fire("message_end", { message: { role: "user", content: "yes, go ahead", timestamp: 9 } }, ctx);
+			const queued = fake.appendedEntries.filter((e) => e.customType === CLASSIFIER_USER_INPUT).at(-1);
+			expect(queued?.data).toEqual({ timestamp: 9, messageDigest: userMessageDigest("yes, go ahead"), userText: "yes, go ahead", queued: true });
 		} finally {
 			rmSync(stateDir, { recursive: true, force: true });
 		}

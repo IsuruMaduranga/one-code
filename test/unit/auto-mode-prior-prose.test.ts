@@ -10,31 +10,46 @@ import { buildPayload } from "../../extensions/safety/permissions/auto-mode/prom
 import { DEFAULT_ENVIRONMENT } from "./helpers/classify-request.ts";
 
 let seq = 0;
-/** A user-role message with its provenance entry: typed, or (`typed: false`) an extension's turn. */
-const user = (text: string, typed = true) => {
+/** A user-role message with its provenance entry: typed, or (`typed: false`) an extension's turn; `queued` when submitted while the agent worked. */
+const user = (text: string, typed = true, queued = false) => {
 	const timestamp = ++seq;
 	return [
 		{ type: "message", id: `u${timestamp}`, message: { role: "user", content: text, timestamp } },
-		{ type: "custom", id: `p${timestamp}`, customType: CLASSIFIER_USER_INPUT, data: { timestamp, messageDigest: userMessageDigest(text), userText: typed ? text : null } },
+		{ type: "custom", id: `p${timestamp}`, customType: CLASSIFIER_USER_INPUT, data: { timestamp, messageDigest: userMessageDigest(text), userText: typed ? text : null, ...(queued ? { queued: true } : {}) } },
 	];
 };
 const said = (...content: unknown[]) => ({ type: "message", id: `a${++seq}`, message: { role: "assistant", content } });
 const text = (body: string) => ({ type: "text", text: body });
 const bash = (command: string) => ({ type: "toolCall", id: `c${++seq}`, name: "bash", arguments: { command } });
-const project = (branch: unknown[], priorProse = true) => classifierHistory(branch, { priorProse });
+const project = (branch: unknown[]) => classifierHistory(branch);
 
 describe("the agent's prose before a typed reply", () => {
-	it("sits directly above the reply it was answered by, only when asked for", () => {
+	it("sits directly above the reply it was answered by", () => {
 		const branch = [...user("Tidy the release."), said(text("I will force-move the v1 tag. Shall I?")), ...user("go ahead")];
 		expect(project(branch)).toEqual([
 			{ kind: "user", text: "Tidy the release." },
 			{ kind: "assistant", text: "I will force-move the v1 tag. Shall I?" },
 			{ kind: "user", text: "go ahead" },
 		]);
-		// A subagent's view of the main session carries none.
-		expect(project(branch, false)).toEqual([
+	});
+
+	it("is in a child's view too, so that view stays a prefix of what the main session's calls sent", () => {
+		const spawn = { type: "toolCall", id: "spawn", name: "Agent", arguments: { prompt: "move the tag" } };
+		const later = bash("git push --tags");
+		const branch = [...user("Tidy the release."), said(text("I will force-move the v1 tag. Shall I?")), ...user("go ahead"), said(bash("git fetch"), spawn), said(later)];
+		const atSpawn = classifierHistory(branch, { beforeToolCallId: "spawn" });
+		const child = classifierHistory(branch, { throughToolCallId: "spawn" });
+		const afterwards = classifierHistory(branch, { beforeToolCallId: later.id });
+		expect(atSpawn.some((entry) => entry.kind === "assistant")).toBe(true);
+		expect(child.slice(0, atSpawn.length)).toEqual(atSpawn);
+		expect(afterwards.slice(0, child.length)).toEqual(child);
+	});
+
+	it("is left out for a reply the user submitted while the agent was still working", () => {
+		const branch = [...user("Tidy the release."), said(text("Done. Shall I force-push to main?")), ...user("yes, go ahead", true, true)];
+		expect(project(branch)).toEqual([
 			{ kind: "user", text: "Tidy the release." },
-			{ kind: "user", text: "go ahead" },
+			{ kind: "user", text: "yes, go ahead" },
 		]);
 	});
 
@@ -56,6 +71,18 @@ describe("the agent's prose before a typed reply", () => {
 			{ kind: "user", text: "Tidy the release." },
 			{ kind: "user", text: "yes" },
 		]);
+	});
+
+	it("is dropped by a notification, a branch summary or a shell entry between it and the reply", () => {
+		const between = [
+			{ type: "custom_message", id: "n1", customType: "task-notification", content: "The build finished.", display: true },
+			{ type: "branch_summary", id: "b1", summary: "Another branch's work." },
+			{ type: "message", id: "s1", message: { role: "bashExecution", command: "ls", output: "a.txt" } },
+		];
+		for (const entry of between) {
+			const projected = project([...user("Tidy the release."), said(text("I will delete the v0 tag. OK?")), entry, ...user("yes")]);
+			expect(projected.some((line) => line.kind === "assistant"), entry.type).toBe(false);
+		}
 	});
 
 	it("is never emitted without a reply after it", () => {

@@ -577,9 +577,11 @@ The classifier is Claude Code's two-stage ruleset, embedded verbatim:
 The classifier reads what you typed, what you picked in a question dialog,
 the agent's tool calls, and the agent's last message before each of your
 replies (its last 2,000 characters), so a short "go ahead" is read against
-the plan you were answering. It doesn't read other tool output or the rest of
-the agent's text, so neither a file the agent read nor the agent's own
-reasoning can talk it into an approval.
+the plan you were answering. A message you send while the agent is still
+working isn't read as a reply to what the agent says afterwards, and a
+question dialog you cancel counts as no answer. It doesn't read other tool
+output or the rest of the agent's text, so neither a file the agent read nor
+the agent's own reasoning can talk it into an approval.
 
 A block is checked before it's acted on: it must cite a real rule from the
 ruleset. An approval is the classifier's own call. A classifier that can't

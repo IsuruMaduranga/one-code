@@ -121,8 +121,9 @@ describe("hand-back review transcript", () => {
 		expect(lastTranscript()).toContain(SIBLING);
 		expect(lastTranscript()).toContain(LATER_REQUEST);
 		expect(lastTranscript()).not.toContain("NOT-YET-RUN");
-		// The main agent's prose before a reply is the main session's referent only.
-		expect(lastTranscript()).not.toContain("MAIN-AGENT-PROSE");
+		// The main agent's prose before a reply is in the child's view as it is in the main
+		// session's, so the child's request extends the prompt the main session's calls cached.
+		expect(lastTranscript()).toContain("MAIN-AGENT-PROSE");
 	});
 
 	it("reviews a foreground run against the session through its own spawning call", async () => {

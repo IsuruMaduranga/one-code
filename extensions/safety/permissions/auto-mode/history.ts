@@ -49,6 +49,16 @@ function userMessageKey(timestamp: unknown, digest: string): string {
 	return JSON.stringify([timestamp, digest]);
 }
 
+/**
+ * What provenance records of one user-role message: the words the user typed
+ * (null for an extension-generated turn), and whether they submitted them
+ * while the agent was still working.
+ */
+interface UserInput {
+	text: string | null;
+	queued: boolean;
+}
+
 /** What a branch's provenance entries say, and how far into the branch that was read. */
 interface ProvenanceIndex {
 	head?: string;
@@ -56,7 +66,7 @@ interface ProvenanceIndex {
 	tail?: unknown;
 	/** Whether the branch has any provenance entry: none means a session from before provenance. */
 	recorded: boolean;
-	byKey: Map<string, string | null>;
+	byKey: Map<string, UserInput>;
 	/** Entry id → digest of that user message's text. */
 	digests: Map<string, string>;
 }
@@ -83,7 +93,7 @@ function provenanceIndex(branch: readonly unknown[]): ProvenanceIndex {
 		if (typeof data.userText !== "string" && data.userText !== null) continue;
 		// Entries written before the digest carry the message text itself.
 		const digest = typeof data.messageDigest === "string" ? data.messageDigest : typeof data.messageText === "string" ? userMessageDigest(data.messageText) : undefined;
-		if (digest !== undefined) index.byKey.set(userMessageKey(data.timestamp, digest), data.userText);
+		if (digest !== undefined) index.byKey.set(userMessageKey(data.timestamp, digest), { text: data.userText, queued: data.queued === true });
 	}
 	index.length = branch.length;
 	index.tail = id(branch.length - 1);
@@ -96,16 +106,16 @@ function provenanceIndex(branch: readonly unknown[]): ProvenanceIndex {
  * input event's text when recorded, null for an extension-generated turn.
  * Every user message gets an entry once the gate is loaded, so a message
  * without one was written before it (plain pi, or a build before provenance)
- * and is unverified (null), even after the resumed session records new ones.
+ * and is unverified (undefined), even after the resumed session records new ones.
  */
-function userWords(index: ProvenanceIndex, entry: Record<string, any>, message: Record<string, any>, text: string): string | null {
-	if (!index.recorded) return null;
+function userInput(index: ProvenanceIndex, entry: Record<string, any>, message: Record<string, any>, text: string): UserInput | undefined {
+	if (!index.recorded) return undefined;
 	let digest = typeof entry.id === "string" ? index.digests.get(entry.id) : undefined;
 	if (digest === undefined) {
 		digest = userMessageDigest(text);
 		if (typeof entry.id === "string") index.digests.set(entry.id, digest);
 	}
-	return index.byKey.get(userMessageKey(message.timestamp, digest)) ?? null;
+	return index.byKey.get(userMessageKey(message.timestamp, digest));
 }
 
 /** Where the projected history ends; neither field reads the whole active branch. */
@@ -124,14 +134,15 @@ const QUESTION_TOOL = "ask_user_question";
 export const QUESTION_ANSWER_PREFIX = "[User answered AskUserQuestion]:   ";
 
 /**
- * Whether the question tool's result reports answers the user submitted, read
- * from the result's details (the tool's own record, which the model cannot
- * write). A dialog the user cancelled or turned into a chat is not an answer:
- * its text lists unsubmitted selections or the model's own questions.
+ * The sentence the question tool wrote for answers the user submitted, read
+ * from the result's details (the tool's own record, which neither the model
+ * nor a hook that rewrites the result's content can write). The tool records
+ * it only for a submitted answer: a dialog the user cancelled or turned into
+ * a chat lists unsubmitted selections or the model's own questions.
  */
-function submittedAnswers(details: unknown): boolean {
-	const { answers, cancelled, declined } = record(details);
-	return Array.isArray(answers) && answers.length > 0 && cancelled !== true && declined !== true;
+function submittedAnswer(details: unknown): string | undefined {
+	const { answerText } = record(details);
+	return typeof answerText === "string" && answerText.trim() ? answerText : undefined;
 }
 
 /**
@@ -180,20 +191,23 @@ export function childHistoryCursor(startedBy: string | undefined, inFlight: read
  * assistant message (pi persists the whole tool-call batch before executing it).
  * A bridged child uses `throughToolCallId` to include its parent's running call.
  *
- * `priorProse` (the main session's own calls only) adds the agent's last prose
- * before each typed user message, directly above it: a reply such as "go
- * ahead" names nothing, and the ruleset reads it against that proposal. Tool
- * calls between the two keep it; any other user-role message drops it, since
- * the reply may answer that message. The entry is appended with the reply, so
- * the transcript still only grows.
+ * The agent's last prose before each typed user message goes directly above
+ * it: a reply such as "go ahead" names nothing, and the ruleset reads it
+ * against that proposal. Tool calls between the two keep it; any other
+ * user-role message drops it, since the reply may answer that message, and so
+ * does a reply the user submitted while the agent was still working. The
+ * entry is appended with the reply, so the transcript still only grows, and
+ * every caller projects it, so a child's view stays a prefix of what the main
+ * session's calls sent.
  *
  * The question dialog's answer is the one tool result projected: a user line
  * at the result's own place on the branch (after every call of that batch, so
  * a later call's transcript extends an earlier one's), matched to its call by
- * id and left out when the tool errored (no dialog was shown) or the user
- * cancelled the dialog or chose to chat instead.
+ * id, taken from the tool's own record of a submitted answer and left out
+ * when the tool errored (no dialog was shown) or the user cancelled the
+ * dialog or chose to chat instead.
  */
-export function classifierHistory(branch: readonly unknown[], options: HistoryCursor & { priorProse?: boolean } = {}): TranscriptEntry[] {
+export function classifierHistory(branch: readonly unknown[], options: HistoryCursor = {}): TranscriptEntry[] {
 	const transcript: TranscriptEntry[] = [];
 	const boundary = latestCompaction(branch);
 	if (boundary) {
@@ -218,22 +232,29 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 		if (reachedPending) break;
 		if (entry.type === "branch_summary" && typeof entry.summary === "string") {
 			transcript.push({ kind: "summary", text: entry.summary });
+			prose = undefined;
 			continue;
 		}
+		// A notification or another extension message reaches the model as a
+		// user-role message: the user's next reply may answer it.
+		if (entry.type === "custom_message") prose = undefined;
 		if (entry.type !== "message") continue;
 		const message = record(entry.message);
 		if (message.role === "user") {
 			// Sessions preserve the input event's source, so extension-generated
 			// turns never gain intent authority on resume and expanded skill text
 			// is not credited as typed.
-			const userText = userWords(provenance, entry, message, messageText(message.content));
-			if (userText?.trim()) {
-				if (prose !== undefined) transcript.push({ kind: "assistant", text: prose });
-				transcript.push({ kind: "user", text: userText.trim() });
+			const input = userInput(provenance, entry, message, messageText(message.content));
+			const userText = input?.text?.trim();
+			if (userText) {
+				// A message submitted while the agent was working was written before
+				// the agent's latest message existed, so it is not a reply to it.
+				if (prose !== undefined && !input?.queued) transcript.push({ kind: "assistant", text: prose });
+				transcript.push({ kind: "user", text: userText });
 			}
 			prose = undefined;
 		} else if (message.role === "assistant" && Array.isArray(message.content)) {
-			if (options.priorProse) prose = shownProse(message) ?? prose;
+			prose = shownProse(message) ?? prose;
 			for (const rawBlock of message.content) {
 				const block = record(rawBlock);
 				if (block.type !== "toolCall" || typeof block.name !== "string") continue;
@@ -260,9 +281,12 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 				}
 			}
 		} else if (message.role === "toolResult") {
-			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true || !submittedAnswers(message.details)) continue;
-			const answer = messageText(message.content);
-			if (answer.trim()) transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
+			if (typeof message.toolCallId !== "string" || !questionCalls.has(message.toolCallId) || message.isError === true) continue;
+			const answer = submittedAnswer(message.details);
+			if (answer !== undefined) transcript.push({ kind: "user", text: `${QUESTION_ANSWER_PREFIX}${answer}` });
+		} else {
+			// A `!` command's output and the like: user-role text of its own.
+			prose = undefined;
 		}
 	}
 	return transcript;

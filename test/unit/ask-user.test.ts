@@ -335,4 +335,23 @@ describe("ask_user_question in the TUI", () => {
 		// A fixed label, never the model's question text: the report leaves the transcript.
 		expect(calls[0][1]).toEqual({ blocked: { kind: "question", message: "Question" } });
 	});
+
+	it("records its sentence in the details only for a submitted answer", async () => {
+		const { createFakeCtx, createFakePi } = await import("./helpers/fake-pi.ts");
+		const { default: askUserExtension } = await import("../../extensions/tools/ask-user/index.ts");
+		const questions = [{ question: "Which database?", header: "DB", options: [{ label: "Postgres" }, { label: "SQLite" }] }];
+		const answers = [{ question: "Which database?", header: "DB", selected: ["SQLite"], freeform: false }];
+		const run = async (outcome: unknown) => {
+			const fake = createFakePi();
+			askUserExtension(fake.pi as never);
+			const ctx = createFakeCtx({ hasUI: true, mode: "interactive", ui: { custom: async () => outcome } });
+			return (await fake.tools.get("ask_user_question")!.execute("q1", { questions }, undefined, undefined, ctx)) as { content: Array<{ text: string }>; details: Record<string, unknown> };
+		};
+		const submitted = await run({ kind: "submit", answers });
+		expect(submitted.details.answerText).toBe(submitted.content[0].text);
+		expect(submitted.details.answerText).toContain('"Which database?"="SQLite"');
+		for (const outcome of [{ kind: "cancel", answers }, { kind: "chat" }, undefined]) {
+			expect((await run(outcome)).details.answerText).toBeUndefined();
+		}
+	});
 });

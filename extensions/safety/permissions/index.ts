@@ -729,11 +729,12 @@ function permissionsExtension(pi: ExtensionAPI) {
 	// Persist input provenance beside the user message, not another transcript.
 	// pi stores extension-generated user turns in the same role; without this
 	// marker a resume could promote a skill body into the user's own intent.
-	const pendingInputs: { text: string; user: boolean }[] = [];
+	const pendingInputs: { text: string; user: boolean; queued: boolean }[] = [];
 	pi.on("input", (event) => {
 		const text = event.text?.trim();
 		if (!text) return;
-		pendingInputs.push({ text, user: event.source !== "extension" });
+		// Submitted while the agent was working: not a reply to the message the agent ends on.
+		pendingInputs.push({ text, user: event.source !== "extension", queued: event.streamingBehavior !== undefined });
 		// Handled commands never produce a user message. Bound only this pending
 		// association queue; the active conversation itself is never truncated.
 		if (pendingInputs.length > 256) pendingInputs.shift();
@@ -744,7 +745,7 @@ function permissionsExtension(pi: ExtensionAPI) {
 		const at = pendingInputs.findIndex((input) => text.trim() === input.text || text.trim().startsWith(`${input.text}\n`));
 		const input = at >= 0 ? pendingInputs.splice(at, 1)[0] : undefined;
 		// A digest identifies the message; the text is already in the session.
-		pi.appendEntry(CLASSIFIER_USER_INPUT, { timestamp: event.message.timestamp, messageDigest: userMessageDigest(text), userText: input?.user ? input.text : null });
+		pi.appendEntry(CLASSIFIER_USER_INPUT, { timestamp: event.message.timestamp, messageDigest: userMessageDigest(text), userText: input?.user ? input.text : null, ...(input?.queued ? { queued: true } : {}) });
 	});
 
 	/**
@@ -824,12 +825,9 @@ function permissionsExtension(pi: ExtensionAPI) {
 
 		// Project pi's active context on every call. Compaction, resume and /tree
 		// therefore change classifier context at the same boundary as the agent's.
-		// The main session's own call (it names its tool call) also carries the
-		// agent's prose before each typed reply; a child reads the main session
-		// without it.
 		const history = classifierHistory(
 			ctx.sessionManager.getBranch(),
-			opts?.toolCallId ? { beforeToolCallId: opts.toolCallId, priorProse: true } : (opts?.history ?? { throughToolCallId: currentMainToolCallId }),
+			opts?.toolCallId ? { beforeToolCallId: opts.toolCallId } : (opts?.history ?? { throughToolCallId: currentMainToolCallId }),
 		);
 		const action = opts?.appendEntry;
 		const shell = normalizeToolName(toolName) === "powershell" ? "powershell" : isShellTool(normalizeToolName(toolName)) || normalizeToolName(toolName) === "monitor" ? "bash" : undefined;
