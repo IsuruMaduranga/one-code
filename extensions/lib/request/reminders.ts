@@ -560,6 +560,8 @@ interface BashRecord {
 	cancelled: boolean;
 	truncated: boolean;
 	fullOutputPath?: string;
+	/** Why pi could not save the full output (pi 1.6.1). */
+	fullOutputError?: string;
 	timestamp: number;
 	excludeFromContext?: boolean;
 }
@@ -580,8 +582,15 @@ export function bashRecordText(record: BashRecord): string {
 	text += record.output ? `\`\`\`\n${record.output}\n\`\`\`` : "(no output)";
 	if (record.cancelled) text += "\n\n(command cancelled)";
 	else if (record.exitCode !== null && record.exitCode !== undefined && record.exitCode !== 0) text += `\n\nCommand exited with code ${record.exitCode}`;
-	if (record.truncated && record.fullOutputPath) text += `\n\n[Output truncated. Full output: ${record.fullOutputPath}]`;
+	if (record.truncated) text += `\n\n[${bashTruncationNote(record)}]`;
 	return text;
+}
+
+/** pi's `bashTruncationNote`: where a truncated run's full output is, or why it could not be saved. */
+function bashTruncationNote(record: BashRecord): string {
+	if (record.fullOutputPath) return `Output truncated. Full output: ${record.fullOutputPath}`;
+	if (record.fullOutputError) return `Output truncated. Could not save the full output: ${record.fullOutputError}`;
+	return "Output truncated";
 }
 
 /**

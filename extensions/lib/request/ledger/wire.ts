@@ -310,7 +310,7 @@ function inputSchemaOf(tool: unknown): unknown {
 }
 
 /** Root keywords pi's converter copies on some versions and APIs and drops on others, and a deferred declaration built here leaves out. */
-const ROOT_KEYWORDS = ["additionalProperties", "$defs", "definitions"] as const;
+const ROOT_KEYWORDS = ["additionalProperties", "$schema", "$defs", "definitions"] as const;
 
 /** A declaration's `strict` flag, wherever its API keeps it; absent reads as false. */
 function strictOf(tool: unknown): boolean {
@@ -320,11 +320,11 @@ function strictOf(tool: unknown): boolean {
 
 /**
  * Whether two declarations of one tool take the same input, as the merge
- * compares them. A root `additionalProperties`, `$defs` or `definitions` that
- * only one side carries is not a difference: pi 1.6 began sending the first
- * on Anthropic and pi 1.5.1 the other two (earlier versions dropped them),
- * and a deferred declaration built here has none, so a declaration recorded
- * without one differs from pi's live one in that keyword alone. That is not
+ * compares them. A root keyword in `ROOT_KEYWORDS` that only one side
+ * carries is not a difference: pi copies them on some versions and APIs and
+ * not on others, and a deferred declaration built here has none, so a
+ * declaration recorded without one differs from pi's live one in that
+ * keyword alone. That is not
  * a changed tool: the recorded bytes stay, and pi validates a call against
  * the tool's own schema either way. When both sides carry the keyword it is
  * compared like the rest. A changed `strict` flag is a difference: a strict

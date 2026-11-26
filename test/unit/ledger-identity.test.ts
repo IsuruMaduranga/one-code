@@ -98,6 +98,15 @@ describe("mergeDeclarations", () => {
 		expect(mergeDeclarations([recorded], [live])).toEqual([recorded]);
 	});
 
+	// pi 1.6.1 keeps a non-strict Anthropic tool's root `$schema` (pi #12212); a
+	// deferred declaration and one recorded on pi 1.6.0 lack it.
+	it("keeps the recorded bytes when only one side carries the root $schema", () => {
+		const recorded = tool("text", { id: { type: "string" } }, { defer_loading: true });
+		const live = { name: "lookup", description: "text", input_schema: { type: "object", properties: { id: { type: "string" } }, $schema: "http://json-schema.org/draft-07/schema#" } };
+		expect(mergeDeclarations([recorded], [live])).toEqual([recorded]);
+		expect(mergeDeclarations([live], [recorded])).toEqual([live]);
+	});
+
 	it("takes the live declaration when both sides carry a root keyword and it changed", () => {
 		const withDefs = (type: string) => ({ name: "lookup", description: "text", input_schema: { type: "object", properties: { id: { $ref: "#/$defs/Id" } }, $defs: { Id: { type } }, additionalProperties: false } });
 		expect(mergeDeclarations([withDefs("string")], [withDefs("number")])).toEqual([withDefs("number")]);
